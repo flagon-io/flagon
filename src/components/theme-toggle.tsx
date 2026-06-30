@@ -7,28 +7,16 @@ import { cn } from '@/lib/cn';
 
 type Theme = 'light' | 'dark' | 'system';
 
-// Cross-subdomain so the choice carries between flagon.io / app.flagon.io (the
-// value is inlined at build time). Unset locally → host-only cookie.
-const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN;
-
-function systemPrefersDark() {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
-function resolveAppearance(theme: Theme): 'dark' | 'light' {
-  return theme === 'dark' || (theme === 'system' && systemPrefersDark()) ? 'dark' : 'light';
-}
-
 /**
- * Apply the theme to the document AND persist the *resolved* appearance to a
- * cookie. The server reads that cookie to put the right class in the initial
- * HTML — no inline theme script, no FOUC, no React "script in component" warning.
+ * Apply the theme to the document. `system` removes both classes and lets the
+ * `prefers-color-scheme` rule in globals.css decide (and track OS changes live);
+ * an explicit choice adds `.dark` / `.light` to override the OS.
  */
 function apply(theme: Theme) {
-  const appearance = resolveAppearance(theme);
-  document.documentElement.classList.toggle('dark', appearance === 'dark');
-  const domain = ROOT_DOMAIN ? `; domain=.${ROOT_DOMAIN}` : '';
-  document.cookie = `flagon-appearance=${appearance}; path=/; max-age=31536000; samesite=lax${domain}`;
+  const root = document.documentElement.classList;
+  root.remove('dark', 'light');
+  if (theme === 'dark') root.add('dark');
+  else if (theme === 'light') root.add('light');
 }
 
 const OPTIONS: { value: Theme; label: string; icon: React.ReactNode }[] = [
@@ -43,19 +31,12 @@ export function ThemeToggle() {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Reflect the saved choice. For `system` this is a no-op (no class), so the
+    // CSS already showed the right theme at first paint — no flash. Only an
+    // explicit light/dark that differs from the OS changes anything here.
     const stored = (localStorage.getItem('flagon-theme') as Theme | null) ?? 'system';
     setTheme(stored);
-    // Reconcile the cookie + class with the current OS (e.g. system mode where
-    // the OS theme changed since the cookie was last written).
     apply(stored);
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = () => {
-      if (((localStorage.getItem('flagon-theme') as Theme | null) ?? 'system') === 'system') {
-        apply('system');
-      }
-    };
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
   }, []);
 
   useEffect(() => {

@@ -1,38 +1,25 @@
-'use client';
-
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WaitlistForm } from '@/components/waitlist-form';
-import { Skeleton } from '@/components/skeleton';
 import { buttonVariants } from '@/components/ui/button';
-import { apiBase, appBase } from '@/lib/site';
+import { appBase } from '@/lib/site';
+
+const WAITLIST = process.env.NEXT_PUBLIC_WAITLIST_ENABLED === 'true';
 
 /**
- * Adapts the hero CTA to the instance config: a waitlist capture when waitlist
- * mode is on (and the founder slot is taken), otherwise a direct sign-up.
+ * Hero CTA. In waitlist mode it captures the waitlist; otherwise a direct
+ * sign-up. Decided at build time (no client fetch, no flicker/skeleton).
  */
 export function HeroAccess() {
-  const [waitlist, setWaitlist] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    fetch(`${apiBase}/waitlist`)
-      .then((r) => r.json())
-      .then((c: { enabled?: boolean; signupOpen?: boolean }) =>
-        setWaitlist(Boolean(c.enabled && !c.signupOpen)),
-      )
-      .catch(() => setWaitlist(false));
-  }, []);
-
-  // Skeleton while we resolve config, sized to avoid layout shift.
-  if (waitlist === null) return <Skeleton className="h-11.5 w-full max-w-md rounded-lg" />;
-
-  if (waitlist) {
+  if (WAITLIST) {
     return (
       <>
         <WaitlistForm />
         <p className="mt-3 text-xs text-muted">
-          No spam, no pitch decks. Already approved?{' '}
-          <Link href={`${appBase}/app/signup`} className="text-brand-500 hover:text-brand-400">
+          No spam, no pitch decks. Got an invite?{' '}
+          <Link
+            href={`${appBase}/app/signup?register=1`}
+            className="text-brand-500 hover:text-brand-400"
+          >
             Create your account
           </Link>
           .

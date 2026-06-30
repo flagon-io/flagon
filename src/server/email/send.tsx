@@ -36,6 +36,6 @@ export async function sendWaitlistJoined(to: string) {
 }
 
 export async function sendWaitlistApproved(to: string) {
-  const html = await render(<WaitlistApprovedEmail signUpUrl={appUrl('/app/signup')} />);
+  const html = await render(<WaitlistApprovedEmail signUpUrl={appUrl('/app/signup?register=1')} />);
   await sendEmail({ to, subject: "You're in. Create your Flagon account", html });
 }

@@ -1,62 +1,35 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signUp } from '@/lib/auth-client';
 import { AuthCard } from '@/components/auth-card';
 import { Field, SubmitButton } from '@/components/form';
 import { SocialButtons, OrDivider } from '@/components/social-buttons';
 import { WaitlistForm } from '@/components/waitlist-form';
-import { Skeleton } from '@/components/skeleton';
-import { apiBase } from '@/lib/site';
 
-type Mode = 'loading' | 'register' | 'waitlist';
+// Build-time flag (inlined) — known on first render, so no fetch and no flicker.
+const WAITLIST = process.env.NEXT_PUBLIC_WAITLIST_ENABLED === 'true';
 
 export default function SignUpPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>('loading');
-
-  useEffect(() => {
-    // Decide whether this instance takes registrations or a waitlist.
-    fetch(`${apiBase}/waitlist`)
-      .then((r) => r.json())
-      .then((cfg: { enabled?: boolean; signupOpen?: boolean }) => {
-        setMode(cfg.enabled && !cfg.signupOpen ? 'waitlist' : 'register');
-      })
-      .catch(() => setMode('register'));
-  }, []);
-
-  if (mode === 'loading') {
-    return (
-      <div className="flex min-h-full flex-col items-center justify-center px-4 py-12">
-        <div className="w-full max-w-sm">
-          <div className="flex flex-col items-center gap-3">
-            <Skeleton className="h-7 w-7" />
-            <Skeleton className="h-6 w-48" />
-          </div>
-          <div className="mt-6 space-y-2.5 rounded-xl border border-border bg-card p-6">
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="my-2 h-px w-full" />
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const searchParams = useSearchParams();
+  // Approved people arrive from the invite email with ?register and skip the
+  // waitlist view. The founder / anyone approved can also switch to it below.
+  const forceRegister = searchParams.has('register');
+  const [mode, setMode] = useState<'register' | 'waitlist'>(
+    WAITLIST && !forceRegister ? 'waitlist' : 'register',
+  );
 
   if (mode === 'waitlist') {
     return (
       <AuthCard
         title="Request early access"
-        subtitle="Flagon is invite-only right now. Join the waitlist and we’ll email you when your spot opens."
+        subtitle="Flagon is invite-only right now. Join the waitlist and we’ll email you an invite when your spot opens."
         alt={
           <>
-            Already approved or the account owner?{' '}
+            Got an invite, or the account owner?{' '}
             <button
               onClick={() => setMode('register')}
               className="font-medium text-brand-500 hover:text-brand-400"

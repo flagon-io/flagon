@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
 import { Geist, Geist_Mono } from 'next/font/google';
 import NextTopLoader from 'nextjs-toploader';
 import { siteUrl } from '@/lib/site';
@@ -43,19 +42,16 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  // No-FOUC theme without any inline/script element (React 19 warns on those):
-  // the ThemeToggle persists the *resolved* appearance to a cookie, and we put
-  // the `dark` class straight into the server-rendered <html>. Defaults to dark
-  // (brand default) on first visit before a preference exists.
-  const appearance = (await cookies()).get('flagon-appearance')?.value;
-  const dark = appearance !== 'light';
-
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // No theme class here: globals.css follows the OS via prefers-color-scheme at
+  // first paint (no flash for system users), and the ThemeToggle adds an explicit
+  // .dark/.light only when the visitor picks one. No cookie/headers read, so every
+  // page stays statically renderable — keep it that way.
   return (
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full${dark ? ' dark' : ''}`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
       <body className="min-h-full flex flex-col antialiased">
         <NextTopLoader color="#ff6a14" height={2} showSpinner={false} shadow="0 0 8px #ff6a14" />

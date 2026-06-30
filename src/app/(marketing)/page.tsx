@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { HeroAccess } from '@/components/hero-access';
 import { AccessButton } from '@/components/access-button';
+import { CodeBlock } from '@/components/prose';
 import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
@@ -163,15 +164,13 @@ export default function Home() {
               Read the docs →
             </Link>
           </div>
-          <pre className="overflow-x-auto rounded-xl border border-border bg-card p-5 font-mono text-[13px] leading-relaxed text-muted">
-            <span className="text-foreground">curl</span> -X POST \{'\n'}
-            {'  '}https://api.flagon.io/ofrep/v1/evaluate/flags/new-dashboard \{'\n'}
-            {'  '}-H <span className="text-brand-500">&quot;Authorization: Bearer $FLAGON_SDK_KEY&quot;</span> \{'\n'}
-            {'  '}-d <span className="text-brand-500">&apos;{'{'}&quot;context&quot;:{'{'}&quot;plan&quot;:&quot;enterprise&quot;{'}'}{'}'}&apos;</span>
-            {'\n\n'}
-            <span className="opacity-60">{`# => { "key": "new-dashboard", "value": true,
-#      "variant": "on", "reason": "TARGETING_MATCH" }`}</span>
-          </pre>
+          <CodeBlock className="p-5">{`curl -X POST \\
+  https://api.flagon.io/ofrep/v1/evaluate/flags/new-dashboard \\
+  -H "Authorization: Bearer $FLAGON_SDK_KEY" \\
+  -d '{"context":{"plan":"enterprise"}}'
+
+# => { "key": "new-dashboard", "value": true,
+#      "variant": "on", "reason": "TARGETING_MATCH" }`}</CodeBlock>
         </div>
       </section>
 
