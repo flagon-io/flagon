@@ -12,7 +12,6 @@ import { createHash } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import type { Bundle, FlagDefinition } from '@/core/types';
 import { withTenant } from '@/server/db';
-import { newId } from '@/server/db/id';
 import { auditLogs, environments, flagEnvironments, flags, segments } from '@/server/db/schema/app';
 import { bundleStore } from '@/server/bundles';
 
@@ -95,7 +94,6 @@ export async function publishEnvironment(
 
   await withTenant(organizationId, async (tx) => {
     await tx.insert(auditLogs).values({
-      id: newId('aud'),
       organizationId,
       actorId: actorId ?? null,
       actorType: actorId ? 'user' : 'system',

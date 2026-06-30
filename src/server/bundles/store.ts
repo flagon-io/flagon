@@ -1,5 +1,5 @@
 /**
- * BundleStore — the seam between the control plane (which publishes flag
+ * BundleStore - the seam between the control plane (which publishes flag
  * bundles) and the data plane (which reads them on the hot path). The future Go
  * evaluator implements the read side of this same contract against the same
  * backing store, so extracting it requires zero changes to the control plane.

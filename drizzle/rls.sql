@@ -27,11 +27,13 @@ BEGIN
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t);
+    -- organization_id is uuid; the GUC is text. Cast it, treating unset/empty
+    -- as NULL so no rows match when no tenant context is established.
     EXECUTE format(
       $policy$
         CREATE POLICY tenant_isolation ON %I
-          USING (organization_id = current_setting('app.current_org', true))
-          WITH CHECK (organization_id = current_setting('app.current_org', true))
+          USING (organization_id = nullif(current_setting('app.current_org', true), '')::uuid)
+          WITH CHECK (organization_id = nullif(current_setting('app.current_org', true), '')::uuid)
       $policy$,
       t
     );

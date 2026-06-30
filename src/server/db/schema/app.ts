@@ -1,8 +1,8 @@
 /**
  * Flagon domain schema: tenancy, the flag model, delivery (sdk keys + bundles),
- * audit, and usage. Every tenant-scoped table carries `organization_id` so a
- * single RLS policy (`organization_id = current_setting('app.current_org')`)
- * isolates tenants in the shared database. See rls.sql for the policies.
+ * audit, usage, and the platform waitlist. Tenant-scoped tables carry
+ * `organization_id` and are isolated by the RLS policy in rls.sql. Ids are
+ * UUIDv7 (see id.ts).
  */
 
 import {
@@ -15,22 +15,53 @@ import {
   text,
   timestamp,
   unique,
+  uuid,
 } from 'drizzle-orm/pg-core';
 import type { Bundle, Condition, FlagType, JsonValue, TargetingRule } from '@/core/types';
-import { organizations, users } from './auth';
+import { uuidv7 } from '../id';
+import { organizations } from './auth';
 
 /**
- * Tenant placement — where an org's data lives. v1: everyone is `shared` (RLS in
+ * Platform waitlist (NOT tenant-scoped, no RLS). Public signup is closed once
+ * the first user exists; everyone else joins here and an admin approves them.
+ */
+export const waitlist = pgTable('waitlist', {
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
+  email: text('email').notNull().unique(),
+  name: text('name'),
+  // pending | approved | rejected | converted
+  status: text('status').notNull().default('pending'),
+  note: text('note'),
+  approvedByUserId: uuid('approved_by_user_id'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * "What should we build next" — developer-submitted platform building-block
+ * requests from the marketing site. Public intake, NOT tenant-scoped, no RLS.
+ */
+export const featureRequests = pgTable('feature_requests', {
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
+  body: text('body').notNull(),
+  email: text('email'),
+  userId: uuid('user_id'),
+  // new | reviewing | planned | shipped | declined
+  status: text('status').notNull().default('new'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Tenant placement - where an org's data lives. v1: everyone is `shared` (RLS in
  * the main DB). Flipping a whale to `dedicated` later is a row change here plus
  * a data move, with no application code change.
  */
 export const tenantPlacements = pgTable('tenant_placements', {
-  organizationId: text('organization_id')
+  organizationId: uuid('organization_id')
     .primaryKey()
     .references(() => organizations.id, { onDelete: 'cascade' }),
   // shared | schema | dedicated
   mode: text('mode').notNull().default('shared'),
-  // Connection identifier for non-shared modes (resolved by packages/db config).
   connectionRef: text('connection_ref'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -38,8 +69,8 @@ export const tenantPlacements = pgTable('tenant_placements', {
 export const projects = pgTable(
   'projects',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
@@ -52,15 +83,14 @@ export const projects = pgTable(
 export const environments = pgTable(
   'environments',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    projectId: text('project_id')
+    projectId: uuid('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
-    // Short key, e.g. "production", "staging".
     key: text('key').notNull(),
     color: text('color').notNull().default('#64748b'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -71,11 +101,11 @@ export const environments = pgTable(
 export const flags = pgTable(
   'flags',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    projectId: text('project_id')
+    projectId: uuid('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
     key: text('key').notNull(),
@@ -97,14 +127,14 @@ export const flags = pgTable(
 export const flagEnvironments = pgTable(
   'flag_environments',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    flagId: text('flag_id')
+    flagId: uuid('flag_id')
       .notNull()
       .references(() => flags.id, { onDelete: 'cascade' }),
-    environmentId: text('environment_id')
+    environmentId: uuid('environment_id')
       .notNull()
       .references(() => environments.id, { onDelete: 'cascade' }),
     // ENABLED | DISABLED
@@ -120,11 +150,11 @@ export const flagEnvironments = pgTable(
 export const segments = pgTable(
   'segments',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    projectId: text('project_id')
+    projectId: uuid('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
     key: text('key').notNull(),
@@ -145,15 +175,14 @@ export const segments = pgTable(
 export const sdkKeys = pgTable(
   'sdk_keys',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    environmentId: text('environment_id')
+    environmentId: uuid('environment_id')
       .notNull()
       .references(() => environments.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
-    // Non-secret display prefix, e.g. "flagon_srv_3Qr8".
     prefix: text('prefix').notNull(),
     hashedKey: text('hashed_key').notNull().unique(),
     // server | client
@@ -165,19 +194,15 @@ export const sdkKeys = pgTable(
   (t) => [index('sdk_keys_env_idx').on(t.environmentId)],
 );
 
-/**
- * Published, immutable bundle snapshots (the Postgres bundle-store driver).
- * The R2 driver stores the same payload as an object; this table is the
- * self-host / local default and the source of truth for re-publishing.
- */
+/** Published, immutable bundle snapshots (the Postgres bundle-store driver). */
 export const bundles = pgTable(
   'bundles',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    environmentId: text('environment_id')
+    environmentId: uuid('environment_id')
       .notNull()
       .references(() => environments.id, { onDelete: 'cascade' }),
     etag: text('etag').notNull(),
@@ -193,11 +218,11 @@ export const bundles = pgTable(
 export const auditLogs = pgTable(
   'audit_logs',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    actorId: text('actor_id'),
+    actorId: uuid('actor_id'),
     // user | sdk_key | system
     actorType: text('actor_type').notNull().default('user'),
     action: text('action').notNull(),
@@ -209,15 +234,15 @@ export const auditLogs = pgTable(
   (t) => [index('audit_logs_org_created_idx').on(t.organizationId, t.createdAt)],
 );
 
-/** Daily evaluation rollups per environment — the basis for usage billing. */
+/** Daily evaluation rollups per environment - the basis for usage billing. */
 export const usageRollups = pgTable(
   'usage_rollups',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    environmentId: text('environment_id')
+    environmentId: uuid('environment_id')
       .notNull()
       .references(() => environments.id, { onDelete: 'cascade' }),
     day: date('day').notNull(),

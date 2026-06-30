@@ -1,5 +1,5 @@
 /**
- * Flagon core types — the canonical, framework-free contract shared by:
+ * Flagon core types - the canonical, framework-free contract shared by:
  *   - the bundle compiler (control plane, TypeScript)
  *   - the evaluation engine (this package, TypeScript)
  *   - the future Go data plane (a verbatim port reading the same bundle JSON)
@@ -67,7 +67,7 @@ export interface FlagDefinition {
 /**
  * A compiled, immutable snapshot of one environment's flags. This is the blob
  * written to the bundle store (R2 / Postgres) and read on the hot path. The
- * evaluator never touches the database — only a Bundle.
+ * evaluator never touches the database - only a Bundle.
  */
 export interface Bundle {
   schemaVersion: 1;
@@ -107,7 +107,7 @@ export type ErrorCode =
   | 'INVALID_CONTEXT'
   | 'GENERAL';
 
-/** Result of evaluating a single flag — maps 1:1 onto an OFREP response object. */
+/** Result of evaluating a single flag - maps 1:1 onto an OFREP response object. */
 export interface EvaluationResult {
   key: string;
   value: JsonValue;

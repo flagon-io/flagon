@@ -1,7 +1,7 @@
 /**
  * SDK keys authenticate the evaluation hot path. We store only a SHA-256 hash;
  * the plaintext is returned once at creation. Lookup is by hash against the
- * (non-RLS) sdk_keys table — the eval request has no tenant context yet, and a
+ * (non-RLS) sdk_keys table - the eval request has no tenant context yet, and a
  * unique cryptographic hash is itself the bootstrap credential.
  */
 

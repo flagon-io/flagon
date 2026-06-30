@@ -1,20 +1,25 @@
 /**
- * BetterAuth-owned tables. These mirror the schema BetterAuth's Drizzle adapter
- * expects for the core, organization, SSO, and Stripe plugins. Keep field names
- * in sync with the auth config in src/server/auth. When BetterAuth's schema
- * changes, regenerate with `npx @better-auth/cli generate` and reconcile here.
+ * BetterAuth-owned tables (core + organization, SSO, Stripe, username plugins).
+ *
+ * Ids are `uuid` populated with app-generated UUIDv7 (see id.ts) via BetterAuth's
+ * advanced.database.generateId. Switching the column DEFAULT to native
+ * `uuidv7()` on Postgres 18 later needs no data migration.
  */
 
-import { boolean, integer, pgTable, text, timestamp, unique } from 'drizzle-orm/pg-core';
+import { boolean, integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { uuidv7 } from '../id';
 
 // --- Core ------------------------------------------------------------------
 
 export const users = pgTable('users', {
-  id: text('id').primaryKey(),
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   emailVerified: boolean('email_verified').notNull().default(false),
   image: text('image'),
+  // username plugin: normalized (lowercase, unique) + original-case display form.
+  username: text('username').unique(),
+  displayUsername: text('display_username'),
   // Added by the Stripe plugin.
   stripeCustomerId: text('stripe_customer_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -22,13 +27,13 @@ export const users = pgTable('users', {
 });
 
 export const sessions = pgTable('sessions', {
-  id: text('id').primaryKey(),
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
   token: text('token').notNull().unique(),
-  userId: text('user_id')
+  userId: uuid('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  // Added by the organization plugin: the org the session is currently acting in.
-  activeOrganizationId: text('active_organization_id'),
+  // Organization plugin: the org the session is currently acting in.
+  activeOrganizationId: uuid('active_organization_id'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
@@ -37,10 +42,10 @@ export const sessions = pgTable('sessions', {
 });
 
 export const accounts = pgTable('accounts', {
-  id: text('id').primaryKey(),
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
   accountId: text('account_id').notNull(),
   providerId: text('provider_id').notNull(),
-  userId: text('user_id')
+  userId: uuid('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
   accessToken: text('access_token'),
@@ -55,7 +60,7 @@ export const accounts = pgTable('accounts', {
 });
 
 export const verifications = pgTable('verifications', {
-  id: text('id').primaryKey(),
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -66,7 +71,7 @@ export const verifications = pgTable('verifications', {
 // --- Organization plugin ---------------------------------------------------
 
 export const organizations = pgTable('organizations', {
-  id: text('id').primaryKey(),
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
   logo: text('logo'),
@@ -77,11 +82,11 @@ export const organizations = pgTable('organizations', {
 export const members = pgTable(
   'members',
   {
-    id: text('id').primaryKey(),
-    organizationId: text('organization_id')
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     // owner | admin | member | viewer
@@ -92,31 +97,32 @@ export const members = pgTable(
 );
 
 export const invitations = pgTable('invitations', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
+  organizationId: uuid('organization_id')
     .notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
   email: text('email').notNull(),
   role: text('role').notNull().default('member'),
   // pending | accepted | rejected | canceled
   status: text('status').notNull().default('pending'),
-  inviterId: text('inviter_id')
+  inviterId: uuid('inviter_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // --- SSO plugin (per-org enterprise OIDC/SAML) -----------------------------
 
 export const ssoProviders = pgTable('sso_providers', {
-  id: text('id').primaryKey(),
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
   issuer: text('issuer').notNull(),
   domain: text('domain').notNull(),
   oidcConfig: text('oidc_config'),
   samlConfig: text('saml_config'),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
   providerId: text('provider_id').notNull().unique(),
-  organizationId: text('organization_id').references(() => organizations.id, {
+  organizationId: uuid('organization_id').references(() => organizations.id, {
     onDelete: 'cascade',
   }),
 });
@@ -124,9 +130,9 @@ export const ssoProviders = pgTable('sso_providers', {
 // --- Stripe plugin ---------------------------------------------------------
 
 export const subscriptions = pgTable('subscriptions', {
-  id: text('id').primaryKey(),
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
   plan: text('plan').notNull(),
-  // The org id this subscription belongs to.
+  // Generic reference (org id) as managed by the Stripe plugin; kept text.
   referenceId: text('reference_id').notNull(),
   stripeCustomerId: text('stripe_customer_id'),
   stripeSubscriptionId: text('stripe_subscription_id'),

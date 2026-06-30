@@ -1,0 +1,29 @@
+# Flagon
+
+> Flagon is the open-source developer platform: the infrastructure primitives every team rebuilds (feature flags, experiments, eventing, configuration, audit), built once and well. The first product is feature flags: OpenFeature-native, edge-fast, and multitenant. Source-available under FSL-1.1-Apache-2.0; self-hostable from a single container.
+
+Flagon exists so developers stop reinventing the same platform plumbing and relitigating build-vs-buy on every project. You learn one platform (orgs, roles, API, billing) and new building blocks plug into it.
+
+How it works:
+- A multitenant **control plane** (Next.js dashboard + management API) owns your data in Postgres (row-level isolation per organization).
+- On publish, flags compile to an immutable, versioned **bundle** (a superset of the OpenFeature/flagd flag-definition format).
+- A **data plane** serves evaluation on the hot path from that bundle and never touches the primary database.
+- Evaluation is the standard **OFREP** (OpenFeature Remote Evaluation Protocol): point any OpenFeature SDK with the OFREP provider at Flagon using an SDK key. No proprietary client, no lock-in.
+- Flag types: boolean, string, number, object. Targeting by context attributes, segments, and fractional (percentage) rollouts.
+
+## Docs
+- [Documentation overview](https://flagon.io/docs): what Flagon is and how the docs are organized.
+- [Quickstart](https://flagon.io/docs/quickstart): create an org, a flag, and evaluate it.
+- [Feature Flags](https://flagon.io/docs/feature-flags): the flag model in depth.
+- [Evaluation (OFREP)](https://flagon.io/docs/feature-flags/evaluation): the OpenFeature Remote Evaluation Protocol endpoints.
+- [Targeting & rollouts](https://flagon.io/docs/feature-flags/targeting): rules, segments, and fractional rollouts.
+- [Self-hosting](https://flagon.io/docs/self-hosting): run the whole platform from one container on any Postgres.
+- [REST API reference](https://flagon.io/docs/api): the management API.
+
+## API
+- [OpenAPI spec](https://flagon.io/api/openapi.json): machine-readable description of the product API.
+
+## More
+- [Products](https://flagon.io/products): the building blocks on the platform and roadmap.
+- [Pricing](https://flagon.io/pricing): usage-based, billed on evaluations served, not seats.
+- [GitHub](https://github.com/flagon-io/flagon): source code, under FSL-1.1-Apache-2.0.

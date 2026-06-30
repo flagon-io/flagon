@@ -1,5 +1,5 @@
 /**
- * Flagon evaluation core — public surface.
+ * Flagon evaluation core - public surface.
  *
  * Framework-free and dependency-free. Safe to import from route handlers, the
  * bundle compiler, tests, or (eventually) a separate process. Do not add

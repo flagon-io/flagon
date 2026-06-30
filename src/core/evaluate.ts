@@ -16,7 +16,7 @@ import type {
   Outcome,
 } from './types';
 
-/** Evaluate a single flag by key. Never throws — failures map to error results. */
+/** Evaluate a single flag by key. Never throws - failures map to error results. */
 export function evaluateFlag(
   bundle: Bundle,
   key: string,

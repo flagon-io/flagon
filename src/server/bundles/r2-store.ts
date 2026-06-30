@@ -1,5 +1,5 @@
 /**
- * R2 bundle store — the production edge read path. Cloudflare R2 speaks the S3
+ * R2 bundle store - the production edge read path. Cloudflare R2 speaks the S3
  * API, so we use the AWS SDK pointed at the R2 endpoint. Bundles are stored as
  * a single immutable object per environment: `<org>/<env>.json`. This is the
  * exact object the future Go data plane (and Cloudflare Workers) will read.

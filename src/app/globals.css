@@ -1,55 +1,79 @@
 @import "tailwindcss";
 
 /*
- * Flagon theme — Tailwind v4 is CSS-first, so design tokens live here in
- * @theme rather than a tailwind.config.ts. Editors without the Tailwind v4
- * language plugin may flag `@import "tailwindcss"` / `@theme` as unknown
- * at-rules; that is a linter false-positive, the syntax is correct.
+ * Flagon theme. Light + dark, switched by a `.dark` class on <html>. Components
+ * reference semantic tokens (bg-background, text-muted, border-border, …) so a
+ * single set of variable overrides flips the whole product between modes.
+ *
+ * Aesthetic: structured and technical (faint grid, mono eyebrows, hairline
+ * cards, oversized headings) warmed with a single vermilion accent and a soft
+ * violet/amber glow, never the stark all-monochrome look.
+ *
+ * Editors without the Tailwind v4 plugin may flag @import/@theme/@custom-variant
+ * as unknown at-rules - that's a linter false-positive.
  */
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
+  color-scheme: light;
   --background: #ffffff;
-  --foreground: #0f172a; /* slate-900 */
-  --muted: #64748b; /* slate-500 */
-  --border: #e2e8f0; /* slate-200 */
+  --foreground: #0a0a0b;
   --card: #ffffff;
+  --card-muted: #fafafa;
+  --muted: #6b7280;
+  --border: #e7e7ea;
+  --input: #ffffff;
+  --grid-line: rgba(9, 9, 11, 0.045);
+  --glow: rgba(255, 106, 20, 0.1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0b0f1a;
-    --foreground: #e2e8f0;
-    --muted: #94a3b8;
-    --border: #1e293b;
-    --card: #0f172a;
-  }
+.dark {
+  color-scheme: dark;
+  --background: #08080a;
+  --foreground: #fafafa;
+  --card: #0e0e11;
+  --card-muted: #0c0c0f;
+  --muted: #9b9ba4;
+  --border: #1d1d21;
+  --input: #0c0c0f;
+  --grid-line: rgba(255, 255, 255, 0.035);
+  --glow: rgba(255, 106, 20, 0.16);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-muted: var(--card-muted);
   --color-muted: var(--muted);
   --color-border: var(--border);
-  --color-card: var(--card);
+  --color-input: var(--input);
 
-  /* Flagon brand — a warm amber "ale" against slate. */
-  --color-brand-50: #fff8ed;
-  --color-brand-100: #ffefd3;
-  --color-brand-200: #ffdba5;
-  --color-brand-300: #ffc06d;
-  --color-brand-400: #ff9a32;
-  --color-brand-500: #ff7d0a;
-  --color-brand-600: #f06000;
-  --color-brand-700: #c74702;
-  --color-brand-800: #9e380b;
-  --color-brand-900: #7f300c;
+  /* Flagon brand - a bright, vivid orange. Black text on 500/600 stays
+     high-contrast. Identical in both themes. */
+  --color-brand-50: #fff7ed;
+  --color-brand-100: #ffecd2;
+  --color-brand-200: #ffd6a5;
+  --color-brand-300: #ffb56d;
+  --color-brand-400: #ff8f38;
+  --color-brand-500: #ff6a14;
+  --color-brand-600: #f25109;
+  --color-brand-700: #c63f0c;
+  --color-brand-800: #9d3310;
+  --color-brand-900: #7e2c12;
+
+  /* Secondary accent for gradients (violet). */
+  --color-violet-400: #a78bfa;
+  --color-violet-500: #8b5cf6;
 
   --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-mono), ui-monospace, monospace;
 }
 
-* {
-  border-color: var(--color-border);
+html {
+  background: var(--background);
+  color: var(--foreground);
 }
 
 body {
@@ -57,4 +81,60 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(255, 106, 20, 0.25);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Faint blueprint grid. Pair with a mask for a fade. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+/* Mono eyebrow label used above section headings. */
+.eyebrow {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+/* Modal / popover entrance animations (used via inline `animation:` in Modal). */
+@keyframes flagon-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes flagon-pop {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+/*
+ * Interactivity affordances. Tailwind v4's Preflight resets buttons to
+ * cursor:default — restore the pointer for anything clickable, and show a
+ * not-allowed cursor when disabled. Keeps the whole UI feeling responsive.
+ */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  a[href] {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled="true"],
+  :disabled {
+    cursor: not-allowed;
+  }
 }

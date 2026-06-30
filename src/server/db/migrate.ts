@@ -11,9 +11,22 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { sql } from 'drizzle-orm';
 import postgres from 'postgres';
 
+// Load .env for standalone CLI runs (Next loads it itself; containers set real env).
+try {
+  process.loadEnvFile();
+} catch {
+  /* no .env file - rely on the ambient environment */
+}
+
 async function main() {
-  const url = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
-  if (!url) throw new Error('DIRECT_DATABASE_URL or DATABASE_URL must be set');
+  // Prefer a direct (non-pooled) connection for migrations. Accept the names
+  // Neon's Vercel integration provides so it works without extra config.
+  const url =
+    process.env.DIRECT_DATABASE_URL ??
+    process.env.DATABASE_URL_UNPOOLED ??
+    process.env.POSTGRES_URL_NON_POOLING ??
+    process.env.DATABASE_URL;
+  if (!url) throw new Error('A database URL must be set (DIRECT_DATABASE_URL / DATABASE_URL)');
 
   // A short-lived, non-pooled client; `max: 1` is required by the migrator.
   const client = postgres(url, { max: 1 });

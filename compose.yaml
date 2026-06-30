@@ -1,0 +1,43 @@
+# Local / self-host stack: Postgres + Flagon.
+#
+#   docker compose up --build           # migrates + serves on :3000
+#   docker compose exec app pnpm db:seed  # optional demo data + SDK key
+#
+# The app uses the Postgres bundle-store driver, so no Cloudflare/Vercel needed.
+
+services:
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://flagon:flagon@db:5432/flagon
+      DIRECT_DATABASE_URL: postgres://flagon:flagon@db:5432/flagon
+      BETTER_AUTH_SECRET: dev-secret-change-me-please-use-32-bytes
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:3000/api/v1
+      BUNDLE_STORE_DRIVER: postgres
+    ports:
+      - '3000:3000'
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: flagon
+      POSTGRES_PASSWORD: flagon
+      POSTGRES_DB: flagon
+    ports:
+      - '5432:5432'
+    volumes:
+      - flagon_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U flagon']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  flagon_pgdata:

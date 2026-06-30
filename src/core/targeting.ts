@@ -1,5 +1,5 @@
 /**
- * Targeting evaluation — pure boolean logic over an EvaluationContext.
+ * Targeting evaluation - pure boolean logic over an EvaluationContext.
  *
  * Conditions form a small tree (no string eval, no regex injection) so the same
  * structure ports cleanly to Go. Segments are named conditions resolved by ref.

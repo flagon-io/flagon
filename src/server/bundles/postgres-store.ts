@@ -1,5 +1,5 @@
 /**
- * Postgres bundle store — the default driver. Great for local dev and
+ * Postgres bundle store - the default driver. Great for local dev and
  * self-host (no extra infrastructure), and the durable source of truth even
  * when R2 is the edge read path. Bundles are append-only history keyed by etag;
  * reads return the most recently generated row for the environment.
@@ -8,7 +8,6 @@
 import { desc, eq } from 'drizzle-orm';
 import type { Bundle } from '@/core/types';
 import { withTenant } from '@/server/db';
-import { newId } from '@/server/db/id';
 import { bundles } from '@/server/db/schema/app';
 import type { BundleRef, BundleStore } from './store';
 
@@ -18,7 +17,6 @@ export class PostgresBundleStore implements BundleStore {
       await tx
         .insert(bundles)
         .values({
-          id: newId('bndl'),
           organizationId: ref.organizationId,
           environmentId: ref.environmentId,
           etag: bundle.etag,
