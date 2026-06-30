@@ -4,8 +4,9 @@
 > vision, what's built, conventions, how to run it, and what's next - enough to
 > resume from a cold start without losing context.
 
-Last updated: 2026-06-30 (mobile pass, OFREP org-binding tests, sudo requests triage,
-project-count fix, environment auto-seed).
+Last updated: 2026-06-30 (API tokens + JWT seam: PATs, org tokens, scopes, per-token
+rate limiting, JWKS rotation, /docs/api-authentication; marketing visual pass: monoline
+logo, next/og social cards, capability-voice copy, Configuration → 3rd in the lineup).
 
 ---
 
@@ -49,6 +50,15 @@ management API) owns the data and compiles flags into immutable, versioned
 OLTP DB. Today both run in the one Next app; the bundle-store contract +
 pure-engine seam mean the data plane can later be extracted to Go (Cloudflare)
 with no rewrite.
+
+**Auth seam (built).** Every credential (session cookie, user PAT, org token)
+normalizes to one `Principal` and can be exchanged for a short-lived JWT
+(`POST /api/v1/token`); backends validate that JWT against the JWKS via `verifyJwt`
+(jose) with **no session/PAT/DB logic**. So the same "split later" applies to the
+*control* plane: a **gateway** validates the incoming credential and mints a JWT at
+the edge, and every service behind it deals with JWT only. The gateway keeps the
+auth DB + `api_tokens`; the services need only the JWKS URL. (See §4 "API auth" and
+the §10 "Service split" item.)
 
 **Four surfaces** (host-routed by `src/proxy.ts`; locally all on `localhost:3000`):
 
@@ -399,17 +409,35 @@ The eval loop, auth, infra, and now **flag authoring** are done. Critical path:
    Optional follow-ups: email **verification** on signup, and a `/sudo` email
    preview/test-send tool (use Resend test inboxes: `delivered@resend.dev`, …).
 
-> **Pick up here next session.** Deploy is unblocked (git push to `main` migrates +
-> builds on Vercel — see §7; just confirm the Vercel↔GitHub link, env vars, and
-> `FLAGON_ADMIN_EMAIL` so you can reach `/sudo` on the fresh prod DB). The biggest
-> *product* gap is that **pricing is marketing only — nothing enforces plans** (§11).
-> Highest-value next work: **billing + entitlements (§10, the big one)** and the
-> **rename/delete/archive** polish (item 1a). Quick wins available: the org-level
-> **environment template** (item 1d) and **email verification** (item 4).
-> Already done this session: mobile pass, OFREP org-binding **verified + hardened**
-> (§11), `/sudo/requests` triage, projects-count fix, env auto-seed. **Pre-launch
-> must-check:** RLS is bypassed locally (superuser role) — verify it actually engages
-> in prod (§11). Also revisit **segment scoping** (§10).
+> **Pick up here next — next steps, roughly in priority order:**
+>
+> 1. **Deploy to prod.** Unblocked: push `main` → Vercel migrates (now incl. `0002`:
+>    `api_tokens` + `jwkss`) and builds. Set/keep `BETTER_AUTH_SECRET` **and**
+>    `BETTER_AUTH_URL` **stable** (the JWKS private key is encrypted with the secret;
+>    the JWT `iss` uses the URL), plus `FLAGON_ADMIN_EMAIL` for `/sudo`. Then
+>    smoke-test on the real subdomains: shared session, **PAT + JWT exchange**,
+>    **OFREP eval**, transactional emails.
+> 2. **Billing + entitlements — the big product gap (§10).** Pricing is still
+>    marketing only; nothing enforces plans. BetterAuth Stripe → an `entitlements`
+>    layer → usage metering. (The metering pipeline also productizes into the
+>    "usage metering" building block from the lineup discussion.)
+> 3. **rename / delete / archive** for project / flag / environment (item 1a; org
+>    already has it).
+> 4. **Quick wins:** org-level **environment template** (1d); **email verification**
+>    (item 4); move the **per-token rate limiter to a shared store** (Redis/DB — it's
+>    in-memory / per-instance today, §10/§11); a `/sudo` **token audit** view.
+> 5. **Service split / JWT gateway** when you extract services — the seam is ready
+>    (§2/§10); revisit then, not before.
+>
+> **Pre-launch must-checks:** RLS is bypassed locally (superuser role) — confirm it
+> engages in prod (§11). Keep `BETTER_AUTH_SECRET` stable, or clear the `jwkss` table
+> on a rotation (else "failed to decrypt private key"). Revisit **segment scoping** (§10).
+>
+> **Done recently:** **API tokens + JWT seam** (user PATs, org tokens, fine-grained
+> scopes, per-token rate limiting, JWKS rotation, `/docs/api-authentication`) —
+> verified end-to-end incl. OFREP unaffected; marketing visual pass (**monoline
+> flagon logo**, dynamic **`next/og`** social cards, capability-voice copy,
+> Configuration moved to 3rd in the lineup).
 
 After that it's a usable, deployable hosted product. Then:
 
@@ -430,7 +458,17 @@ After that it's a usable, deployable hosted product. Then:
 - **Enterprise SSO**: per-org OIDC/SAML via BetterAuth SSO plugin (`sso_providers`
   exists; plugin not enabled). SCIM later.
 - **Go data plane**: move `/api/ofrep` to Go on Cloudflare reading the same R2
-  bundles; port `src/core` and validate against the conformance fixtures.
+  bundles; port `src/core` and validate against the conformance fixtures. (OFREP
+  authenticates with SDK keys, separate from the JWT seam below.)
+- **Service split (JWT gateway)** — the auth seam is built (§2/§4). At split time a
+  gateway resolves session/PAT/org-token → mints a short-lived JWT; extracted
+  services validate **JWT-only** via JWKS (`verifyJwt`; swap `getJwks()` for
+  `createRemoteJWKSet(JWKS_URL)`). Decisions to make then: gateway-mints-per-request
+  vs client-exchanges; share `iss`/`aud` (`jwt-config.ts`) + a stable
+  `BETTER_AUTH_SECRET` as env; only the gateway needs the auth DB + `api_tokens`.
+  JWT is a 15-min snapshot, so mint per request if you need instant revocation. Also
+  move the per-token rate limiter (`src/server/api/rate-limit.ts`, in-memory /
+  per-instance) to a shared store (Redis/DB) for multi-instance correctness.
 - **Streaming** (SSE) bundle updates; **audit log** UI; **product detail** pages;
   **integration/e2e tests** (RLS isolation, publish→eval, auth/onboarding).
 
@@ -462,12 +500,22 @@ After that it's a usable, deployable hosted product. Then:
   **Before launch:** (1) run the app locally as a **non-superuser** role to truly
   exercise RLS; (2) confirm the **Neon role used in production is non-superuser**
   (it normally is, which is *why* RLS will engage in prod but not dev).
+- **API token / JWT caveats.** (1) The `jwt` plugin encrypts the JWKS private key
+  with `BETTER_AUTH_SECRET`; if that secret changes — or two envs share one DB with
+  different secrets (dev `.env` vs a local prod-build `.env.production`) — decryption
+  fails (*"failed to decrypt private key"*). Keep the secret stable per environment,
+  or `delete from jwkss` to regenerate. (2) The per-token rate limiter
+  (`src/server/api/rate-limit.ts`) is **in-memory / per-instance** — fine on one
+  container; multi-instance needs a shared store. (3) A minted JWT is a 15-min
+  snapshot of the principal's claims: revocation is immediate for *new* exchanges,
+  but an in-flight JWT stays valid until `exp`.
 - **Legal pages** are solid baseline copy — **have counsel review** before launch.
 - **Production subdomain routing + cross-subdomain auth** are implemented but only
   exercised locally (proxy is a no-op without `NEXT_PUBLIC_ROOT_DOMAIN`); validate
   on the real multi-subdomain deploy.
 - **Neon is provisioned** via the Vercel integration but **not yet migrated/deployed**;
   the live DB is still local Docker. First production deploy runs migrations.
-- Migrations: `0000_*.sql` (baseline) + `0001_*.sql` (feature_requests). Additive;
+- Migrations: `0000_*.sql` (baseline) + `0001_*.sql` (feature_requests) +
+  `0002_*.sql` (api_tokens + jwkss). Additive;
   applied on deploy. Locally run `pnpm db:migrate` (if Postgres reports too many
   connections, `docker compose restart db` first).
