@@ -141,8 +141,8 @@ export function MembersManager({
 
       <section>
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted">Members</h2>
-        <div className="mt-3 overflow-hidden rounded-xl border border-border">
-          <table className="w-full text-sm">
+        <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+          <table className="w-full min-w-120 text-sm">
             <tbody>
               {members.map((m) => (
                 <tr key={m.id} className="border-b border-border last:border-0">
@@ -185,8 +185,8 @@ export function MembersManager({
       {invites.length > 0 && (
         <section>
           <h2 className="text-xs font-medium uppercase tracking-wide text-muted">Pending invites</h2>
-          <div className="mt-3 overflow-hidden rounded-xl border border-border">
-            <table className="w-full text-sm">
+          <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+            <table className="w-full min-w-120 text-sm">
               <tbody>
                 {invites.map((i) => (
                   <tr key={i.id} className="border-b border-border last:border-0">

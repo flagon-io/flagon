@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Logo } from '@/components/logo';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { MarketingNavLinks } from '@/components/marketing-nav-links';
+import { MarketingMobileMenu } from '@/components/marketing-mobile-menu';
 import { MarketingAuthSlot } from '@/components/marketing-auth-slot';
 
 /**
@@ -23,6 +24,7 @@ export function MarketingNav() {
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <MarketingAuthSlot />
+          <MarketingMobileMenu />
         </div>
       </div>
     </header>

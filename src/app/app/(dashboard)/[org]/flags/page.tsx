@@ -59,8 +59,8 @@ export default async function FlagsPage({ params }: { params: Promise<{ org: str
           </p>
         </div>
       ) : (
-        <div className="mt-8 overflow-hidden rounded-xl border border-border">
-          <table className="w-full text-sm">
+        <div className="mt-8 overflow-x-auto rounded-xl border border-border">
+          <table className="w-full min-w-136 text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted">
                 <th className="px-4 py-2.5 font-medium">Flag</th>

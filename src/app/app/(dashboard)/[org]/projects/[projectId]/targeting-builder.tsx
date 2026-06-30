@@ -206,7 +206,7 @@ function FractionalEditor({
   return (
     <div className="space-y-2">
       {rows.map((r, i) => (
-        <div key={i} className="flex items-center gap-2">
+        <div key={i} className="flex flex-wrap items-center gap-2">
           <Select
             value={r.variant}
             onValueChange={(v) => setRows(rows.map((x, j) => (j === i ? { ...x, variant: v } : x)))}
@@ -239,7 +239,7 @@ function FractionalEditor({
           </Button>
         </div>
       ))}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           type="button"
           size="sm"

@@ -33,8 +33,8 @@ export default async function SudoWaitlistPage() {
         {entries.length} total · {pending} pending approval
       </p>
 
-      <div className="mt-8 overflow-hidden rounded-xl border border-border">
-        <table className="w-full text-sm">
+      <div className="mt-8 overflow-x-auto rounded-xl border border-border">
+        <table className="w-full min-w-136 text-sm">
           <thead>
             <tr className="border-b border-border bg-card text-left text-xs uppercase tracking-wide text-muted">
               <th className="px-4 py-3 font-medium">Email</th>

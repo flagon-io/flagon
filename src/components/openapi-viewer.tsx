@@ -41,8 +41,8 @@ function SchemaProps({ spec, schema }: { spec: Spec; schema: any }) {
   }
   const required: string[] = r.required ?? [];
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <table className="w-full text-xs">
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full min-w-96 text-xs">
         <tbody>
           {Object.entries(r.properties).map(([name, prop]: [string, any]) => (
             <tr key={name} className="border-b border-border last:border-0">
@@ -98,8 +98,8 @@ function Operation({ spec, path, method, op }: { spec: Spec; path: string; metho
           {params.length > 0 && (
             <div>
               <h4 className="eyebrow mb-2">Parameters</h4>
-              <div className="overflow-hidden rounded-lg border border-border">
-                <table className="w-full text-xs">
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full min-w-96 text-xs">
                   <tbody>
                     {params.map((p: any) => (
                       <tr key={p.name} className="border-b border-border last:border-0">

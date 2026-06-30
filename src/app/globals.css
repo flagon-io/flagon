@@ -157,3 +157,9 @@ body {
     cursor: not-allowed;
   }
 }
+
+/* Mobile nav drawer slide-in (used via inline `animation:` in MobileNav). */
+@keyframes flagon-slide-in {
+  from { transform: translateX(-100%); }
+  to { transform: none; }
+}

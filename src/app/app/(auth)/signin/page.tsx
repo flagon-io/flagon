@@ -54,20 +54,26 @@ export default function SignInPage() {
           onChange={setIdentifier}
           autoComplete="username"
         />
-        <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-sm font-medium">Password</span>
-            <Link href="/app/forgot-password" className="text-xs text-muted hover:text-foreground">
-              Forgot password?
-            </Link>
-          </div>
+        <div className="relative">
+          <label htmlFor="password" className="mb-1.5 block text-sm font-medium">
+            Password
+          </label>
           <Input
+            id="password"
             type="password"
             value={password}
             autoComplete="current-password"
             onChange={(e) => setPassword(e.target.value)}
             required
           />
+          {/* Positioned in the label row, but placed after the input in the DOM so
+              tab order is username → password → here (not username → here → password). */}
+          <Link
+            href="/app/forgot-password"
+            className="absolute right-0 top-0 text-xs text-muted hover:text-foreground"
+          >
+            Forgot password?
+          </Link>
         </div>
         {error && <p className="text-sm text-red-400">{error}</p>}
         <SubmitButton loading={loading}>Sign in</SubmitButton>
