@@ -24,7 +24,7 @@ Semantic status colors: emerald (success), amber (warning), red (danger).
 - **Input** (`input.tsx`) — styled `<input>`; spreads all native props (`type`, `disabled`, `placeholder`, `defaultValue`/`value`). Full-width by default.
 - **Textarea** (`textarea.tsx`) — multiline counterpart to Input; same styling, spreads native props (`rows`, etc.).
 - **Select** (`select.tsx`) — `<Select value onValueChange options ariaLabel className>`; `options: {value,label}[]`. Custom popover listbox (the native `<select>` can't be themed). Use this everywhere instead of `<select>`.
-- **Modal** (`modal.tsx`) — `<Modal open onClose title description footer size closeOnEsc closeOnBackdrop showClose>`; portal + blurred backdrop, body-scroll lock, focus trap + restore, ESC/backdrop dismiss (both configurable, default on). **Build every create/confirm flow on this.** Pattern: a trigger `Button` flips an `open` state; put the form in `children` with `id`, and a submit `<Button type="submit" form={id}>` in `footer`; close on success.
+- **Modal** (`modal.tsx`) — `<Modal open onClose title description footer size closeOnEsc closeOnBackdrop showClose>`; portal + blurred backdrop, body-scroll lock, focus trap + restore, ESC/backdrop dismiss (both configurable, default on). On open it focuses the **first form field** (skips the header close button) so you can type immediately; the focus effect keys on `open` only (reads `onClose`/`closeOnEsc` via refs) so typing-induced re-renders never steal focus — don't add `onClose` back to its deps. **Build every create/confirm flow on this.** Pattern: a trigger `Button` flips an `open` state; put the form in `children` with `id`, and a submit `<Button type="submit" form={id}>` in `footer`; close on success. **Footer actions are right-aligned with the primary action rightmost** — order them `Cancel` then primary (the `footer` prop is `flex justify-end`; if you render a footer inside the body instead, match `flex justify-end gap-2 border-t border-border pt-4`).
 
 ## Form helpers (`@/components/form`)
 
@@ -37,7 +37,7 @@ One shared pattern: a trigger button with `aria-haspopup` + an absolutely-positi
 
 ## App chrome (`@/components/app`)
 
-- **AppShell** — fixed sidebar (org/brand header + grouped nav + bottom collapse) beside a column with a slim top header (account menu top-right) over scrolling content. Used by the dashboard (org switcher header) and sudo (brand + badge header).
+- **AppShell** — fixed sidebar (org/brand header + grouped nav + bottom collapse) beside a column with a slim top header (account menu top-right) over scrolling content. Used by the dashboard (org switcher header) and sudo (brand + badge header). On mobile the sidebar is hidden (`md:`) and replaced by **MobileNav** (`@/components/app/mobile-nav`) — a hamburger in the topbar opens a portal slide-in drawer reusing the same `SidebarHeaderContent`/`SidebarNav`/`SidebarFooter` (so the org switcher works on mobile). The marketing nav has its own **MarketingMobileMenu** for the same reason.
 - **AppSidebar** — takes serializable `NavSection[]` (`icon` is a string key in the `ICONS` registry); add an icon to the registry to use it. `soon: true` renders a muted "Soon" item (no link).
 - **AppTopbar** — slim header; optional `left` slot (brand for standalone pages), theme toggle + `UserMenu` on the right.
 

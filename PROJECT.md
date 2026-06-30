@@ -4,7 +4,8 @@
 > vision, what's built, conventions, how to run it, and what's next - enough to
 > resume from a cold start without losing context.
 
-Last updated: 2026-06-30.
+Last updated: 2026-06-30 (mobile pass, OFREP org-binding tests, sudo requests triage,
+project-count fix, environment auto-seed).
 
 ---
 
@@ -167,6 +168,19 @@ LICENSE.md (FSL), LICENSE-APACHE
 - **Auth across subdomains**: when `NEXT_PUBLIC_ROOT_DOMAIN` is set, BetterAuth
   uses cross-subdomain cookies (`.flagon.io`) + trustedOrigins, so one login
   works on app./api./sudo. (`src/server/auth`).
+- **Mobile**: every surface is responsive. App/sudo shells swap the sidebar for a
+  `MobileNav` drawer below `md` (org switcher included); marketing nav uses
+  `MarketingMobileMenu`. Data tables wrap in `overflow-x-auto` + a `min-w-*`; dense
+  rule rows (`targeting`/`fractional`) use `flex-wrap`. Modals focus the first field
+  and right-align footer actions (primary rightmost) — see DESIGN_SYSTEM.md.
+- **Drizzle gotcha (correlated subqueries)**: interpolating a column into a raw
+  `sql` template subquery (e.g. `${projects.id}`) renders it **unqualified** (`"id"`), which
+  inside a subquery binds to the inner table's own column, silently returning 0.
+  Write the qualified ref as literal text (`projects.id`). This bit the projects
+  list env/flag counts; fixed + commented in `[org]/projects/page.tsx`.
+- **Tests**: Vitest (`pnpm test`). `vitest.config.ts` maps the `@/*` alias to `./src`
+  so tests can import by app path. Coverage: core eval conformance
+  (`src/core/evaluate.test.ts`) + OFREP org-binding (`src/server/ofrep/handler.test.ts`).
 
 ---
 
@@ -260,10 +274,14 @@ R2 / social / Stripe.
 - [x] **Marketing**: home, products, pricing, **multi-page docs**, docs/api, terms, privacy; nav/footer
 - [x] **Auth UI** (`/app/signin`, `/app/signup`): social buttons, adaptive waitlist/registration
 - [x] **Dashboard** (`/app`): onboarding + projects view (read-only)
-- [x] **Flag control plane UI** (server actions, RLS-scoped): **projects** (list/create),
-      **environments** (create + colors), **SDK keys** (create/reveal-once/revoke per env),
-      **flag editor** — boolean/string/number/object **variants**, per-environment
-      **state + default + targeting**, **Publish** → bundle (verified end-to-end → OFREP)
+- [x] **Flag control plane UI** (server actions, RLS-scoped): **projects** (list/create —
+      new projects **auto-seed Production + Staging** envs, `DEFAULT_ENVIRONMENTS` in
+      `[org]/actions.ts`; no SDK keys auto-created), **environments** (create + colors),
+      **SDK keys** (create/reveal-once/revoke per env), **flag editor** —
+      boolean/string/number/object **variants**, per-environment
+      **state + default + targeting**, **Publish** → bundle (verified end-to-end → OFREP).
+      NB: **environments are per-project** (LaunchDarkly/GitHub model); OpenFeature has no
+      "environment" concept, so this is purely a product choice (see §9 / §11)
 - [x] **Visual targeting rule builder** (no JSON): ordered rules (first-match-wins) with a
       shared **ConditionBuilder** (ALL/ANY over attribute clauses — eq/ne/in/contains/
       gt…/semver — and **segment refs**) + **OutcomeEditor** (serve a variant or a
@@ -320,11 +338,19 @@ The eval loop, auth, infra, and now **flag authoring** are done. Critical path:
 
 1. ~~Flag management UI~~ — **done**, incl. the **visual targeting rule builder**
    (condition + outcome, fractional rollout) and **Segments CRUD**. Remaining polish:
-   **(a)** project / flag / environment / org **rename · delete · archive**;
+   **(a)** project / flag / environment / org **rename · delete · archive** (org rename/
+   delete exist; project/flag/env do not);
    **(b)** a project/env **selector primitive** once a second product needs it;
    ~~**(c)** a `/sudo` page to triage the **building-block requests**~~ — **done**
    (`/sudo/requests`: status pipeline new→reviewing→planned→shipped/declined,
    overview "new" count badge).
+   **(d) Environments — decided:** stay **per-project** (right for bundle/SDK-key
+   scoping; OpenFeature is silent on environments). New projects now auto-seed
+   Production + Staging. **Next option (not built):** an org-level "environment
+   template" so the default set is configurable org-wide — `DEFAULT_ENVIRONMENTS`
+   in `[org]/actions.ts` is the single thing that becomes template-driven. Do NOT
+   pursue global/instance-level environments (Unleash model) — it fights the
+   per-(project,env) bundle keying for little gain.
 2. ~~Org context in the dashboard~~ — **done**: org-scoped routes
    (`/app/[org]/…`, clean prod URLs), switcher, members, roles, invitations
    (invite → accept → membership). Invites are link-based until email.
@@ -339,11 +365,17 @@ The eval loop, auth, infra, and now **flag authoring** are done. Critical path:
    Optional follow-ups: email **verification** on signup, and a `/sudo` email
    preview/test-send tool (use Resend test inboxes: `delivered@resend.dev`, …).
 
-> **Pick up here next session.** Deploy is unblocked. The biggest *product* gap is
-> that **pricing is marketing only — nothing enforces plans** (see §11). After
-> deploy, the highest-value work is billing + entitlements (§10) and the
-> rename/delete/archive polish (item 1). (OFREP org-binding is now **verified +
-> hardened** — §11.) Also revisit **segment scoping** (§10).
+> **Pick up here next session.** Deploy is unblocked (git push to `main` migrates +
+> builds on Vercel — see §7; just confirm the Vercel↔GitHub link, env vars, and
+> `FLAGON_ADMIN_EMAIL` so you can reach `/sudo` on the fresh prod DB). The biggest
+> *product* gap is that **pricing is marketing only — nothing enforces plans** (§11).
+> Highest-value next work: **billing + entitlements (§10, the big one)** and the
+> **rename/delete/archive** polish (item 1a). Quick wins available: the org-level
+> **environment template** (item 1d) and **email verification** (item 4).
+> Already done this session: mobile pass, OFREP org-binding **verified + hardened**
+> (§11), `/sudo/requests` triage, projects-count fix, env auto-seed. **Pre-launch
+> must-check:** RLS is bypassed locally (superuser role) — verify it actually engages
+> in prod (§11). Also revisit **segment scoping** (§10).
 
 After that it's a usable, deployable hosted product. Then:
 
