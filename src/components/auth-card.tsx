@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { Logo } from '@/components/logo';
+import { siteUrl } from '@/lib/site';
 
 /**
  * Centered auth layout: logo, heading, a bordered form card, and an optional
@@ -20,9 +20,9 @@ export function AuthCard({
     <div className="flex min-h-full flex-col items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center text-center">
-          <Link href="/" aria-label="Flagon home">
+          <a href={siteUrl} aria-label="Flagon home">
             <Logo size={28} />
-          </Link>
+          </a>
           <h1 className="mt-6 text-xl font-semibold tracking-tight">{title}</h1>
           {subtitle && <p className="mt-1.5 text-sm text-muted">{subtitle}</p>}
         </div>
