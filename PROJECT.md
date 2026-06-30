@@ -337,7 +337,9 @@ The eval loop, auth, infra, and now **flag authoring** are done. Critical path:
 > **Pick up here next session.** Deploy is unblocked. The biggest *product* gap is
 > that **pricing is marketing only — nothing enforces plans** (see §11). After
 > deploy, the highest-value work is billing + entitlements (§10) and the
-> rename/delete/archive polish (item 1). Also revisit **segment scoping** (§10).
+> rename/delete/archive polish (item 1). Also: **verify OFREP is strictly
+> org-bound** (shared flag names across orgs — §11, do before real SDK traffic)
+> and revisit **segment scoping** (§10).
 
 After that it's a usable, deployable hosted product. Then:
 
@@ -366,6 +368,23 @@ After that it's a usable, deployable hosted product. Then:
 
 - **No billing / plan enforcement.** Pricing is marketing only. Nothing charges,
   meters, or gates by plan. Don't launch paid tiers until §10 "Billing" is built.
+- **Verify OFREP is strictly org-bound (do before real SDK traffic).** Concern:
+  two orgs can have the same flag key (e.g. both `new-dashboard`); make sure one
+  org's SDK key can never read another's. How it's bound today: eval resolves the
+  SDK key → `{org, env}` (`resolveSdkKey`, uses the plain `db` since `sdk_keys` is
+  non-RLS by design), then `PostgresBundleStore.get()` runs inside
+  `withTenant(org)`, so the `bundles` RLS policy (FORCE RLS, gated on
+  `app.current_org`) plus the `environmentId` WHERE scope the read to exactly
+  `(org, env)`. Env IDs are globally-unique UUIDv7, and flag keys are unique per
+  project, so within a bundle there's no collision. This *should* be airtight.
+  **To confirm + harden tomorrow:** (1) add an integration test — two orgs, same
+  flag key, distinct SDK keys → each key resolves only its own value and org A's
+  key never sees org B's flag (single + bulk OFREP); (2) `get()`/`put()` filter by
+  `environmentId` only and lean on RLS for the org filter — add an explicit
+  `organizationId` predicate to the WHERE for defense-in-depth and clarity;
+  (3) sanity-check the same for the R2 bundle store key (`bundles/<org>/<env>` vs
+  `<env>` only). Files: `src/server/ofrep/handler.ts`,
+  `src/server/flags/sdk-keys.ts`, `src/server/bundles/{postgres,r2}-store.ts`.
 - **Legal pages** are solid baseline copy — **have counsel review** before launch.
 - **Production subdomain routing + cross-subdomain auth** are implemented but only
   exercised locally (proxy is a no-op without `NEXT_PUBLIC_ROOT_DOMAIN`); validate
