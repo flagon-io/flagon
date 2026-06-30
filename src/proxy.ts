@@ -46,8 +46,12 @@ export function proxy(req: NextRequest) {
   // Surface isolation (prod): the apex (marketing) must NOT serve the product
   // surfaces — those live only on their subdomains. So flagon.io/api/v1 is dead,
   // and flagon.io/app|/sudo bounce to the right subdomain.
+  //
+  // Exception: /api/auth stays reachable on the apex. BetterAuth's session
+  // endpoints are infrastructure (cross-subdomain cookie on .flagon.io), and the
+  // marketing site needs same-origin sign-out to work from the account menu.
   if (root && (sub === '' || sub === 'www')) {
-    if (url.pathname.startsWith('/api')) {
+    if (url.pathname.startsWith('/api') && !url.pathname.startsWith('/api/auth')) {
       return applyCors(
         new NextResponse(JSON.stringify({ message: 'Not Found' }), {
           status: 404,
