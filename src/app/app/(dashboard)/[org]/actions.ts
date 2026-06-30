@@ -7,12 +7,14 @@
  * `router.refresh()` after a success to re-pull the server-rendered data.
  */
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getOrgBySlug, roleAtLeast } from '@/server/api/org-context';
-import { withTenant } from '@/server/db';
+import { db, withTenant } from '@/server/db';
 import { uuidv7 } from '@/server/db/id';
-import { environments, flagEnvironments, flags, projects, sdkKeys, segments } from '@/server/db/schema/app';
+import { apiTokens, environments, flagEnvironments, flags, projects, sdkKeys, segments } from '@/server/db/schema/app';
 import { generateSdkKey, type SdkKeyScope } from '@/server/flags/sdk-keys';
+import { generateApiToken } from '@/server/tokens/api-tokens';
+import { normalizeScopes } from '@/server/api/scopes';
 import { publishEnvironment } from '@/server/flags/publish';
 import type { Condition, FlagType, JsonValue, TargetingRule } from '@/core/types';
 
@@ -175,6 +177,63 @@ export async function revokeSdkKey(orgSlug: string, keyId: string): Promise<Acti
   await withTenant(g.orgId, (tx) =>
     tx.update(sdkKeys).set({ revokedAt: new Date() }).where(eq(sdkKeys.id, keyId)),
   );
+  return { ok: true, data: undefined };
+}
+
+// --- Org API tokens --------------------------------------------------------
+// Org-provisioned service tokens (api_tokens, kind='org'). Not RLS-protected, so
+// queries are scoped by organizationId explicitly. Admin+ only; the token's role
+// is capped at the creator's role and can never be 'owner'.
+
+const ORG_TOKEN_RANK: Record<string, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
+
+export async function createOrgApiToken(
+  orgSlug: string,
+  input: { name: string; role: string; expiresInDays?: number | null; scopes?: string[] | null },
+): Promise<ActionResult<{ plaintext: string }>> {
+  const resolved = await getOrgBySlug(orgSlug);
+  if (!resolved || !roleAtLeast(resolved.org.role, 'admin')) return fail('Not authorized.');
+
+  const name = input.name.trim();
+  if (!name) return fail('Give the token a name.');
+  if (input.role === 'owner' || !(input.role in ORG_TOKEN_RANK)) return fail('Invalid role.');
+  if (ORG_TOKEN_RANK[input.role]! > ORG_TOKEN_RANK[resolved.org.role]!) {
+    return fail('You cannot grant a role higher than your own.');
+  }
+
+  const generated = generateApiToken('org');
+  const expiresAt = input.expiresInDays
+    ? new Date(Date.now() + input.expiresInDays * 86_400_000)
+    : null;
+
+  await db.insert(apiTokens).values({
+    id: uuidv7(),
+    kind: 'org',
+    organizationId: resolved.org.id,
+    role: input.role,
+    createdByUserId: resolved.user.id,
+    name,
+    prefix: generated.prefix,
+    hashedKey: generated.hashedKey,
+    scopes: normalizeScopes(input.scopes),
+    expiresAt,
+  });
+  return { ok: true, data: { plaintext: generated.plaintext } };
+}
+
+export async function revokeOrgApiToken(orgSlug: string, id: string): Promise<ActionResult> {
+  const resolved = await getOrgBySlug(orgSlug);
+  if (!resolved || !roleAtLeast(resolved.org.role, 'admin')) return fail('Not authorized.');
+  await db
+    .update(apiTokens)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(apiTokens.id, id),
+        eq(apiTokens.organizationId, resolved.org.id),
+        eq(apiTokens.kind, 'org'),
+      ),
+    );
   return { ok: true, data: undefined };
 }
 

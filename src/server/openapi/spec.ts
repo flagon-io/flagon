@@ -43,6 +43,7 @@ export function buildOpenApiDocument(serverUrl: string): Json {
     tags: [
       { name: 'General', description: 'Discovery and health' },
       { name: 'Account', description: 'The signed-in user' },
+      { name: 'Authentication', description: 'Token exchange for the JWT seam' },
       { name: 'Projects', description: 'Projects within an organization' },
       { name: 'Environments', description: 'Environments and publishing' },
       { name: 'Evaluation', description: 'OpenFeature flag evaluation (OFREP)' },
@@ -69,11 +70,38 @@ export function buildOpenApiDocument(serverUrl: string): Json {
         get: {
           tags: ['Account'],
           summary: 'Current user',
-          security: [{ sessionCookie: [] }],
+          security: [{ apiToken: [] }, { sessionCookie: [] }],
           responses: {
             '200': {
               description: 'The signed-in user and their organizations',
               content: { 'application/json': { schema: ref('Me') } },
+            },
+            '401': errorResponse('Unauthenticated'),
+          },
+        },
+      },
+      '/v1/token': {
+        post: {
+          tags: ['Authentication'],
+          summary: 'Exchange a credential for a JWT',
+          description:
+            'Exchanges the caller’s session, personal access token, or org token for a short-lived (15-minute) signed JWT. Backends validate that JWT against the published JWKS — no session or token lookup required.',
+          security: [{ apiToken: [] }, { sessionCookie: [] }],
+          responses: {
+            '200': {
+              description: 'A short-lived bearer JWT',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      token: { type: 'string' },
+                      token_type: { type: 'string', example: 'Bearer' },
+                      expires_in: { type: 'integer', example: 900 },
+                    },
+                  },
+                },
+              },
             },
             '401': errorResponse('Unauthenticated'),
           },
@@ -84,7 +112,7 @@ export function buildOpenApiDocument(serverUrl: string): Json {
         get: {
           tags: ['Projects'],
           summary: 'List projects',
-          security: [{ sessionCookie: [] }],
+          security: [{ apiToken: [] }, { sessionCookie: [] }],
           responses: {
             '200': {
               description: 'Projects',
@@ -96,7 +124,7 @@ export function buildOpenApiDocument(serverUrl: string): Json {
         post: {
           tags: ['Projects'],
           summary: 'Create a project',
-          security: [{ sessionCookie: [] }],
+          security: [{ apiToken: [] }, { sessionCookie: [] }],
           requestBody: jsonBody('ProjectCreate'),
           responses: {
             '201': {
@@ -117,7 +145,7 @@ export function buildOpenApiDocument(serverUrl: string): Json {
           tags: ['Environments'],
           summary: 'Publish an environment',
           description: 'Compiles the environment’s flags into a bundle and makes it live.',
-          security: [{ sessionCookie: [] }],
+          security: [{ apiToken: [] }, { sessionCookie: [] }],
           responses: {
             '200': {
               description: 'Published',
@@ -175,6 +203,12 @@ export function buildOpenApiDocument(serverUrl: string): Json {
           type: 'http',
           scheme: 'bearer',
           description: 'An environment SDK key, used for flag evaluation.',
+        },
+        apiToken: {
+          type: 'http',
+          scheme: 'bearer',
+          description:
+            'A personal access token (flagon_pat_…), an org token (flagon_oat_…), or a JWT from POST /v1/token. Carries the caller’s permissions, optionally narrowed by scopes. Token requests are rate limited (429 + Retry-After).',
         },
         sessionCookie: {
           type: 'apiKey',

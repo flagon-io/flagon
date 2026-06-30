@@ -19,7 +19,7 @@ export async function POST(
   ctx: { params: Promise<{ org: string; envId: string }> },
 ) {
   const { org, envId } = await ctx.params;
-  const membership = await requireMembership(req, org, 'member');
+  const membership = await requireMembership(req, org, 'member', 'environments:write');
   if (isResponse(membership)) return membership;
 
   // RLS guarantees this only resolves if the env belongs to the member's org.
@@ -28,7 +28,11 @@ export async function POST(
   );
   if (!env) return apiError(404, 'Environment not found.');
 
-  const bundle = await publishEnvironment(membership.organizationId, envId, membership.user.id);
+  const bundle = await publishEnvironment(
+    membership.organizationId,
+    envId,
+    membership.principal.userId,
+  );
 
   return json({
     published: true,

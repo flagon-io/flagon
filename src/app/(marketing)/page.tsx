@@ -4,27 +4,7 @@ import { AccessButton } from '@/components/access-button';
 import { CodeBlock } from '@/components/prose';
 import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-
-const products = [
-  {
-    name: 'Feature Flags',
-    status: 'Available',
-    body: 'OpenFeature-native flags with targeting, segments, and fractional rollouts. Edge-fast evaluation that sits on your hot path.',
-    live: true,
-  },
-  {
-    name: 'Experiments',
-    status: 'Coming soon',
-    body: 'A/B tests and metrics built on the same flags you already ship. Measure impact without bolting on another tool.',
-    live: false,
-  },
-  {
-    name: 'Eventing & Webhooks',
-    status: 'Coming soon',
-    body: 'Configurable pipelines from sources to destinations, with filtering, retries, signing, and replay. The webhook layer every product reinvents.',
-    live: false,
-  },
-];
+import { featuredProducts } from '@/lib/products';
 
 const pillars = [
   {
@@ -69,11 +49,11 @@ export default function Home() {
             <span className="text-muted">not platforms.</span>
           </h1>
           <p className="mt-7 max-w-2xl text-lg leading-relaxed text-muted">
-            Every team rebuilds the same plumbing: flags, eventing, configuration, audit. Then they
-            relitigate build-vs-buy on the next one. Flagon is those primitives, built once and{' '}
-            <span className="font-medium text-foreground">open source</span>, so you stop reinventing
-            infrastructure and ship your product. Starting with{' '}
-            <span className="font-medium text-foreground">feature flags</span>, done right.
+            Every product stands on the same primitives. Flagon builds them once, fully{' '}
+            <span className="font-medium text-foreground">open source</span>, on one foundation, so
+            your team can build product, not platform. We start with{' '}
+            <span className="font-medium text-foreground">feature flags</span>, done right, and
+            we&apos;re just getting started.
           </p>
 
           <div id="access" className="mt-10 max-w-md scroll-mt-20">
@@ -90,7 +70,7 @@ export default function Home() {
             <div>
               <p className="eyebrow">Products</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-                One platform. Every primitive you rebuild.
+                One platform. Every primitive you need.
               </h2>
             </div>
             <p className="hidden max-w-xs text-sm text-muted sm:block">
@@ -100,15 +80,21 @@ export default function Home() {
           </div>
 
           <div className="mt-10 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3">
-            {products.map((p) => (
-              <div key={p.name} className="bg-background p-7">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold">{p.name}</h3>
-                  <Badge variant={p.live ? 'brand' : 'neutral'}>{p.status}</Badge>
+            {featuredProducts.map((p) => {
+              const Icon = p.icon;
+              return (
+                <div key={p.name} className="group bg-background p-7 transition-colors hover:bg-card-muted">
+                  <div className="flex items-center justify-between">
+                    <span className="grid size-10 place-items-center rounded-lg border border-border bg-card-muted text-brand-500 transition-colors group-hover:border-brand-500/40 group-hover:bg-brand-500/10">
+                      <Icon className="size-5" strokeWidth={2} />
+                    </span>
+                    <Badge variant={p.live ? 'brand' : 'neutral'}>{p.status}</Badge>
+                  </div>
+                  <h3 className="mt-4 text-lg font-semibold">{p.name}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-muted">{p.body}</p>
                 </div>
-                <p className="mt-3 text-sm leading-relaxed text-muted">{p.body}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mt-6">
@@ -178,13 +164,13 @@ export default function Home() {
       <section className="border-b border-border">
         <div className="mx-auto max-w-6xl px-6 py-24 text-center">
           <h2 className="mx-auto max-w-3xl text-3xl font-semibold tracking-tight sm:text-5xl">
-            Stop rebuilding the{' '}
+            Everything your product{' '}
             <span className="bg-linear-to-r from-brand-500 to-violet-500 bg-clip-text text-transparent">
-              wheel.
+              stands on.
             </span>
           </h2>
           <p className="mx-auto mt-5 max-w-xl text-muted">
-            Built by developers who got tired of reinventing this on every team. Fully open source
+            Built by developers who wanted these primitives to just exist. Fully open source
             under FSL: run it yourself for free, or let us own the upkeep and operations so you
             don&apos;t have to. Usage-based, so you pay for what you ship, not how many seats you buy.
           </p>

@@ -144,3 +144,15 @@ export const subscriptions = pgTable('subscriptions', {
   trialStart: timestamp('trial_start', { withTimezone: true }),
   trialEnd: timestamp('trial_end', { withTimezone: true }),
 });
+
+// --- JWT plugin (JWKS signing keys) ----------------------------------------
+// Holds the asymmetric key pair(s) the `jwt` plugin signs/serves. Platform-wide
+// (not tenant-scoped, no RLS). The plugin's `jwks` model resolves to this table
+// via the adapter's `usePlural` (jwks → jwkss).
+export const jwkss = pgTable('jwkss', {
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
+  publicKey: text('public_key').notNull(),
+  privateKey: text('private_key').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+});

@@ -14,7 +14,7 @@ export const metadata: Metadata = {
     template: '%s · Flagon',
   },
   description:
-    'Build products, not platforms. Flagon is the open-source platform primitives every team rebuilds (feature flags, experiments, eventing, configuration, audit), built once. Starting with feature flags: OpenFeature-native, edge-fast, self-hostable, usage-based.',
+    'Build products, not platforms. Flagon is every primitive your product needs in one open-source platform: feature flags, experiments, configuration, eventing, audit, and more. Starting with feature flags: OpenFeature-native, edge-fast, self-hostable, usage-based.',
   keywords: [
     'developer platform',
     'feature flags',
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     type: 'website',
     title: 'Flagon: build products, not platforms',
     description:
-      'The platform primitives every team rebuilds (flags, eventing, configuration, audit), built once and open source. Stop reinventing infrastructure.',
+      'Every primitive your product needs (flags, experiments, configuration, eventing, audit), on one open-source foundation. Edge-fast, self-hostable, usage-based.',
     url: siteUrl,
     siteName: 'Flagon',
   },
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Flagon: build products, not platforms',
     description:
-      'Open-source platform primitives every team rebuilds, built once. Feature flags first: OpenFeature-native and edge-fast.',
+      'Every primitive your product needs, on one open-source foundation. Feature flags first: OpenFeature-native and edge-fast.',
   },
 };
 

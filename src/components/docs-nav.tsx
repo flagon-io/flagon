@@ -26,7 +26,10 @@ const NAV: { group: string; items: { label: string; href: string }[] }[] = [
   },
   {
     group: 'Reference',
-    items: [{ label: 'REST API', href: '/docs/api' }],
+    items: [
+      { label: 'API authentication', href: '/docs/api-authentication' },
+      { label: 'REST API', href: '/docs/api' },
+    ],
   },
 ];
 

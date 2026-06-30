@@ -33,7 +33,7 @@ function slugify(input: string): string {
 
 export async function GET(req: Request, ctx: { params: Promise<{ org: string }> }) {
   const { org } = await ctx.params;
-  const membership = await requireMembership(req, org, 'viewer');
+  const membership = await requireMembership(req, org, 'viewer', 'projects:read');
   if (isResponse(membership)) return membership;
 
   const rows = await withTenant(membership.organizationId, (tx) =>
@@ -46,7 +46,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ org: string }> 
 
 export async function POST(req: Request, ctx: { params: Promise<{ org: string }> }) {
   const { org } = await ctx.params;
-  const membership = await requireMembership(req, org, 'member');
+  const membership = await requireMembership(req, org, 'member', 'projects:write');
   if (isResponse(membership)) return membership;
 
   const parsed = createSchema.safeParse(await req.json().catch(() => null));

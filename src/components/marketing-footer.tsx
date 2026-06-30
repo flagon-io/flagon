@@ -55,13 +55,20 @@ function Social({ href, label, children }: { href: string; label: string; childr
 
 export function MarketingFooter() {
   return (
-    <footer className="border-t border-border">
-      <div className="mx-auto grid max-w-6xl gap-10 px-6 py-16 md:grid-cols-2 lg:grid-cols-6">
+    <footer className="relative overflow-hidden border-t border-border">
+      <div
+        className="bg-grid pointer-events-none absolute inset-0"
+        style={{
+          maskImage: 'radial-gradient(90% 80% at 50% 0%, black, transparent)',
+          WebkitMaskImage: 'radial-gradient(90% 80% at 50% 0%, black, transparent)',
+        }}
+      />
+      <div className="relative mx-auto grid max-w-6xl gap-10 px-6 py-16 md:grid-cols-2 lg:grid-cols-6">
         <div className="lg:col-span-2">
           <Logo size={22} />
           <p className="mt-4 max-w-xs text-sm text-muted">
-            Open-source platform primitives. Stop rebuilding flags, eventing, config, and audit on
-            every team. Build your product instead.
+            The open-source platform layer: feature flags, experiments, configuration, eventing, and
+            audit on one foundation. Everything your product needs.
           </p>
           <div className="mt-5 flex items-center gap-4">
             <Social href={GITHUB_URL} label="GitHub">
@@ -97,7 +104,7 @@ export function MarketingFooter() {
         ))}
       </div>
 
-      <div className="border-t border-border">
+      <div className="relative border-t border-border">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-6 py-6 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
           <p>© 2026 Flagon, LLC. All rights reserved.</p>
           <div className="flex items-center gap-5">

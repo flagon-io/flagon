@@ -71,7 +71,7 @@ export function SuggestBuildingBlock({
         open={open}
         onClose={close}
         title="What should we build next?"
-        description="Tell us the platform problem you keep rebuilding. We build the boring infrastructure so you don't have to."
+        description="Tell us which platform primitive you need next. We build the foundational pieces so you don't have to."
         footer={
           state === 'done' ? (
             <Button onClick={close}>Done</Button>

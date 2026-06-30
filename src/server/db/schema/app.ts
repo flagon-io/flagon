@@ -19,7 +19,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { Bundle, Condition, FlagType, JsonValue, TargetingRule } from '@/core/types';
 import { uuidv7 } from '../id';
-import { organizations } from './auth';
+import { organizations, users } from './auth';
 
 /**
  * Platform waitlist (NOT tenant-scoped, no RLS). Public signup is closed once
@@ -192,6 +192,46 @@ export const sdkKeys = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('sdk_keys_env_idx').on(t.environmentId)],
+);
+
+/**
+ * API tokens — the management-API credential (distinct from eval-only sdk_keys).
+ * Two kinds share one table:
+ *   - 'user' (PAT): owned by `userId`; acts with that user's LIVE org memberships.
+ *   - 'org'  (org-provisioned): owned by `organizationId`, acts with a fixed `role`
+ *     in that one org; `createdByUserId` is the admin who minted it.
+ * Like sdk_keys, this table is NOT under RLS — the token hash is the bootstrap
+ * credential resolved before any tenant context exists. We store only the hash.
+ */
+export const apiTokens = pgTable(
+  'api_tokens',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    // 'user' | 'org'
+    kind: text('kind').notNull(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'cascade',
+    }),
+    // org tokens: the role the token acts as within its org (owner|admin|member|viewer)
+    role: text('role'),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    name: text('name').notNull(),
+    prefix: text('prefix').notNull(),
+    hashedKey: text('hashed_key').notNull().unique(),
+    // Reserved for future fine-grained scoping; null = inherit-all (v1).
+    scopes: jsonb('scopes').$type<string[]>(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('api_tokens_user_idx').on(t.userId),
+    index('api_tokens_org_idx').on(t.organizationId),
+  ],
 );
 
 /** Published, immutable bundle snapshots (the Postgres bundle-store driver). */

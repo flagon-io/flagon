@@ -15,6 +15,13 @@
       "when": 1782801901912,
       "tag": "0001_volatile_whirlwind",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782840540302,
+      "tag": "0002_white_puppet_master",
+      "breakpoints": true
     }
   ]
 }

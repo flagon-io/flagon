@@ -4,6 +4,7 @@ import { Check, Zap } from 'lucide-react';
 import { AccessButton } from '@/components/access-button';
 import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { MarketingHero } from '@/components/marketing-hero';
 import { cn } from '@/lib/cn';
 import { GITHUB_URL } from '@/lib/site';
 
@@ -78,24 +79,21 @@ const tiers: Tier[] = [
 
 export default function PricingPage() {
   return (
-    <div className="mx-auto max-w-6xl px-6 py-20">
-      <div className="text-center">
-        <p className="eyebrow">Pricing</p>
-        <h1 className="mt-4 text-4xl font-semibold tracking-tight sm:text-5xl">
-          Usage-based, not seat-based.
-        </h1>
-        <p className="mx-auto mt-4 max-w-xl text-muted">
-          You&rsquo;re billed on the evaluations you serve, and seats are never the bill. Free for solo
-          projects, a flat base plus usage once you&rsquo;re shipping with a team. Self-host the whole
-          platform for free, forever.
-        </p>
-        <p className="mx-auto mt-5 inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-medium text-brand-500">
+    <>
+      <MarketingHero
+        align="center"
+        eyebrow="Pricing"
+        title="Usage-based, not seat-based."
+        subtitle="You're billed on the evaluations you serve, and seats are never the bill. Free for solo projects, a flat base plus usage once you're shipping with a team. Self-host the whole platform for free, forever."
+      >
+        <p className="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-medium text-brand-500">
           <Zap className="size-3.5" />
-          Early access: paid plans are free while we&rsquo;re in beta. Pricing shown is at GA.
+          Early access: paid plans are free while we&apos;re in beta. Pricing shown is at GA.
         </p>
-      </div>
+      </MarketingHero>
 
-      <div className="mt-14 grid items-start gap-6 lg:grid-cols-3">
+      <div className="mx-auto max-w-6xl px-6 py-16">
+      <div className="grid items-start gap-6 lg:grid-cols-3">
         {tiers.map((tier) => (
           <div
             key={tier.name}
@@ -162,17 +160,17 @@ export default function PricingPage() {
             environments never cost extra. We charge for the work the platform does, not your team size.
           </p>
         </div>
-        <div className="flex flex-col justify-center rounded-xl border border-border bg-card-muted p-6 text-sm text-muted">
-          <p>
-            <span className="font-medium text-foreground">Rather run it yourself?</span> Flagon is
-            fully open source. Self-host the whole platform free under FSL, or buy so we own the
-            upkeep and operations and you don&apos;t have to, at a price that beats building it.
+        <div className="rounded-xl border border-border bg-card p-6">
+          <h3 className="text-sm font-semibold">Rather run it yourself?</h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted">
+            Flagon is fully open source. Self-host the whole platform free under FSL, or buy so we own
+            the upkeep and operations and you don&apos;t have to, at a price that beats building it.
           </p>
           <a
             href={GITHUB_URL}
             target="_blank"
             rel="noreferrer"
-            className="mt-3 inline-flex w-fit items-center gap-1.5 text-brand-500 hover:text-brand-400"
+            className="mt-3 inline-flex w-fit items-center gap-1.5 text-sm text-brand-500 hover:text-brand-400"
           >
             Get it on GitHub →
           </a>
@@ -190,6 +188,7 @@ export default function PricingPage() {
         </a>
         .
       </p>
-    </div>
+      </div>
+    </>
   );
 }

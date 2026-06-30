@@ -17,8 +17,10 @@ import { betterAuth } from 'better-auth';
 import { APIError } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { nextCookies } from 'better-auth/next-js';
-import { organization, username } from 'better-auth/plugins';
+import { jwt, organization, username } from 'better-auth/plugins';
 import { count, eq } from 'drizzle-orm';
+import { JWT_AUDIENCE, JWT_EXPIRATION, JWT_ISSUER } from './jwt-config';
+import { userOrgRoles } from './principal';
 import { db } from '@/server/db';
 import { uuidv7 } from '@/server/db/id';
 import {
@@ -161,6 +163,24 @@ export const auth = betterAuth({
           inviterName: data.inviter.user?.name ?? 'A teammate',
           invitationId: data.id,
         });
+      },
+    }),
+    // JWT seam: publishes a JWKS + a session→JWT exchange (`/api/auth/token`) and
+    // gives us `auth.api.signJWT` to mint tokens for PAT/org exchange. The session
+    // payload carries the user's live org roles so backends authorize from claims.
+    jwt({
+      jwks: {
+        keyPairConfig: { alg: 'EdDSA' },
+        // Rotate the signing key every 90 days; keep the prior public key servable
+        // for 7 days so any in-flight (≤15m) JWT still verifies across a rotation.
+        rotationInterval: 60 * 60 * 24 * 90,
+        gracePeriod: 60 * 60 * 24 * 7,
+      },
+      jwt: {
+        issuer: JWT_ISSUER,
+        audience: JWT_AUDIENCE,
+        expirationTime: JWT_EXPIRATION,
+        definePayload: async ({ user }) => ({ act: 'user', orgs: await userOrgRoles(user.id) }),
       },
     }),
     nextCookies(),

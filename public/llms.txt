@@ -1,8 +1,8 @@
 # Flagon
 
-> Flagon is the open-source developer platform: the infrastructure primitives every team rebuilds (feature flags, experiments, eventing, configuration, audit), built once and well. The first product is feature flags: OpenFeature-native, edge-fast, and multitenant. Source-available under FSL-1.1-Apache-2.0; fully self-hostable, or run by us.
+> Flagon is the open-source developer platform: every primitive your product needs (feature flags, experiments, configuration, eventing, audit), built once and well on one foundation. The first product is feature flags: OpenFeature-native, edge-fast, and multitenant. Source-available under FSL-1.1-Apache-2.0; fully self-hostable, or run by us.
 
-Flagon exists so developers stop reinventing the same platform plumbing and relitigating build-vs-buy on every project. You learn one platform (orgs, roles, API, billing) and new building blocks plug into it.
+Flagon gives developers the platform primitives every product needs on a single foundation. You learn one platform (orgs, roles, API, billing) and new building blocks plug into it.
 
 How it works:
 - A multitenant **control plane** (Next.js dashboard + management API) owns your data in Postgres (row-level isolation per organization).

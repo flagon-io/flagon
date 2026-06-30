@@ -14,9 +14,9 @@ export default function DocsOverview() {
       <p className="eyebrow">Documentation</p>
       <H1>Overview</H1>
       <Lead>
-        Flagon is an open-source developer platform: the building blocks every company ends up
-        rebuilding, in one place. Feature flags is the first product; experiments, access management,
-        audit, and more are on the way.
+        Flagon is an open-source developer platform: the building blocks behind every product, in one
+        place. Feature flags is the first product; experiments, configuration, eventing, audit, and
+        more are on the way.
       </Lead>
 
       <P>

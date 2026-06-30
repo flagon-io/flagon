@@ -123,9 +123,25 @@ LICENSE.md (FSL), LICENSE-APACHE
   The public waitlist *join/status* stays at `/api/v1/waitlist` (used by
   marketing) but is excluded from the spec.
 - **RLS**: every tenant table has `organization_id`; all tenant-scoped access
-  goes through `withTenant(orgId, tx => …)`. Auth tables and `sdk_keys`
-  (credential lookup) are intentionally NOT under RLS. Policies in
+  goes through `withTenant(orgId, tx => …)`. Auth tables, `sdk_keys`, `api_tokens`
+  (credential lookup), and `jwkss` are intentionally NOT under RLS. Policies in
   `drizzle/rls.sql`, applied by `db:migrate`.
+- **API auth — one Principal, a JWT seam**: the management API (`/api/v1`)
+  authenticates via `getPrincipal` (`src/server/api/http.ts`), which normalizes a
+  session cookie, a **user PAT** (`flagon_pat_…`), an **org token** (`flagon_oat_…`),
+  or a Bearer **JWT** into one `Principal` (`src/server/auth/principal.ts`). Tokens
+  are roll-our-own (mirror `sdk-keys.ts`): SHA-256 hash, reveal-once, `api_tokens`
+  (non-RLS). A PAT inherits the user's **live** org roles; an org token carries a
+  fixed role in one org (capped at the creator's role, admin+ to manage). `POST
+  /api/v1/token` exchanges any credential for a 15-min JWT (BetterAuth `jwt` plugin
+  signs; JWKS published); `verifyJwt` (`src/server/auth/jwt.ts`, jose) validates it
+  with **no session/PAT logic** — that's exactly what a future split-out API/data
+  plane uses. `principalClaims()` is the single source for both the session
+  `definePayload` and the exchange, so resolver and mint never diverge. Tokens may
+  be **scope-restricted** (`src/server/api/scopes.ts`; endpoints declare a required
+  scope) and are **rate-limited per token** (`src/server/api/rate-limit.ts`, 429 +
+  `Retry-After`); the JWKS signing key **rotates** (90d, 7d grace). OFREP/SDK-key
+  evaluation is a separate path and is unaffected. Docs: `/docs/api-authentication`.
 - **Design system**: reusable primitives in `src/components/ui` (`Button` +
   `buttonVariants`, `Badge`, `Input`, `Select`), built with `cva` + `cn()`
   (`src/lib/cn.ts`). Prefer these over ad-hoc Tailwind on every element; links that
@@ -163,8 +179,12 @@ LICENSE.md (FSL), LICENSE-APACHE
 - **Theming**: semantic tokens in `globals.css` flip via a `.dark` class. Never
   hardcode `zinc-*`. Brand is a vermilion (`--color-brand-*`). Theme
   is light/dark/**system** (dropdown in nav, no-FOUC script in root layout).
-- **Logo**: standalone vermilion flagon glyph (`src/components/logo.tsx`,
-  `src/app/icon.svg`), no square backplate.
+- **Logo**: monoline flagon mark — single constant-width stroke (lidded jug,
+  knob, pour spout, handle), **flat one color** via `currentColor`, no gradient
+  (defaults to brand vermilion; print/merch-safe). `src/components/logo.tsx`
+  (`LogoMark`/`Logo`) + `src/app/icon.svg` (favicon). Marketing OG/Twitter images
+  are dynamic `next/og` (`src/app/_og/render.tsx`, Geist base64-embedded in
+  `src/app/_og/fonts.ts`): per-page branded cards (grid + glow + watermark).
 - **Auth across subdomains**: when `NEXT_PUBLIC_ROOT_DOMAIN` is set, BetterAuth
   uses cross-subdomain cookies (`.flagon.io`) + trustedOrigins, so one login
   works on app./api./sudo. (`src/server/auth`).
@@ -209,6 +229,11 @@ See `.env.example`. Notable toggles:
   `/api/providers`). Signup collects email/password/username (no name field).
 - **Sudo access** = membership in the sudo org (`SUDO_ORG_SLUG`, default
   `flagon`), or `FLAGON_ADMIN_EMAIL` as bootstrap.
+- **API credentials**: users mint **personal access tokens** (Settings → Personal
+  access tokens; inherit their live permissions) and admins mint **org tokens**
+  (Org settings → Organization API tokens; fixed role, no shared service account).
+  Both are reveal-once and revocable. See the §4 "API auth — one Principal, a JWT
+  seam" bullet for how they resolve and exchange for a JWT.
 - Signup gating: open when `WAITLIST_ENABLED=false`; else founder + approved
   waitlist emails only (enforced in `auth` `user.create.before`).
 - Multi-tenant: new users have no org → onboarding `/app/new` to create one.
@@ -269,7 +294,16 @@ R2 / social / Stripe.
       permissive CORS. Any OpenFeature SDK with the OFREP provider works unmodified.
       **Org-binding regression-tested** (`handler.test.ts`): shared flag keys stay
       strictly tenant-isolated; cross-org reads are impossible at the handler seam.
-- [x] **Management API** `/api/v1`: index, health, me, projects (list/create), environment publish
+- [x] **Management API** `/api/v1`: index, health, me, projects (list/create), environment publish,
+      **token exchange** (`POST /v1/token`)
+- [x] **API tokens + JWT seam**: user **PATs** + org-provisioned tokens (roll-our-own,
+      hashed, reveal-once, `api_tokens`, non-RLS), a unified `getPrincipal` resolver
+      (session · PAT · org token · JWT), and a `verifyJwt` (jose/JWKS) seam so a future
+      split-out API validates JWT only. **Fine-grained scopes**, **per-token rate
+      limiting** (429), and **JWKS rotation** (90d). Settings UIs for both; docs at
+      `/docs/api-authentication`. Verified end-to-end (PAT→/me, exchange→JWT→claims-
+      authz, org-token cross-org 403, revoke→401, scope→403, rate-limit→429, **OFREP
+      eval still 200**)
 - [x] **Self-documenting API**: index, `{message}` errors, JSON 404, **OpenAPI 3.1** + viewer (product-only)
 - [x] **Marketing**: home, products, pricing, **multi-page docs**, docs/api, terms, privacy; nav/footer
 - [x] **Auth UI** (`/app/signin`, `/app/signup`): social buttons, adaptive waitlist/registration
