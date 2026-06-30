@@ -19,6 +19,10 @@ export const siteUrl = process.env.NEXT_PUBLIC_ROOT_DOMAIN
 // (api.flagon.io/v1), which CORS allows. Locally this points back at /api/v1.
 export const apiBase = process.env.NEXT_PUBLIC_API_URL ?? '/api/v1';
 
+// The API root without the version segment (e.g. https://api.flagon.io, or /api
+// locally). Version-less endpoints like /openapi.json live here.
+export const apiOrigin = apiBase.replace(/\/v\d+\/?$/, '');
+
 // Internal admin console ("sudo"). Empty locally (served at /sudo); set to
 // https://sudo.flagon.io in production where it's its own subdomain.
 export const sudoBase = process.env.NEXT_PUBLIC_SUDO_URL ?? '';

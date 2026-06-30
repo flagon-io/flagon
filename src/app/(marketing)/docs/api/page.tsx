@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { Code, H1, Lead, P } from '@/components/prose';
 import { OpenApiViewer } from '@/components/openapi-viewer';
+import { buildOpenApiDocument } from '@/server/openapi/spec';
+import { apiOrigin } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'API reference',
@@ -9,6 +11,10 @@ export const metadata: Metadata = {
 };
 
 export default function ApiReferencePage() {
+  // Built at render time and passed in, so the viewer never fetches /api/openapi.json
+  // (which is 404 on the marketing apex). Pure data — the page stays static.
+  const spec = buildOpenApiDocument(apiOrigin);
+
   return (
     <div className="max-w-none">
       <p className="eyebrow">Reference</p>
@@ -20,12 +26,12 @@ export default function ApiReferencePage() {
       </Lead>
       <P>
         Everything below is generated from a single OpenAPI 3.1 document served at{' '}
-        <Code>/api/openapi.json</Code>. Point your own tooling at it, or browse it here. As the
-        platform grows, this reference grows with it automatically.
+        <Code>{`${apiOrigin}/openapi.json`}</Code>. Point your own tooling at it, or browse it here.
+        As the platform grows, this reference grows with it automatically.
       </P>
 
       <div className="mt-12">
-        <OpenApiViewer />
+        <OpenApiViewer spec={spec} />
       </div>
     </div>
   );

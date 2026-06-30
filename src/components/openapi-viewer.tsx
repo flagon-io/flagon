@@ -1,8 +1,8 @@
 'use client';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useState } from 'react';
-import { Skeleton } from '@/components/skeleton';
+import { useState } from 'react';
+import { apiOrigin } from '@/lib/site';
 
 type Spec = any;
 
@@ -144,37 +144,7 @@ function Operation({ spec, path, method, op }: { spec: Spec; path: string; metho
   );
 }
 
-export function OpenApiViewer() {
-  const [spec, setSpec] = useState<Spec | null>(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    fetch('/api/openapi.json')
-      .then((r) => r.json())
-      .then(setSpec)
-      .catch(() => setError(true));
-  }, []);
-
-  if (error) return <p className="text-sm text-muted">Could not load the API spec.</p>;
-  if (!spec) {
-    return (
-      <div>
-        <div className="flex items-center justify-between border-b border-border pb-5">
-          <div className="space-y-2">
-            <Skeleton className="h-6 w-44" />
-            <Skeleton className="h-3 w-56" />
-          </div>
-          <Skeleton className="h-7 w-28" />
-        </div>
-        <div className="mt-8 space-y-2">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full rounded-xl" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
+export function OpenApiViewer({ spec }: { spec: Spec }) {
   const tags: { name: string; description?: string }[] = spec.tags ?? [];
   const byTag = new Map<string, { path: string; method: string; op: any }[]>();
   for (const [path, item] of Object.entries<any>(spec.paths ?? {})) {
@@ -198,7 +168,9 @@ export function OpenApiViewer() {
           <p className="mt-1 font-mono text-xs text-muted">{spec.servers?.[0]?.url}</p>
         </div>
         <a
-          href="/api/openapi.json"
+          href={`${apiOrigin}/openapi.json`}
+          target="_blank"
+          rel="noreferrer"
           className="rounded-md border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:text-foreground"
         >
           openapi.json ↗
