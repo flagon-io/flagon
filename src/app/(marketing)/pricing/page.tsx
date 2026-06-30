@@ -164,8 +164,9 @@ export default function PricingPage() {
         </div>
         <div className="flex flex-col justify-center rounded-xl border border-border bg-card-muted p-6 text-sm text-muted">
           <p>
-            <span className="font-medium text-foreground">Rather run it yourself?</span> Flagon is open
-            source. Self-host the entire platform from a single container, free under FSL.
+            <span className="font-medium text-foreground">Rather run it yourself?</span> Flagon is
+            fully open source. Self-host the whole platform free under FSL, or buy so we own the
+            upkeep and operations and you don&apos;t have to, at a price that beats building it.
           </p>
           <a
             href={GITHUB_URL}

@@ -3,7 +3,8 @@ import { Code, DocNext, H1, H2, Lead, P, Pre } from '@/components/prose';
 
 export const metadata: Metadata = {
   title: 'Self-hosting',
-  description: 'Run the whole Flagon platform from a single container backed by any Postgres.',
+  description:
+    'Flagon is fully open source under FSL. Run the whole platform yourself with Docker and any Postgres, or let us host it.',
 };
 
 export default function SelfHostingPage() {
@@ -12,7 +13,9 @@ export default function SelfHostingPage() {
       <p className="eyebrow">Get started</p>
       <H1>Self-hosting</H1>
       <Lead>
-        Flagon runs as a single container backed by any Postgres. No Cloudflare or Vercel required.
+        Flagon is fully open source under FSL. You can run the whole platform yourself with Docker and
+        any Postgres, with no Cloudflare or Vercel required, or let us run it for you. Self-hosting
+        stays a first-class path as the platform grows.
       </Lead>
 
       <H2>Run it</H2>
@@ -21,8 +24,11 @@ export default function SelfHostingPage() {
 docker compose up --build          # migrates, applies RLS, serves on :3000
 docker compose exec app pnpm db:seed   # demo org, flags, and an SDK key`}</Pre>
       <P>
-        The same image powers our hosted offering. The only difference is the bundle-store driver
-        (Postgres locally, Cloudflare R2 in production via <Code>BUNDLE_STORE_DRIVER</Code>).
+        Compose brings up the app and a Postgres. The same code powers our hosted offering. The only
+        production-specific pieces are pluggable behind config (for example the bundle-store driver:{' '}
+        <Code>BUNDLE_STORE_DRIVER=postgres</Code> by default, or Cloudflare R2). As the platform grows
+        and pieces like the evaluation data plane split out, they ship in this same repository and the
+        Compose stack grows with them, so a complete, runnable platform always comes from one source.
       </P>
 
       <H2>Platform toggles</H2>

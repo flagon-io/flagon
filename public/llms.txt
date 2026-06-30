@@ -1,6 +1,6 @@
 # Flagon
 
-> Flagon is the open-source developer platform: the infrastructure primitives every team rebuilds (feature flags, experiments, eventing, configuration, audit), built once and well. The first product is feature flags: OpenFeature-native, edge-fast, and multitenant. Source-available under FSL-1.1-Apache-2.0; self-hostable from a single container.
+> Flagon is the open-source developer platform: the infrastructure primitives every team rebuilds (feature flags, experiments, eventing, configuration, audit), built once and well. The first product is feature flags: OpenFeature-native, edge-fast, and multitenant. Source-available under FSL-1.1-Apache-2.0; fully self-hostable, or run by us.
 
 Flagon exists so developers stop reinventing the same platform plumbing and relitigating build-vs-buy on every project. You learn one platform (orgs, roles, API, billing) and new building blocks plug into it.
 
@@ -17,7 +17,7 @@ How it works:
 - [Feature Flags](https://flagon.io/docs/feature-flags): the flag model in depth.
 - [Evaluation (OFREP)](https://flagon.io/docs/feature-flags/evaluation): the OpenFeature Remote Evaluation Protocol endpoints.
 - [Targeting & rollouts](https://flagon.io/docs/feature-flags/targeting): rules, segments, and fractional rollouts.
-- [Self-hosting](https://flagon.io/docs/self-hosting): run the whole platform from one container on any Postgres.
+- [Self-hosting](https://flagon.io/docs/self-hosting): run the whole platform yourself with Docker on any Postgres.
 - [REST API reference](https://flagon.io/docs/api): the management API.
 
 ## API

@@ -185,9 +185,9 @@ export default function Home() {
             </span>
           </h2>
           <p className="mx-auto mt-5 max-w-xl text-muted">
-            Built by developers who got tired of reinventing this on every team. Open source on
-            GitHub, self-hostable from a single container, and usage-based, so you pay for what you
-            ship, not how many seats you buy.
+            Built by developers who got tired of reinventing this on every team. Fully open source
+            under FSL: run it yourself for free, or let us own the upkeep and operations so you
+            don&apos;t have to. Usage-based, so you pay for what you ship, not how many seats you buy.
           </p>
           <div className="mt-8 flex items-center justify-center gap-3">
             <AccessButton size="lg" />

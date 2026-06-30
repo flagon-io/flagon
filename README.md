@@ -3,8 +3,9 @@
 **The open-source developer platform.** Flagon starts with multitenant,
 OpenFeature-native **feature flags**: target with confidence, roll out
 gradually, and evaluate fast enough to sit on your hot path - and it's built to
-grow into the rest of your release stack. Open source and self-hostable: run the
-whole thing from one container, or let us host it. Developer-first. Always.
+grow into the rest of your release stack. Fully open source and self-hostable:
+run the whole thing yourself, or let us own the operations so you don't have to.
+Developer-first. Always.
 
 > **License note:** Flagon is _source-available_ under
 > [FSL-1.1-Apache-2.0](./LICENSE.md) (the Functional Source License). You can

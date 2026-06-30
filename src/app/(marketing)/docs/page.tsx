@@ -39,7 +39,7 @@ export default function DocsOverview() {
 
       <H2>Get the platform</H2>
       <P>
-        Flagon runs as a single container backed by any Postgres, or you can use our hosted offering.
+        Flagon is fully open source: run it yourself on any Postgres, or use our hosted offering.
         Either way, the same docs apply. The fastest path is the{' '}
         <Link href="/docs/quickstart" className="text-brand-500 hover:text-brand-400">
           quickstart
