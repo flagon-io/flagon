@@ -46,30 +46,42 @@ export function Modal({
   const titleId = useId();
   const descId = useId();
 
+  // Hold the latest callbacks in refs so the focus/scroll effect can depend on
+  // `[open]` alone. Keeping `onClose`/`closeOnEsc` in the effect deps would re-run
+  // it on every parent render (inline `onClose={() => …}` is a new fn each time),
+  // and each re-run re-grabs focus — which yanked the caret to the close button on
+  // every keystroke. Refs decouple "latest handler" from "re-run the effect".
+  const onCloseRef = useRef(onClose);
+  const closeOnEscRef = useRef(closeOnEsc);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    closeOnEscRef.current = closeOnEsc;
+  });
+
   useEffect(() => setMounted(true), []);
 
-  // Body scroll lock + focus management while open.
+  // Body scroll lock + focus management — runs once per open/close, not per render.
   useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    // Focus the first focusable element, or the panel itself.
-    const focusables = panelRef.current?.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    );
-    (focusables?.[0] ?? panelRef.current)?.focus();
+
+    const FOCUSABLE =
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusables = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+    // Focus the first real field, not the header close button, so the user can type immediately.
+    const initial = focusables.find((el) => el.getAttribute('aria-label') !== 'Close') ?? focusables[0];
+    (initial ?? panelRef.current)?.focus();
 
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape' && closeOnEsc) {
+      if (e.key === 'Escape' && closeOnEscRef.current) {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key === 'Tab' && panelRef.current) {
-        const items = panelRef.current.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        );
+        const items = panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE);
         if (items.length === 0) return;
         const first = items[0]!;
         const last = items[items.length - 1]!;
@@ -89,7 +101,7 @@ export function Modal({
       document.body.style.overflow = prevOverflow;
       previouslyFocused?.focus?.();
     };
-  }, [open, closeOnEsc, onClose]);
+  }, [open]);
 
   if (!mounted || !open) return null;
 

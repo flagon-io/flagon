@@ -18,8 +18,11 @@ export default async function ProjectsPage({ params }: { params: Promise<{ org: 
         id: projects.id,
         name: projects.name,
         slug: projects.slug,
-        envCount: sql<number>`(select count(*) from environments e where e.project_id = ${projects.id})`,
-        flagCount: sql<number>`(select count(*) from flags f where f.project_id = ${projects.id})`,
+        // Correlate on the literal `projects.id` — NOT `${projects.id}`, which
+        // Drizzle renders unqualified as `"id"` and the subquery binds to the
+        // inner table's own id (e.id / f.id), silently counting 0.
+        envCount: sql<number>`(select count(*) from environments e where e.project_id = projects.id)`,
+        flagCount: sql<number>`(select count(*) from flags f where f.project_id = projects.id)`,
       })
       .from(projects)
       .orderBy(projects.name),

@@ -204,12 +204,12 @@ function CreateFlag({
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <div className="flex gap-2">
-        <Button type="submit" disabled={busy || !name.trim()}>
-          Create flag
-        </Button>
+      <div className="flex justify-end gap-2 border-t border-border pt-4">
         <Button type="button" variant="ghost" onClick={() => onDone()}>
           Cancel
+        </Button>
+        <Button type="submit" disabled={busy || !name.trim()}>
+          Create flag
         </Button>
       </div>
     </form>

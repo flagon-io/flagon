@@ -11,6 +11,7 @@ import {
   Inbox,
   KeyRound,
   Layers,
+  Lightbulb,
   type LucideIcon,
   PanelLeft,
   PanelLeftClose,
@@ -35,6 +36,7 @@ const ICONS = {
   settings: Settings,
   sudo: ShieldCheck,
   inbox: Inbox,
+  lightbulb: Lightbulb,
   palette: Palette,
   back: ArrowLeft,
 } satisfies Record<string, LucideIcon>;

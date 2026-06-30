@@ -29,6 +29,7 @@ export default async function SudoLayout({ children }: { children: React.ReactNo
       items: [
         { label: 'Overview', icon: 'home', href: '/sudo', end: true },
         { label: 'Waitlist', icon: 'inbox', href: '/sudo/waitlist' },
+        { label: 'Requests', icon: 'lightbulb', href: '/sudo/requests' },
         { label: 'Design', icon: 'palette', href: '/sudo/design' },
       ],
     },

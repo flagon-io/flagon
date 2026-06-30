@@ -47,6 +47,18 @@ function keyify(input: string): string {
 
 // --- Projects --------------------------------------------------------------
 
+/**
+ * Environments every new project is seeded with, so a project is usable
+ * immediately and "production / staging" are universal across the system. SDK
+ * keys are NOT auto-created — they're reveal-once secrets, so the user mints one
+ * per environment when ready. (Forward-compatible with a future org-level
+ * template: this constant is the only thing that becomes configurable.)
+ */
+const DEFAULT_ENVIRONMENTS = [
+  { name: 'Production', key: 'production', color: '#22c55e' },
+  { name: 'Staging', key: 'staging', color: '#f59e0b' },
+] as const;
+
 export async function createProject(
   orgSlug: string,
   input: { name: string; slug?: string },
@@ -58,9 +70,19 @@ export async function createProject(
   const slug = (input.slug?.trim() ? slugify(input.slug) : slugify(name)) || 'project';
   const id = uuidv7();
   try {
-    await withTenant(g.orgId, (tx) =>
-      tx.insert(projects).values({ id, organizationId: g.orgId, name, slug }),
-    );
+    await withTenant(g.orgId, async (tx) => {
+      await tx.insert(projects).values({ id, organizationId: g.orgId, name, slug });
+      await tx.insert(environments).values(
+        DEFAULT_ENVIRONMENTS.map((e) => ({
+          id: uuidv7(),
+          organizationId: g.orgId,
+          projectId: id,
+          name: e.name,
+          key: e.key,
+          color: e.color,
+        })),
+      );
+    });
   } catch {
     return fail(`A project with the slug "${slug}" already exists.`);
   }

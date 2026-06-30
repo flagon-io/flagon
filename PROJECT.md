@@ -253,6 +253,8 @@ R2 / social / Stripe.
 - [x] **OFREP** — full API surface: single + bulk eval (HTTP-correct quoted ETag / 304) +
       **`GET /ofrep/v1/configuration`** (capability discovery → automatic SDK polling) +
       permissive CORS. Any OpenFeature SDK with the OFREP provider works unmodified.
+      **Org-binding regression-tested** (`handler.test.ts`): shared flag keys stay
+      strictly tenant-isolated; cross-org reads are impossible at the handler seam.
 - [x] **Management API** `/api/v1`: index, health, me, projects (list/create), environment publish
 - [x] **Self-documenting API**: index, `{message}` errors, JSON 404, **OpenAPI 3.1** + viewer (product-only)
 - [x] **Marketing**: home, products, pricing, **multi-page docs**, docs/api, terms, privacy; nav/footer
@@ -306,7 +308,8 @@ R2 / social / Stripe.
       **React Email** templates (org invite, password reset, waitlist joined/approved); wired to
       invites, password reset (+ forgot/reset pages), and waitlist join/approval
 - [x] **Auth pages**: signup (helper text + terms), forgot/reset password
-- [x] **Sudo** console (`/sudo`) + `/api/sudo/*`: **sudo-org-membership gated**, dogfooding switch, own subdomain
+- [x] **Sudo** console (`/sudo`) + `/api/sudo/*`: **sudo-org-membership gated**, dogfooding switch, own subdomain;
+      tools: **waitlist** (approve/reject) + **building-block requests** triage (status pipeline)
 - [x] **Proxy** subdomain routing (app./sudo./api.) + central CORS + `/api` passthrough
 - [x] **Docker** (migrate-on-start) + **Vercel** migrate-on-deploy; Neon-aware migrator
 - [x] **Seed** (founder login + `flagon` sudo org + demo flags); FSL license; LLC entity
@@ -319,7 +322,9 @@ The eval loop, auth, infra, and now **flag authoring** are done. Critical path:
    (condition + outcome, fractional rollout) and **Segments CRUD**. Remaining polish:
    **(a)** project / flag / environment / org **rename · delete · archive**;
    **(b)** a project/env **selector primitive** once a second product needs it;
-   **(c)** a `/sudo` page to triage the **building-block requests** now being collected.
+   ~~**(c)** a `/sudo` page to triage the **building-block requests**~~ — **done**
+   (`/sudo/requests`: status pipeline new→reviewing→planned→shipped/declined,
+   overview "new" count badge).
 2. ~~Org context in the dashboard~~ — **done**: org-scoped routes
    (`/app/[org]/…`, clean prod URLs), switcher, members, roles, invitations
    (invite → accept → membership). Invites are link-based until email.
@@ -337,9 +342,8 @@ The eval loop, auth, infra, and now **flag authoring** are done. Critical path:
 > **Pick up here next session.** Deploy is unblocked. The biggest *product* gap is
 > that **pricing is marketing only — nothing enforces plans** (see §11). After
 > deploy, the highest-value work is billing + entitlements (§10) and the
-> rename/delete/archive polish (item 1). Also: **verify OFREP is strictly
-> org-bound** (shared flag names across orgs — §11, do before real SDK traffic)
-> and revisit **segment scoping** (§10).
+> rename/delete/archive polish (item 1). (OFREP org-binding is now **verified +
+> hardened** — §11.) Also revisit **segment scoping** (§10).
 
 After that it's a usable, deployable hosted product. Then:
 
@@ -368,23 +372,30 @@ After that it's a usable, deployable hosted product. Then:
 
 - **No billing / plan enforcement.** Pricing is marketing only. Nothing charges,
   meters, or gates by plan. Don't launch paid tiers until §10 "Billing" is built.
-- **Verify OFREP is strictly org-bound (do before real SDK traffic).** Concern:
-  two orgs can have the same flag key (e.g. both `new-dashboard`); make sure one
-  org's SDK key can never read another's. How it's bound today: eval resolves the
-  SDK key → `{org, env}` (`resolveSdkKey`, uses the plain `db` since `sdk_keys` is
-  non-RLS by design), then `PostgresBundleStore.get()` runs inside
-  `withTenant(org)`, so the `bundles` RLS policy (FORCE RLS, gated on
-  `app.current_org`) plus the `environmentId` WHERE scope the read to exactly
-  `(org, env)`. Env IDs are globally-unique UUIDv7, and flag keys are unique per
-  project, so within a bundle there's no collision. This *should* be airtight.
-  **To confirm + harden tomorrow:** (1) add an integration test — two orgs, same
-  flag key, distinct SDK keys → each key resolves only its own value and org A's
-  key never sees org B's flag (single + bulk OFREP); (2) `get()`/`put()` filter by
-  `environmentId` only and lean on RLS for the org filter — add an explicit
-  `organizationId` predicate to the WHERE for defense-in-depth and clarity;
-  (3) sanity-check the same for the R2 bundle store key (`bundles/<org>/<env>` vs
-  `<env>` only). Files: `src/server/ofrep/handler.ts`,
-  `src/server/flags/sdk-keys.ts`, `src/server/bundles/{postgres,r2}-store.ts`.
+- **OFREP org-binding — verified + hardened ✅.** Concern was: two orgs can have
+  the same flag key (e.g. both `new-dashboard`); one org's SDK key must never read
+  another's. How it's bound: eval resolves the SDK key → `{org, env}` (both from
+  the same `sdk_keys` row, so env always belongs to that org), then
+  `PostgresBundleStore.get()` runs inside `withTenant(org)` — the `bundles` RLS
+  policy (FORCE RLS on `app.current_org`) **plus an explicit `organizationId`
+  predicate** (added for defense-in-depth) **plus** the `environmentId` WHERE scope
+  the read to exactly `(org, env)`. Env IDs are globally-unique UUIDv7; flag keys
+  are unique per project, so no in-bundle collision. R2 keys are `<org>/<env>.json`
+  (org-scoped). Locked in by `src/server/ofrep/handler.test.ts` (5 tests, no DB):
+  two orgs / same key / distinct SDK keys → each reads only its own value (single +
+  bulk), the store is never asked for a cross-tenant `(org, env)` pair, and
+  invalid/missing keys 401 without touching the store. **Remaining (nice-to-have):**
+  a DB-level integration test that exercises the actual RLS policy end-to-end
+  (needs a live Postgres; the handler-seam test already proves the app-layer
+  contract). Files: `src/server/ofrep/handler.ts`, `src/server/flags/sdk-keys.ts`,
+  `src/server/bundles/{postgres,r2}-store.ts`.
+- **RLS is NOT exercised locally — the dev Postgres role is `SUPERUSER`/`BYPASSRLS`.**
+  Superuser roles bypass RLS entirely, so `withTenant()` + the `tenant_isolation`
+  policies are effectively no-ops in local Docker (verified via `pg_roles`). This
+  means tenant isolation has never actually run in dev, and dev/prod can diverge.
+  **Before launch:** (1) run the app locally as a **non-superuser** role to truly
+  exercise RLS; (2) confirm the **Neon role used in production is non-superuser**
+  (it normally is, which is *why* RLS will engage in prod but not dev).
 - **Legal pages** are solid baseline copy — **have counsel review** before launch.
 - **Production subdomain routing + cross-subdomain auth** are implemented but only
   exercised locally (proxy is a no-op without `NEXT_PUBLIC_ROOT_DOMAIN`); validate

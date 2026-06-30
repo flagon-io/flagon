@@ -2,13 +2,17 @@ import Link from 'next/link';
 import { count, eq } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { users } from '@/server/db/schema/auth';
-import { waitlist } from '@/server/db/schema/app';
+import { featureRequests, waitlist } from '@/server/db/schema/app';
 
 export default async function SudoHome() {
   const [{ value: pending }] = await db
     .select({ value: count() })
     .from(waitlist)
     .where(eq(waitlist.status, 'pending'));
+  const [{ value: newRequests }] = await db
+    .select({ value: count() })
+    .from(featureRequests)
+    .where(eq(featureRequests.status, 'new'));
   const [{ value: userCount }] = await db.select({ value: count() }).from(users);
 
   const tools = [
@@ -17,6 +21,12 @@ export default async function SudoHome() {
       href: '/sudo/waitlist',
       desc: 'Approve or reject early-access requests.',
       badge: pending > 0 ? `${pending} pending` : undefined,
+    },
+    {
+      title: 'Requests',
+      href: '/sudo/requests',
+      desc: 'Triage building-block requests from the marketing site.',
+      badge: newRequests > 0 ? `${newRequests} new` : undefined,
     },
   ];
 

@@ -5,7 +5,7 @@
  * reads return the most recently generated row for the environment.
  */
 
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { Bundle } from '@/core/types';
 import { withTenant } from '@/server/db';
 import { bundles } from '@/server/db/schema/app';
@@ -32,7 +32,10 @@ export class PostgresBundleStore implements BundleStore {
       const rows = await tx
         .select({ payload: bundles.payload })
         .from(bundles)
-        .where(eq(bundles.environmentId, ref.environmentId))
+        // RLS (FORCE, gated on app.current_org via withTenant) already scopes this
+        // to the org; the explicit organizationId predicate is defense-in-depth so
+        // a bundle is never readable cross-org even if a policy were ever relaxed.
+        .where(and(eq(bundles.environmentId, ref.environmentId), eq(bundles.organizationId, ref.organizationId)))
         .orderBy(desc(bundles.generatedAt))
         .limit(1);
       return rows[0]?.payload ?? null;
