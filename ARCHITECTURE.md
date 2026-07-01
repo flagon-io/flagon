@@ -4,7 +4,7 @@ Flagon is a **developer platform**, not a feature-flag app — a hybrid internal
 developer platform: the **hub you put everything into** (the portal) *and* the
 **capabilities you'd otherwise build yourself** (the batteries). This document is
 the target model everything is being re-seated onto (confirmed 2026-07-01).
-Production will be reset once the substrate is right.
+Production was reset + rebaselined on this model (2026-07-01); deploys are normal/additive now.
 
 ## Positioning (locked)
 

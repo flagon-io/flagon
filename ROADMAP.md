@@ -154,15 +154,16 @@ Configuration & Secrets, Experiments, Event Bus, Audit Log — on the same grid.
 
 ### Phase 6 — Launch
 
-- [ ] One-time prod reset + deploy; email deliverability + DMARC; `app.`/`sudo.`
-  shared-session check; open the waitlist / GA.
+- [ ] Email deliverability + DMARC; `app.`/`sudo.` shared-session check; open the waitlist /
+  GA. (Prod is already reset, rebaselined, and deployed on the current schema.)
 
 ---
 
 ## Cross-cutting / anything else
 
-- **Prod will be wiped and reseeded** once the substrate is right; the migration baseline is
-  consolidated as we go. `migrate.ts` stays non-destructive; the reset is manual.
+- **Prod was reset + rebaselined (2026-07-01)** onto the consolidated baseline and deployed;
+  **deploys are normal / additive now** — no further wipe needed. `migrate.ts` stays
+  non-destructive.
 - **Isolation is a hard requirement**: a whale must be movable to its own schema/cluster so it
   can't degrade the shared pool. It holds because everything routes through `withTenant`.
 - **Team roles → permissions**: membership, team roles, and multi-team ownership are the

@@ -15,7 +15,8 @@
 > the OLD model. As of 2026-07-01 it has been REMOVED to get a clean Catalog baseline
 > (projects + environments only); it will be re-wired on the new substrate. Parts of this
 > doc that call flags "shipped/Available" describe the pre-pivot state.** Trust
-> ARCHITECTURE.md + ROADMAP.md for go-forward truth. Production will be wiped and reseeded.
+> ARCHITECTURE.md + ROADMAP.md for go-forward truth. Prod was reset + rebaselined on the
+> current schema (2026-07-01); deploys are normal/additive now — no further reset needed.
 
 Last updated: 2026-07-01 (platform pivot + Catalog baseline: hub/capabilities positioning
 locked, marketing reframed; **Feature Flags functionality/APIs/UI/docs removed**, schema +
@@ -565,13 +566,11 @@ After that it's a usable, deployable hosted product. Then:
   `app.`/`sudo.` shared-session sign-in flow on the real domains.
 - **Neon is live in production** — serving via Vercel. (Local dev uses Docker Postgres.)
 - **Migrations consolidated to a single clean baseline (2026-07-01):** the old
-  `0000`–`0003` files were collapsed into one `drizzle/0000_shocking_gamora.sql`
-  reflecting the entire final schema (auth + api_tokens + jwkss + flags w/
-  client_available/overrides + the **org-level environment grain**). Since nothing was
-  live in prod yet, this was chosen over a data-preserving migration.
-  **⚠️ ONE-TIME PROD RESET REQUIRED before the next deploy:** on Neon run
-  `DROP SCHEMA public CASCADE; CREATE SCHEMA public; DROP SCHEMA IF EXISTS drizzle CASCADE;`
-  (clears tables + the drizzle journal), then deploy — the baseline applies fresh and
-  every deploy after is normal/additive. `migrate.ts` stays non-destructive (no auto-drop).
-  Locally: `docker compose down -v && up -d db && pnpm db:migrate && pnpm db:seed`
+  incremental migrations were collapsed into one `drizzle/0000_*.sql` reflecting the
+  entire current schema (auth + teams + api_tokens + the Catalog:
+  projects/environments). **The one-time prod reset was performed (2026-07-01)** — on
+  Neon `DROP SCHEMA public CASCADE; CREATE SCHEMA public; DROP SCHEMA IF EXISTS drizzle
+  CASCADE;`, the baseline applied fresh on deploy, and **every deploy since is normal /
+  additive — no further reset needed.** `migrate.ts` stays non-destructive (no auto-drop).
+  Local reset: `docker compose down -v && up -d db && pnpm db:migrate && pnpm db:seed`
   (if Postgres reports too many connections, `docker compose restart db` first).
