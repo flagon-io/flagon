@@ -118,7 +118,10 @@ Metered, and Stripe owns the money/tax so we don't. Lean on hosted pages; no bil
   (add/manage cards, change plan, cancel), hosted invoices, **Stripe Tax**, **Link**. Cards,
   PCI, tax, dunning = Stripe's problem.
 - [ ] **Coupons + trials**: a 100%-off coupon = "Beta free access until revoked"; free trials
-  as Stripe trial periods. Grant/revoke from `/sudo`.
+  as Stripe trial periods. Applied at signup/checkout.
+- [ ] **`/sudo` billing admin**: provision **enterprise orgs with custom pricing** (negotiated
+  Price, optionally + `dedicated` placement), and grant/revoke **coupons, beta access, and
+  trials** per org from the internal console.
 - [ ] **Entitlements layer**: (org plan + subscription status) → allowed capabilities +
   limits; enforced in `gate()` / per capability. Billing + usage surfaced in the dashboard.
 
@@ -139,11 +142,15 @@ The enterprise-tier enabler; protects shared tenants from a whale.
 - [ ] **Org-scoped (global) AND project-scoped flags**: a global flag (no project) merges into
   every project's bundle; project flags are scoped to their project. Plus segments, targeting,
   fractional rollouts, per-subject overrides.
-- [ ] Compile to immutable **bundles** per cell; **OFREP** evaluation.
+- [ ] Compile to immutable **bundles** per cell; **OFREP** evaluation. **Fully OpenFeature
+  compatible** so any OpenFeature SDK points at us with no proprietary client.
 - [ ] **Safe for frontend AND backend**: **server keys** (secret, full context, every flag)
   and **client/publishable keys** (public, embeddable in React/browser/mobile, return only
   client-available flags). Both are `access_keys` with a scope; no proprietary client.
-- [ ] **Metering wired to billing** (`flags.evaluations` → `usage_rollups` → Stripe).
+- [ ] **Go edge data plane**: a stateless hot-path evaluator that serves OFREP from the bundle
+  store at the edge, and **reports usage back to the platform** (batched `org`/`meter`/`count`)
+  → `usage_rollups` → Stripe. This is how we **charge on real usage**, not estimates.
+- [ ] **Metering wired to billing** end to end (edge counts → `usage_rollups` → Stripe meters).
 - [ ] Dashboard: Feature Flags module per project (flip Soon™ → live); global flags surface;
   keys managed per (project, environment) under the capability.
 

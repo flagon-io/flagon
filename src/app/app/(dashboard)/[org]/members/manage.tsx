@@ -106,7 +106,8 @@ export function MembersManager({
     refresh();
   }
   function copyInviteLink(id: string) {
-    navigator.clipboard?.writeText(appHref('/invitations')).then(() => {
+    // The actual invite-acceptance link (works on the app subdomain via the proxy).
+    navigator.clipboard?.writeText(appHref(`/invite/${id}`)).then(() => {
       setCopied(id);
       setTimeout(() => setCopied(null), 1500);
     });

@@ -135,9 +135,17 @@ Built on Stripe primitives, leaning on their hosted pages (we do not build billi
 - **Usage = Stripe Billing Meters.** Each app meter (`flags.evaluations`, …) maps to a Stripe
   meter/price; `usage_rollups` are reported per period. Plans include a free allowance; paid
   meters overage beyond it.
+- **Metering ingestion loop (charge on REAL usage).** The **data plane** (the hot-path
+  evaluator — a Go edge node that serves OFREP from the bundle store) counts what it actually
+  serves and **reports usage back to the control plane** (batched: `org`/`meter`/`count`),
+  which aggregates into `usage_rollups` → Stripe meters. This closes the loop so billing
+  reflects what customers truly consumed, not estimates. The edge stays cheap/stateless; the
+  platform owns aggregation + billing.
 - **Coupons / promo codes = beta + trials.** A 100%-off Stripe Coupon is "Beta free access
-  until revoked" (remove it to revoke); free trials are Stripe trial periods. Granted and
-  revoked from `/sudo`.
+  until revoked" (remove it to revoke); free trials are Stripe trial periods.
+- **`/sudo` is the billing admin.** Provision **enterprise orgs with custom pricing**
+  (negotiated Price / a `tenant_placements` bump to `dedicated`), and grant / revoke **coupons,
+  beta access, and trials** per org — all from the internal console.
 - **Hosted pages, so we never touch payment/tax.** Stripe **Checkout** to start/upgrade,
   **Customer Portal** to add/manage cards + change plan + cancel, hosted invoices, **Stripe
   Tax** for automatic tax, and **Link** for saved payment. Cards, PCI, tax, and dunning are

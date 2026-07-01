@@ -45,7 +45,10 @@ export function SignUp({ waitlist, firstUser }: { waitlist: boolean; firstUser: 
               </button>
             </>
           ) : (
-            <>Have an invite? Open the link in your invite email to finish signing up.</>
+            <>
+              <span className="font-medium text-foreground">Have an invite?</span> Open the sign-up
+              link in your invite email to finish creating your account.
+            </>
           )
         }
       >
