@@ -177,22 +177,25 @@ each org schema + each dedicated cluster). Enterprise tier offers/forces `dedica
 - **Environments** (org page): manage the tier set — name, key, color, `tier`, order.
   No product data.
 
-## Phasing (billing-first)
+## Phasing
 
-**Done:** the Catalog baseline — projects + environments (org-level, `tier`/`rank`),
-generic `usage_rollups` spine, dashboard, management API — with Feature Flags removed; and
-**teams** (better-auth teams + `team_members`, default team per org, `projects.team_id`,
-Teams page). ROADMAP.md is the authoritative status + task list.
+**ROADMAP.md is the authoritative status + task list.** High-level order (kept in sync there):
 
-1. **Billing (Stripe) — FIRST, before any metered feature.** Org ↔ Stripe customer; tiers
-   as Products/Prices; Billing Meters wired to `usage_rollups`; coupons + trials (beta
-   access, revocable); Checkout + Customer Portal; webhook sync into `subscriptions`; the
-   entitlements layer.
-2. **Tenant isolation / placement.** Route `withTenant` by `tenant_placements`; connection
-   resolver + migration fan-out; enterprise → `dedicated`. The enterprise-tier enabler.
-3. **Finish substrate.** Team-scoped project ACL in `gate()` + team member management;
-   `project_environments` (the cell); generic `access_keys` (server/client scopes);
-   `project_products` (module registry).
-4. **Rebuild Feature Flags** on the substrate: flags/segments/bundles/OFREP re-seated on the
-   cell + access_keys; **publishable (client) keys**; metering wired to billing.
-5. **Further capabilities** (Config & Secrets, Experiments, Event Bus, …) on the same grid.
+**Done:** the Catalog baseline — projects + environments (org-level, `tier`/`rank`), generic
+`usage_rollups` spine, dashboard, management API — with Feature Flags removed; and **teams**
+(better-auth teams + `team_members` with team roles, default team per org, project→team
+ownership, managed from the team, project, and member surfaces). Prod was reset, rebaselined,
+and deployed.
+
+1. **Platform finalization + UX.** Projects owned by **multiple** teams (`project_teams`),
+   **environment metadata** (provider/kind/region), and a real management-UX overhaul — make
+   the primitives excellent.
+2. **Billing (Stripe) — before any metered feature.** Tiers as Products/Prices; Billing Meters
+   on `usage_rollups`; coupons + trials (beta access, revocable); hosted Checkout / Portal /
+   Tax; the entitlements layer. (See § Billing above.)
+3. **Tenant isolation / placement.** Placement-aware `withTenant`; migration fan-out;
+   enterprise → `dedicated`. (See § Tenant isolation above.)
+4. **Rebuild Feature Flags** on the substrate: the cell + generic `access_keys` +
+   `project_products`; org- and project-scoped flags; server + **publishable client** keys;
+   metering wired to billing.
+5. **Further capabilities** (Config & Secrets, Experiments, Event Bus, …), then launch.

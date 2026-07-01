@@ -15,11 +15,12 @@ import { WaitlistForm } from '@/components/waitlist-form';
  * page can never claim "invite-only" while the server quietly allows registration
  * (or vice versa).
  */
-export function SignUp({ waitlist }: { waitlist: boolean }) {
+export function SignUp({ waitlist, firstUser }: { waitlist: boolean; firstUser: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Approved people arrive from the invite email with ?register and skip the
-  // waitlist view. The founder / anyone approved can also switch to it below.
+  // Invited people arrive from the invite email with ?register and skip the
+  // waitlist view entirely. Only the very first account (bootstrap) may self-serve
+  // past the waitlist; once a user exists, everyone else must use an invite link.
   const forceRegister = searchParams.has('register');
   const initialEmail = searchParams.get('email') ?? '';
   const invite = searchParams.get('invite');
@@ -33,15 +34,19 @@ export function SignUp({ waitlist }: { waitlist: boolean }) {
         title="Request early access"
         subtitle="Flagon is invite-only right now. Join the waitlist and we’ll email you an invite when your spot opens."
         alt={
-          <>
-            Got an invite, or the account owner?{' '}
-            <button
-              onClick={() => setMode('register')}
-              className="font-medium text-brand-500 hover:text-brand-400"
-            >
-              Create your account
-            </button>
-          </>
+          firstUser ? (
+            <>
+              Account owner setting up?{' '}
+              <button
+                onClick={() => setMode('register')}
+                className="font-medium text-brand-500 hover:text-brand-400"
+              >
+                Create your account
+              </button>
+            </>
+          ) : (
+            <>Have an invite? Open the link in your invite email to finish signing up.</>
+          )
         }
       >
         <WaitlistForm />
