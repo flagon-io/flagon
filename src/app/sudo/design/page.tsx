@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { SelectDemo, FieldDemo, ModalDemo } from './demos';
+import { SelectDemo, FieldDemo, ModalDemo, SecretRevealDemo } from './demos';
 
 function Row({ title, code, children }: { title: string; code: string; children: React.ReactNode }) {
   return (
@@ -119,6 +119,12 @@ export default function DesignSystemPage() {
         </Row>
         <Row title="Select" code="<Select value onValueChange options />">
           <SelectDemo />
+        </Row>
+      </Section>
+
+      <Section title="Secret reveal" importPath="@/components/ui/secret-reveal">
+        <Row title="SecretReveal" code="<SecretReveal masked onReveal /> — reveal + copy, surfaces errors">
+          <SecretRevealDemo />
         </Row>
       </Section>
 

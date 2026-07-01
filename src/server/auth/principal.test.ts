@@ -66,10 +66,10 @@ describe('principal ↔ claims', () => {
       tokenId: 'tok1',
       organizationId: 'orgA',
       role: 'member',
-      scopes: ['flags:read'],
+      scopes: ['projects:read'],
     };
     const claims = await principalClaims(p);
-    expect(claims.scopes).toEqual(['flags:read']);
-    expect(claimsToPrincipal(claims).scopes).toEqual(['flags:read']);
+    expect(claims.scopes).toEqual(['projects:read']);
+    expect(claimsToPrincipal(claims).scopes).toEqual(['projects:read']);
   });
 });

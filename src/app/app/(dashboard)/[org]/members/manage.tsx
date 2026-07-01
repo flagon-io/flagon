@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Copy, Trash2, UserPlus } from 'lucide-react';
+import { Check, Copy, Trash2, UserPlus, UsersRound } from 'lucide-react';
 import { organization } from '@/lib/auth-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,18 +10,25 @@ import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
 import { Modal } from '@/components/ui/modal';
 import { appHref } from '@/lib/site';
+import { TEAM_ROLES } from '@/lib/teams';
+import { addTeamMember, removeTeamMember, setTeamMemberRole } from '../actions';
 
+type MemberTeam = { id: string; name: string; role: string };
 type Member = {
   id: string;
+  userId: string;
   role: string;
   name: string;
   email: string;
   username: string | null;
   isSelf: boolean;
+  teams: MemberTeam[];
 };
 type Invite = { id: string; email: string; role: string; expiresAt: string };
+type Team = { id: string; name: string };
 
 const ROLES = ['member', 'admin'] as const;
+const TEAM_ROLE_OPTIONS = TEAM_ROLES.map((r) => ({ value: r, label: r[0]!.toUpperCase() + r.slice(1) }));
 
 function roleVariant(role: string) {
   return role === 'owner' ? 'brand' : role === 'admin' ? 'success' : 'neutral';
@@ -29,11 +36,15 @@ function roleVariant(role: string) {
 
 export function MembersManager({
   orgId,
+  orgSlug,
+  allTeams,
   members,
   invites,
   canManage,
 }: {
   orgId: string;
+  orgSlug: string;
+  allTeams: Team[];
   members: Member[];
   invites: Invite[];
   canManage: boolean;
@@ -46,8 +57,22 @@ export function MembersManager({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  // Which member's team memberships we're managing (re-derived from props so it
+  // stays fresh after router.refresh()).
+  const [manageId, setManageId] = useState<string | null>(null);
+  const managing = members.find((m) => m.id === manageId) ?? null;
 
   const refresh = () => startTransition(() => router.refresh());
+
+  async function toggleTeam(userId: string, teamId: string, on: boolean) {
+    if (on) await addTeamMember(orgSlug, teamId, userId);
+    else await removeTeamMember(orgSlug, teamId, userId);
+    refresh();
+  }
+  async function changeTeamRole(userId: string, teamId: string, next: string) {
+    await setTeamMemberRole(orgSlug, teamId, userId, next);
+    refresh();
+  }
 
   function openInvite() {
     setEmail('');
@@ -152,6 +177,24 @@ export function MembersManager({
                     </div>
                     <div className="text-xs text-muted">{m.email}</div>
                   </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {m.teams.length === 0 ? (
+                        <span className="text-xs text-muted">No teams</span>
+                      ) : (
+                        m.teams.map((t) => (
+                          <Badge key={t.id} variant="neutral" title={`Team role: ${t.role}`}>
+                            {t.name}
+                          </Badge>
+                        ))
+                      )}
+                      {canManage && (
+                        <Button size="sm" variant="ghost" onClick={() => setManageId(m.id)}>
+                          <UsersRound className="size-3.5" /> Manage
+                        </Button>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-right">
                     {canManage && !m.isSelf && m.role !== 'owner' ? (
                       <div className="flex items-center justify-end gap-2">
@@ -181,6 +224,50 @@ export function MembersManager({
           </table>
         </div>
       </section>
+
+      <Modal
+        open={Boolean(managing)}
+        onClose={() => setManageId(null)}
+        title={managing ? `${managing.name}'s teams` : 'Teams'}
+        description="Toggle which teams this person is on, and their role on each. Team roles are recorded for future permissions but don't grant access yet."
+      >
+        {managing && (
+          <ul className="space-y-2">
+            {allTeams.length === 0 && (
+              <li className="text-sm text-muted">No teams yet. Create one from the Teams page.</li>
+            )}
+            {allTeams.map((team) => {
+              const membership = managing.teams.find((t) => t.id === team.id);
+              const on = Boolean(membership);
+              return (
+                <li
+                  key={team.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
+                >
+                  <label className="flex items-center gap-2.5 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(e) => toggleTeam(managing.userId, team.id, e.target.checked)}
+                      className="size-4 accent-brand-500"
+                    />
+                    <span className="font-medium">{team.name}</span>
+                  </label>
+                  {on && (
+                    <Select
+                      value={membership!.role}
+                      onValueChange={(r) => changeTeamRole(managing.userId, team.id, r)}
+                      ariaLabel={`Role on ${team.name}`}
+                      options={TEAM_ROLE_OPTIONS}
+                      className="w-32"
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Modal>
 
       {invites.length > 0 && (
         <section>

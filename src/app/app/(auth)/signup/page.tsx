@@ -18,6 +18,8 @@ export default function SignUpPage() {
   // Approved people arrive from the invite email with ?register and skip the
   // waitlist view. The founder / anyone approved can also switch to it below.
   const forceRegister = searchParams.has('register');
+  const initialEmail = searchParams.get('email') ?? '';
+  const invite = searchParams.get('invite');
   const [mode, setMode] = useState<'register' | 'waitlist'>(
     WAITLIST && !forceRegister ? 'waitlist' : 'register',
   );
@@ -44,18 +46,29 @@ export default function SignUpPage() {
     );
   }
 
-  return <RegisterForm onWaitlist={() => setMode('waitlist')} router={router} />;
+  return (
+    <RegisterForm
+      onWaitlist={() => setMode('waitlist')}
+      router={router}
+      initialEmail={initialEmail}
+      invite={invite}
+    />
+  );
 }
 
 function RegisterForm({
   router,
   onWaitlist,
+  initialEmail,
+  invite,
 }: {
   router: ReturnType<typeof useRouter>;
   onWaitlist: () => void;
+  initialEmail: string;
+  invite: string | null;
 }) {
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,7 +86,8 @@ function RegisterForm({
       return;
     }
     // Keep the button disabled through the redirect — the page navigates away.
-    router.push('/app');
+    // If they came from an invite, drop them back on the accept screen.
+    router.push(invite ? `/app/invite/${invite}` : '/app');
     router.refresh();
   }
 

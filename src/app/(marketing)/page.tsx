@@ -4,24 +4,24 @@ import { AccessButton } from '@/components/access-button';
 import { CodeBlock } from '@/components/prose';
 import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { featuredProducts } from '@/lib/products';
+import { featuredCapabilities } from '@/lib/capabilities';
 
 const pillars = [
   {
-    title: 'OpenFeature-native',
-    body: 'We speak OFREP, the standard remote evaluation protocol. Point any OpenFeature SDK at Flagon. No proprietary client, no lock-in.',
+    title: 'One catalog, one mental model',
+    body: 'Register your projects, environments, teams, and ownership once. Every capability reads from the same map, so adopting the next one is basically free.',
   },
   {
-    title: 'Edge-fast evaluation',
-    body: 'Flags compile to immutable bundles served from edge storage. Evaluation never touches your primary database.',
+    title: 'Batteries included',
+    body: 'The capabilities you would otherwise build or buy, like flags, config, secrets, and events, share your primitives instead of bolting on, with much more on the roadmap.',
   },
   {
-    title: 'Self-documenting API',
-    body: 'A JSON-only API that documents itself with OpenAPI. Predictable errors, stable contracts. No surprises.',
+    title: 'Open source, your way',
+    body: 'Self-host the whole platform free under FSL, or let us run it. Open standards like OpenFeature where they exist, so there is no lock-in.',
   },
   {
-    title: 'Multitenant by design',
-    body: 'Organizations, ad-hoc invites, RBAC, per-org SSO. Row-level isolation by default, dedicated infra for your largest tenants.',
+    title: 'Usage-based',
+    body: 'Projects, environments, teams, and members are free. You pay for the throughput you actually use, never per seat.',
   },
 ];
 
@@ -44,16 +44,15 @@ export default function Home() {
         <div className="relative mx-auto max-w-6xl px-6 pb-24 pt-24 sm:pt-32">
           <p className="eyebrow">The open-source developer platform</p>
           <h1 className="mt-6 max-w-4xl text-5xl font-semibold leading-[1.05] tracking-tight sm:text-7xl">
-            Build products,
+            Stop building your platform.
             <br />
-            <span className="text-muted">not platforms.</span>
+            <span className="text-muted">Start shipping on it.</span>
           </h1>
           <p className="mt-7 max-w-2xl text-lg leading-relaxed text-muted">
-            Every product stands on the same primitives. Flagon builds them once, fully{' '}
-            <span className="font-medium text-foreground">open source</span>, on one foundation, so
-            your team can build product, not platform. We start with{' '}
-            <span className="font-medium text-foreground">feature flags</span>, done right, and
-            we&apos;re just getting started.
+            Flagon is the hub you put everything into: your projects, environments, and teams, with
+            the platform capabilities you&apos;d otherwise stitch together, built in. It starts with a
+            catalog of everything you run, and every capability builds on top. We&apos;re just getting
+            started.
           </p>
 
           <div id="access" className="mt-10 max-w-md scroll-mt-20">
@@ -68,19 +67,19 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6 py-20">
           <div className="flex items-end justify-between">
             <div>
-              <p className="eyebrow">Products</p>
+              <p className="eyebrow">Capabilities</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-                One platform. Every primitive you need.
+                Bring everything in. Turn on what you need.
               </h2>
             </div>
             <p className="hidden max-w-xs text-sm text-muted sm:block">
-              Learn it once: orgs, roles, API, billing. Every new building block plugs into the same
-              foundation, so adopting the next one is free.
+              Learn the catalog once: projects, environments, teams. Every capability plugs into the
+              same foundation, so adopting the next one is basically free.
             </p>
           </div>
 
           <div className="mt-10 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3">
-            {featuredProducts.map((p) => {
+            {featuredCapabilities.map((p) => {
               const Icon = p.icon;
               return (
                 <div key={p.name} className="group bg-background p-7 transition-colors hover:bg-card-muted">
@@ -99,10 +98,10 @@ export default function Home() {
 
           <div className="mt-6">
             <Link
-              href="/products"
+              href="/capabilities"
               className="text-sm font-medium text-brand-500 hover:text-brand-400"
             >
-              View all products →
+              View all capabilities →
             </Link>
           </div>
         </div>
@@ -113,7 +112,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6 py-20">
           <p className="eyebrow">Why Flagon</p>
           <h2 className="mt-3 max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">
-            Feature flags, engineered like infrastructure.
+            A developer platform, engineered like infrastructure.
           </h2>
           <div className="mt-10 grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-2 lg:grid-cols-4">
             {pillars.map((f, i) => (
@@ -133,15 +132,14 @@ export default function Home() {
       <section className="border-b border-border">
         <div className="mx-auto grid max-w-6xl gap-10 px-6 py-20 lg:grid-cols-2 lg:items-center">
           <div>
-            <p className="eyebrow">Capability: open standards</p>
+            <p className="eyebrow">One API for everything</p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-              Evaluate with any OpenFeature SDK.
+              A self-documenting API.
             </h2>
             <p className="mt-4 text-muted">
-              Standards-first is a capability we ship, not a footnote. Flagon implements the full OFREP
-              surface and a self-documenting JSON API, so you point the OpenFeature OFREP provider at
-              your SDK key and go. No proprietary client, no lock-in. It&apos;s the first of many
-              capabilities the platform will expose.
+              Every capability speaks the same JSON API: predictable errors, stable contracts, and an
+              OpenAPI document you can generate clients from. Standards-first too, so where an open
+              spec exists, like OpenFeature for flags, Flagon implements it and you avoid lock-in.
             </p>
             <Link
               href="/docs"
@@ -150,13 +148,12 @@ export default function Home() {
               Read the docs →
             </Link>
           </div>
-          <CodeBlock className="p-5">{`curl -X POST \\
-  https://api.flagon.io/ofrep/v1/evaluate/flags/new-dashboard \\
-  -H "Authorization: Bearer $FLAGON_SDK_KEY" \\
-  -d '{"context":{"plan":"enterprise"}}'
+          <CodeBlock className="p-5">{`curl https://api.flagon.io/v1 \\
+  -H "Authorization: Bearer $FLAGON_TOKEN"
 
-# => { "key": "new-dashboard", "value": true,
-#      "variant": "on", "reason": "TARGETING_MATCH" }`}</CodeBlock>
+# => { "health_url": ".../v1/health",
+#      "organization_projects_url": ".../v1/orgs/{org}/projects",
+#      "openapi_url": ".../openapi.json" }`}</CodeBlock>
         </div>
       </section>
 
@@ -170,9 +167,9 @@ export default function Home() {
             </span>
           </h2>
           <p className="mx-auto mt-5 max-w-xl text-muted">
-            Built by developers who wanted these primitives to just exist. Fully open source
+            Built by developers who wanted the platform layer to just exist. Fully open source
             under FSL: run it yourself for free, or let us own the upkeep and operations so you
-            don&apos;t have to. Usage-based, so you pay for what you ship, not how many seats you buy.
+            don&apos;t have to. Usage-based, so you pay for what you use, not how many seats you buy.
           </p>
           <div className="mt-8 flex items-center justify-center gap-3">
             <AccessButton size="lg" />

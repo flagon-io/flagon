@@ -3,14 +3,11 @@ import { siteUrl } from '@/lib/site';
 
 const paths = [
   '',
-  '/products',
+  '/capabilities',
   '/pricing',
   '/docs',
   '/docs/quickstart',
   '/docs/self-hosting',
-  '/docs/feature-flags',
-  '/docs/feature-flags/evaluation',
-  '/docs/feature-flags/targeting',
   '/docs/api',
   '/terms',
   '/privacy',

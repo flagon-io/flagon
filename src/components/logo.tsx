@@ -1,10 +1,11 @@
 import { cn } from '@/lib/cn';
 
-// Brand mark: a monoline flagon — lidded jug body, knob, pour spout, and handle,
-// drawn in one constant-width stroke. Flat single color via `currentColor` (no
-// gradient) so it reproduces in one ink/thread/etch and at favicon sizes. Defaults
-// to brand vermilion; override the color by passing a text-* class (e.g. a
-// monochrome `text-foreground` lockup).
+// Brand mark: a geometric, faceted flagon — straight segments + angled shoulders
+// and chamfers (miter joins) for a technical feel, with a lidded jug body and a
+// clean angular handle that attaches on the body edge and bulges outward (no
+// bleed). Flat single color via `currentColor` (no gradient) so it reproduces in
+// one ink/thread/etch and at favicon sizes. Defaults to brand vermilion; override
+// the color with a text-* class.
 export function LogoMark({ size = 28, className }: { size?: number; className?: string }) {
   return (
     <svg
@@ -15,15 +16,18 @@ export function LogoMark({ size = 28, className }: { size?: number; className?: 
       stroke="currentColor"
       strokeWidth={2.3}
       strokeLinecap="round"
-      strokeLinejoin="round"
+      strokeLinejoin="miter"
       aria-hidden
       className={cn('shrink-0 text-brand-500', className)}
     >
-      <path d="M11 9 C9 11 7.5 14.5 7.5 19 C7.5 23.5 9 25.8 10 27 L18 27 C19 25.8 20.5 23.5 20.5 19 C20.5 14.5 19 11 17 9 Z" />
-      <path d="M10.5 9 L10.5 7.2 C10.5 6 12 5.4 14 5.4 C16 5.4 17.5 6 17.5 7.2 L17.5 9" />
-      <path d="M14 5.4 L14 4" />
-      <path d="M11 9 C10 8.3 8.9 8 7.9 8.5" />
-      <path d="M18.4 11.6 C23.6 12.2 25.8 14.9 25.8 17.6 C25.8 20.7 22.8 21.9 19.7 22.5" />
+      {/* body (faceted jug) */}
+      <path d="M11 9 L7.5 13 L8 23 L10 27 L18 27 L20 23 L20.5 13 L17 9 Z" />
+      {/* lid */}
+      <path d="M9.8 9 L10.5 6.6 L17.5 6.6 L18.2 9" />
+      {/* knob */}
+      <path d="M13.2 6.6 L13.5 4.9 L14.5 4.9 L14.8 6.6" />
+      {/* handle */}
+      <path d="M20.5 13.5 L24.8 15 L25.5 18 L24.8 21 L20 24.5" />
     </svg>
   );
 }

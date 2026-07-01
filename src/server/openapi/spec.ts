@@ -10,9 +10,8 @@
  * (e.g. https://api.flagon.io, or http://localhost:3000/api locally).
  *
  * SCOPE: this documents the PRODUCT API only - the contract people build on.
- * Internal platform endpoints that are side effects of running the hosted
- * service (the waitlist, admin tooling, the BetterAuth handler) are deliberately
- * excluded; they exist and work, but they are not part of the published spec.
+ * Internal platform endpoints (waitlist, admin, the BetterAuth handler) are
+ * excluded. Capability APIs (Feature Flags, …) are added here as they land.
  */
 
 type Json = Record<string, unknown>;
@@ -45,8 +44,6 @@ export function buildOpenApiDocument(serverUrl: string): Json {
       { name: 'Account', description: 'The signed-in user' },
       { name: 'Authentication', description: 'Token exchange for the JWT seam' },
       { name: 'Projects', description: 'Projects within an organization' },
-      { name: 'Environments', description: 'Environments and publishing' },
-      { name: 'Evaluation', description: 'OpenFeature flag evaluation (OFREP)' },
     ],
     paths: {
       '/v1': {
@@ -136,74 +133,9 @@ export function buildOpenApiDocument(serverUrl: string): Json {
           },
         },
       },
-      '/v1/orgs/{org}/environments/{environmentId}/publish': {
-        parameters: [
-          { $ref: '#/components/parameters/Org' },
-          { $ref: '#/components/parameters/EnvironmentId' },
-        ],
-        post: {
-          tags: ['Environments'],
-          summary: 'Publish an environment',
-          description: 'Compiles the environment’s flags into a bundle and makes it live.',
-          security: [{ apiToken: [] }, { sessionCookie: [] }],
-          responses: {
-            '200': {
-              description: 'Published',
-              content: { 'application/json': { schema: ref('PublishResult') } },
-            },
-            '404': errorResponse('Environment not found'),
-          },
-        },
-      },
-      '/ofrep/v1/evaluate/flags/{key}': {
-        parameters: [
-          {
-            name: 'key',
-            in: 'path',
-            required: true,
-            schema: { type: 'string' },
-            description: 'Flag key',
-          },
-        ],
-        post: {
-          tags: ['Evaluation'],
-          summary: 'Evaluate a flag (OFREP)',
-          security: [{ sdkKey: [] }],
-          requestBody: jsonBody('EvaluationRequest', false),
-          responses: {
-            '200': {
-              description: 'Evaluation result',
-              content: { 'application/json': { schema: ref('EvaluationResult') } },
-            },
-            '401': errorResponse('Invalid SDK key'),
-            '404': errorResponse('Flag or bundle not found'),
-          },
-        },
-      },
-      '/ofrep/v1/evaluate/flags': {
-        post: {
-          tags: ['Evaluation'],
-          summary: 'Bulk evaluate (OFREP)',
-          security: [{ sdkKey: [] }],
-          requestBody: jsonBody('EvaluationRequest', false),
-          responses: {
-            '200': {
-              description: 'All flag evaluations',
-              content: { 'application/json': { schema: ref('BulkEvaluationResult') } },
-            },
-            '304': { description: 'Not modified (matched If-None-Match etag)' },
-            '401': errorResponse('Invalid SDK key'),
-          },
-        },
-      },
     },
     components: {
       securitySchemes: {
-        sdkKey: {
-          type: 'http',
-          scheme: 'bearer',
-          description: 'An environment SDK key, used for flag evaluation.',
-        },
         apiToken: {
           type: 'http',
           scheme: 'bearer',
@@ -224,12 +156,6 @@ export function buildOpenApiDocument(serverUrl: string): Json {
           required: true,
           schema: { type: 'string' },
           description: 'Organization slug or id',
-        },
-        EnvironmentId: {
-          name: 'environmentId',
-          in: 'path',
-          required: true,
-          schema: { type: 'string', format: 'uuid' },
         },
       },
       schemas: {
@@ -305,42 +231,6 @@ export function buildOpenApiDocument(serverUrl: string): Json {
             name: { type: 'string', maxLength: 64 },
             slug: { type: 'string', pattern: '^[a-z0-9-]+$' },
           },
-        },
-        PublishResult: {
-          type: 'object',
-          properties: {
-            published: { type: 'boolean' },
-            etag: { type: 'string' },
-            flagCount: { type: 'integer' },
-            generatedAt: { type: 'string', format: 'date-time' },
-          },
-        },
-        EvaluationRequest: {
-          type: 'object',
-          properties: {
-            context: {
-              type: 'object',
-              description: 'OpenFeature evaluation context (targetingKey + attributes).',
-              additionalProperties: true,
-            },
-          },
-        },
-        EvaluationResult: {
-          type: 'object',
-          properties: {
-            key: { type: 'string' },
-            value: {},
-            reason: {
-              type: 'string',
-              enum: ['STATIC', 'DEFAULT', 'TARGETING_MATCH', 'SPLIT', 'DISABLED', 'ERROR', 'UNKNOWN'],
-            },
-            variant: { type: 'string' },
-            errorCode: { type: 'string' },
-          },
-        },
-        BulkEvaluationResult: {
-          type: 'object',
-          properties: { flags: { type: 'array', items: ref('EvaluationResult') } },
         },
       },
     },

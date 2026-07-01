@@ -29,7 +29,9 @@ async function main() {
   if (!url) throw new Error('A database URL must be set (DIRECT_DATABASE_URL / DATABASE_URL)');
 
   // A short-lived, non-pooled client; `max: 1` is required by the migrator.
-  const client = postgres(url, { max: 1 });
+  // Swallow NOTICEs — rls.sql runs `DROP POLICY IF EXISTS` idempotently every
+  // deploy, which harmlessly NOTICEs "does not exist, skipping" on a fresh DB.
+  const client = postgres(url, { max: 1, onnotice: () => {} });
   const db = drizzle(client);
 
   console.log('[migrate] applying drizzle migrations…');

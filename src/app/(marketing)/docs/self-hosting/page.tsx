@@ -26,7 +26,7 @@ docker compose exec app pnpm db:seed   # demo org, flags, and an SDK key`}</Pre>
       <P>
         Compose brings up the app and a Postgres. The same code powers our hosted offering. The only
         production-specific pieces are pluggable behind config (for example the bundle-store driver:{' '}
-        <Code>BUNDLE_STORE_DRIVER=postgres</Code> by default, or any S3-compatible object store). As the platform grows
+        <Code>BUNDLE_STORE_DRIVER=postgres</Code>{' '}by default, or any S3-compatible object store). As the platform grows
         and pieces like the evaluation data plane split out, they ship in this same repository and the
         Compose stack grows with them, so a complete, runnable platform always comes from one source.
       </P>

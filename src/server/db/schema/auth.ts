@@ -32,8 +32,9 @@ export const sessions = pgTable('sessions', {
   userId: uuid('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  // Organization plugin: the org the session is currently acting in.
+  // Organization plugin: the org (and team) the session is currently acting in.
   activeOrganizationId: uuid('active_organization_id'),
+  activeTeamId: uuid('active_team_id'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
@@ -105,12 +106,46 @@ export const invitations = pgTable('invitations', {
   role: text('role').notNull().default('member'),
   // pending | accepted | rejected | canceled
   status: text('status').notNull().default('pending'),
+  // Teams plugin: optionally invite straight into a team.
+  teamId: uuid('team_id'),
   inviterId: uuid('inviter_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// --- Organization plugin: teams --------------------------------------------
+// A team is a subgroup within an org that owns projects. better-auth creates a
+// default team per org (see auth/index.ts). Membership is the team_members join.
+
+export const teams = pgTable('teams', {
+  id: uuid('id').primaryKey().$defaultFn(uuidv7),
+  name: text('name').notNull(),
+  organizationId: uuid('organization_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }),
+});
+
+export const teamMembers = pgTable(
+  'team_members',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // Team-level role — scaffolding for future GitHub-style team permissions.
+    // Stored + editable now, but does NOT gate anything yet. member | maintainer
+    role: text('role').notNull().default('member'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique('team_members_team_user_unique').on(t.teamId, t.userId)],
+);
 
 // --- SSO plugin (per-org enterprise OIDC/SAML) -----------------------------
 

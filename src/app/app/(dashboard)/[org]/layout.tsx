@@ -22,21 +22,40 @@ export default async function OrgLayout({
   const sudo = await hasSudoAccess(resolved.user);
   const user = (ctx?.user ?? resolved.user) as SessionUser;
   const base = appPath(`/${slug}`);
+  const b = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // regex-escape for `match`
 
-  // Nav grouped by product area so the IA scales as Flagon grows beyond flags.
+  // The Catalog primitives: Projects and Environments are org-level and sit
+  // top-level. Capabilities (Feature Flags, …) will add their own nav here as they
+  // are rebuilt on the project × environment grid.
   const sections: NavSection[] = [
-    { items: [{ label: 'Overview', icon: 'home', href: base, end: true }] },
+    {
+      items: [
+        { label: 'Overview', icon: 'home', href: base, end: true },
+        {
+          label: 'Projects',
+          icon: 'projects',
+          href: `${base}/projects`,
+          match: `^${b}/projects(/[^/]+)?/?$`,
+        },
+        {
+          label: 'Environments',
+          icon: 'environments',
+          href: `${base}/environments`,
+          match: `^${b}/environments`,
+        },
+      ],
+    },
     {
       title: 'Feature Flags',
       items: [
-        { label: 'Projects', icon: 'projects', href: `${base}/projects` },
-        { label: 'Flags', icon: 'flag', href: `${base}/flags` },
-        { label: 'Segments', icon: 'segment', href: `${base}/segments` },
+        { label: 'Flags', icon: 'flag', soon: true },
+        { label: 'Segments', icon: 'segment', soon: true },
       ],
     },
     {
       title: 'Organization',
       items: [
+        { label: 'Teams', icon: 'teams', href: `${base}/teams` },
         { label: 'Members', icon: 'users', href: `${base}/members` },
         { label: 'Settings', icon: 'settings', href: `${base}/settings` },
       ],

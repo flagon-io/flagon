@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1782795323881,
-      "tag": "0000_conscious_warlock",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1782801901912,
-      "tag": "0001_volatile_whirlwind",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1782840540302,
-      "tag": "0002_white_puppet_master",
+      "when": 1782896978290,
+      "tag": "0000_brief_punisher",
       "breakpoints": true
     }
   ]

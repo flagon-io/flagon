@@ -109,10 +109,16 @@ export default async function InvitePage({ params }: { params: Promise<{ id: str
         account with that address, then accept it.
       </p>
       <div className="mt-6 flex flex-col gap-2">
-        <Link href={appPath('/signup')} className={buttonVariants()}>
+        <Link
+          href={`${appPath('/signup')}?register&email=${encodeURIComponent(invite.email)}&invite=${id}`}
+          className={buttonVariants()}
+        >
           Create account
         </Link>
-        <Link href={appPath('/signin')} className={buttonVariants({ variant: 'secondary' })}>
+        <Link
+          href={`${appPath('/signin')}?email=${encodeURIComponent(invite.email)}`}
+          className={buttonVariants({ variant: 'secondary' })}
+        >
           Sign in
         </Link>
       </div>

@@ -17,14 +17,6 @@ const NAV: { group: string; items: { label: string; href: string }[] }[] = [
     ],
   },
   {
-    group: 'Feature Flags',
-    items: [
-      { label: 'Overview', href: '/docs/feature-flags' },
-      { label: 'Evaluation (OFREP)', href: '/docs/feature-flags/evaluation' },
-      { label: 'Targeting & rollouts', href: '/docs/feature-flags/targeting' },
-    ],
-  },
-  {
     group: 'Reference',
     items: [
       { label: 'API authentication', href: '/docs/api-authentication' },

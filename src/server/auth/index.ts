@@ -18,9 +18,10 @@ import { APIError } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { nextCookies } from 'better-auth/next-js';
 import { jwt, organization, username } from 'better-auth/plugins';
-import { count, eq } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import { JWT_AUDIENCE, JWT_EXPIRATION, JWT_ISSUER } from './jwt-config';
 import { userOrgRoles } from './principal';
+import { seedDefaultEnvironments } from '@/server/environments/defaults';
 import { db } from '@/server/db';
 import { uuidv7 } from '@/server/db/id';
 import {
@@ -29,7 +30,7 @@ import {
   SINGLE_TENANT_ORG_SLUG,
   socialProviderStatus,
 } from '@/server/config';
-import { members, organizations, users } from '@/server/db/schema/auth';
+import { invitations, members, organizations, users } from '@/server/db/schema/auth';
 import { waitlist } from '@/server/db/schema/app';
 import { sendOrgInvite, sendPasswordReset } from '@/server/email/send';
 import * as schema from '@/server/db/schema';
@@ -50,6 +51,8 @@ async function ensureSharedOrgMembership(userId: string): Promise<void> {
       .values({ id: uuidv7(), name: 'Default', slug: SINGLE_TENANT_ORG_SLUG })
       .onConflictDoNothing();
     [org] = await find();
+    // This path bypasses the org plugin's afterCreate hook, so seed envs here.
+    if (org) await seedDefaultEnvironments(org.id);
   }
   if (!org) return;
 
@@ -69,17 +72,30 @@ async function signupAllowed(email: string): Promise<boolean> {
   // Waitlist off (local/self-host default): registration is open.
   if (!isWaitlistEnabled()) return true;
 
+  const normalized = email.toLowerCase();
+
   const [{ value: userCount }] = await db.select({ value: count() }).from(users);
   // First account ever (the founder) is always allowed.
   if (userCount === 0) return true;
 
-  // Otherwise the email must be an approved waitlist entry.
+  // An approved waitlist entry is allowed.
   const [entry] = await db
     .select({ status: waitlist.status })
     .from(waitlist)
-    .where(eq(waitlist.email, email.toLowerCase()))
+    .where(eq(waitlist.email, normalized))
     .limit(1);
-  return entry?.status === 'approved';
+  if (entry?.status === 'approved') return true;
+
+  // A pending, unexpired org invitation IS the invite — the waitlist only guards
+  // people arriving unprompted, so let invited addresses create their account.
+  const [invite] = await db
+    .select({ expiresAt: invitations.expiresAt })
+    .from(invitations)
+    .where(and(eq(invitations.email, normalized), eq(invitations.status, 'pending')))
+    .limit(1);
+  if (invite && invite.expiresAt.getTime() > Date.now()) return true;
+
+  return false;
 }
 
 // Root domain (e.g. "flagon.io") enables a shared session across every
@@ -156,6 +172,16 @@ export const auth = betterAuth({
       invitationExpiresIn: 60 * 60 * 24 * 7,
       // We don't run email verification yet, so don't gate invite accept on it.
       requireEmailVerificationOnInvitation: false,
+      // Teams own projects (Catalog ownership). A default team is created with each org.
+      teams: { enabled: true, defaultTeam: { enabled: true } },
+      organizationHooks: {
+        // Environments are an org-level platform primitive: seed the default set
+        // (Production, Staging) the moment an org is created, so projects and flags
+        // have a consistent environment grid from day one.
+        afterCreateOrganization: async ({ organization }) => {
+          await seedDefaultEnvironments(organization.id);
+        },
+      },
       sendInvitationEmail: async (data) => {
         await sendOrgInvite({
           to: data.email,

@@ -14,31 +14,33 @@ export const metadata: Metadata = {
     template: '%s · Flagon',
   },
   description:
-    'Build products, not platforms. Flagon is every primitive your product needs in one open-source platform: feature flags, experiments, configuration, eventing, audit, and more. Starting with feature flags: OpenFeature-native, edge-fast, self-hostable, usage-based.',
+    'Stop building your platform. Flagon is the hub for everything you run: projects, environments, and teams, with the capabilities you would otherwise build yourself, like feature flags, configuration, secrets, and events. Open source, self-hostable, usage-based.',
   keywords: [
     'developer platform',
+    'internal developer platform',
+    'developer portal',
+    'software catalog',
     'feature flags',
     'OpenFeature',
     'OFREP',
-    'feature management',
-    'eventing',
-    'webhooks',
-    'audit log',
+    'configuration',
+    'secrets',
+    'event bus',
     'build vs buy',
   ],
   openGraph: {
     type: 'website',
-    title: 'Flagon: build products, not platforms',
+    title: 'Flagon: stop building your platform',
     description:
-      'Every primitive your product needs (flags, experiments, configuration, eventing, audit), on one open-source foundation. Edge-fast, self-hostable, usage-based.',
+      'The hub for everything you run: projects, environments, and teams, with the capabilities built in like feature flags, config, secrets, and events. Open source, usage-based.',
     url: siteUrl,
     siteName: 'Flagon',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Flagon: build products, not platforms',
+    title: 'Flagon: stop building your platform',
     description:
-      'Every primitive your product needs, on one open-source foundation. Feature flags first: OpenFeature-native and edge-fast.',
+      'One hub for everything you run, with the platform capabilities built in. Start with the catalog; feature flags is the first capability on top.',
   },
 };
 

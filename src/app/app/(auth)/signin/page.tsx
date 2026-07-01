@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signIn } from '@/lib/auth-client';
 import { AuthCard } from '@/components/auth-card';
@@ -11,7 +11,8 @@ import { SocialButtons, OrDivider } from '@/components/social-buttons';
 
 export default function SignInPage() {
   const router = useRouter();
-  const [identifier, setIdentifier] = useState('');
+  const searchParams = useSearchParams();
+  const [identifier, setIdentifier] = useState(searchParams.get('email') ?? '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

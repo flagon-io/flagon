@@ -5,10 +5,9 @@ import { appBase, GITHUB_URL } from '@/lib/site';
 
 const columns: { heading: string; links: { label: string; href: string; external?: boolean }[] }[] = [
   {
-    heading: 'Product',
+    heading: 'Platform',
     links: [
-      { label: 'Products', href: '/products' },
-      { label: 'Feature Flags', href: '/products' },
+      { label: 'Capabilities', href: '/capabilities' },
       { label: 'Pricing', href: '/pricing' },
       { label: 'Docs', href: '/docs' },
     ],
@@ -34,7 +33,7 @@ const columns: { heading: string; links: { label: string; href: string; external
     links: [
       { label: 'Terms', href: '/terms' },
       { label: 'Privacy', href: '/privacy' },
-      { label: 'License (FSL)', href: GITHUB_URL, external: true },
+      { label: 'License (FSL)', href: `${GITHUB_URL}/blob/main/LICENSE.md`, external: true },
     ],
   },
 ];
@@ -67,8 +66,8 @@ export function MarketingFooter() {
         <div className="lg:col-span-2">
           <Logo size={22} />
           <p className="mt-4 max-w-xs text-sm text-muted">
-            The open-source platform layer: feature flags, experiments, configuration, eventing, and
-            audit on one foundation. Everything your product needs.
+            The open-source developer platform: one hub for your projects, environments, and teams,
+            with capabilities like feature flags, config, and events built in.
           </p>
           <div className="mt-5 flex items-center gap-4">
             <Social href={GITHUB_URL} label="GitHub">

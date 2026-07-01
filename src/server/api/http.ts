@@ -18,7 +18,6 @@ import type { ZodError } from 'zod';
 import { auth } from '@/server/auth';
 import { db } from '@/server/db';
 import { members, organizations } from '@/server/db/schema/auth';
-import { bearerFromHeader } from '@/server/flags/sdk-keys';
 import { isApiTokenFormat, resolveApiToken } from '@/server/tokens/api-tokens';
 import { verifyJwt } from '@/server/auth/jwt';
 import { claimsToPrincipal, type Principal } from '@/server/auth/principal';
@@ -73,6 +72,13 @@ export async function getUser(req: Request): Promise<SessionUser | null> {
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session?.user) return null;
   return { id: session.user.id, email: session.user.email, name: session.user.name };
+}
+
+/** Extract a bearer token from an Authorization header (case-insensitive scheme). */
+function bearerFromHeader(header: string | null): string | null {
+  if (!header) return null;
+  const match = /^bearer\s+(.+)$/i.exec(header.trim());
+  return match ? match[1]!.trim() : null;
 }
 
 /**

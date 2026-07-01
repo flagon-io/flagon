@@ -1,24 +1,45 @@
 # Flagon - Project State & Roadmap
 
-> Living handoff doc. Read this first to pick the project back up. It captures the
-> vision, what's built, conventions, how to run it, and what's next - enough to
-> resume from a cold start without losing context.
+> Living handoff doc: the deep history, conventions, and how-to-run. For the CURRENT
+> plan, read these first, then this:
+>
+> - **[ARCHITECTURE.md](./ARCHITECTURE.md)**: the target platform model (substrate
+>   primitives vs capabilities) everything is being re-seated onto.
+> - **[ROADMAP.md](./ROADMAP.md)**: what's done, what's next, the launch sequence.
+>
+> ⚠️ **PIVOT IN PROGRESS (2026-07-01).** Flagon is now positioned as a hybrid internal
+> developer platform: a hub (Catalog: projects, environments, teams, ownership) plus
+> capabilities on top. **The Catalog is capability #1; Feature Flags is #2.** The code
+> is being re-seated onto the substrate model (teams own projects, the project×environment
+> cell, generic access keys, generic metering, module registry). **Feature Flags works on
+> the OLD model. As of 2026-07-01 it has been REMOVED to get a clean Catalog baseline
+> (projects + environments only); it will be re-wired on the new substrate. Parts of this
+> doc that call flags "shipped/Available" describe the pre-pivot state.** Trust
+> ARCHITECTURE.md + ROADMAP.md for go-forward truth. Production will be wiped and reseeded.
 
-Last updated: 2026-06-30 (API tokens + JWT seam: PATs, org tokens, scopes, per-token
-rate limiting, JWKS rotation, /docs/api-authentication; marketing visual pass: monoline
-logo, next/og social cards, capability-voice copy, Configuration → 3rd in the lineup).
+Last updated: 2026-07-01 (platform pivot + Catalog baseline: hub/capabilities positioning
+locked, marketing reframed; **Feature Flags functionality/APIs/UI/docs removed**, schema +
+dashboard + API trimmed to projects + environments; ARCHITECTURE.md + ROADMAP.md track the
+rebuild).
 
 ---
 
 ## 1. Vision
 
-**Flagon is an open-source developer platform - the building blocks every team
-ends up rebuilding, in one place.** Feature flags is the **first product**;
-experiments, eventing & webhooks, configuration, and audit are on the roadmap.
-(Usage metering, notifications, and standalone access management were considered
-and cut from the near-term lineup.) The thesis: every team needs the same
-infrastructure, so build it once (well, open source, usage-based) and stop
-re-deciding the same problems.
+**Flagon is an open-source developer platform — the hub you put everything into,
+with the capabilities you'd otherwise build yourself, built in.** A hybrid internal
+developer platform: the portal *and* the batteries. Positioning locked 2026-07-01,
+full model in [ARCHITECTURE.md](./ARCHITECTURE.md); hero = *"Stop building your
+platform. Start shipping on it."* The extensible pieces are **Capabilities**.
+**Capability #1 is the Catalog** (the hub itself: projects, environments, teams,
+ownership, growing to linked repos/services); **Feature Flags is capability #2**
+(built on projects + environments). Likely next: Configuration & Secrets,
+Experiments; then Eventing & Webhooks, Audit Log. **Observability is "Under
+consideration"** (build vs integrate a provider). The thesis: every team needs the
+same platform layer, so build it once (open source, usage-based) and stop
+re-deciding the same problems. **NOTE:** a substrate rebuild (teams own projects,
+the project×environment cell, generic access keys, generic metering, module
+registry) is planned to re-seat the code onto this model — not yet built.
 
 - **Hosted offering**: we run it, usage-based pricing.
 - **Open source / self-host**: single container, any Postgres. Source-available
@@ -96,7 +117,8 @@ src/
                               new + invitations (topbar-only chrome),
                               [org]/ {layout=AppShell, actions.ts (flag control-plane server actions),
                                 page=overview, flags (org-wide list), members,
-                                projects/ {list+create, [projectId]/ {environments + SDK keys + flags + segments,
+                                environments/ (org-level set: list/add/rename/color/delete — a platform primitive),
+                                projects/ {list+create, [projectId]/ {per-env SDK keys + publish + flags + segments,
                                   flags/[flagId] = flag editor: definition + per-env state/default/visual targeting + publish,
                                   condition-builder + targeting-builder (shared visual rule editors)}},
                                 segments/ (org-wide), settings/ (org), members, invitations}}
@@ -189,9 +211,10 @@ LICENSE.md (FSL), LICENSE-APACHE
 - **Theming**: semantic tokens in `globals.css` flip via a `.dark` class. Never
   hardcode `zinc-*`. Brand is a vermilion (`--color-brand-*`). Theme
   is light/dark/**system** (dropdown in nav, no-FOUC script in root layout).
-- **Logo**: monoline flagon mark — single constant-width stroke (lidded jug,
-  knob, pour spout, handle), **flat one color** via `currentColor`, no gradient
-  (defaults to brand vermilion; print/merch-safe). `src/components/logo.tsx`
+- **Logo**: **geometric/faceted** flagon mark — straight segments + angled
+  shoulders and chamfers (miter joins), lidded jug + knob + a clean angular handle
+  that attaches on the body edge (no bleed). **Flat one color** via `currentColor`,
+  no gradient (defaults to brand vermilion; print/merch-safe). `src/components/logo.tsx`
   (`LogoMark`/`Logo`) + `src/app/icon.svg` (favicon). Marketing OG/Twitter images
   are dynamic `next/og` (`src/app/_og/render.tsx`, Geist base64-embedded in
   `src/app/_og/fonts.ts`): per-page branded cards (grid + glow + watermark).
@@ -249,8 +272,8 @@ See `.env.example`. Notable toggles:
 - Multi-tenant: new users have no org → onboarding `/app/new` to create one.
   Single-tenant: auto-joined to the shared org.
 
-**Seed login** (`pnpm db:seed`): `founder@flagon.local` / username `founder` /
-password `flagon123`. Also creates the sudo org `flagon` (founder is a member,
+**Seed login** (`pnpm db:seed`): `flagon@flagon.local` / username `flagon` /
+password `flagon123`. Also creates the sudo org `flagon` (this user is a member,
 so they get sudo + dogfood Flagon's own flags), project `web`, flags
 `new-dashboard` + `checkout-color`, and prints a fresh SDK key.
 
@@ -318,19 +341,44 @@ R2 / social / Stripe.
 - [x] **Marketing**: home, products, pricing, **multi-page docs**, docs/api, terms, privacy; nav/footer
 - [x] **Auth UI** (`/app/signin`, `/app/signup`): social buttons, adaptive waitlist/registration
 - [x] **Dashboard** (`/app`): onboarding + projects view (read-only)
-- [x] **Flag control plane UI** (server actions, RLS-scoped): **projects** (list/create —
-      new projects **auto-seed Production + Staging** envs, `DEFAULT_ENVIRONMENTS` in
-      `[org]/actions.ts`; no SDK keys auto-created), **environments** (create + colors),
-      **SDK keys** (create/reveal-once/revoke per env), **flag editor** —
+- [x] **Flag control plane UI** (server actions, RLS-scoped): **projects** (list/create),
+      **environments** (org-level `/[org]/environments` page: add/rename/color/delete,
+      admin-gated; `DEFAULT_ENVIRONMENTS` Production + Staging seeded at **org creation**
+      via the org plugin's `afterCreateOrganization` hook, `@/server/environments/defaults`),
+      **SDK keys** (create/reveal-once/revoke per **project × env**), **flag editor** —
       boolean/string/number/object **variants**, per-environment
       **state + default + targeting**, **Publish** → bundle (verified end-to-end → OFREP).
-      NB: **environments are per-project** (LaunchDarkly/GitHub model); OpenFeature has no
-      "environment" concept, so this is purely a product choice (see §9 / §11)
+      NB: **environments are an org-level PLATFORM primitive** (shared across all projects,
+      so `production` means the same thing everywhere); `project` is an explicit dimension on
+      SDK keys, bundles, `compileBundle`, and OFREP. OpenFeature has no "environment" concept,
+      so the env axis is purely a product/compile choice invisible to the SDK.
+- [x] **Org-scoped ("global") flags** — a flag with **no project** (`flags.project_id` NULL) that
+      **merges into every project's bundle** per environment (e.g. a platform-wide
+      `maintenance_mode` kill switch). Created via **New flag → scope: Global (all projects)**;
+      edited at **`/[org]/flags/[flagId]`** (same editor, `projectId=null`). `compileBundle`
+      unions project flags + globals; publishing a global fans out to every project's bundle;
+      the test gate compiles a **global-only** bundle (project-independent). Target **by
+      attributes only** (project segments are per-project). **Key-collision guard** in
+      `createFlag`: a global key must be unique org-wide, and a project key must not clash with
+      a global (both directions) so no bundle ever has a duplicate key. A partial unique index
+      (`flags_org_global_key_unique … where project_id is null`) backstops global uniqueness.
+      Verified end-to-end → OFREP (seed ships `maintenance_mode`; it appears in project `web`'s
+      bundle and evaluates `region=eu → on`).
 - [x] **Visual targeting rule builder** (no JSON): ordered rules (first-match-wins) with a
       shared **ConditionBuilder** (ALL/ANY over attribute clauses — eq/ne/in/contains/
       gt…/semver — and **segment refs**) + **OutcomeEditor** (serve a variant or a
       **fractional rollout** w/ weights + bucketBy). Unrepresentable conditions fall back
       to a validated JSON editor so nothing is lost.
+- [x] **Flag UX + keys (LD/Statsig-style)**: per-flag **test gate** (evaluate a context via
+      the real compile+engine), **named targeting rules**, **per-subject overrides**
+      (compiled as highest-priority rules), **copy config between environments** +
+      **apply a flag's config to selected environments** (LD-style write-time snapshot —
+      the "turn it on across all envs" answer; we stay per-env, not Statsig's env-tag
+      model); **retrievable SDK keys** (AES-GCM encrypted at rest via `secret-box`, via
+      the reusable **`SecretReveal`** primitive — masked + eye + copy, surfaces errors;
+      PATs/org tokens stay reveal-once); **per-flag client availability** so
+      client-scoped keys (browser/React) only receive flags marked available (enforced in
+      the OFREP handler, single + bulk). Docs: `/docs/feature-flags/client-side`.
 - [x] **Segments CRUD**: project-scoped reusable audiences (same ConditionBuilder in a
       modal), referenced from flag targeting; compiled into every env bundle on publish.
       Manageable both in a project workspace and org-wide at `/app/[org]/segments`
@@ -382,47 +430,47 @@ The eval loop, auth, infra, and now **flag authoring** are done. Critical path:
 
 1. ~~Flag management UI~~ — **done**, incl. the **visual targeting rule builder**
    (condition + outcome, fractional rollout) and **Segments CRUD**. Remaining polish:
-   **(a)** project / flag / environment / org **rename · delete · archive** (org rename/
-   delete exist; project/flag/env do not);
+   **(a)** project / flag / org **rename · delete · archive** (org rename/delete +
+   **environment** rename/delete now exist; project/flag do not);
    **(b)** a project/env **selector primitive** once a second product needs it;
    ~~**(c)** a `/sudo` page to triage the **building-block requests**~~ — **done**
    (`/sudo/requests`: status pipeline new→reviewing→planned→shipped/declined,
    overview "new" count badge).
-   **(d) Environments — decided:** stay **per-project** (right for bundle/SDK-key
-   scoping; OpenFeature is silent on environments). New projects now auto-seed
-   Production + Staging. **Next option (not built):** an org-level "environment
-   template" so the default set is configurable org-wide — `DEFAULT_ENVIRONMENTS`
-   in `[org]/actions.ts` is the single thing that becomes template-driven. Do NOT
-   pursue global/instance-level environments (Unleash model) — it fights the
-   per-(project,env) bundle keying for little gain.
+   **(d) Environments — DONE, changed model (2026-07-01):** promoted from per-project to
+   an **org-level platform primitive** (own `/[org]/environments` page, top-level nav).
+   The set is shared across all projects; `project` is now an explicit dimension on SDK
+   keys, bundles, `compileBundle`, and OFREP. `DEFAULT_ENVIRONMENTS` (Production + Staging)
+   seeds at **org creation**. Enabled **(e)** below and future non-flag products binding to
+   the same project × environment grid.
+   **(e) Org-scoped ("global") flags — DONE (2026-07-01):** flags with no project that merge
+   into every project's bundle (platform-wide kill switches). Built on the env refactor; see
+   §8 for the full description. Attributes-only targeting for now — a possible follow-up is
+   **org-level segments** so globals can target named audiences across projects.
 2. ~~Org context in the dashboard~~ — **done**: org-scoped routes
    (`/app/[org]/…`, clean prod URLs), switcher, members, roles, invitations
    (invite → accept → membership). Invites are link-based until email.
-3. **Deploy wiring** — Vercel project + four domains (`flagon.io`, `app.`, `api.`,
-   `sudo.`) + DNS exist (Cloudflare, "DNS only"). **`.env.production` is generated
-   and ready to upload** (gitignored; auth secret + Resend key filled,
-   `BUNDLE_STORE_DRIVER=postgres` for a zero-extra-setup first deploy). Remaining:
-   set `EMAIL_FROM` + the DMARC TXT record (see `.env.example` checklist), push,
-   and confirm the prod deploy migrates Neon and that subdomains + shared session +
-   emails work end-to-end.
+3. ~~Deploy wiring~~ — **DONE, live in production at `flagon.io` (2026-07-01).**
+   Pushed to `main`; Vercel migrated Neon (`0000`–`0002`) and built. Verified live:
+   marketing, dynamic OG, management API health, **JWKS + PAT/JWT exchange**, OFREP.
+   Remaining ops polish: confirm `EMAIL_FROM` + DMARC deliverability from the live
+   domain, and spot-check `app./sudo.` shared-session sign-in on the real subdomains.
 4. ~~Transactional email~~ — **done** (Resend adapter + React Email templates).
    Optional follow-ups: email **verification** on signup, and a `/sudo` email
    preview/test-send tool (use Resend test inboxes: `delivered@resend.dev`, …).
 
 > **Pick up here next — next steps, roughly in priority order:**
 >
-> 1. **Deploy to prod.** Unblocked: push `main` → Vercel migrates (now incl. `0002`:
->    `api_tokens` + `jwkss`) and builds. Set/keep `BETTER_AUTH_SECRET` **and**
->    `BETTER_AUTH_URL` **stable** (the JWKS private key is encrypted with the secret;
->    the JWT `iss` uses the URL), plus `FLAGON_ADMIN_EMAIL` for `/sudo`. Then
->    smoke-test on the real subdomains: shared session, **PAT + JWT exchange**,
->    **OFREP eval**, transactional emails.
+> 1. ~~Deploy to prod~~ — **✅ DONE, live at `flagon.io` (2026-07-01).** `0002`
+>    migrated on Neon; JWKS + PAT/JWT exchange + OFREP verified in prod; token
+>    exchange returns clean 401 (secret stable). Keep `BETTER_AUTH_SECRET` /
+>    `BETTER_AUTH_URL` stable going forward. Left: email deliverability check +
+>    `app./sudo.` sign-in spot-check on the real domains.
 > 2. **Billing + entitlements — the big product gap (§10).** Pricing is still
 >    marketing only; nothing enforces plans. BetterAuth Stripe → an `entitlements`
 >    layer → usage metering. (The metering pipeline also productizes into the
 >    "usage metering" building block from the lineup discussion.)
-> 3. **rename / delete / archive** for project / flag / environment (item 1a; org
->    already has it).
+> 3. **rename / delete / archive** for project / flag (item 1a; org + environment
+>    already have rename/delete).
 > 4. **Quick wins:** org-level **environment template** (1d); **email verification**
 >    (item 4); move the **per-token rate limiter to a shared store** (Redis/DB — it's
 >    in-memory / per-instance today, §10/§11); a `/sudo` **token audit** view.
@@ -478,16 +526,18 @@ After that it's a usable, deployable hosted product. Then:
   meters, or gates by plan. Don't launch paid tiers until §10 "Billing" is built.
 - **OFREP org-binding — verified + hardened ✅.** Concern was: two orgs can have
   the same flag key (e.g. both `new-dashboard`); one org's SDK key must never read
-  another's. How it's bound: eval resolves the SDK key → `{org, env}` (both from
-  the same `sdk_keys` row, so env always belongs to that org), then
+  another's. How it's bound: eval resolves the SDK key → `{org, project, env}` (all
+  from the same `sdk_keys` row, so project+env always belong to that org), then
   `PostgresBundleStore.get()` runs inside `withTenant(org)` — the `bundles` RLS
   policy (FORCE RLS on `app.current_org`) **plus an explicit `organizationId`
-  predicate** (added for defense-in-depth) **plus** the `environmentId` WHERE scope
-  the read to exactly `(org, env)`. Env IDs are globally-unique UUIDv7; flag keys
-  are unique per project, so no in-bundle collision. R2 keys are `<org>/<env>.json`
-  (org-scoped). Locked in by `src/server/ofrep/handler.test.ts` (5 tests, no DB):
-  two orgs / same key / distinct SDK keys → each reads only its own value (single +
-  bulk), the store is never asked for a cross-tenant `(org, env)` pair, and
+  predicate** (added for defense-in-depth) **plus** the `projectId` + `environmentId`
+  WHERE scope the read to exactly `(org, project, env)`. IDs are globally-unique UUIDv7;
+  flag keys are unique per project, and global (org-scoped) flag keys are guarded to be
+  unique org-wide (and never clash with a project key), so no in-bundle collision even after
+  globals merge in. R2 keys are
+  `<org>/<project>/<env>.json`. Locked in by `src/server/ofrep/handler.test.ts` (5 tests,
+  no DB): two orgs / same key / distinct SDK keys → each reads only its own value (single +
+  bulk), the store is never asked for a cross-tenant `(org, project, env)` ref, and
   invalid/missing keys 401 without touching the store. **Remaining (nice-to-have):**
   a DB-level integration test that exercises the actual RLS policy end-to-end
   (needs a live Postgres; the handler-seam test already proves the app-layer
@@ -510,12 +560,18 @@ After that it's a usable, deployable hosted product. Then:
   snapshot of the principal's claims: revocation is immediate for *new* exchanges,
   but an in-flight JWT stays valid until `exp`.
 - **Legal pages** are solid baseline copy — **have counsel review** before launch.
-- **Production subdomain routing + cross-subdomain auth** are implemented but only
-  exercised locally (proxy is a no-op without `NEXT_PUBLIC_ROOT_DOMAIN`); validate
-  on the real multi-subdomain deploy.
-- **Neon is provisioned** via the Vercel integration but **not yet migrated/deployed**;
-  the live DB is still local Docker. First production deploy runs migrations.
-- Migrations: `0000_*.sql` (baseline) + `0001_*.sql` (feature_requests) +
-  `0002_*.sql` (api_tokens + jwkss). Additive;
-  applied on deploy. Locally run `pnpm db:migrate` (if Postgres reports too many
-  connections, `docker compose restart db` first).
+- **Production subdomain routing + cross-subdomain auth** — now **live**; `www.` and
+  `api.` verified (marketing, health, JWKS, API all respond). Still spot-check the
+  `app.`/`sudo.` shared-session sign-in flow on the real domains.
+- **Neon is live in production** — serving via Vercel. (Local dev uses Docker Postgres.)
+- **Migrations consolidated to a single clean baseline (2026-07-01):** the old
+  `0000`–`0003` files were collapsed into one `drizzle/0000_shocking_gamora.sql`
+  reflecting the entire final schema (auth + api_tokens + jwkss + flags w/
+  client_available/overrides + the **org-level environment grain**). Since nothing was
+  live in prod yet, this was chosen over a data-preserving migration.
+  **⚠️ ONE-TIME PROD RESET REQUIRED before the next deploy:** on Neon run
+  `DROP SCHEMA public CASCADE; CREATE SCHEMA public; DROP SCHEMA IF EXISTS drizzle CASCADE;`
+  (clears tables + the drizzle journal), then deploy — the baseline applies fresh and
+  every deploy after is normal/additive. `migrate.ts` stays non-destructive (no auto-drop).
+  Locally: `docker compose down -v && up -d db && pnpm db:migrate && pnpm db:seed`
+  (if Postgres reports too many connections, `docker compose restart db` first).

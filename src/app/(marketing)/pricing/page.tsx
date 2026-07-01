@@ -11,7 +11,7 @@ import { GITHUB_URL } from '@/lib/site';
 export const metadata: Metadata = {
   title: 'Pricing',
   description:
-    'Usage-based pricing: billed on the evaluations you serve, not seats. Free for solo projects, a flat base plus usage for teams, custom for enterprise. Self-host free, forever.',
+    'Usage-based pricing: pay for the throughput you use across capabilities, not seats. Projects, environments, teams, and members are always free. Self-host the whole platform free, forever.',
 };
 
 type Tier = {
@@ -30,14 +30,15 @@ const tiers: Tier[] = [
     name: 'Free',
     price: '$0',
     cadence: 'forever',
-    blurb: 'Solo devs and side projects. Everything you need to ship real flags.',
+    blurb: 'Solo devs and side projects. The whole platform, with usage that just works.',
     highlight: false,
     cta: { kind: 'signup', label: 'Start free' },
     features: [
-      '1 member · 1 project',
-      '100K evaluations / month',
-      'All flag types, targeting & rollouts',
-      'OpenFeature / OFREP access',
+      'No credit card, no trial clock',
+      'Solo (1 member)',
+      'Unlimited projects & environments',
+      'Every capability at side-project scale',
+      'Sane monthly usage included',
       'Community support',
     ],
   },
@@ -45,14 +46,15 @@ const tiers: Tier[] = [
     name: 'Team',
     price: '$29',
     cadence: '/ month',
-    priceNote: 'plus usage, billed on evaluations, not seats',
-    blurb: 'Teams shipping to production. Pay for what you serve, never per seat.',
+    priceNote: 'base includes usage; more is metered per capability, never per seat',
+    blurb: 'Growing teams in production. Real included usage, then pay for what you use.',
     highlight: true,
     cta: { kind: 'signup', label: 'Get started' },
     features: [
       'Everything in Free, plus',
-      'Unlimited members & projects',
-      '1M evaluations included, then metered',
+      'Unlimited members & teams',
+      'Generous usage included across every capability',
+      'Usage-based beyond the included allowance',
       'Role-based access control',
       'Audit log',
       'Per-org SSO add-on',
@@ -62,17 +64,17 @@ const tiers: Tier[] = [
   {
     name: 'Enterprise',
     price: 'Custom',
-    cadence: 'annual',
-    blurb: 'For scale, compliance, and isolation requirements.',
+    cadence: 'tailored',
+    blurb: 'Scale, compliance, and isolation. We tailor pricing to how you use it.',
     highlight: false,
     cta: { kind: 'contact', label: 'Contact sales', href: 'mailto:sales@flagon.io' },
     features: [
       'Everything in Team, plus',
+      'Volume usage pricing',
       'SAML SSO + SCIM provisioning',
       'Dedicated / isolated infrastructure',
-      'Volume evaluation pricing',
       '99.9% uptime SLA',
-      'Priority support & onboarding',
+      'Security review & priority support',
     ],
   },
 ];
@@ -84,7 +86,7 @@ export default function PricingPage() {
         align="center"
         eyebrow="Pricing"
         title="Usage-based, not seat-based."
-        subtitle="You're billed on the evaluations you serve, and seats are never the bill. Free for solo projects, a flat base plus usage once you're shipping with a team. Self-host the whole platform for free, forever."
+        subtitle="Free for solo developers, and it means free: the whole platform with sane usage built in, no card required. Teams get real included usage across every capability, then pay only for what they use beyond it. Never per seat. Self-host the whole platform for free, forever."
       >
         <p className="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-medium text-brand-500">
           <Zap className="size-3.5" />
@@ -155,9 +157,11 @@ export default function PricingPage() {
         <div className="rounded-xl border border-border bg-card p-6">
           <h3 className="text-sm font-semibold">How usage works</h3>
           <p className="mt-2 text-sm leading-relaxed text-muted">
-            One flag evaluation = one unit. Each plan includes a monthly allotment; past that, Team is
-            metered per million evaluations and Enterprise gets volume pricing. Members, projects, and
-            environments never cost extra. We charge for the work the platform does, not your team size.
+            Usage is metered per capability. Every plan includes a monthly allowance for each meter,
+            starting with flag evaluations and growing as capabilities land, like config reads and
+            events. Past the allowance, Team is metered and Enterprise gets volume pricing. Projects,
+            environments, teams, and members never cost extra. We charge for the work the platform
+            does, not your team size.
           </p>
         </div>
         <div className="rounded-xl border border-border bg-card p-6">

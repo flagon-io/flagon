@@ -2,21 +2,15 @@
  * Management-API scopes (fine-grained tokens). A token whose `scopes` is a
  * non-empty set is restricted to exactly those; a null/empty set means the token
  * inherits its full role permissions (classic, unrestricted). Sessions are never
- * scoped. These scopes apply ONLY to /api/v1 — OFREP evaluation uses SDK keys and
- * is unaffected.
+ * scoped. These scopes apply ONLY to /api/v1. Capability scopes (flags, …) are
+ * added here as those capabilities land.
  */
 
 export const API_SCOPES = [
   { value: 'projects:read', label: 'Projects: read' },
   { value: 'projects:write', label: 'Projects: write' },
   { value: 'environments:read', label: 'Environments: read' },
-  { value: 'environments:write', label: 'Environments: write & publish' },
-  { value: 'flags:read', label: 'Flags: read' },
-  { value: 'flags:write', label: 'Flags: write' },
-  { value: 'segments:read', label: 'Segments: read' },
-  { value: 'segments:write', label: 'Segments: write' },
-  { value: 'sdk_keys:read', label: 'SDK keys: read' },
-  { value: 'sdk_keys:write', label: 'SDK keys: write' },
+  { value: 'environments:write', label: 'Environments: write' },
   { value: 'members:read', label: 'Members: read' },
   { value: 'members:write', label: 'Members: write' },
 ] as const;

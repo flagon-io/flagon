@@ -15,10 +15,6 @@ DECLARE
   tenant_tables text[] := ARRAY[
     'projects',
     'environments',
-    'flags',
-    'flag_environments',
-    'segments',
-    'bundles',
     'audit_logs',
     'usage_rollups'
   ];

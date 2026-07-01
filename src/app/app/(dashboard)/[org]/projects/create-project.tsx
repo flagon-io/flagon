@@ -36,7 +36,7 @@ export function CreateProject({ orgSlug }: { orgSlug: string }) {
         open={open}
         onClose={() => setOpen(false)}
         title="Create project"
-        description="A project groups flags, environments, and SDK keys for one application."
+        description="A project is one application or service you run. Capabilities attach to it per environment; environments are shared across every project."
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)}>

@@ -16,9 +16,11 @@ import {
   PanelLeft,
   PanelLeftClose,
   Palette,
+  Server,
   Settings,
   ShieldCheck,
   Users,
+  UsersRound,
 } from 'lucide-react';
 import { Logo, LogoMark } from '@/components/logo';
 import { OrgSwitcher, type Org } from '@/components/org-switcher';
@@ -30,9 +32,10 @@ const ICONS = {
   projects: Boxes,
   flag: Flag,
   segment: Layers,
-  environments: Layers,
+  environments: Server,
   keys: KeyRound,
   users: Users,
+  teams: UsersRound,
   settings: Settings,
   sudo: ShieldCheck,
   inbox: Inbox,
@@ -53,6 +56,12 @@ export type NavItem = {
   external?: boolean;
   /** Active only on exact path match (use for section roots like Overview). */
   end?: boolean;
+  /**
+   * Regex source of pathnames that count as active — overrides the default
+   * href-prefix match. Lets a nav item own routes nested under a sibling's path
+   * (e.g. the flag editor lives under /projects/… but belongs to Flags).
+   */
+  match?: string;
 };
 export type NavSection = { title?: string; items: NavItem[] };
 export type NavFooterItem = { label: string; href: string; icon: NavIcon; external?: boolean };
@@ -102,6 +111,7 @@ export function SidebarHeaderContent({
 export function SidebarNav({ sections, collapsed = false }: { sections: NavSection[]; collapsed?: boolean }) {
   const pathname = usePathname();
   const isActive = (item: NavItem) => {
+    if (item.match) return new RegExp(item.match).test(pathname);
     if (!item.href) return false;
     if (item.end) return pathname === item.href;
     return pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -129,7 +139,7 @@ export function SidebarNav({ sections, collapsed = false }: { sections: NavSecti
                   {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
                   {!collapsed && item.soon && (
                     <span className="rounded bg-card-muted px-1.5 py-0.5 text-[10px] font-medium text-muted">
-                      Soon
+                      Soon™
                     </span>
                   )}
                 </>

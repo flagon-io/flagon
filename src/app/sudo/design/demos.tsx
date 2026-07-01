@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
 import { Select } from '@/components/ui/select';
+import { SecretReveal } from '@/components/ui/secret-reveal';
 
 /** Live, stateful Select for the design reference. */
 export function SelectDemo() {
@@ -59,6 +60,25 @@ export function ModalDemo() {
         </form>
       </Modal>
     </>
+  );
+}
+
+/** Reveal-on-demand secret (SDK keys). Shows the success + failure paths. */
+export function SecretRevealDemo() {
+  return (
+    <div className="flex flex-col gap-3">
+      <SecretReveal
+        masked="flagon_srv_AFjg8…"
+        onReveal={async () => {
+          await new Promise((r) => setTimeout(r, 300));
+          return { ok: true, value: 'flagon_srv_AFjg8sK2p9QxR4tLmN0vB7wZ' };
+        }}
+      />
+      <SecretReveal
+        masked="flagon_srv_old12…"
+        onReveal={async () => ({ ok: false, error: 'Predates reveal — rotate it.' })}
+      />
+    </div>
   );
 }
 

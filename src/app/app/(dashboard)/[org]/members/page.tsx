@@ -1,8 +1,8 @@
 import { notFound } from 'next/navigation';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { getOrgBySlug, roleAtLeast } from '@/server/api/org-context';
 import { db } from '@/server/db';
-import { invitations, members, users } from '@/server/db/schema/auth';
+import { invitations, members, teamMembers, teams, users } from '@/server/db/schema/auth';
 import { MembersManager } from './manage';
 
 export default async function MembersPage({ params }: { params: Promise<{ org: string }> }) {
@@ -38,6 +38,31 @@ export default async function MembersPage({ params }: { params: Promise<{ org: s
     .from(invitations)
     .where(and(eq(invitations.organizationId, orgId), eq(invitations.status, 'pending')));
 
+  // Teams in the org + who is on which (with team role), to show + manage per member.
+  const teamRows = await db
+    .select({ id: teams.id, name: teams.name })
+    .from(teams)
+    .where(eq(teams.organizationId, orgId))
+    .orderBy(asc(teams.createdAt));
+
+  const membershipRows = await db
+    .select({
+      userId: teamMembers.userId,
+      teamId: teamMembers.teamId,
+      teamRole: teamMembers.role,
+      teamName: teams.name,
+    })
+    .from(teamMembers)
+    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+    .where(eq(teams.organizationId, orgId));
+
+  const teamsByUser = new Map<string, { id: string; name: string; role: string }[]>();
+  for (const r of membershipRows) {
+    const list = teamsByUser.get(r.userId) ?? [];
+    list.push({ id: r.teamId, name: r.teamName, role: r.teamRole });
+    teamsByUser.set(r.userId, list);
+  }
+
   return (
     <div>
       <p className="text-xs uppercase tracking-wide text-muted">{org.name}</p>
@@ -49,13 +74,17 @@ export default async function MembersPage({ params }: { params: Promise<{ org: s
 
       <MembersManager
         orgId={orgId}
+        orgSlug={slug}
+        allTeams={teamRows}
         members={memberRows.map((m) => ({
           id: m.id,
+          userId: m.userId,
           role: m.role,
           name: m.name,
           email: m.email,
           username: m.username,
           isSelf: m.userId === user.id,
+          teams: teamsByUser.get(m.userId) ?? [],
         }))}
         invites={inviteRows.map((i) => ({
           id: i.id,

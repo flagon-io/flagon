@@ -1,9 +1,10 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { sql } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 import { getOrgBySlug } from '@/server/api/org-context';
 import { withTenant } from '@/server/db';
-import { projects } from '@/server/db/schema/app';
+import { teams } from '@/server/db/schema/auth';
+import { environments, projects } from '@/server/db/schema/app';
 import { appPath } from '@/lib/site';
 import { CreateProject } from './create-project';
 
@@ -12,21 +13,21 @@ export default async function ProjectsPage({ params }: { params: Promise<{ org: 
   const resolved = await getOrgBySlug(slug);
   if (!resolved) notFound();
 
-  const rows = await withTenant(resolved.org.id, (tx) =>
-    tx
+  const { rows, envCount } = await withTenant(resolved.org.id, async (tx) => {
+    const rows = await tx
       .select({
         id: projects.id,
         name: projects.name,
         slug: projects.slug,
-        // Correlate on the literal `projects.id` — NOT `${projects.id}`, which
-        // Drizzle renders unqualified as `"id"` and the subquery binds to the
-        // inner table's own id (e.id / f.id), silently counting 0.
-        envCount: sql<number>`(select count(*) from environments e where e.project_id = projects.id)`,
-        flagCount: sql<number>`(select count(*) from flags f where f.project_id = projects.id)`,
+        team: teams.name,
       })
       .from(projects)
-      .orderBy(projects.name),
-  );
+      .leftJoin(teams, eq(teams.id, projects.teamId))
+      .orderBy(projects.name);
+    // Environments are org-level, so the count is shared across every project.
+    const [{ value: envCount }] = await tx.select({ value: count() }).from(environments);
+    return { rows, envCount };
+  });
 
   return (
     <div>
@@ -34,7 +35,8 @@ export default async function ProjectsPage({ params }: { params: Promise<{ org: 
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
           <p className="mt-1 text-sm text-muted">
-            A project groups flags, environments, and SDK keys for one application.
+            A project is one application or service you run. Capabilities attach to it per
+            environment.
           </p>
         </div>
         <CreateProject orgSlug={slug} />
@@ -43,7 +45,7 @@ export default async function ProjectsPage({ params }: { params: Promise<{ org: 
       {rows.length === 0 ? (
         <div className="mt-8 rounded-xl border border-dashed border-border bg-card/40 p-10 text-center">
           <p className="text-sm text-muted">No projects yet.</p>
-          <p className="mt-1 text-xs text-muted">Create your first project to start adding flags.</p>
+          <p className="mt-1 text-xs text-muted">Create your first project to start your catalog.</p>
         </div>
       ) : (
         <ul className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -56,8 +58,8 @@ export default async function ProjectsPage({ params }: { params: Promise<{ org: 
                 <p className="font-medium">{p.name}</p>
                 <p className="mt-0.5 font-mono text-xs text-muted">{p.slug}</p>
                 <p className="mt-3 text-xs text-muted">
-                  {Number(p.envCount)} environment{Number(p.envCount) === 1 ? '' : 's'} ·{' '}
-                  {Number(p.flagCount)} flag{Number(p.flagCount) === 1 ? '' : 's'}
+                  {Number(envCount)} environment{Number(envCount) === 1 ? '' : 's'}
+                  {p.team ? ` · ${p.team}` : ''}
                 </p>
               </Link>
             </li>

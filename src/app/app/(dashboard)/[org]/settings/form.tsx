@@ -109,7 +109,7 @@ export function DangerZone({ org }: { org: { id: string; name: string; slug: str
       <h2 className="text-sm font-semibold text-red-400">Danger zone</h2>
       <p className="mt-1 text-sm text-muted">
         Deleting <span className="font-medium text-foreground">{org.name}</span> permanently removes
-        its projects, flags, environments, and members. This cannot be undone.
+        its projects, environments, and members. This cannot be undone.
       </p>
       <Button variant="danger" className="mt-4" onClick={() => setOpen(true)}>
         Delete organization
