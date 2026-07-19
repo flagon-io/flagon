@@ -13,8 +13,8 @@ export const metadata: Metadata = {
     "experiments",
     "config",
     "catalog",
-    "open source",
-    "self-hosted",
+    "self-hostable",
+    "source-available",
   ],
   openGraph: {
     type: "website",

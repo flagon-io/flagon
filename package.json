@@ -8,12 +8,20 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:provision": "node scripts/db-provision.mjs",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@icons-pack/react-simple-icons": "^13.13.0",
+    "better-auth": "^1.6.23",
+    "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.25.0",
     "next": "16.2.10",
+    "postgres": "^3.4.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
@@ -22,6 +30,8 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
@@ -30,6 +40,9 @@
   },
   "allowScripts": {
     "sharp@0.34.5": true,
-    "unrs-resolver@1.12.2": true
+    "unrs-resolver@1.12.2": true,
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true
   }
 }

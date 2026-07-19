@@ -10,7 +10,7 @@ export const brand = {
   apiUrl: "https://api.flagon.io",
   github: "https://github.com/flagon-io",
 
-  eyebrow: "The open-source developer platform",
+  eyebrow: "The self-hostable developer platform",
   taglineLead: "Stop building your platform.",
   taglineFollow: "Start shipping on it.",
   description:

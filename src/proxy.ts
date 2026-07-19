@@ -28,17 +28,27 @@ function subdomainOf(host: string): string | null {
 export function proxy(request: NextRequest) {
   const host = request.headers.get("host") ?? "";
   const sub = subdomainOf(host);
+  const { pathname } = request.nextUrl;
 
-  if (sub === "api" || sub === "app") {
-    const segment = `/${sub}`;
-    if (!request.nextUrl.pathname.startsWith(segment)) {
-      const url = request.nextUrl.clone();
-      url.pathname =
-        request.nextUrl.pathname === "/"
-          ? segment
-          : `${segment}${request.nextUrl.pathname}`;
-      return NextResponse.rewrite(url);
-    }
+  // api.flagon.io/... -> /api/...
+  if (sub === "api" && !pathname.startsWith("/api")) {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname === "/" ? "/api" : `/api${pathname}`;
+    return NextResponse.rewrite(url);
+  }
+
+  // app.flagon.io/... -> /app/... , EXCEPT /api/* which is the shared API and
+  // auth surface. Keeping it same-origin means login on app.flagon.io hits
+  // app.flagon.io/api/auth directly (no CORS), and the app can call the API
+  // same-origin too.
+  if (
+    sub === "app" &&
+    !pathname.startsWith("/app") &&
+    !pathname.startsWith("/api")
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname === "/" ? "/app" : `/app${pathname}`;
+    return NextResponse.rewrite(url);
   }
 
   return NextResponse.next();

@@ -37,7 +37,7 @@ const groups: FooterGroup[] = [
     links: [
       { label: "Terms", href: "/terms" },
       { label: "Privacy", href: "/privacy" },
-      { label: "Security" },
+      { label: "Security", href: "/security" },
       { label: "License (FSL)" },
     ],
   },
@@ -84,7 +84,7 @@ export function SiteFooter() {
               </span>
             </Link>
             <p className="max-w-[16rem] text-sm leading-6 text-zinc-500">
-              The open-source developer platform.
+              The self-hostable developer platform.
             </p>
           </div>
 

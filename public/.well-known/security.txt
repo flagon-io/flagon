@@ -1,0 +1,5 @@
+Contact: mailto:security@flagon.io
+Expires: 2027-07-19T00:00:00.000Z
+Policy: https://www.flagon.io/security
+Preferred-Languages: en
+Canonical: https://www.flagon.io/.well-known/security.txt

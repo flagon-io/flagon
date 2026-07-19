@@ -2,7 +2,7 @@
   <img src=".github/avatar-teal.png" alt="Flagon" width="88" height="88" />
   <h1>Flagon</h1>
   <p><strong>Stop building your platform. Start shipping on it.</strong></p>
-  <p>The open-source developer platform: one hub for your projects, environments, and teams, with the products you'd otherwise buy or build stitched right in.</p>
+  <p>The self-hostable developer platform: one hub for your projects, environments, and teams, with the products you'd otherwise buy or build stitched right in.</p>
 </div>
 
 ---
@@ -13,7 +13,7 @@
 
 Flagon is a developer platform. Each organization gets a catalog of projects with teams, ownership, and permissions, and products plug into that foundation. Feature flags are the first product; more follow, all sharing one catalog, one login, and one bill.
 
-It is fully open source and self-hostable. Stand this single repository up and you have the whole platform from day one, no separate services required. As the hosted offering grows, individual capabilities can be split out into standalone microservices, but the monolith always works on its own.
+It is fully self-hostable. Stand this single repository up and you have the whole platform from day one, no separate services required. As the hosted offering grows, individual capabilities can be split out into standalone microservices, but the monolith always works on its own.
 
 ## Stack
 
