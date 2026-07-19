@@ -51,9 +51,14 @@ try {
     $$;
   `);
 
-  // Keep attributes + password in sync with DATABASE_URL_APP.
+  // Keep login + password in sync with DATABASE_URL_APP. Only these two: on
+  // managed Postgres (Neon) the owner has CREATEROLE, not SUPERUSER, and
+  // Postgres rejects any ALTER ROLE that mentions SUPERUSER/BYPASSRLS (even as
+  // a no-op like NOSUPERUSER) unless run by a real superuser. The restrictive
+  // attributes are locked in at CREATE ROLE above and only a superuser could
+  // ever loosen them.
   await sql.unsafe(
-    `ALTER ROLE ${R} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD ${lit(password)};`,
+    `ALTER ROLE ${R} WITH LOGIN PASSWORD ${lit(password)};`,
   );
 
   if (dbName) {
