@@ -9,6 +9,7 @@ import { userEmails } from "../db/schema";
 import { brand } from "./brand";
 import { sessionCookieDomain } from "./cookie-domain";
 import { sendEmail } from "./email";
+import { supersedeDeviceSessions } from "./sessions.server";
 import { renderBrandedEmail } from "./email-templates";
 import { billingEnabled } from "./billing";
 import { normalizeOrgSlug, validateOrgSlug } from "./org-slug";
@@ -127,7 +128,7 @@ export const auth = betterAuth({
       },
       update: {
         // BetterAuth-side updates (e.g. verify-email flipping emailVerified)
-        // flow into the primary row.
+        // flow into the primary row. (session hook is below)
         after: async (updatedUser) => {
           await db
             .update(userEmails)
@@ -142,6 +143,15 @@ export const auth = betterAuth({
                 eq(userEmails.isPrimary, true),
               ),
             );
+        },
+      },
+    },
+    session: {
+      create: {
+        // Re-authenticating on a device replaces that device's session
+        // instead of stacking another one (src/lib/sessions.server.ts).
+        after: async (session) => {
+          await supersedeDeviceSessions(session);
         },
       },
     },
