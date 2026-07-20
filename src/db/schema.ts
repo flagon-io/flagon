@@ -11,7 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { user } from "./auth-schema";
+import { users } from "./auth-schema";
 
 /**
  * Typed query layer. Mirrors the SQL migrations in drizzle/. Row-level
@@ -58,7 +58,7 @@ export const userEmails = pgTable(
     id: text("id").primaryKey(),
     userId: text("user_id")
       .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     email: text("email").notNull(),
     verified: boolean("verified").notNull().default(false),
     isPrimary: boolean("is_primary").notNull().default(false),
@@ -80,8 +80,8 @@ export const userEmails = pgTable(
  * infra table: no RLS, no org scope. Keyed by client identifier; the unique
  * index on key is required by the limiter's race handling.
  */
-export const rateLimit = pgTable(
-  "rate_limit",
+export const rateLimits = pgTable(
+  "rate_limits",
   {
     id: text("id").primaryKey(),
     key: text("key").notNull(),
@@ -91,4 +91,4 @@ export const rateLimit = pgTable(
   (t) => [uniqueIndex("rate_limit_key_uidx").on(t.key)],
 );
 
-export const schema = { organizations, projects, userEmails, rateLimit };
+export const schema = { organizations, projects, userEmails, rateLimits };

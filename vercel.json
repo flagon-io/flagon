@@ -2,6 +2,12 @@
     "$schema": "https://openapi.vercel.sh/vercel.json",
     "framework": "nextjs",
     "buildCommand": "npm run db:provision && npm run db:migrate && npm run build",
+    "crons": [
+        {
+            "path": "/api/cron/cleanup",
+            "schedule": "0 4 * * *"
+        }
+    ],
     "git": {
         "deploymentEnabled": {
             "main": true

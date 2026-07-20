@@ -77,17 +77,22 @@ export const auth = betterAuth({
       });
     },
   },
+  // Plural table names (platform convention; drizzle/0005_plural_tables.sql).
   user: {
+    modelName: "users",
     // Self-service account deletion (settings danger zone).
     // Password-confirmed on the client; revisit before billing/orgs exist.
     deleteUser: { enabled: true },
   },
+  session: { modelName: "sessions" },
+  account: { modelName: "accounts" },
+  verification: { modelName: "verifications" },
   // Keep user_emails (multi-email source of truth, src/lib/user-emails.ts) in
-  // lockstep with BetterAuth's "user".email mirror.
+  // lockstep with BetterAuth's users.email mirror.
   databaseHooks: {
     user: {
       create: {
-        // BetterAuth only knows about "user".email; also reject sign-ups that
+        // BetterAuth only knows about users.email; also reject sign-ups that
         // collide with anyone's ALTERNATE address.
         before: async (newUser) => {
           if (await findByEmail(newUser.email)) {
@@ -147,7 +152,7 @@ export const auth = betterAuth({
   rateLimit: {
     enabled: true,
     storage: "database",
-    modelName: "rateLimit",
+    modelName: "rateLimits",
     window: 60,
     max: 100,
     customRules: {

@@ -21,6 +21,13 @@ passwords, sessions) is app-only via server actions. Browser-only flows
 (sign-up, sign-in, password reset, emailed verification links) are never part
 of the versioned contract.
 
+## Database naming
+
+Tables are plural snake_case (users, sessions, user_emails, rate_limits).
+BetterAuth models are mapped to these via modelName overrides in
+src/lib/auth.ts - any new BetterAuth plugin table gets the same treatment
+(plural modelName + hand-written migration).
+
 ## IDs are UUIDv7
 
 ALL new ids are UUIDv7 (time-ordered, RFC 9562) unless there's an explicit

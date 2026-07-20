@@ -1,21 +1,21 @@
 import { randomBytes } from "node:crypto";
 import { uuidv7 } from "./uuidv7";
-import { and, eq, gte, like, sql } from "drizzle-orm";
+import { and, eq, gte, like, lt, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { userEmails } from "@/db/schema";
-import { user, verification } from "@/db/auth-schema";
+import { users, verifications } from "@/db/auth-schema";
 import { brand } from "./brand";
 import { sendEmail } from "./email";
 import { renderBrandedEmail } from "./email-templates";
 
 /**
  * Multi-email management. user_emails is the source of truth
- * for every address a user owns; "user".email mirrors the primary row so
+ * for every address a user owns; users.email mirrors the primary row so
  * BetterAuth's built-in flows (password reset, session user) keep working.
  * Hooks in src/lib/auth.ts keep the mirror in sync from the BetterAuth side;
  * these helpers keep it in sync from ours.
  *
- * Verification tokens live in BetterAuth's `verification` table under our own
+ * Verification tokens live in BetterAuth's `verifications` table under our own
  * identifier namespace, so they share expiry/cleanup semantics with the rest
  * of auth.
  */
@@ -82,9 +82,9 @@ export async function resolveLoginEmail(email: string): Promise<string> {
   const row = await findByEmail(email);
   if (!row || (!row.isPrimary && !row.verified)) return email;
   const [owner] = await db
-    .select({ email: user.email })
-    .from(user)
-    .where(eq(user.id, row.userId))
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, row.userId))
     .limit(1);
   return owner?.email ?? email;
 }
@@ -93,16 +93,21 @@ export async function resolveLoginEmail(email: string): Promise<string> {
 export async function emailTaken(email: string): Promise<boolean> {
   if (await findByEmail(email)) return true;
   const [existing] = await db
-    .select({ id: user.id })
-    .from(user)
-    .where(sql`lower(${user.email}) = ${normalizeEmail(email)}`)
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`lower(${users.email}) = ${normalizeEmail(email)}`)
     .limit(1);
   return Boolean(existing);
 }
 
 async function createVerificationToken(emailId: string): Promise<string> {
+  // Opportunistic hygiene: expired tokens of ANY kind (ours, password reset)
+  // are unusable by definition, and only consumed tokens delete themselves.
+  // Purging here keeps the table bounded without needing a cron.
+  await db.delete(verifications).where(lt(verifications.expiresAt, new Date()));
+
   const token = randomBytes(24).toString("base64url");
-  await db.insert(verification).values({
+  await db.insert(verifications).values({
     id: uuidv7(),
     identifier: `${TOKEN_NAMESPACE}:${token}`,
     value: emailId,
@@ -192,12 +197,12 @@ export async function resendVerification(
   // Email sends are the abuse vector here; cap them per address.
   const [{ recent }] = await db
     .select({ recent: sql<number>`count(*)::int` })
-    .from(verification)
+    .from(verifications)
     .where(
       and(
-        like(verification.identifier, `${TOKEN_NAMESPACE}:%`),
-        eq(verification.value, emailId),
-        gte(verification.createdAt, new Date(Date.now() - SEND_WINDOW_MS)),
+        like(verifications.identifier, `${TOKEN_NAMESPACE}:%`),
+        eq(verifications.value, emailId),
+        gte(verifications.createdAt, new Date(Date.now() - SEND_WINDOW_MS)),
       ),
     );
   if (recent >= SEND_MAX_PER_WINDOW) {
@@ -224,12 +229,12 @@ export async function verifyEmailToken(token: string): Promise<ActionResult> {
   const identifier = `${TOKEN_NAMESPACE}:${token}`;
   const [record] = await db
     .select()
-    .from(verification)
-    .where(eq(verification.identifier, identifier))
+    .from(verifications)
+    .where(eq(verifications.identifier, identifier))
     .limit(1);
   if (!record) return { ok: false, error: "invalid" };
 
-  await db.delete(verification).where(eq(verification.id, record.id));
+  await db.delete(verifications).where(eq(verifications.id, record.id));
   if (record.expiresAt.getTime() < Date.now())
     return { ok: false, error: "expired" };
 
@@ -243,9 +248,9 @@ export async function verifyEmailToken(token: string): Promise<ActionResult> {
   // Verifying the primary also flips the BetterAuth mirror.
   if (row.isPrimary) {
     await db
-      .update(user)
+      .update(users)
       .set({ emailVerified: true })
-      .where(eq(user.id, row.userId));
+      .where(eq(users.id, row.userId));
   }
   return { ok: true };
 }
@@ -284,9 +289,9 @@ export async function setPrimary(
       .set({ isPrimary: true, updatedAt: new Date() })
       .where(eq(userEmails.id, emailId));
     await tx
-      .update(user)
+      .update(users)
       .set({ email: row.email, emailVerified: true })
-      .where(eq(user.id, userId));
+      .where(eq(users.id, userId));
   });
   const [updated] = await db
     .select()

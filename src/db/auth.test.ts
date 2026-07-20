@@ -20,7 +20,7 @@ describe.skipIf(!canRun)("auth sign-up", () => {
 
   afterAll(async () => {
     if (owner) {
-      await owner`DELETE FROM "user" WHERE email = ${email}`;
+      await owner`DELETE FROM users WHERE email = ${email}`;
       await owner.end();
     }
     if (closePool) await closePool();
@@ -38,7 +38,7 @@ describe.skipIf(!canRun)("auth sign-up", () => {
     expect(res.user.email).toBe(email);
 
     const [row] = await owner`
-      SELECT email, username FROM "user" WHERE email = ${email}
+      SELECT email, username FROM users WHERE email = ${email}
     `;
     expect(row.email).toBe(email);
     expect(row.username).toBeTruthy();
