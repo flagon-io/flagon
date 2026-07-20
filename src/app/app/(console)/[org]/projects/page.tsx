@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -45,7 +46,7 @@ export default async function ProjectsPage({
         </div>
         <div className="pt-1">
           <Link
-            href={`/app/${slug}/projects/new`}
+            href={appPath(`/${slug}/projects/new`)}
             className={`${buttonClass} inline-flex items-center gap-1.5`}
           >
             <Plus className="h-4 w-4" aria-hidden />
@@ -59,7 +60,7 @@ export default async function ProjectsPage({
           {projects.map((project) => (
             <li key={project.id}>
               <Link
-                href={`/app/${slug}/projects/${project.slug}`}
+                href={appPath(`/${slug}/projects/${project.slug}`)}
                 className="flex items-center gap-4 px-4 py-3.5 transition hover:bg-white/2"
               >
                 <span

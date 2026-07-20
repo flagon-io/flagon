@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -15,7 +16,7 @@ export default async function EmailSettingsPage({
   searchParams: Promise<{ email_verified?: string; email_error?: string }>;
 }) {
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/app/signin");
+  if (!session) redirect(appPath("/signin"));
 
   const [{ email_verified, email_error }, emails] = await Promise.all([
     searchParams,

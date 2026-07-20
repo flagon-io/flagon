@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -24,7 +25,7 @@ export default async function ConsoleLayout({
 }) {
   const requestHeaders = await headers();
   const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect("/app/signin");
+  if (!session) redirect(appPath("/signin"));
 
   const orgs = await auth.api.listOrganizations({ headers: requestHeaders });
   const switcherOrgs: SwitcherOrg[] = orgs.map((org) => ({
@@ -70,7 +71,7 @@ export default async function ConsoleLayout({
             so both borders land on the same pixel row. */}
         <header className="flex h-14 shrink-0 border-b border-white/5">
           <div className="flex flex-1 items-center justify-between px-4 sm:px-6">
-            <Link href="/app" className="flex items-center gap-2 md:hidden">
+            <Link href={appPath("")} className="flex items-center gap-2 md:hidden">
               <FlagonMark className="h-6 w-6" />
               <span className="text-sm font-semibold tracking-tight">
                 {brand.name}

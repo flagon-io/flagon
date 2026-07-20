@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -11,13 +12,13 @@ import { auth } from "@/lib/auth";
 export default async function AppIndexPage() {
   const requestHeaders = await headers();
   const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect("/app/signin");
+  if (!session) redirect(appPath("/signin"));
 
   const orgs = await auth.api.listOrganizations({ headers: requestHeaders });
-  if (orgs.length === 0) redirect("/app/new");
+  if (orgs.length === 0) redirect(appPath("/new"));
 
   const active =
     orgs.find((org) => org.id === session.session.activeOrganizationId) ??
     orgs[0];
-  redirect(`/app/${active.slug}`);
+  redirect(appPath(`/${active.slug}`));
 }

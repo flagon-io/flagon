@@ -1,5 +1,6 @@
 "use client";
 
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -73,7 +74,7 @@ export function OrgSwitcher({
     setPending(true);
     try {
       await authClient.organization.setActive({ organizationId: org.id });
-      router.push(`/app/${org.slug}`);
+      router.push(appPath(`/${org.slug}`));
       router.refresh();
     } finally {
       setPending(false);
@@ -85,7 +86,7 @@ export function OrgSwitcher({
       {/* Navigation target: the org identity itself links to the org's
           baseline page, so getting "home" never requires opening the menu. */}
       <Link
-        href={active ? `/app/${active.slug}` : "/app"}
+        href={active ? appPath(`/${active.slug}`) : appPath("/")}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 transition hover:bg-white/5"
       >
         <FlagonMark className="h-6 w-6 shrink-0" />
@@ -151,7 +152,7 @@ export function OrgSwitcher({
             </>
           ) : null}
           <Link
-            href="/app/new"
+            href={appPath("/new")}
             role="menuitem"
             onClick={() => setOpen(false)}
             className="flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-zinc-300 transition hover:bg-white/5 hover:text-zinc-100"

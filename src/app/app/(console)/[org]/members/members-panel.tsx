@@ -1,5 +1,6 @@
 "use client";
 
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -189,7 +190,7 @@ export function MembersPanel({
                 <div className="truncate text-sm font-medium text-zinc-100">
                   {member.username ? (
                     <Link
-                      href={`/app/${orgSlug}/members/${member.username}`}
+                      href={appPath(`/${orgSlug}/members/${member.username}`)}
                       className="transition hover:text-teal-300 hover:underline"
                     >
                       {member.name}

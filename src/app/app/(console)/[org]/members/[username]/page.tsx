@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -57,7 +58,7 @@ export default async function MemberProfilePage({ params }: Params) {
     <div>
       <p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
         <Link
-          href={`/app/${orgSlug}/members`}
+          href={appPath(`/${orgSlug}/members`)}
           className="transition hover:text-teal-300"
         >
           Members
@@ -96,7 +97,7 @@ export default async function MemberProfilePage({ params }: Params) {
               {memberTeams.map((team) => (
                 <li key={team.id}>
                   <Link
-                    href={`/app/${orgSlug}/teams/${team.id}`}
+                    href={appPath(`/${orgSlug}/teams/${team.id}`)}
                     className="flex items-center px-4 py-2.5 text-sm text-zinc-200 transition hover:bg-white/2 hover:text-teal-300"
                   >
                     {team.name}
@@ -124,7 +125,7 @@ export default async function MemberProfilePage({ params }: Params) {
                   className="flex items-center gap-3 px-4 py-2.5 text-sm"
                 >
                   <Link
-                    href={`/app/${orgSlug}/projects/${grant.project.slug}`}
+                    href={appPath(`/${orgSlug}/projects/${grant.project.slug}`)}
                     className="min-w-0 flex-1 truncate text-zinc-200 transition hover:text-teal-300"
                   >
                     {grant.project.name}
@@ -157,7 +158,7 @@ export default async function MemberProfilePage({ params }: Params) {
         <UserRound className="h-3.5 w-3.5" aria-hidden />
         Roles and membership are managed from the{" "}
         <Link
-          href={`/app/${orgSlug}/members`}
+          href={appPath(`/${orgSlug}/members`)}
           className="text-zinc-500 underline transition hover:text-zinc-300"
         >
           members page

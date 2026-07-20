@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -21,7 +22,7 @@ export default async function AccountLayout({
   children: React.ReactNode;
 }) {
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/app/signin");
+  if (!session) redirect(appPath("/signin"));
 
   // Unverified primary email: keep the user signed in (no lockouts) but nag
   // persistently until the address is proven.
@@ -33,7 +34,7 @@ export default async function AccountLayout({
     <>
       <header className="sticky top-0 z-20 border-b border-white/5 bg-[#09090b]/80 backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between px-4">
-          <Link href="/app" className="flex items-center gap-2">
+          <Link href={appPath("")} className="flex items-center gap-2">
             <FlagonMark className="h-6 w-6" />
             <span className="text-sm font-semibold tracking-tight">
               {brand.name}

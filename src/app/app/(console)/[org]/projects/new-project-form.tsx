@@ -1,5 +1,6 @@
 "use client";
 
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -57,7 +58,7 @@ export function NewProjectForm({ orgSlug }: { orgSlug: string }) {
       return;
     }
 
-    router.push(`/app/${orgSlug}/projects/${normalizeProjectSlug(slug)}`);
+    router.push(appPath(`/${orgSlug}/projects/${normalizeProjectSlug(slug)}`));
     router.refresh();
   }
 
@@ -99,7 +100,7 @@ export function NewProjectForm({ orgSlug }: { orgSlug: string }) {
         <button type="submit" disabled={pending} className={buttonClass}>
           {pending ? "Creating..." : "Create project"}
         </button>
-        <Link href={`/app/${orgSlug}/projects`} className={subtleButtonClass}>
+        <Link href={appPath(`/${orgSlug}/projects`)} className={subtleButtonClass}>
           Cancel
         </Link>
       </div>

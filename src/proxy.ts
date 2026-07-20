@@ -37,15 +37,23 @@ export function proxy(request: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
+  // app.flagon.io: the app is served at the subdomain ROOT. A leaked /app
+  // prefix (old link, local-style URL) is canonicalized away with a
+  // permanent redirect so production URLs are always app.flagon.io/<org>/...
+  if (
+    sub === "app" &&
+    (pathname === "/app" || pathname.startsWith("/app/"))
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname.slice("/app".length) || "/";
+    return NextResponse.redirect(url, 308);
+  }
+
   // app.flagon.io/... -> /app/... , EXCEPT /api/* which is the shared API and
   // auth surface. Keeping it same-origin means login on app.flagon.io hits
   // app.flagon.io/api/auth directly (no CORS), and the app can call the API
   // same-origin too.
-  if (
-    sub === "app" &&
-    !pathname.startsWith("/app") &&
-    !pathname.startsWith("/api")
-  ) {
+  if (sub === "app" && !pathname.startsWith("/api")) {
     const url = request.nextUrl.clone();
     url.pathname = pathname === "/" ? "/app" : `/app${pathname}`;
     return NextResponse.rewrite(url);

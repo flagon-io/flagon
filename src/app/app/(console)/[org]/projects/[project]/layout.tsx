@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { resolveProjectContext } from "./resolve-project";
@@ -22,7 +23,7 @@ export default async function ProjectLayout({
     <div>
       <p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
         <Link
-          href={`/app/${orgSlug}/projects`}
+          href={appPath(`/${orgSlug}/projects`)}
           className="transition hover:text-teal-300"
         >
           Projects

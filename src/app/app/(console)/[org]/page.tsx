@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -84,7 +85,7 @@ export default async function OrgPage({ params, searchParams }: Params) {
 
       <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Link
-          href={`/app/${slug}/projects`}
+          href={appPath(`/${slug}/projects`)}
           className="border border-white/10 p-4 text-sm transition hover:border-white/20 hover:bg-white/2"
         >
           <div className="font-medium text-zinc-200">Projects</div>
@@ -93,7 +94,7 @@ export default async function OrgPage({ params, searchParams }: Params) {
           </div>
         </Link>
         <Link
-          href={`/app/${slug}/teams`}
+          href={appPath(`/${slug}/teams`)}
           className="border border-white/10 p-4 text-sm transition hover:border-white/20 hover:bg-white/2"
         >
           <div className="font-medium text-zinc-200">Teams</div>

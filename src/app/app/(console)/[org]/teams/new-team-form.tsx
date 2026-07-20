@@ -1,5 +1,6 @@
 "use client";
 
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -30,7 +31,7 @@ export function NewTeamForm({ orgSlug }: { orgSlug: string }) {
       setError(result.message);
       return;
     }
-    router.push(`/app/${orgSlug}/teams/${result.teamId}`);
+    router.push(appPath(`/${orgSlug}/teams/${result.teamId}`));
     router.refresh();
   }
 
@@ -56,7 +57,7 @@ export function NewTeamForm({ orgSlug }: { orgSlug: string }) {
         <button type="submit" disabled={pending} className={buttonClass}>
           {pending ? "Creating..." : "Create team"}
         </button>
-        <Link href={`/app/${orgSlug}/teams`} className={subtleButtonClass}>
+        <Link href={appPath(`/${orgSlug}/teams`)} className={subtleButtonClass}>
           Cancel
         </Link>
       </div>

@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
@@ -29,7 +30,7 @@ export default async function AppNotFound() {
       <div className="mt-8 flex items-center gap-4">
         {session ? (
           <Link
-            href="/app"
+            href={appPath("")}
             className="inline-flex h-10 items-center rounded-md bg-teal-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
           >
             Back to console
@@ -37,13 +38,13 @@ export default async function AppNotFound() {
         ) : (
           <>
             <Link
-              href="/app/signin"
+              href={appPath("/signin")}
               className="inline-flex h-10 items-center rounded-md bg-teal-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
             >
               Sign in
             </Link>
             <Link
-              href="/app"
+              href={appPath("")}
               className="text-sm text-zinc-400 transition-colors hover:text-zinc-200"
             >
               Back to console

@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -28,7 +29,7 @@ export default async function NewTeamPage({
     <div className="mx-auto max-w-xl">
       <p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
         <Link
-          href={`/app/${slug}/teams`}
+          href={appPath(`/${slug}/teams`)}
           className="transition hover:text-teal-300"
         >
           Teams

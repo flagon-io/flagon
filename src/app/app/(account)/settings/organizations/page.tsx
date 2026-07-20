@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
 export default async function OrganizationsSettingsPage() {
   const requestHeaders = await headers();
   const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect("/app/signin");
+  if (!session) redirect(appPath("/signin"));
 
   const orgs = await auth.api.listOrganizations({ headers: requestHeaders });
 
@@ -26,7 +27,7 @@ export default async function OrganizationsSettingsPage() {
           Organizations
         </h2>
         <Link
-          href="/app/new"
+          href={appPath("/new")}
           className={`${buttonClass} inline-flex items-center gap-1.5`}
         >
           <Plus className="h-4 w-4" aria-hidden />
@@ -41,7 +42,7 @@ export default async function OrganizationsSettingsPage() {
             You don&apos;t belong to any organizations yet.
           </p>
           <Link
-            href="/app/new"
+            href={appPath("/new")}
             className="mt-1 inline-block text-sm font-medium text-teal-400 transition hover:text-teal-300"
           >
             Create your first organization
@@ -52,7 +53,7 @@ export default async function OrganizationsSettingsPage() {
           {orgs.map((org) => (
             <li key={org.id}>
               <Link
-                href={`/app/${org.slug}`}
+                href={appPath(`/${org.slug}`)}
                 className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/2 px-4 py-3 transition hover:border-teal-500/40 hover:bg-white/3"
               >
                 <span

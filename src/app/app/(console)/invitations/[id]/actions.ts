@@ -1,5 +1,6 @@
 "use server";
 
+import { appPath } from "@/lib/urls";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { APIError } from "better-auth/api";
@@ -41,9 +42,9 @@ export async function acceptInvitationAction(
       .from(organizations)
       .where(eq(organizations.id, organizationId))
       .limit(1);
-    if (org) redirect(`/app/${org.slug}`);
+    if (org) redirect(appPath(`/${org.slug}`));
   }
-  redirect("/app");
+  redirect(appPath(""));
 }
 
 export async function declineInvitationAction(
@@ -63,5 +64,5 @@ export async function declineInvitationAction(
     }
     throw error;
   }
-  redirect("/app");
+  redirect(appPath(""));
 }

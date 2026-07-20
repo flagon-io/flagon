@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
 
 export default async function AccountSettingsPage() {
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/app/signin");
+  if (!session) redirect(appPath("/signin"));
 
   const { user } = session;
   const username = user.displayUsername ?? user.username ?? "";

@@ -28,10 +28,27 @@ export function marketingHref(path = "/"): string {
 /**
  * Link to an app page (app.flagon.io in production). Without a configured base
  * URL (local dev, single-domain self-host) the app lives under the /app path
- * prefix, so the fallback is path-prefixed rather than relative.
+ * prefix, so the fallback is path-prefixed rather than relative. Use for
+ * CROSS-SURFACE links (marketing -> app); inside the app use appPath so
+ * navigation stays same-origin and client-side.
  */
 export function appHref(path = "/"): string {
   return join(APP_URL || "/app", path);
+}
+
+/**
+ * Path for IN-APP navigation. When NEXT_PUBLIC_APP_URL is set the app is
+ * served at a subdomain ROOT (app.flagon.io/<org>), so links carry no
+ * prefix; without it (local dev, single-domain self-host, previews) the app
+ * lives under /app. Set the var per Vercel environment: production only,
+ * unless previews also get their own subdomain.
+ */
+export const APP_PATH_PREFIX = APP_URL ? "" : "/app";
+
+export function appPath(path = "/"): string {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  if (normalized === "/") return APP_PATH_PREFIX || "/";
+  return `${APP_PATH_PREFIX}${normalized}`;
 }
 
 /** Link to an API endpoint (api.flagon.io in production; /api otherwise). */

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { appPath } from "@/lib/urls";
 import {
   Activity,
   CreditCard,
@@ -117,7 +118,9 @@ function Item({
     );
   }
 
-  const href = item.path ? `/app/${orgSlug}/${item.path}` : `/app/${orgSlug}`;
+  const href = item.path
+    ? appPath(`/${orgSlug}/${item.path}`)
+    : appPath(`/${orgSlug}`);
   const target = normalizeAppPath(href);
   const active = item.exact
     ? pathname === target

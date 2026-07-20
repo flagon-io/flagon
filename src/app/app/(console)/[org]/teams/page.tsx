@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
@@ -59,7 +60,7 @@ export default async function TeamsPage({
         {canManage ? (
           <div className="pt-1">
             <Link
-              href={`/app/${slug}/teams/new`}
+              href={appPath(`/${slug}/teams/new`)}
               className={`${buttonClass} inline-flex items-center gap-1.5`}
             >
               <Plus className="h-4 w-4" aria-hidden />
@@ -76,7 +77,7 @@ export default async function TeamsPage({
             return (
               <li key={team.id}>
                 <Link
-                  href={`/app/${slug}/teams/${team.id}`}
+                  href={appPath(`/${slug}/teams/${team.id}`)}
                   className="flex items-center gap-4 px-4 py-3.5 transition hover:bg-white/2"
                 >
                   <span

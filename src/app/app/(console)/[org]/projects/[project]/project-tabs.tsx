@@ -1,5 +1,6 @@
 "use client";
 
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Flag, Home, Lock, Settings, type LucideIcon } from "lucide-react";
@@ -75,7 +76,7 @@ export function ProjectTabs({
         return (
           <Link
             key={tab.label}
-            href={`/app${target}`}
+            href={appPath(`${target}`)}
             aria-current={active ? "page" : undefined}
             className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm transition ${
               active

@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -8,5 +9,5 @@ import { auth } from "@/lib/auth";
  */
 export async function redirectIfAuthenticated(): Promise<void> {
   const session = await auth.api.getSession({ headers: await headers() });
-  if (session) redirect("/app");
+  if (session) redirect(appPath(""));
 }

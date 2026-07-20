@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
@@ -92,7 +93,7 @@ export default async function TeamPage({ params }: Params) {
     <div>
       <p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
         <Link
-          href={`/app/${orgSlug}/teams`}
+          href={appPath(`/${orgSlug}/teams`)}
           className="transition hover:text-teal-300"
         >
           Teams
@@ -115,7 +116,7 @@ export default async function TeamPage({ params }: Params) {
           {projectGrants.map((grant) => (
             <li key={grant.project.id}>
               <Link
-                href={`/app/${orgSlug}/projects/${grant.project.slug}`}
+                href={appPath(`/${orgSlug}/projects/${grant.project.slug}`)}
                 className="flex items-center gap-3 px-4 py-2.5 text-sm transition hover:bg-white/2"
               >
                 <span className="min-w-0 flex-1 truncate font-medium text-zinc-200">

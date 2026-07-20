@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { brand } from "@/lib/brand";
-import { marketingHref } from "@/lib/urls";
+import { appPath, marketingHref } from "@/lib/urls";
 import {
   ORG_SLUG_HINT,
   suggestOrgSlug,
@@ -94,7 +94,7 @@ export function NewOrgForm({
       return;
     }
 
-    router.push(`/app/${slug}`);
+    router.push(appPath(`/${slug}`));
     router.refresh();
   }
 
@@ -161,7 +161,7 @@ export function NewOrgForm({
                 </span>
               </div>
               <Link
-                href="/app/new"
+                href={appPath("/new")}
                 className="text-xs text-teal-400 transition hover:text-teal-300 hover:underline"
               >
                 Change plan

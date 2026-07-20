@@ -1,5 +1,6 @@
 "use client";
 
+import { appPath } from "@/lib/urls";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
@@ -57,7 +58,7 @@ export function ProjectSettingsPanel({
       setError(result.message);
       return;
     }
-    router.push(`/app/${orgSlug}/projects`);
+    router.push(appPath(`/${orgSlug}/projects`));
     router.refresh();
   }
 

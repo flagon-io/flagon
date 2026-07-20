@@ -20,6 +20,7 @@ export const ORG_SLUG_HINT =
 
 /** App route segments an org slug would shadow (and become unreachable). */
 const RESERVED_SLUGS = new Set([
+  "app",
   "signin",
   "signup",
   "forgot-password",

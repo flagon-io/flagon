@@ -1,3 +1,4 @@
+import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -44,7 +45,7 @@ export default async function ProjectOverviewPage({ params }: Params) {
           </p>
         </div>
         <Link
-          href={`/app/${orgSlug}/projects/${projectSlug}/access`}
+          href={appPath(`/${orgSlug}/projects/${projectSlug}/access`)}
           className="border border-white/10 p-5 text-sm transition hover:border-white/20 hover:bg-white/2"
         >
           <div className="flex items-center gap-2 font-medium text-zinc-200">

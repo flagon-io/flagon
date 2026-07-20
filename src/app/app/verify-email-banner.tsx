@@ -1,5 +1,6 @@
 "use client";
 
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { useState } from "react";
 import { MailWarning } from "lucide-react";
@@ -59,7 +60,7 @@ export function VerifyEmailBanner({
             </button>
           )}
           <Link
-            href="/app/settings/emails"
+            href={appPath("/settings/emails")}
             className="text-amber-200/80 underline underline-offset-2 transition hover:text-amber-100"
           >
             Email settings

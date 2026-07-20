@@ -1,5 +1,6 @@
 "use client";
 
+import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -15,12 +16,12 @@ import {
 } from "lucide-react";
 
 const sections = [
-  { href: "/app/settings", label: "Public profile", icon: User, exact: true },
-  { href: "/app/settings/account", label: "Account", icon: Settings2 },
-  { href: "/app/settings/emails", label: "Emails", icon: Mail },
-  { href: "/app/settings/sessions", label: "Sessions", icon: Radio },
+  { href: appPath("/settings"), label: "Public profile", icon: User, exact: true },
+  { href: appPath("/settings/account"), label: "Account", icon: Settings2 },
+  { href: appPath("/settings/emails"), label: "Emails", icon: Mail },
+  { href: appPath("/settings/sessions"), label: "Sessions", icon: Radio },
   {
-    href: "/app/settings/organizations",
+    href: appPath("/settings/organizations"),
     label: "Organizations",
     icon: Building2,
   },
