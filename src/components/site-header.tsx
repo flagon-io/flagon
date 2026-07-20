@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { brand } from "@/lib/brand";
 import { FlagonMark } from "@/lib/logo";
+import { SiteNav } from "@/components/site-nav";
 import { UserMenu } from "@/components/user-menu";
 
 /**
  * Marketing header, rendered once in the marketing route-group layout. The
- * right side is session-aware: Sign in / Get started when anonymous, the
- * avatar dropdown when signed in (the *.flagon.io session cookie spans www).
- * Nav stays disabled until the corresponding pages exist.
+ * nav highlights the current page; the right side is session-aware: Sign in /
+ * Get started when anonymous, the avatar dropdown when signed in (the
+ * *.flagon.io session cookie spans www).
  */
 export function SiteHeader() {
   return (
@@ -20,28 +21,7 @@ export function SiteHeader() {
               {brand.name}
             </span>
           </Link>
-          <nav className="hidden items-center gap-1 md:flex">
-            {brand.nav.map((item) =>
-              item.href ? (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className="rounded-md px-3 py-2 text-sm text-zinc-300 transition hover:text-zinc-100"
-                >
-                  {item.label}
-                </Link>
-              ) : (
-                <span
-                  key={item.label}
-                  aria-disabled
-                  title="Coming soon"
-                  className="cursor-not-allowed rounded-md px-3 py-2 text-sm text-zinc-500"
-                >
-                  {item.label}
-                </span>
-              ),
-            )}
-          </nav>
+          <SiteNav />
         </div>
         <UserMenu />
       </div>

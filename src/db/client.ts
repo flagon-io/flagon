@@ -1,13 +1,30 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { organizations, projects, userEmails, rateLimits } from "./schema";
+import {
+  organizations,
+  members,
+  invitations,
+  teams,
+  teamMembers,
+  projects,
+  projectRoles,
+  userEmails,
+  rateLimits,
+  leads,
+} from "./schema";
 import * as authSchema from "./auth-schema";
 
 const schema = {
   organizations,
+  members,
+  invitations,
+  teams,
+  teamMembers,
   projects,
+  projectRoles,
   userEmails,
   rateLimits,
+  leads,
   ...authSchema,
 };
 
@@ -43,10 +60,25 @@ const connectionString = resolveAppUrl();
 const pooled =
   process.env.DATABASE_POOLED === "1" || connectionString.includes("pooler");
 
-const client = postgres(connectionString, {
-  max: 10,
-  prepare: pooled ? false : undefined,
-});
+/**
+ * Cache the pool on globalThis in development: Next's hot reload re-evaluates
+ * this module on every recompile, and without the cache each reload leaks a
+ * fresh 10-connection pool until local Postgres runs out of slots.
+ */
+const globalForDb = globalThis as unknown as {
+  __flagonPgClient?: ReturnType<typeof postgres>;
+};
+
+const client =
+  globalForDb.__flagonPgClient ??
+  postgres(connectionString, {
+    max: 10,
+    prepare: pooled ? false : undefined,
+  });
+
+if (process.env.NODE_ENV !== "production") {
+  globalForDb.__flagonPgClient = client;
+}
 
 export const db = drizzle(client, { schema });
 

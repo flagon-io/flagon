@@ -65,17 +65,18 @@ try {
     await sql.unsafe(`GRANT CONNECT ON DATABASE ${ident(dbName)} TO ${R};`);
   }
   await sql.unsafe(`GRANT USAGE ON SCHEMA public TO ${R};`);
+
+  // NO blanket table grants and NO default privileges, deliberately: every
+  // migration GRANTs the app role its tables explicitly alongside their RLS
+  // policy (or auth-layer classification in src/db/tenancy.test.ts). A table
+  // nobody classified is unreachable - it fails closed instead of leaking
+  // across tenants. The REVOKEs below retire the auto-grant from earlier
+  // versions of this script (idempotent; no-ops once clean).
   await sql.unsafe(
-    `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${R};`,
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM ${R};`,
   );
   await sql.unsafe(
-    `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${R};`,
-  );
-  await sql.unsafe(
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${R};`,
-  );
-  await sql.unsafe(
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${R};`,
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE USAGE, SELECT ON SEQUENCES FROM ${R};`,
   );
 
   console.log(`Provisioned role ${role}.`);

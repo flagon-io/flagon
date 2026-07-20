@@ -38,6 +38,8 @@ export const sessions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    // Organization plugin: the session's currently active org.
+    activeOrganizationId: text("active_organization_id"),
   },
   (table) => [
     index("session_userId_idx").on(table.userId),

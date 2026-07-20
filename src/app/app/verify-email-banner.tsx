@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { MailWarning } from "lucide-react";
-import { resendVerificationAction } from "./settings/emails/actions";
+import { resendVerificationAction } from "./(account)/settings/emails/actions";
 
 /**
  * Persistent console-wide nag shown while the primary email is unverified.

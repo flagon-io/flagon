@@ -19,6 +19,11 @@ const sections = [
   { href: "/app/settings/account", label: "Account", icon: Settings2 },
   { href: "/app/settings/emails", label: "Emails", icon: Mail },
   { href: "/app/settings/sessions", label: "Sessions", icon: Radio },
+  {
+    href: "/app/settings/organizations",
+    label: "Organizations",
+    icon: Building2,
+  },
 ];
 
 /** Flagon-shaped sections that land later; visible so the map is clear. */
@@ -26,7 +31,6 @@ const upcoming = [
   { label: "Appearance", icon: Paintbrush },
   { label: "Notifications", icon: Bell },
   { label: "Access tokens", icon: KeyRound },
-  { label: "Organizations", icon: Building2 },
   { label: "Billing", icon: CreditCard },
 ];
 

@@ -19,5 +19,31 @@ services:
       timeout: 5s
       retries: 10
 
+  # Stripe webhook listener for local dev. Starts with `docker compose up -d`
+  # and forwards sandbox events to the app's webhook route. If .env.local has
+  # no STRIPE_SECRET_KEY the container logs a note and exits cleanly - billing
+  # stays off, nothing else is affected. When it IS running, the first lines
+  # of `docker compose logs stripe` print the signing secret (whsec_...) -
+  # put that in .env.local as STRIPE_WEBHOOK_SECRET and restart the dev
+  # server, or plan upgrades will never apply locally.
+  stripe:
+    image: stripe/stripe-cli:latest
+    restart: on-failure
+    env_file:
+      - path: .env.local
+        required: false
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$STRIPE_SECRET_KEY" ]; then
+          echo "STRIPE_SECRET_KEY is not set; webhook listener not needed. Exiting."
+          exit 0
+        fi
+        exec stripe listen \
+          --api-key "$$STRIPE_SECRET_KEY" \
+          --forward-to host.docker.internal:3000/api/webhooks/stripe
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   flagon_pg:

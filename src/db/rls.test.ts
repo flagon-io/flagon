@@ -40,8 +40,8 @@ describe.skipIf(!canRun)("row-level security", () => {
     orgB = b.id;
 
     // ...each with one project.
-    await owner`INSERT INTO projects (organization_id, key, name) VALUES (${orgA}, 'a1', 'A One')`;
-    await owner`INSERT INTO projects (organization_id, key, name) VALUES (${orgB}, 'b1', 'B One')`;
+    await owner`INSERT INTO projects (organization_id, slug, name) VALUES (${orgA}, 'a1', 'A One')`;
+    await owner`INSERT INTO projects (organization_id, slug, name) VALUES (${orgB}, 'b1', 'B One')`;
   });
 
   afterAll(async () => {
@@ -54,10 +54,10 @@ describe.skipIf(!canRun)("row-level security", () => {
 
   it("only sees its own tenant's rows", async () => {
     const a = await withTenant(orgA, (tx) => tx.select().from(schema.projects));
-    expect(a.map((r) => r.key)).toEqual(["a1"]);
+    expect(a.map((r) => r.slug)).toEqual(["a1"]);
 
     const b = await withTenant(orgB, (tx) => tx.select().from(schema.projects));
-    expect(b.map((r) => r.key)).toEqual(["b1"]);
+    expect(b.map((r) => r.slug)).toEqual(["b1"]);
   });
 
   it("denies by default when no tenant context is set", async () => {
@@ -71,21 +71,21 @@ describe.skipIf(!canRun)("row-level security", () => {
       withTenant(orgA, (tx) =>
         tx
           .insert(schema.projects)
-          .values({ organizationId: orgB, key: "hijack", name: "nope" }),
+          .values({ organizationId: orgB, slug: "hijack", name: "nope" }),
       ),
     ).rejects.toThrow();
   });
 
   it("can write within its own tenant", async () => {
-    const key = `a2-${tag}`;
+    const slug = `a2-${tag}`;
     await withTenant(orgA, (tx) =>
       tx
         .insert(schema.projects)
-        .values({ organizationId: orgA, key, name: "A Two" }),
+        .values({ organizationId: orgA, slug, name: "A Two" }),
     );
     const rows = await withTenant(orgA, (tx) =>
       tx.select().from(schema.projects),
     );
-    expect(rows.map((r) => r.key)).toContain(key);
+    expect(rows.map((r) => r.slug)).toContain(slug);
   });
 });

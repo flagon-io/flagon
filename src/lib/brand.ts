@@ -9,6 +9,7 @@ export const brand = {
   url: "https://www.flagon.io",
   apiUrl: "https://api.flagon.io",
   github: "https://github.com/flagon-io",
+  salesEmail: "sales@flagon.io",
 
   eyebrow: "The self-hostable developer platform",
   taglineLead: "Stop building your platform.",
@@ -19,8 +20,8 @@ export const brand = {
   /** Header nav; href null = page doesn't exist yet (rendered disabled). */
   nav: [
     { label: "Products", href: null },
-    { label: "Enterprise", href: null },
-    { label: "Pricing", href: null },
+    { label: "Enterprise", href: "/enterprise" },
+    { label: "Pricing", href: "/pricing" },
     { label: "Docs", href: "/docs" },
   ] as const,
 

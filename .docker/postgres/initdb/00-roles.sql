@@ -19,12 +19,8 @@ CREATE ROLE flagon_app WITH
 GRANT CONNECT ON DATABASE flagon TO flagon_app;
 GRANT USAGE ON SCHEMA public TO flagon_app;
 
--- DML on existing objects...
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO flagon_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO flagon_app;
-
--- ...and on anything the owner creates later (migrations run as flagon_owner).
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO flagon_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO flagon_app;
+-- NO table grants and NO default privileges here, deliberately. Every
+-- migration GRANTs the app role access to its tables explicitly, alongside
+-- the table's row-level security policy (or its auth-layer classification in
+-- src/db/tenancy.test.ts). A table nobody classified is unreachable by the
+-- app - it fails closed instead of leaking across tenants.

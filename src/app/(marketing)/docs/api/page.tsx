@@ -26,7 +26,7 @@ export default function ApiDocsPage() {
       <h1 className="mt-3 text-3xl font-semibold tracking-tight text-zinc-100">
         {spec.info.title}
       </h1>
-      <div className="mt-4 max-w-2xl space-y-3">
+      <div className="mt-4 space-y-3">
         {(spec.info.description ?? "")
           .split("\n")
           .filter(Boolean)
@@ -62,7 +62,7 @@ export default function ApiDocsPage() {
                 {tag}
               </div>
               {tagInfo?.description ? (
-                <p className="mt-1.5 max-w-2xl text-xs leading-5 text-zinc-500">
+                <p className="mt-1.5 text-xs leading-5 text-zinc-500">
                   {tagInfo.description}
                 </p>
               ) : null}

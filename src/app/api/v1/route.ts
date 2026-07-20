@@ -11,7 +11,7 @@ export function GET() {
   return apiJson({
     version: "v1",
     status: "ok",
-    resources: ["/v1/user", "/v1/user/emails"],
+    resources: ["/v1/user", "/v1/user/emails", "/v1/orgs"],
     openapi: "/v1/openapi.json",
     docs: `${brand.url}/docs/api`,
   });

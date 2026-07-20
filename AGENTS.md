@@ -28,6 +28,25 @@ BetterAuth models are mapped to these via modelName overrides in
 src/lib/auth.ts - any new BetterAuth plugin table gets the same treatment
 (plural modelName + hand-written migration).
 
+## Tenancy: every table is classified, nothing is reachable by accident
+
+The runtime role (flagon_app) is NOSUPERUSER + NOBYPASSRLS and receives NO
+blanket or default privileges - a table nobody classified is UNREACHABLE by
+the app (fails closed) instead of queryable without row-level security
+(leaks silently). Every new table's migration must therefore:
+
+1. `GRANT SELECT, INSERT, UPDATE, DELETE ON <table> TO flagon_app;` explicitly, and
+2. either `ENABLE ROW LEVEL SECURITY` with the `app.current_org_id` tenant
+   policy (product data - see drizzle/0000 for the canonical shape; query it
+   only through `withTenant`), or be added to AUTH_LAYER_TABLES in
+   `src/db/tenancy.test.ts` with a justification (global/auth-layer data,
+   access-checked in application code).
+
+The tenancy audit (`src/db/tenancy.test.ts`) walks the live catalog and
+fails on any unclassified table, missing tenant policy, default-privilege
+grant, or a role that could bypass RLS. Do not weaken it; extend the
+classification lists deliberately.
+
 ## IDs are UUIDv7
 
 ALL new ids are UUIDv7 (time-ordered, RFC 9562) unless there's an explicit

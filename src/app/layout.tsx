@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { brand } from "@/lib/brand";
-import { SiteBottomBar } from "@/components/site-bottom-bar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -41,10 +40,9 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        {children}
-        <SiteBottomBar />
-      </body>
+      {/* No global footer here: the console owns its viewport (no document
+          footer), so content surfaces render SiteBottomBar themselves. */}
+      <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }

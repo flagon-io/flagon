@@ -1,12 +1,18 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+import { auth } from "@/lib/auth";
 
 /**
  * App-surface 404. Deliberately ambiguous: an org/resource that doesn't exist
- * and one the viewer isn't allowed to see return the SAME response, so we never
- * leak the existence of private organizations. Doubles as the
- * "you may need to sign in" prompt.
+ * and one the viewer isn't allowed to see return the SAME response, so we
+ * never leak the existence of private organizations. Session-aware: signed-in
+ * users get a working path back to their console instead of a sign-in prompt.
  */
-export default function AppNotFound() {
+export default async function AppNotFound() {
+  const session = await auth.api
+    .getSession({ headers: await headers() })
+    .catch(() => null);
+
   return (
     <div className="mx-auto flex max-w-md flex-col items-center justify-center py-24 text-center">
       <p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
@@ -16,24 +22,34 @@ export default function AppNotFound() {
         Not found
       </h1>
       <p className="mt-3 text-sm leading-6 text-zinc-400">
-        This page doesn&apos;t exist, or you don&apos;t have access to it. If
-        you have an account, sign in to continue.
+        {session
+          ? "This page doesn't exist, or you don't have access to it. Check the address, or head back to your console."
+          : "This page doesn't exist, or you don't have access to it. If you have an account, sign in to continue."}
       </p>
       <div className="mt-8 flex items-center gap-4">
-        <button
-          type="button"
-          disabled
-          title="Coming soon"
-          className="inline-flex h-11 cursor-not-allowed items-center rounded-full bg-teal-500 px-5 text-sm font-medium text-zinc-950 opacity-50"
-        >
-          Sign in
-        </button>
-        <Link
-          href="/app"
-          className="text-sm text-zinc-400 transition-colors hover:text-zinc-200"
-        >
-          Back to console
-        </Link>
+        {session ? (
+          <Link
+            href="/app"
+            className="inline-flex h-10 items-center rounded-md bg-teal-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
+          >
+            Back to console
+          </Link>
+        ) : (
+          <>
+            <Link
+              href="/app/signin"
+              className="inline-flex h-10 items-center rounded-md bg-teal-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/app"
+              className="text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+            >
+              Back to console
+            </Link>
+          </>
+        )}
       </div>
     </div>
   );

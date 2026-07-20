@@ -2,13 +2,18 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
-import { username } from "better-auth/plugins";
+import { organization, username } from "better-auth/plugins";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { userEmails } from "../db/schema";
 import { brand } from "./brand";
 import { sendEmail } from "./email";
 import { renderBrandedEmail } from "./email-templates";
+import { billingEnabled } from "./billing";
+import { normalizeOrgSlug, validateOrgSlug } from "./org-slug";
+import { appHref } from "./urls";
+import { SELF_SERVE_PLANS, isPlanId } from "./plans";
+import { userOwnsFreeOrg } from "./plans.server";
 import { findByEmail } from "./user-emails";
 import { uuidv7 } from "./uuidv7";
 import {
@@ -140,6 +145,92 @@ export const auth = betterAuth({
       minUsernameLength: USERNAME_MIN_LENGTH,
       maxUsernameLength: USERNAME_MAX_LENGTH,
       usernameValidator: isValidUsername,
+    }),
+    organization({
+      // Plural table names per convention (drizzle/0007_organizations.sql).
+      schema: {
+        organization: {
+          modelName: "organizations",
+          additionalFields: {
+            // The org's plan (src/lib/plans.ts). Selectable at creation when
+            // billing is enabled; validated in beforeCreateOrganization.
+            plan: { type: "string", required: false, defaultValue: "free" },
+          },
+        },
+        member: { modelName: "members" },
+        invitation: { modelName: "invitations" },
+        team: { modelName: "teams" },
+        // Adapter models resolve by drizzle schema KEY (the pgTable maps it
+        // to the team_members SQL name), same as rateLimits -> rate_limits.
+        teamMember: { modelName: "teamMembers" },
+      },
+      creatorRole: "owner",
+      // Teams: named groups of org members that own/get access to resources
+      // (projects first), mirroring how code hosts scope repository access.
+      teams: { enabled: true },
+      invitationExpiresIn: 60 * 60 * 24 * 7, // 7 days
+      // Invitations are email-keyed: inviting an existing account routes to
+      // its primary address, and accepting requires being signed in with it.
+      sendInvitationEmail: async (data) => {
+        const path = appHref(`/invitations/${data.id}`);
+        const url = path.startsWith("http") ? path : `${baseURL}${path}`;
+        await sendEmail({
+          to: data.email,
+          subject: `Join ${data.organization.name} on ${brand.name}`,
+          ...renderBrandedEmail({
+            preview: `${data.inviter.user.name} invited you to ${data.organization.name}.`,
+            heading: `Join ${data.organization.name}`,
+            paragraphs: [
+              `${data.inviter.user.name} invited you to the ${data.organization.name} organization on ${brand.name} (role: ${data.role}).`,
+              `No ${brand.name} account yet? Sign up with this email address first, then open the invitation.`,
+            ],
+            cta: { label: "View invitation", url },
+            footnote:
+              "The invitation expires in 7 days. If you weren't expecting this, you can safely ignore this email.",
+          }),
+        });
+      },
+      organizationHooks: {
+        // Slugs are URL identity (app.flagon.io/<slug>): normalize and
+        // enforce charset + reserved-word rules server-side. Plan selection
+        // is enforced here too so the API can't sidestep the UI.
+        beforeCreateOrganization: async ({ organization: org, user }) => {
+          const slug = normalizeOrgSlug(org.slug ?? "");
+          const result = validateOrgSlug(slug);
+          if (!result.ok) {
+            throw APIError.from("UNPROCESSABLE_ENTITY", {
+              message: result.error,
+              code: "INVALID_ORGANIZATION_SLUG",
+            });
+          }
+
+          const requested = (org as { plan?: string }).plan ?? "free";
+          const plan = "free";
+          if (billingEnabled()) {
+            if (!isPlanId(requested) || !SELF_SERVE_PLANS.includes(requested)) {
+              throw APIError.from("UNPROCESSABLE_ENTITY", {
+                message: "Choose a plan: free or pro.",
+                code: "INVALID_PLAN",
+              });
+            }
+            // Pro is never granted here: every org is created on the free
+            // plan and the Stripe webhook flips it to pro after checkout
+            // completes. A "pro" request only bypasses the one-free-org
+            // limit (the caller is heading to checkout).
+            if (requested === "free" && (await userOwnsFreeOrg(user.id))) {
+              throw APIError.from("UNPROCESSABLE_ENTITY", {
+                message:
+                  "You already have a Hobby organization. Create this one on Pro, or upgrade your existing organization.",
+                code: "FREE_ORG_LIMIT_REACHED",
+              });
+            }
+          }
+          // Billing off (self-host / pre-Stripe): no plan selection, no
+          // free-org limits; everything resolves all-on regardless.
+
+          return { data: { ...org, slug, plan } };
+        },
+      },
     }),
     // Must stay last: lets auth.api.* calls made from server actions write
     // their Set-Cookie headers through Next's cookie store.

@@ -6,20 +6,37 @@ import { brand } from "@/lib/brand";
 import { FlagonMark } from "@/lib/logo";
 import { UserMenu } from "@/components/user-menu";
 import { listEmails } from "@/lib/user-emails";
-import { VerifyEmailBanner } from "./verify-email-banner";
+import { OrgSwitcher, type SwitcherOrg } from "./org-switcher";
+import { SidebarNav } from "./sidebar-nav";
+import { VerifyEmailBanner } from "../verify-email-banner";
 
 /**
- * Signed-in console chrome. The session check gates every console page: an
- * anonymous visit to any org/console URL lands on the sign-in form instead.
- * Auth pages live in the sibling (auth) group so they stay reachable.
+ * Signed-in console chrome: fixed left sidebar (org switcher on top, product
+ * navigation below) and a slim top bar with the account menu. The session
+ * check gates every console page: an anonymous visit to any org/console URL
+ * lands on the sign-in form instead. Auth pages live in the sibling (auth)
+ * group so they stay reachable.
  */
 export default async function ConsoleLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth.api.getSession({ headers: await headers() });
+  const requestHeaders = await headers();
+  const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) redirect("/app/signin");
+
+  const orgs = await auth.api.listOrganizations({ headers: requestHeaders });
+  const switcherOrgs: SwitcherOrg[] = orgs.map((org) => ({
+    id: org.id,
+    slug: org.slug,
+    name: org.name,
+    plan: (org as { plan?: string }).plan ?? "free",
+  }));
+  const activeOrg =
+    orgs.find((org) => org.id === session.session.activeOrganizationId) ??
+    orgs[0] ??
+    null;
 
   // Unverified primary email: keep the user signed in (no lockouts) but nag
   // persistently until the address is proven.
@@ -28,33 +45,58 @@ export default async function ConsoleLayout({
     : ((await listEmails(session.user.id)).find((e) => e.isPrimary) ?? null);
 
   return (
-    <>
-      <header className="sticky top-0 z-20 border-b border-white/5 bg-[#09090b]/80 backdrop-blur">
-        <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between px-4">
-          <div className="flex items-center gap-2.5">
-            <Link href="/app" className="flex items-center gap-2">
+    // The console is an application, not a document: the shell pins itself
+    // to the viewport (fixed inset-0), the sidebar never moves, and only the
+    // content pane scrolls. Fixed positioning makes full-height unconditional
+    // - no dependence on ancestor height chains or dvh quirks.
+    <div className="fixed inset-0 flex overflow-hidden bg-[#09090b]">
+      <aside className="hidden h-full w-60 shrink-0 flex-col border-r border-white/5 md:flex">
+        {/* Same height + border as the top bar so the switcher and account
+            menu read as one continuous header band. */}
+        <div className="flex h-14 shrink-0 items-center border-b border-white/5 px-2">
+          <OrgSwitcher
+            orgs={switcherOrgs}
+            activeOrgId={activeOrg?.id ?? null}
+          />
+        </div>
+        <SidebarNav
+          orgSlugs={switcherOrgs.map((org) => org.slug)}
+          fallbackSlug={activeOrg?.slug ?? null}
+        />
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* h-14 + border on the SAME element as the switcher band next door,
+            so both borders land on the same pixel row. */}
+        <header className="flex h-14 shrink-0 border-b border-white/5">
+          <div className="flex flex-1 items-center justify-between px-4 sm:px-6">
+            <Link href="/app" className="flex items-center gap-2 md:hidden">
               <FlagonMark className="h-6 w-6" />
               <span className="text-sm font-semibold tracking-tight">
                 {brand.name}
               </span>
             </Link>
-            <span className="text-zinc-600">/</span>
-            <span className="text-sm text-zinc-400">Console</span>
+            <div aria-hidden className="hidden md:block" />
+            <UserMenu />
           </div>
-          <UserMenu />
-        </div>
-      </header>
+        </header>
 
-      {primaryEmail ? (
-        <VerifyEmailBanner
-          email={primaryEmail.email}
-          emailRowId={primaryEmail.id}
-        />
-      ) : null}
+        {primaryEmail ? (
+          <VerifyEmailBanner
+            email={primaryEmail.email}
+            emailRowId={primaryEmail.id}
+          />
+        ) : null}
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-10">
-        {children}
-      </main>
-    </>
+        {/* No footer in the console: it's an application surface. Legal
+            links live in the account menu / marketing pages. Content sits in
+            a centered column regardless of how much width it uses. */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
+            {children}
+          </div>
+        </main>
+      </div>
+    </div>
   );
 }

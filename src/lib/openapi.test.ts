@@ -81,6 +81,7 @@ describe("OpenAPI document", () => {
       "/auth/[...all]", // BetterAuth's surface (browser flows)
       "/verify-email", // emailed-link landing (browser flow)
       "/cron/cleanup", // scheduled maintenance (infra, CRON_SECRET-gated)
+      "/webhooks/stripe", // Stripe webhook (infra, signature-gated)
       "/[...catchall]", // JSON 404 fallback
     ];
 

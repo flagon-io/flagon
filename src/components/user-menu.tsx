@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Building2, LayoutDashboard, LogOut, Settings } from "lucide-react";
+import { Building2, LogOut, Settings } from "lucide-react";
 import { authClient, useSession } from "@/lib/auth-client";
 import { appHref } from "@/lib/urls";
 
@@ -118,13 +118,13 @@ export function UserMenu() {
           <div className="my-1 border-t border-white/5" />
 
           <Link
-            href={appHref("/")}
+            href={appHref("/settings/organizations")}
             role="menuitem"
             onClick={() => setOpen(false)}
             className={itemClass}
           >
-            <LayoutDashboard className="h-4 w-4 text-zinc-500" aria-hidden />
-            Dashboard
+            <Building2 className="h-4 w-4 text-zinc-500" aria-hidden />
+            Your organizations
           </Link>
           <Link
             href={appHref("/settings")}
@@ -135,18 +135,6 @@ export function UserMenu() {
             <Settings className="h-4 w-4 text-zinc-500" aria-hidden />
             Settings
           </Link>
-          <span
-            aria-disabled
-            title="Coming soon"
-            className="flex cursor-not-allowed items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-zinc-600"
-          >
-            <Building2 className="h-4 w-4" aria-hidden />
-            Your organizations
-            <span className="ml-auto rounded-full border border-white/10 px-1.5 text-[10px] uppercase tracking-wide text-zinc-600">
-              Soon
-            </span>
-          </span>
-
           <div className="my-1 border-t border-white/5" />
 
           <button

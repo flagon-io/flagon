@@ -27,6 +27,7 @@ type Schema = {
   required?: readonly string[];
   properties?: Record<string, Schema>;
   items?: Schema;
+  allOf?: readonly Schema[];
   $ref?: string;
 };
 
@@ -101,6 +102,12 @@ function exampleOf(schema: Schema | undefined): unknown {
   const s = resolve(schema);
   if (!s) return null;
   if (s.example !== undefined) return s.example;
+  if (s.allOf) {
+    return Object.assign(
+      {},
+      ...s.allOf.map((part) => exampleOf(part) as object),
+    ) as Record<string, unknown>;
+  }
   if (s.type === "array") return [exampleOf(s.items)];
   if (s.type === "object" || s.properties) {
     const out: Record<string, unknown> = {};

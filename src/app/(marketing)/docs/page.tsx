@@ -71,7 +71,7 @@ export default function DocsHomePage() {
       <h1 className="mt-3 text-3xl font-semibold tracking-tight text-zinc-100">
         {brand.name} Documentation
       </h1>
-      <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-400">
+      <p className="mt-4 text-sm leading-6 text-zinc-400">
         Everything you need to build on {brand.name}: guides, concepts, and a
         complete API reference. Most sections land alongside their features;
         what&apos;s live is ready below.
@@ -83,7 +83,7 @@ export default function DocsHomePage() {
             <Link
               key={title}
               href={href}
-              className="group rounded-xl border border-white/10 bg-white/2 p-5 transition hover:border-teal-500/40 hover:bg-white/3"
+              className="group border border-white/10 bg-white/2 p-5 transition hover:border-teal-500/40 hover:bg-white/3"
             >
               <div className="flex items-center gap-2.5">
                 <Icon className="h-4.5 w-4.5 text-teal-400" aria-hidden />
@@ -104,7 +104,7 @@ export default function DocsHomePage() {
               key={title}
               aria-disabled
               title="Coming soon"
-              className="cursor-not-allowed rounded-xl border border-white/5 p-5 opacity-60"
+              className="cursor-not-allowed border border-white/5 p-5 opacity-60"
             >
               <div className="flex items-center gap-2.5">
                 <Icon className="h-4.5 w-4.5 text-zinc-600" aria-hidden />

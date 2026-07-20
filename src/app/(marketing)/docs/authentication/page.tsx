@@ -10,8 +10,8 @@ export const metadata: Metadata = {
 
 const h2 = "mt-12 text-xl font-semibold tracking-tight text-zinc-100";
 const h3 = "mt-8 text-base font-semibold text-zinc-100";
-const p = "mt-3 max-w-2xl text-sm leading-6 text-zinc-400";
-const li = "max-w-2xl text-sm leading-6 text-zinc-400";
+const p = "mt-3 text-sm leading-6 text-zinc-400";
+const li = "text-sm leading-6 text-zinc-400";
 const a = "text-teal-400 transition hover:text-teal-300 hover:underline";
 const code = "rounded bg-white/5 px-1 py-0.5 text-[13px] text-zinc-200";
 
