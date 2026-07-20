@@ -257,13 +257,12 @@ export function NewOrgForm({
       ) : null}
 
       {!billingEnabled ? (
-        <div className="mx-auto mt-10 max-w-xl">
-          <Notice tone="info">
-            Billing isn&apos;t configured on this deployment, so plans
-            don&apos;t apply here: every organization runs with everything
-            unlocked.
-          </Notice>
-        </div>
+        // Quiet footnote, not a warning: billing-off is the normal state for
+        // self-hosted deployments, nothing needs fixing.
+        <p className="mx-auto mt-8 max-w-xl text-center text-xs leading-5 text-zinc-600">
+          Billing isn&apos;t configured on this deployment, so plans
+          don&apos;t apply: every organization runs with everything unlocked.
+        </p>
       ) : null}
     </div>
   );

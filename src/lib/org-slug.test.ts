@@ -16,9 +16,24 @@ describe("organization slug rules", () => {
     expect(validateOrgSlug("a".repeat(40)).ok).toBe(false);
   });
 
-  it("rejects reserved route and platform words", () => {
-    for (const slug of ["settings", "signin", "api", "docs", "new", "flagon"]) {
+  it("blocks only app-route segments (an org there would be unreachable)", () => {
+    for (const slug of [
+      "signin",
+      "signup",
+      "forgot-password",
+      "reset-password",
+      "settings",
+      "new",
+      "invitations",
+      "api",
+    ]) {
       expect(validateOrgSlug(slug).ok, slug).toBe(false);
+    }
+  });
+
+  it("everything else is first-come, including brand and platform words", () => {
+    for (const slug of ["flagon", "docs", "admin", "support", "billing"]) {
+      expect(validateOrgSlug(slug).ok, slug).toBe(true);
     }
   });
 
