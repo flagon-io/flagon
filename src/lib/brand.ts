@@ -16,7 +16,13 @@ export const brand = {
   description:
     "One hub for your projects, environments, and teams, with the products you'd otherwise buy or build stitched right in. One catalog, one login, one bill, everything sharing the same foundation.",
 
-  nav: ["Products", "Enterprise", "Pricing", "Docs"] as const,
+  /** Header nav; href null = page doesn't exist yet (rendered disabled). */
+  nav: [
+    { label: "Products", href: null },
+    { label: "Enterprise", href: null },
+    { label: "Pricing", href: null },
+    { label: "Docs", href: "/docs" },
+  ] as const,
 
   products: [
     "Catalog",

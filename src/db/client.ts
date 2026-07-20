@@ -1,9 +1,9 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { organizations, projects } from "./schema";
+import { organizations, projects, userEmails, rateLimit } from "./schema";
 import * as authSchema from "./auth-schema";
 
-const schema = { organizations, projects, ...authSchema };
+const schema = { organizations, projects, userEmails, rateLimit, ...authSchema };
 
 /**
  * Base database client, connecting as the RESTRICTED `flagon_app` role

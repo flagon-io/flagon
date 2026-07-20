@@ -26,8 +26,8 @@ const groups: FooterGroup[] = [
   {
     title: "Resources",
     links: [
-      { label: "Docs" },
-      { label: "API reference" },
+      { label: "Docs", href: "/docs" },
+      { label: "API reference", href: "/docs/api" },
       { label: "Status" },
       { label: "Changelog" },
     ],
@@ -73,7 +73,7 @@ function FooterItem({ link }: { link: FooterLink }) {
 export function SiteFooter() {
   return (
     <footer className="w-full border-t border-white/5">
-      <div className="mx-auto w-full max-w-6xl px-6 py-14">
+      <div className="mx-auto w-full max-w-7xl px-6 py-14">
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-4 lg:grid-cols-5">
           {/* Brand cell */}
           <div className="col-span-2 flex flex-col gap-3 lg:col-span-1">

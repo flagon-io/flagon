@@ -3,7 +3,7 @@ import Link from "next/link";
 /**
  * App-surface 404. Deliberately ambiguous: an org/resource that doesn't exist
  * and one the viewer isn't allowed to see return the SAME response, so we never
- * leak the existence of private organizations (GitHub-style). Doubles as the
+ * leak the existence of private organizations. Doubles as the
  * "you may need to sign in" prompt.
  */
 export default function AppNotFound() {

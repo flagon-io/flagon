@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { brand } from "@/lib/brand";
 
 export default function Home() {
   return (
-    <main className="relative mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center px-6 py-20 text-zinc-100">
+    <main className="relative mx-auto flex w-full max-w-7xl flex-1 flex-col justify-center px-6 py-20 text-zinc-100">
       <p className="mb-6 text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
         {brand.eyebrow}
       </p>
@@ -39,7 +40,16 @@ export default function Home() {
           </span>
           <span className="text-sm font-medium text-teal-300">Coming soon</span>
         </div>
-        <p className="text-sm text-zinc-500">Sign-ups open soon.</p>
+        <p className="text-sm text-zinc-500">
+          Sign-ups open soon. In the meantime,{" "}
+          <Link
+            href="/docs/api"
+            className="text-teal-400 transition hover:text-teal-300 hover:underline"
+          >
+            browse the API reference
+          </Link>
+          .
+        </p>
       </div>
     </main>
   );

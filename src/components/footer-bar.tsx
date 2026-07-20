@@ -13,7 +13,7 @@ import { marketingHref } from "@/lib/urls";
  * rendered inside the app (app.flagon.io).
  */
 export function FooterBar({
-  maxWidthClass = "max-w-6xl",
+  maxWidthClass = "max-w-7xl",
 }: {
   maxWidthClass?: string;
 }) {

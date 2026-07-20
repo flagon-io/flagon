@@ -12,7 +12,7 @@ services:
       - "5432:5432"
     volumes:
       - flagon_pg:/var/lib/postgresql/data
-      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+      - ./.docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U flagon_owner -d flagon"]
       interval: 5s

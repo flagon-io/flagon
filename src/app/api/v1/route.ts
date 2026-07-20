@@ -1,8 +1,9 @@
 import { apiJson } from "@/lib/api";
+import { brand } from "@/lib/brand";
 
 /**
  * v1 API index - served at `api.flagon.io/v1` (locally `/api/v1`).
- * Resource endpoints will hang off this segment (e.g. /v1/orgs, /v1/flags).
+ * Discovery: lists resources, the OpenAPI document, and the human docs.
  */
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,8 @@ export function GET() {
   return apiJson({
     version: "v1",
     status: "ok",
-    resources: [],
+    resources: ["/v1/user", "/v1/user/emails"],
+    openapi: "/v1/openapi.json",
+    docs: `${brand.url}/docs/api`,
   });
 }

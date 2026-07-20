@@ -16,6 +16,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 function join(base: string, path: string): string {
   const normalized = path.startsWith("/") ? path : `/${path}`;
+  if (base && normalized === "/") return base;
   return `${base}${normalized}`;
 }
 
@@ -24,12 +25,16 @@ export function marketingHref(path = "/"): string {
   return join(MARKETING_URL, path);
 }
 
-/** Link to an app page (app.flagon.io in production). */
+/**
+ * Link to an app page (app.flagon.io in production). Without a configured base
+ * URL (local dev, single-domain self-host) the app lives under the /app path
+ * prefix, so the fallback is path-prefixed rather than relative.
+ */
 export function appHref(path = "/"): string {
-  return join(APP_URL, path);
+  return join(APP_URL || "/app", path);
 }
 
-/** Link to an API endpoint (api.flagon.io in production). */
+/** Link to an API endpoint (api.flagon.io in production; /api otherwise). */
 export function apiHref(path = "/"): string {
-  return join(API_URL, path);
+  return join(API_URL || "/api", path);
 }
