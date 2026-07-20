@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { userEmails } from "../db/schema";
 import { brand } from "./brand";
+import { sessionCookieDomain } from "./cookie-domain";
 import { sendEmail } from "./email";
 import { renderBrandedEmail } from "./email-templates";
 import { billingEnabled } from "./billing";
@@ -33,7 +34,12 @@ import {
  * so www and api see it too.
  */
 const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
-const crossSubDomain = new URL(baseURL).hostname.includes(".");
+// One sign-in, visible on www / app / api: the session cookie is scoped to
+// the apex domain. Null on localhost and preview hosts (single origin).
+const cookieDomain = sessionCookieDomain(
+  baseURL,
+  process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "flagon.io",
+);
 
 const trustedOrigins = [
   process.env.NEXT_PUBLIC_APP_URL,
@@ -259,7 +265,11 @@ export const auth = betterAuth({
     // Changing this invalidates existing sessions (old cookie name is simply
     // ignored), which is fine pre-launch.
     cookiePrefix: "flagon",
-    crossSubDomainCookies: { enabled: crossSubDomain },
+    // Explicit domain: BetterAuth otherwise defaults to the full baseURL
+    // hostname (app.flagon.io), which the marketing site can't read.
+    crossSubDomainCookies: cookieDomain
+      ? { enabled: true, domain: cookieDomain }
+      : { enabled: false },
     // Platform convention: ALL ids are UUIDv7 (time-ordered) unless there's
     // an explicit reason otherwise. Applies to user/session/account/
     // verification rows created by BetterAuth.
