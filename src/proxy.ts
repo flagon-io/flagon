@@ -37,13 +37,10 @@ export function proxy(request: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
-  // app.flagon.io: the app is served at the subdomain ROOT. A leaked /app
-  // prefix (old link, local-style URL) is canonicalized away with a
-  // permanent redirect so production URLs are always app.flagon.io/<org>/...
-  if (
-    sub === "app" &&
-    (pathname === "/app" || pathname.startsWith("/app/"))
-  ) {
+  // app.flagon.io: the app is served at the subdomain ROOT. A /app prefix
+  // here is a local-style URL that leaked into production, so it is
+  // canonicalized away: production URLs are always app.flagon.io/<org>/...
+  if (sub === "app" && (pathname === "/app" || pathname.startsWith("/app/"))) {
     const url = request.nextUrl.clone();
     url.pathname = pathname.slice("/app".length) || "/";
     return NextResponse.redirect(url, 308);
