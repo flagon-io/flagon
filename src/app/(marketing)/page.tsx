@@ -45,7 +45,7 @@ const principles = [
   {
     icon: Server,
     title: "Self-host the whole thing",
-    body: "Every capability, unmetered, on your own Postgres. There is no reduced community edition, and nothing is held back for the hosted service.",
+    body: "Source-available under the FSL: run it on your own Postgres, for your own use, with no license fee. What ships in the repository is the real platform, not a cut-down community edition.",
   },
 ] as const;
 
@@ -101,7 +101,7 @@ export default function Home() {
             </Link>
           </>
         }
-        footnote="Free to start, no card required. Self-host it free, forever."
+        footnote="Free to start, no card required. Or run it yourself, source-available."
       />
 
       {/* Products */}

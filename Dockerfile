@@ -7,15 +7,27 @@
 # Built on Next's standalone output, so the runtime layer carries only the
 # modules actually reached rather than the full node_modules tree.
 
+# The Node major, defaulted to match .nvmrc. CI passes the value read FROM
+# .nvmrc so there is one source of truth; the default keeps a bare
+# `docker build .` honest for anyone building by hand.
+#
+# This was 22 while .nvmrc said 24, which is not a cosmetic drift: the image
+# was building the app on a runtime CI never tests, and at least one
+# dependency declares `node >=24`, so `npm ci` was emitting EBADENGINE and
+# carrying on. An engine warning is a promise that something will break later,
+# somewhere with a worse stack trace.
+ARG NODE_VERSION=24
+
 # --- deps -------------------------------------------------------------------
-FROM node:22-alpine AS deps
+FROM node:${NODE_VERSION}-alpine AS deps
 WORKDIR /app
 # Only the manifests, so this layer caches until dependencies actually change.
 COPY package.json package-lock.json ./
 RUN npm ci
 
 # --- build ------------------------------------------------------------------
-FROM node:22-alpine AS build
+ARG NODE_VERSION
+FROM node:${NODE_VERSION}-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -32,7 +44,8 @@ ARG BETTER_AUTH_SECRET=build-time-placeholder-not-used-at-runtime
 RUN npm run build
 
 # --- runtime ----------------------------------------------------------------
-FROM node:22-alpine AS runner
+ARG NODE_VERSION
+FROM node:${NODE_VERSION}-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

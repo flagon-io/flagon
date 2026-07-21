@@ -1,0 +1,12 @@
+{
+  "comment": "THE mark. Every other logo asset is generated from this file by scripts/build-logo-assets.mjs - do not hand-edit icon.svg or the .github avatars. JSON rather than TS so a plain node script and the app can both read it without a build step.",
+  "viewBox": "0 0 64 64",
+  "strokeWidth": 3.2,
+  "bounds": { "x": 15, "y": 15, "width": 34, "height": 35 },
+  "paths": [
+    "M18 22 L36 22 L39 50 L15 50 Z",
+    "M19 22 L21 15 L33 15 L35 22 Z",
+    "M37 28 L46 29 L49 34 L49 39 L46 44 L38 43"
+  ],
+  "pathNames": ["body", "lid", "handle"]
+}

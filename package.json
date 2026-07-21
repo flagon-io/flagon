@@ -17,7 +17,11 @@
     "org:claim": "node scripts/org-claim.mjs",
     "stripe:listen": "docker compose up -d stripe && docker compose logs -f stripe",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "logo": "node scripts/build-logo-assets.mjs"
+  },
+  "engines": {
+    "node": ">=24"
   },
   "dependencies": {
     "@icons-pack/react-simple-icons": "^13.13.0",

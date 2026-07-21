@@ -23,9 +23,9 @@ export default function DocsLayout({
   //
   // Self-hosting sits in "Get started" rather than in a "Platform" section
   // near the bottom, because where a capability appears in a sidebar is a
-  // claim about how important it is. Running the whole platform yourself,
-  // unmetered, is one of the main reasons to choose this product at all;
-  // listing it after the product guides files it as an appendix for people
+  // claim about how important it is. Running the whole platform yourself is
+  // one of the main reasons to choose this product at all; listing it after
+  // the product guides files it as an appendix for people
   // with unusual requirements, which is the opposite of true. Reading it as
   // the second thing on the page is the point.
   const navModel: DocsNavModel = {

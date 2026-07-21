@@ -36,9 +36,32 @@ export default function SelfHostingDocsPage() {
       </h1>
       <p className={p}>
         {brand.name} is one Next.js application and one Postgres database.
-        Self-hosting runs the whole platform with every feature enabled and
-        nothing metered: there is no reduced &ldquo;community edition&rdquo;,
-        and no capability is held back for the hosted service.
+        Self-hosting runs the real platform, not a reduced &ldquo;community
+        edition&rdquo;: the capabilities in this repository are the ones the
+        hosted service runs on.
+      </p>
+      <p className={p}>
+        It is source-available under the{" "}
+        <a
+          href={`${brand.repo}/blob/main/LICENSE.md`}
+          className={a}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          Functional Source License
+        </a>
+        . In practice: run it for your own purposes, internally or
+        commercially, without a license fee. The one thing it does not permit
+        is offering {brand.name} itself as a competing product or service. Each
+        release converts to Apache 2.0 two years after we publish it, so the
+        code you depend on becomes fully open source on a clock you can read.
+      </p>
+      <p className={p}>
+        What that does not buy you is our operations. The hosted service exists
+        because upgrades, backups, and the pager are real work, and self-hosting
+        moves that work to you: there is no SLA and no support commitment on
+        your deployment. That is the honest trade, and it is worth making
+        deliberately rather than discovering later.
       </p>
 
       <h2 className={h2}>The short version</h2>

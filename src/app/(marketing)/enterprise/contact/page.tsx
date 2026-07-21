@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { BadgeCheck, Building2, Rocket } from "lucide-react";
 import { brand } from "@/lib/brand";
-import { FlagonMark } from "@/lib/logo";
 import { PLANS } from "@/lib/plans";
+import { BleedBand } from "@/components/bleed-band";
+import { PageHero } from "@/components/page-hero";
 import { ContactSalesForm } from "./contact-sales-form";
 
 export const metadata: Metadata = {
@@ -28,69 +29,69 @@ const points = [
   },
 ] as const;
 
-/** Enterprise contact - `/enterprise/contact`. Split layout: gradient pitch
- * panel on the left, lead form on the right. Submissions land in the leads
- * table for internal follow-up. */
+/**
+ * Enterprise contact.
+ *
+ * Built from the same two pieces as every other marketing page: the shared
+ * hero, then a band ruled edge to edge. It used to be a bespoke full-bleed
+ * two-column grid with its own gradient panel, which was written before the
+ * page grid existed and never joined it - the left panel ran to the viewport
+ * edge while the site's column rules, the header, and the footer all sat on a
+ * different set of edges, and `flex-1` stretched the whole thing to the
+ * viewport leaving a screen of dead space under a short form.
+ *
+ * The form column is given slightly more width than the pitch column. Inputs
+ * have a minimum comfortable size that prose does not, so an even split makes
+ * the fields feel cramped while the copy floats.
+ */
 export default function EnterpriseContactPage() {
   return (
-    <div className="grid flex-1 grid-cols-1 lg:grid-cols-2">
-      {/* Pitch panel */}
-      <div className="relative overflow-hidden border-r border-white/10 bg-[#07100f] px-6 py-16 sm:px-12 lg:px-20 lg:py-28">
-        {/* Ambient gradient */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0"
-          style={{
-            background:
-              "radial-gradient(80% 60% at 0% 100%, rgba(13,148,136,0.35) 0%, rgba(13,148,136,0.12) 40%, transparent 70%), radial-gradient(60% 50% at 100% 0%, rgba(45,212,191,0.10) 0%, transparent 60%)",
-          }}
-        />
-        <div className="relative mx-auto w-full max-w-xl lg:ml-auto lg:mr-8">
-          <FlagonMark className="h-10 w-10" />
-          <p className="mt-8 font-mono text-xs uppercase tracking-[0.25em] text-teal-400/80">
-            Enterprise
-          </p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight text-zinc-100">
-            Talk to our sales team
-          </h1>
+    <div className="relative">
+      <PageHero
+        eyebrow="Enterprise"
+        title="Talk to our sales team"
+        lede="Tell us what you're running and we'll come back with a number. Fixed pricing shaped from your usage estimates, no hard caps, and support that answers."
+        rule={false}
+      />
 
-          <div className="mt-12 space-y-9">
-            {points.map(({ icon: Icon, title, body }) => (
-              <div key={title} className="flex gap-4">
-                <span
-                  aria-hidden
-                  className="flex h-10 w-10 shrink-0 items-center justify-center border border-teal-500/20 bg-teal-500/10 text-teal-300"
-                >
-                  <Icon className="h-5 w-5" />
-                </span>
-                <div>
-                  <h2 className="text-sm font-semibold text-zinc-100">
-                    {title}
-                  </h2>
-                  <p className="mt-1 max-w-md text-sm leading-6 text-zinc-400">
-                    {body}
-                  </p>
+      <BleedBand>
+        <div className="grid grid-cols-1 divide-y divide-white/10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:divide-x lg:divide-y-0">
+          <div className="p-8 sm:p-10 lg:p-12">
+            <div className="space-y-8">
+              {points.map(({ icon: Icon, title, body }) => (
+                <div key={title} className="flex gap-4">
+                  <span
+                    aria-hidden
+                    className="flex h-10 w-10 shrink-0 items-center justify-center border border-teal-500/20 bg-teal-500/10 text-teal-300"
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h2 className="text-sm font-semibold text-zinc-100">
+                      {title}
+                    </h2>
+                    <p className="mt-1 text-sm leading-6 text-zinc-400">
+                      {body}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+
+            <p className="mt-10 border-t border-white/5 pt-6 text-sm leading-6 text-zinc-500">
+              Not enterprise-sized yet? Pro is ${PLANS.pro.priceMonthly}/month
+              and self-serve.
+            </p>
           </div>
 
-          <p className="mt-14 max-w-md border-t border-white/5 pt-6 text-sm leading-6 text-zinc-500">
-            Not enterprise-sized yet? Pro is ${PLANS.pro.priceMonthly}/month
-            and self-serve.
-          </p>
+          <div className="p-8 sm:p-10 lg:p-12">
+            <p className="mb-6 font-mono text-xs text-zinc-500">
+              Fields marked * are required.
+            </p>
+            <ContactSalesForm />
+          </div>
         </div>
-      </div>
-
-      {/* Form panel */}
-      <div className="flex items-start justify-center px-6 py-16 sm:px-12 lg:px-20 lg:py-28">
-        <div className="w-full max-w-xl lg:ml-8 lg:mr-auto">
-          <p className="mb-6 text-xs text-zinc-500">
-            All fields marked with an asterisk (*) are required.
-          </p>
-          <ContactSalesForm />
-        </div>
-      </div>
+      </BleedBand>
     </div>
   );
 }

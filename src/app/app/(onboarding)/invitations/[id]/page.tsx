@@ -70,9 +70,18 @@ export default async function InvitationPage({
           <h1 className="mt-5 text-2xl font-semibold tracking-tight text-zinc-100">
             Can&apos;t open this invitation
           </h1>
+          {/* Two paragraphs, not one sentence built by concatenation. The
+              upstream message comes from BetterAuth and does not reliably end
+              in a full stop, so appending our guidance to it produced
+              "...for the session email Make sure you're signed in", which
+              reads as a rendering fault on the first page an invited person
+              ever sees. */}
           <p className="mt-3 text-sm leading-6 text-zinc-400">
-            {blockedMessage ??
-              "This invitation doesn't exist, has expired, or was sent to a different email address."}{" "}
+            {blockedMessage
+              ? blockedMessage.replace(/\s*[.!?]?\s*$/, ".")
+              : "This invitation doesn't exist, has expired, or was sent to a different email address."}
+          </p>
+          <p className="mt-3 text-sm leading-6 text-zinc-500">
             Make sure you&apos;re signed in with the account whose primary
             email received the invitation, and that the address is verified.
           </p>

@@ -17,11 +17,11 @@ export const metadata: Metadata = {
   description: `Guides and reference documentation for ${brand.name}: the self-hostable developer platform.`,
 };
 
-// Ordering: getting started and concepts first, then the products, with the
 // Self-hosting is second, matching the sidebar: running it yourself is a
-// headline capability, not a footnote. API reference last. Typed explicitly so a section can go
-// back to `href: null` (unbuilt) without the placeholder branch below
-// becoming unreachable and losing its types.
+// headline capability, not a footnote. Then concepts, then the products, with
+// the API reference last. Typed explicitly so a section can go back to
+// `href: null` (unbuilt) without the placeholder branch below becoming
+// unreachable and losing its types.
 type DocsSection = {
   title: string;
   description: string;
@@ -39,7 +39,7 @@ const sections: readonly DocsSection[] = [
   {
     title: "Self-hosting",
     description:
-      "Run the whole platform yourself, free and unmetered, with every feature enabled. One command to start.",
+      "Run the whole platform on your own infrastructure, source-available under the FSL. One command to start.",
     href: "/docs/self-hosting",
     icon: Server,
   },

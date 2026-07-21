@@ -49,7 +49,7 @@ const capabilities = [
   "Server and client credentials, scoped separately",
   "Realtime invalidation stream, with polling fallback",
   "Full REST API and OpenAPI spec",
-  "Self-host the whole thing, unmetered",
+  "Self-host the whole thing, source-available",
 ] as const;
 
 export default function FeatureFlagsProductPage() {

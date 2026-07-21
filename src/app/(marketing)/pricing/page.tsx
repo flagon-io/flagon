@@ -32,8 +32,8 @@ const included = [
   },
   {
     icon: Server,
-    title: "Self-host free, forever",
-    body: "Run the whole platform on your own infrastructure with everything enabled and nothing metered.",
+    title: "Run it yourself",
+    body: "Source-available under the FSL. Deploy the whole platform on your own infrastructure, for your own use, with no license fee.",
   },
 ] as const;
 
@@ -60,7 +60,7 @@ export default function PricingPage() {
             to ship for real, and pay for what you actually serve.
           </>
         }
-        footnote={`One pooled credit across every product. Self-host it free, forever.`}
+        footnote={`One pooled credit across every product. Or run it yourself, source-available.`}
         rule={false}
       />
 
