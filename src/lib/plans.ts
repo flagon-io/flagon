@@ -14,6 +14,25 @@
 export const PLAN_IDS = ["free", "pro", "enterprise"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
+/**
+ * Does a period's usage become invoice lines automatically?
+ *
+ * Only Pro. Hobby is never invoiced at all, and Enterprise is CONTRACTED: the
+ * fee is negotiated up front from usage estimates, and the envelope it covers
+ * lives in the agreement rather than in this codebase. That distinction is
+ * easy to lose because `PLANS.enterprise.includedUsageCents` is 0 - which
+ * means "no self-serve credit", NOT "every unit is billable". Attaching usage
+ * to an enterprise invoice would charge the negotiated fee PLUS 100% of
+ * metered usage, which is the opposite of what was signed.
+ *
+ * When contracted envelopes are modelled properly (a contracted amount that
+ * becomes a credit line, so overage is a true-up), this is where that decision
+ * changes - one predicate, shared by the webhook and anything that follows it.
+ */
+export function usageIsAutoInvoiced(plan: PlanId): boolean {
+  return plan === "pro";
+}
+
 export const PLANS = {
   // NOTE: the id "free" is the stable identifier (database plan column,
   // API enum); "Hobby" is its display name. Renaming the id would be a data

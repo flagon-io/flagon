@@ -34,6 +34,17 @@ const PRO_LOOKUP_KEY = "flagon_pro_monthly";
 let cachedProPriceId: string | null = null;
 
 /**
+ * Test mode is decided by the KEY, not by NODE_ENV.
+ *
+ * A production build pointed at a sandbox key is a normal, useful setup (a
+ * staging deployment), and a development machine holding a live key is the
+ * dangerous one. Only the key knows which account the writes land in.
+ */
+export function isTestModeKey(key: string | undefined): boolean {
+  return Boolean(key?.startsWith("sk_test_") || key?.startsWith("rk_test_"));
+}
+
+/**
  * The Pro subscription price ($20/mo flat). Resolution order: explicit
  * STRIPE_PRO_PRICE_ID env, then lookup_key search, then create the product +
  * price on the fly (sandbox-friendly: a fresh Stripe account needs zero
@@ -51,6 +62,18 @@ export async function ensureProPriceId(): Promise<string> {
   if (existing.data[0]) {
     cachedProPriceId = existing.data[0].id;
     return cachedProPriceId;
+  }
+
+  // Auto-creation is a SANDBOX convenience. In live mode it would invent a
+  // product and a $20 price in a real Stripe account on the first upgrade
+  // click - a catalog entry nobody reviewed, easy to duplicate, and awkward to
+  // withdraw once a customer is subscribed to it. Live deployments name the
+  // price explicitly with STRIPE_PRO_PRICE_ID (or carry the lookup key above).
+  if (!isTestModeKey(process.env.STRIPE_SECRET_KEY)) {
+    throw new Error(
+      `No Stripe price found for lookup key "${PRO_LOOKUP_KEY}" and STRIPE_PRO_PRICE_ID is unset. ` +
+        "Create the Pro price in Stripe and set STRIPE_PRO_PRICE_ID; refusing to create a product in live mode.",
+    );
   }
 
   const product = await stripe.products.create({

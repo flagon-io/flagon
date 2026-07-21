@@ -18,7 +18,7 @@ import {
   totalsFromSnapshot,
 } from "@/lib/billing-periods.server";
 import { withInvoiceClaim } from "@/lib/invoice-claims.server";
-import { PLANS, isPlanId } from "@/lib/plans";
+import { PLANS, isPlanId, usageIsAutoInvoiced } from "@/lib/plans";
 import { buildUsageInvoiceLines } from "@/lib/usage-invoice";
 import { clearPlanCache } from "@/lib/usage-events.server";
 
@@ -146,6 +146,21 @@ export async function POST(request: Request) {
       if (period.status === "invoiced") break;
 
       const planId = isPlanId(period.plan) ? period.plan : "free";
+
+      /**
+       * Contracted plans are invoiced by agreement, not by this handler.
+       *
+       * The org is matched by stripe_customer_id alone, so an enterprise org
+       * with a Stripe customer attached - the natural thing to do when setting
+       * up their subscription - would otherwise have a full period of usage
+       * added on top of the fee that was supposed to cover it.
+       *
+       * The period is still CLOSED above, deliberately: the frozen snapshot is
+       * what a contract review and any true-up are computed from, so it has to
+       * exist even though nothing is attached to the invoice here.
+       */
+      if (!usageIsAutoInvoiced(planId)) break;
+
       const snapshot = await getPeriod({
         orgId: org.id,
         periodStart: period.periodStart,

@@ -158,7 +158,7 @@ export function Select({
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={cx(
-          "flex w-full box-border items-center justify-between gap-3 rounded-md border border-white/10 bg-[#111113] px-3 text-left text-sm leading-none text-zinc-200 outline-none transition hover:border-white/20 focus:border-teal-500/60 focus:ring-2 focus:ring-teal-500/20 data-[placeholder]:text-zinc-600 disabled:cursor-not-allowed disabled:opacity-50",
+          "flex w-full box-border items-center justify-between gap-3 rounded-md border border-white/10 bg-[#111113] px-3 text-left text-sm leading-none text-zinc-200 outline-none transition hover:border-white/20 focus:border-teal-500/60 focus:ring-2 focus:ring-teal-500/20 data-placeholder:text-zinc-600 disabled:cursor-not-allowed disabled:opacity-50",
           compact ? "h-8 text-xs" : "h-9",
           className,
         )}
@@ -172,7 +172,7 @@ export function Select({
         <SelectPrimitive.Content
           position="popper"
           sideOffset={5}
-          className="z-[110] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border border-white/10 bg-[#111113] p-1 shadow-2xl shadow-black/60"
+          className="z-110 min-w-(--radix-select-trigger-width) overflow-hidden rounded-md border border-white/10 bg-[#111113] p-1 shadow-2xl shadow-black/60"
         >
           <SelectPrimitive.Viewport>
             {options.map((option) => (
@@ -180,7 +180,7 @@ export function Select({
                 key={option.value}
                 value={option.value}
                 disabled={option.disabled}
-                className="relative flex cursor-default select-none items-center rounded px-8 py-2 text-sm text-zinc-300 outline-none data-[highlighted]:bg-white/7 data-[highlighted]:text-zinc-50 data-[disabled]:opacity-40"
+                className="relative flex cursor-default select-none items-center rounded px-8 py-2 text-sm text-zinc-300 outline-none data-highlighted:bg-white/7 data-highlighted:text-zinc-50 data-disabled:opacity-40"
               >
                 <SelectPrimitive.ItemIndicator className="absolute left-2.5">
                   <Check className="h-3.5 w-3.5 text-teal-400" />
