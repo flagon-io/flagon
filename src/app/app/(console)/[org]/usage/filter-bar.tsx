@@ -1,7 +1,14 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 
 /**
  * The usage filter controls.
@@ -40,7 +47,9 @@ function useQueryWriter() {
       }
       const query = params.toString();
       startTransition(() => {
-        router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
+        router.push(query ? `${pathname}?${query}` : pathname, {
+          scroll: false,
+        });
       });
     },
     [pathname, router, searchParams],
@@ -82,7 +91,11 @@ function Chevron() {
       stroke="currentColor"
       strokeWidth="1.5"
     >
-      <path d="M3 4.5 6 7.5 9 4.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M3 4.5 6 7.5 9 4.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -96,8 +109,18 @@ function Check({ checked }: { checked: boolean }) {
       }`}
     >
       {checked ? (
-        <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 text-zinc-950" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M2.5 6.2 4.8 8.5 9.5 3.8" strokeLinecap="round" strokeLinejoin="round" />
+        <svg
+          viewBox="0 0 12 12"
+          className="h-2.5 w-2.5 text-zinc-950"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path
+            d="M2.5 6.2 4.8 8.5 9.5 3.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       ) : null}
     </span>
@@ -339,7 +362,9 @@ export function ChartControls({
             type="button"
             aria-pressed={granularity === option.value}
             onClick={() =>
-              update({ granularity: option.value === "daily" ? null : option.value })
+              update({
+                granularity: option.value === "daily" ? null : option.value,
+              })
             }
             className={`px-3 py-1.5 text-xs transition ${
               granularity === option.value

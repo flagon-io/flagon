@@ -85,7 +85,10 @@ export default async function BillingPage({
               key={feature}
               className="flex items-start gap-2.5 text-sm leading-5 text-zinc-300"
             >
-              <Check className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+              <Check
+                className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500"
+                aria-hidden
+              />
               {feature}
             </li>
           ))}
@@ -111,8 +114,8 @@ export default async function BillingPage({
         </p>
       ) : (
         <p className="mt-4 text-sm leading-6 text-zinc-500">
-          Billing isn&apos;t configured on this deployment, so plans
-          don&apos;t apply: this organization runs with everything unlocked.
+          Billing isn&apos;t configured on this deployment, so plans don&apos;t
+          apply: this organization runs with everything unlocked.
         </p>
       )}
     </div>

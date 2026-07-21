@@ -38,7 +38,11 @@ export async function POST(request: Request) {
 
   const signature = request.headers.get("stripe-signature");
   if (!signature) {
-    return apiError(400, "missing_signature", "Missing stripe-signature header.");
+    return apiError(
+      400,
+      "missing_signature",
+      "Missing stripe-signature header.",
+    );
   }
 
   const payload = await request.text();
@@ -50,7 +54,11 @@ export async function POST(request: Request) {
       process.env.STRIPE_WEBHOOK_SECRET,
     );
   } catch {
-    return apiError(400, "invalid_signature", "Webhook signature verification failed.");
+    return apiError(
+      400,
+      "invalid_signature",
+      "Webhook signature verification failed.",
+    );
   }
 
   switch (event.type) {
@@ -59,7 +67,9 @@ export async function POST(request: Request) {
       const orgId = session.client_reference_id;
       if (orgId && session.mode === "subscription") {
         const subscriptionId =
-          typeof session.subscription === "string" ? session.subscription : null;
+          typeof session.subscription === "string"
+            ? session.subscription
+            : null;
         // Retrieve the subscription for its cycle: this is the org's billing
         // window from now on, and the usage page has to agree with it.
         let cycle: { start: Date; end: Date } | null = null;

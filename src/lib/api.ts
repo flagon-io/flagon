@@ -73,4 +73,8 @@ export const apiNotFound = () =>
   apiError(404, "not_found", "The requested API endpoint does not exist.");
 
 export const apiMethodNotAllowed = () =>
-  apiError(405, "method_not_allowed", "This method is not allowed on this endpoint.");
+  apiError(
+    405,
+    "method_not_allowed",
+    "This method is not allowed on this endpoint.",
+  );

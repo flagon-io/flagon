@@ -12,8 +12,8 @@ import postgres from "postgres";
  */
 const canRun = Boolean(
   process.env.DATABASE_URL_APP &&
-    process.env.DATABASE_URL_OWNER &&
-    process.env.BETTER_AUTH_SECRET,
+  process.env.DATABASE_URL_OWNER &&
+  process.env.BETTER_AUTH_SECRET,
 );
 
 describe.skipIf(!canRun)("organization lifecycle", () => {
@@ -35,8 +35,18 @@ describe.skipIf(!canRun)("organization lifecycle", () => {
     orgId = org.id as string;
 
     for (const [id, name, email, role] of [
-      [`life-owner-${stamp}`, "Robin Vale", `robin+own${stamp}@example.com`, "owner"],
-      [`life-member-${stamp}`, "Sam Reed", `sam+mem${stamp}@example.com`, "member"],
+      [
+        `life-owner-${stamp}`,
+        "Robin Vale",
+        `robin+own${stamp}@example.com`,
+        "owner",
+      ],
+      [
+        `life-member-${stamp}`,
+        "Sam Reed",
+        `sam+mem${stamp}@example.com`,
+        "member",
+      ],
     ] as const) {
       await owner`
         INSERT INTO users (id, name, email, email_verified)
@@ -121,7 +131,8 @@ describe.skipIf(!canRun)("organization lifecycle", () => {
       );
       expect(row.count, `${table} should cascade`).toBe(0);
     }
-    const [proj] = await owner`SELECT count(*)::int AS count FROM projects WHERE id = ${project.id}::uuid`;
+    const [proj] =
+      await owner`SELECT count(*)::int AS count FROM projects WHERE id = ${project.id}::uuid`;
     expect(proj.count).toBe(0);
 
     // access_tokens carries no foreign key to organizations (subject_id spans
@@ -133,7 +144,9 @@ describe.skipIf(!canRun)("organization lifecycle", () => {
     const [tokens] = await owner`
       SELECT count(*)::int AS count FROM access_tokens
       WHERE subject_type = 'organization' AND subject_id = ${orgId}`;
-    expect(tokens.count, "org tokens must not outlive their organization").toBe(0);
+    expect(tokens.count, "org tokens must not outlive their organization").toBe(
+      0,
+    );
 
     orgId = "";
   });

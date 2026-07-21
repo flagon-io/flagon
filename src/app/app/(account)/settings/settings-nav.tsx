@@ -13,7 +13,12 @@ import {
 } from "lucide-react";
 
 const sections = [
-  { href: appPath("/settings"), label: "Public profile", icon: User, exact: true },
+  {
+    href: appPath("/settings"),
+    label: "Public profile",
+    icon: User,
+    exact: true,
+  },
   { href: appPath("/settings/account"), label: "Account", icon: Settings2 },
   { href: appPath("/settings/emails"), label: "Emails", icon: Mail },
   { href: appPath("/settings/sessions"), label: "Sessions", icon: Radio },

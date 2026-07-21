@@ -8,8 +8,8 @@ import postgres from "postgres";
  */
 const canRun = Boolean(
   process.env.DATABASE_URL_APP &&
-    process.env.DATABASE_URL_OWNER &&
-    process.env.BETTER_AUTH_SECRET,
+  process.env.DATABASE_URL_OWNER &&
+  process.env.BETTER_AUTH_SECRET,
 );
 
 describe.skipIf(!canRun)("auth sign-up", () => {

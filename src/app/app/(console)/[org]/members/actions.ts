@@ -24,7 +24,8 @@ export async function resolveInviteEmail(
   identifier: string,
 ): Promise<{ ok: true; email: string } | { ok: false; message: string }> {
   const value = identifier.trim();
-  if (!value) return { ok: false, message: "Enter a username or email address." };
+  if (!value)
+    return { ok: false, message: "Enter a username or email address." };
   if (value.includes("@")) return { ok: true, email: value.toLowerCase() };
 
   const [user] = await db
@@ -112,7 +113,8 @@ export async function updateMemberRoleAction(
   if (!isAssignableOrgRole(role)) {
     return {
       ok: false,
-      message: "Choose admin or member. Use Transfer ownership to hand over the organization.",
+      message:
+        "Choose admin or member. Use Transfer ownership to hand over the organization.",
     };
   }
 
@@ -169,7 +171,8 @@ export async function transferOwnershipAction(
 ): Promise<MemberActionResult> {
   const session = await auth.api.getSession({ headers: await headers() });
   const org = await resolveOrg(orgSlug);
-  if (!session || !org) return { ok: false, message: "Organization not found." };
+  if (!session || !org)
+    return { ok: false, message: "Organization not found." };
 
   const result = await transferOwnership({
     orgId: org.id,

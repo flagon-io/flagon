@@ -1,4 +1,14 @@
-import { and, eq, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { projects, usageRollups } from "../db/schema";
 import { withTenant } from "../db/tenant";
 import {
@@ -126,9 +136,7 @@ function filterConditions(filter: UsageFilter | undefined): SQL[] {
   if (meterIds) {
     // An empty set must match nothing, not everything.
     conditions.push(
-      meterIds.length
-        ? inArray(usageRollups.meter, meterIds)
-        : sql`false`,
+      meterIds.length ? inArray(usageRollups.meter, meterIds) : sql`false`,
     );
   }
 
@@ -202,7 +210,9 @@ export async function usageSummary(input: {
     if (!meter) continue;
     const quantity = Number(row.quantity);
     if (quantity <= 0) continue;
-    lines.push(lineFromMeter(meter, quantity, planRate(plan, meter.id) ?? undefined));
+    lines.push(
+      lineFromMeter(meter, quantity, planRate(plan, meter.id) ?? undefined),
+    );
   }
   lines.sort(
     (a, b) => b.costCents - a.costCents || a.meterId.localeCompare(b.meterId),
@@ -224,7 +234,9 @@ async function usageRows(input: {
   orgId: string;
   window: PeriodWindow;
   filter?: UsageFilter;
-}): Promise<{ day: string; meter: string; projectId: string | null; quantity: number }[]> {
+}): Promise<
+  { day: string; meter: string; projectId: string | null; quantity: number }[]
+> {
   const rows = await withTenant(input.orgId, (tx) =>
     tx
       .select({
@@ -296,7 +308,9 @@ export async function usageProjects(input: {
   const rows = await usageRows(input);
   const ids = [
     ...new Set(
-      rows.map((row) => row.projectId).filter((id): id is string => Boolean(id)),
+      rows
+        .map((row) => row.projectId)
+        .filter((id): id is string => Boolean(id)),
     ),
   ];
   if (!ids.length) return [];
@@ -305,7 +319,12 @@ export async function usageProjects(input: {
     tx
       .select({ id: projects.id, name: projects.name })
       .from(projects)
-      .where(and(eq(projects.organizationId, input.orgId), inArray(projects.id, ids))),
+      .where(
+        and(
+          eq(projects.organizationId, input.orgId),
+          inArray(projects.id, ids),
+        ),
+      ),
   );
   const byId = new Map(named.map((project) => [project.id, project.name]));
   // A project can be deleted while its usage lives on (drizzle/0017).
@@ -360,7 +379,11 @@ export function bucketsFor(
           ? addDaysUTC(cursor, 7)
           : addMonthsUTC(cursor, 1);
     const end = addDaysUTC(next, -1);
-    buckets.push({ key: isoDay(cursor), start: cursor, end: end > last ? last : end });
+    buckets.push({
+      key: isoDay(cursor),
+      start: cursor,
+      end: end > last ? last : end,
+    });
     cursor = next;
   }
   return buckets;
@@ -417,7 +440,10 @@ export async function usageView(input: {
     string,
     { bucketQuantities: number[]; groupQuantities: Map<string, number>[] }
   >();
-  const groupTotals = new Map<string, { quantity: number; costCents: number }>();
+  const groupTotals = new Map<
+    string,
+    { quantity: number; costCents: number }
+  >();
 
   for (const row of rows) {
     const index = bucketIndex.get(row.day);
@@ -497,7 +523,9 @@ export async function usageView(input: {
       quantity: total.quantity,
       costCents: total.costCents,
     }))
-    .sort((a, b) => b.costCents - a.costCents || a.label.localeCompare(b.label));
+    .sort(
+      (a, b) => b.costCents - a.costCents || a.label.localeCompare(b.label),
+    );
 
   return {
     from: isoDay(input.window.from),

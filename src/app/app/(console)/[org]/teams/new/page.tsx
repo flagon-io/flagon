@@ -39,9 +39,8 @@ export default async function NewTeamPage({
         Create a team
       </h1>
       <p className="mt-2 text-sm leading-6 text-zinc-500">
-        Teams group people so you can share projects and products with
-        everyone at once. After creating it, add members from the team&apos;s
-        page.
+        Teams group people so you can share projects and products with everyone
+        at once. After creating it, add members from the team&apos;s page.
       </p>
       <div className="mt-8">
         <NewTeamForm orgSlug={slug} />

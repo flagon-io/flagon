@@ -2,7 +2,9 @@
  * Tiny user-agent summarizer for the sessions list ("Chrome on Windows").
  * Intentionally coarse: this is display sugar, not detection.
  */
-export function describeUserAgent(userAgent: string | null | undefined): string {
+export function describeUserAgent(
+  userAgent: string | null | undefined,
+): string {
   if (!userAgent) return "Unknown device";
 
   const ua = userAgent.toLowerCase();

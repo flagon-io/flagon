@@ -20,7 +20,12 @@ import { appPath } from "@/lib/urls";
  * applications, so treating them as secrets nobody may look at again would be
  * theatre. Secret tokens are shown once and never again.
  */
-type Token = { id: string; name: string; created_at: string; token?: string | null };
+type Token = {
+  id: string;
+  name: string;
+  created_at: string;
+  token?: string | null;
+};
 
 function CreateClientTokenModal({
   create,
@@ -45,7 +50,10 @@ function CreateClientTokenModal({
           if (await create(form)) setOpen(false);
         }}
       >
-        <Field label="Name" hint="Use a name that identifies where this token is deployed.">
+        <Field
+          label="Name"
+          hint="Use a name that identifies where this token is deployed."
+        >
           <Input name="name" required autoFocus placeholder="iOS production" />
         </Field>
         <ModalActions>
@@ -84,15 +92,27 @@ export function CredentialsPanel({
   }
 
   async function revoke(id: string) {
-    if (!(await fetch(`/api/v1/orgs/${orgSlug}/client-tokens/${id}`, { method: "DELETE" })).ok) return;
+    if (
+      !(
+        await fetch(`/api/v1/orgs/${orgSlug}/client-tokens/${id}`, {
+          method: "DELETE",
+        })
+      ).ok
+    )
+      return;
     setClientTokens((items) => items.filter((item) => item.id !== id));
   }
 
   async function rotate(id: string) {
-    const response = await fetch(`/api/v1/orgs/${orgSlug}/client-tokens/${id}`, { method: "PATCH" });
+    const response = await fetch(
+      `/api/v1/orgs/${orgSlug}/client-tokens/${id}`,
+      { method: "PATCH" },
+    );
     if (!response.ok) return;
     const body = await response.json();
-    setClientTokens((items) => items.map((item) => (item.id === id ? { ...item, ...body } : item)));
+    setClientTokens((items) =>
+      items.map((item) => (item.id === id ? { ...item, ...body } : item)),
+    );
     setRotated(id);
   }
 
@@ -137,7 +157,11 @@ export function CredentialsPanel({
                     : "Publishable client evaluation"}
                 </p>
               </div>
-              <Button variant="secondary" size="sm" onClick={() => rotate(token.id)}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => rotate(token.id)}
+              >
                 Rotate
               </Button>
               <Button

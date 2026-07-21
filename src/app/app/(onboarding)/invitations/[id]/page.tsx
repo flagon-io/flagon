@@ -50,9 +50,7 @@ export default async function InvitationPage({
           </h1>
           <p className="mt-3 text-sm leading-6 text-zinc-400">
             {invitation.inviterEmail} invited you to join{" "}
-            <span className="text-zinc-200">
-              {invitation.organizationName}
-            </span>{" "}
+            <span className="text-zinc-200">{invitation.organizationName}</span>{" "}
             as <span className="uppercase">{invitation.role}</span>. The
             invitation was sent to{" "}
             <span className="text-zinc-200">{invitation.email}</span>.
@@ -82,8 +80,8 @@ export default async function InvitationPage({
               : "This invitation doesn't exist, has expired, or was sent to a different email address."}
           </p>
           <p className="mt-3 text-sm leading-6 text-zinc-500">
-            Make sure you&apos;re signed in with the account whose primary
-            email received the invitation, and that the address is verified.
+            Make sure you&apos;re signed in with the account whose primary email
+            received the invitation, and that the address is verified.
           </p>
         </>
       )}

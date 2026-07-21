@@ -4,10 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { describeUserAgent } from "@/lib/user-agent";
-import {
-  Notice,
-  subtleButtonClass,
-} from "@/components/form-ui";
+import { Notice, subtleButtonClass } from "@/components/form-ui";
 
 type SessionRow = {
   token: string;
@@ -41,7 +38,9 @@ export function SessionsList({
     const { error: revokeError } = await authClient.revokeSession({ token });
     setPendingToken(null);
     if (revokeError) {
-      setError(revokeError.message ?? "Something went wrong. Please try again.");
+      setError(
+        revokeError.message ?? "Something went wrong. Please try again.",
+      );
       return;
     }
     router.refresh();
@@ -53,7 +52,9 @@ export function SessionsList({
     const { error: revokeError } = await authClient.revokeOtherSessions();
     setPendingToken(null);
     if (revokeError) {
-      setError(revokeError.message ?? "Something went wrong. Please try again.");
+      setError(
+        revokeError.message ?? "Something went wrong. Please try again.",
+      );
       return;
     }
     router.refresh();
@@ -62,8 +63,8 @@ export function SessionsList({
   return (
     <div className="mt-6 max-w-2xl space-y-6">
       <p className="text-sm leading-6 text-zinc-400">
-        This is a list of devices that are signed in to your account. Revoke
-        any sessions that you do not recognize.
+        This is a list of devices that are signed in to your account. Revoke any
+        sessions that you do not recognize.
       </p>
 
       {error ? <Notice tone="error">{error}</Notice> : null}

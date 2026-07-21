@@ -31,8 +31,8 @@ export default async function NewProjectPage({
         Create a project
       </h1>
       <p className="mt-2 text-sm leading-6 text-zinc-500">
-        Projects are where your work lives. Products attach to them, and
-        access is shared with members and teams from the project&apos;s page.
+        Projects are where your work lives. Products attach to them, and access
+        is shared with members and teams from the project&apos;s page.
       </p>
       <div className="mt-8">
         <NewProjectForm orgSlug={slug} />

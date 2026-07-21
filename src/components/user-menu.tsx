@@ -56,7 +56,10 @@ export function UserMenu({
 
   if (isPending) {
     return (
-      <div aria-hidden className="h-8 w-8 animate-pulse rounded-full bg-white/10" />
+      <div
+        aria-hidden
+        className="h-8 w-8 animate-pulse rounded-full bg-white/10"
+      />
     );
   }
 
@@ -128,7 +131,9 @@ export function UserMenu({
             onClick={() => setOpen(false)}
             className="block rounded-md px-3 py-2 transition hover:bg-white/5"
           >
-            <div className="text-sm font-semibold text-zinc-100">{username}</div>
+            <div className="text-sm font-semibold text-zinc-100">
+              {username}
+            </div>
             <div className="truncate text-xs text-zinc-500">{user.email}</div>
           </Link>
 

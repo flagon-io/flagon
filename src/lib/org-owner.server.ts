@@ -12,7 +12,11 @@ import { members } from "../db/schema";
  */
 export type TransferOwnershipResult =
   | { ok: true }
-  | { ok: false; code: "not_owner" | "not_a_member" | "already_owner"; error: string };
+  | {
+      ok: false;
+      code: "not_owner" | "not_a_member" | "already_owner";
+      error: string;
+    };
 
 export async function transferOwnership(input: {
   orgId: string;

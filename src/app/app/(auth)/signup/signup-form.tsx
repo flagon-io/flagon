@@ -111,7 +111,9 @@ export function SignUpForm() {
               minLength={8}
               className={inputClass}
             />
-            <p className={hintClass}>Password should be at least 8 characters.</p>
+            <p className={hintClass}>
+              Password should be at least 8 characters.
+            </p>
           </div>
 
           <div>
@@ -130,7 +132,11 @@ export function SignUpForm() {
             <p className={hintClass}>{USERNAME_HINT}</p>
           </div>
 
-          <button type="submit" disabled={pending} className={primaryButtonClass}>
+          <button
+            type="submit"
+            disabled={pending}
+            className={primaryButtonClass}
+          >
             {pending ? "Creating account..." : "Create account"}
           </button>
 

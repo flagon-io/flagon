@@ -1,13 +1,16 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { db } from "../db/client";
 import { isUniqueViolation } from "../db/errors";
-import { projectRoles, projects, teamMembers, teams } from "../db/schema";
+import {
+  projectOwners,
+  projectRoles,
+  projects,
+  teamMembers,
+  teams,
+} from "../db/schema";
 import { users } from "../db/auth-schema";
 import { withTenant } from "../db/tenant";
-import {
-  type ProjectRole,
-  highestRole,
-} from "./project-access";
+import { type ProjectRole, highestRole } from "./project-access";
 
 /**
  * Project access data access. Grants live in project_roles (tenant-scoped
@@ -44,7 +47,9 @@ export async function userTeamIds(
     .select({ teamId: teamMembers.teamId })
     .from(teamMembers)
     .innerJoin(teams, eq(teams.id, teamMembers.teamId))
-    .where(and(eq(teams.organizationId, orgId), eq(teamMembers.userId, userId)));
+    .where(
+      and(eq(teams.organizationId, orgId), eq(teamMembers.userId, userId)),
+    );
   return rows.map((row) => row.teamId);
 }
 
@@ -66,7 +71,11 @@ export async function resolveProjectRole(input: {
   const teamIds = await userTeamIds(input.orgId, input.userId);
   const grants = await withTenant(input.orgId, (tx) =>
     tx
-      .select({ role: projectRoles.role, subjectType: projectRoles.subjectType, subjectId: projectRoles.subjectId })
+      .select({
+        role: projectRoles.role,
+        subjectType: projectRoles.subjectType,
+        subjectId: projectRoles.subjectId,
+      })
       .from(projectRoles)
       .where(eq(projectRoles.projectId, input.projectId)),
   );
@@ -88,10 +97,7 @@ export async function listProjectGrants(
   projectId: string,
 ): Promise<ProjectGrant[]> {
   const rows = await withTenant(orgId, (tx) =>
-    tx
-      .select()
-      .from(projectRoles)
-      .where(eq(projectRoles.projectId, projectId)),
+    tx.select().from(projectRoles).where(eq(projectRoles.projectId, projectId)),
   );
 
   const userIds = rows
@@ -202,7 +208,11 @@ export async function listMemberProjectGrants(
   const teamNames = new Map(teamRows.map((row) => [row.id, row.name]));
 
   return applicable.map((row) => ({
-    project: { id: row.projectId, slug: row.projectSlug, name: row.projectName },
+    project: {
+      id: row.projectId,
+      slug: row.projectSlug,
+      name: row.projectName,
+    },
     role: row.role as ProjectRole,
     via:
       row.subjectType === "user"
@@ -215,40 +225,69 @@ export async function listMemberProjectGrants(
   }));
 }
 
-export type TeamProjectGrant = {
+export type TeamProject = {
   project: { id: string; slug: string; name: string };
-  role: ProjectRole;
-  createdAt: Date;
+  /** The granted role, or null when the team owns the project without access. */
+  role: ProjectRole | null;
+  /** Named as responsible for the project in the catalog. */
+  owner: boolean;
+  /** When the grant was made; null for an owned project with no grant. */
+  grantedAt: Date | null;
 };
 
-/** The projects a team holds an explicit grant on, with the granted role. */
-export async function listTeamProjectGrants(
+/**
+ * Every project a team is attached to, by ACCESS or by OWNERSHIP.
+ *
+ * The two are deliberately independent (see project-ownership.server.ts):
+ * ownership is a statement about who is responsible, and it grants nothing.
+ * That makes "owns it but cannot open it" a real and interesting state - it
+ * usually means a grant was revoked and the catalog was never updated - so
+ * listing grants alone hides exactly the rows worth seeing. One query with two
+ * outer joins rather than two lists, because the answer people want is per
+ * project ("what is this team to this project?"), not per mechanism.
+ */
+export async function listTeamProjects(
   orgId: string,
   teamId: string,
-): Promise<TeamProjectGrant[]> {
+): Promise<TeamProject[]> {
   const rows = await withTenant(orgId, (tx) =>
     tx
       .select({
-        role: projectRoles.role,
-        createdAt: projectRoles.createdAt,
         projectId: projects.id,
         projectSlug: projects.slug,
         projectName: projects.name,
+        role: projectRoles.role,
+        grantedAt: projectRoles.createdAt,
+        ownerId: projectOwners.id,
       })
-      .from(projectRoles)
-      .innerJoin(projects, eq(projects.id, projectRoles.projectId))
-      .where(
+      .from(projects)
+      .leftJoin(
+        projectRoles,
         and(
+          eq(projectRoles.projectId, projects.id),
           eq(projectRoles.subjectType, "team"),
           eq(projectRoles.subjectId, teamId),
         ),
       )
+      .leftJoin(
+        projectOwners,
+        and(
+          eq(projectOwners.projectId, projects.id),
+          eq(projectOwners.teamId, teamId),
+        ),
+      )
+      .where(or(isNotNull(projectRoles.id), isNotNull(projectOwners.id)))
       .orderBy(projects.name),
   );
   return rows.map((row) => ({
-    project: { id: row.projectId, slug: row.projectSlug, name: row.projectName },
-    role: row.role as ProjectRole,
-    createdAt: row.createdAt,
+    project: {
+      id: row.projectId,
+      slug: row.projectSlug,
+      name: row.projectName,
+    },
+    role: (row.role as ProjectRole | null) ?? null,
+    owner: row.ownerId !== null,
+    grantedAt: row.grantedAt ?? null,
   }));
 }
 
@@ -310,7 +349,10 @@ export async function removeProjectGrant(
     tx
       .delete(projectRoles)
       .where(
-        and(eq(projectRoles.id, grantId), eq(projectRoles.projectId, projectId)),
+        and(
+          eq(projectRoles.id, grantId),
+          eq(projectRoles.projectId, projectId),
+        ),
       )
       .returning({ id: projectRoles.id }),
   );
@@ -329,7 +371,11 @@ export function serializeGrant(grant: ProjectGrant) {
             username: grant.subject.username,
             name: grant.subject.name,
           }
-        : { type: "team" as const, id: grant.subject.id, name: grant.subject.name },
+        : {
+            type: "team" as const,
+            id: grant.subject.id,
+            name: grant.subject.name,
+          },
     created_at: grant.createdAt.toISOString(),
   };
 }

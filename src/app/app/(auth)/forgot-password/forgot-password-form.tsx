@@ -80,8 +80,8 @@ export function ForgotPasswordForm({
       {error ? <Notice tone="error">{error}</Notice> : null}
       {emailConfigured ? null : (
         <Notice tone="info">
-          Email delivery is not configured on this instance. The reset link
-          will be printed to the server logs.
+          Email delivery is not configured on this instance. The reset link will
+          be printed to the server logs.
         </Notice>
       )}
 
@@ -107,7 +107,11 @@ export function ForgotPasswordForm({
             />
           </div>
 
-          <button type="submit" disabled={pending} className={primaryButtonClass}>
+          <button
+            type="submit"
+            disabled={pending}
+            className={primaryButtonClass}
+          >
             {pending ? "Sending..." : "Send password reset email"}
           </button>
         </form>

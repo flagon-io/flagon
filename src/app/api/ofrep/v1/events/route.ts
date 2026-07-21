@@ -14,11 +14,20 @@ const streamHeaders = {
   "X-Accel-Buffering": "no",
 };
 
-export function OPTIONS() { return new Response(null, { status: 204, headers: OFREP_HEADERS }); }
+export function OPTIONS() {
+  return new Response(null, { status: 204, headers: OFREP_HEADERS });
+}
 
 export async function GET(request: Request) {
   const credential = await authenticateOfrep(request, true);
-  if (!credential) return Response.json({ errorCode: "UNAUTHORIZED", errorDetails: "A valid evaluation credential is required." }, { status: 401, headers: OFREP_HEADERS });
+  if (!credential)
+    return Response.json(
+      {
+        errorCode: "UNAUTHORIZED",
+        errorDetails: "A valid evaluation credential is required.",
+      },
+      { status: 401, headers: OFREP_HEADERS },
+    );
 
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
   let closed = false;
@@ -29,11 +38,19 @@ export async function GET(request: Request) {
     closed = true;
     if (heartbeat) clearInterval(heartbeat);
     unsubscribe();
-    try { controller?.close(); } catch { /* The browser may already have closed the stream. */ }
+    try {
+      controller?.close();
+    } catch {
+      /* The browser may already have closed the stream. */
+    }
   };
   const send = (message: string) => {
     if (closed) return;
-    try { controller?.enqueue(encoder.encode(message)); } catch { close(); }
+    try {
+      controller?.enqueue(encoder.encode(message));
+    } catch {
+      close();
+    }
   };
 
   try {
@@ -41,14 +58,23 @@ export async function GET(request: Request) {
       send(`event: configuration_changed\ndata: {}\n\n`);
     });
   } catch {
-    return Response.json({ errorCode: "EVENTS_UNAVAILABLE", errorDetails: "Realtime notifications are temporarily unavailable." }, { status: 503, headers: OFREP_HEADERS });
+    return Response.json(
+      {
+        errorCode: "EVENTS_UNAVAILABLE",
+        errorDetails: "Realtime notifications are temporarily unavailable.",
+      },
+      { status: 503, headers: OFREP_HEADERS },
+    );
   }
 
   request.signal.addEventListener("abort", close, { once: true });
   const stream = new ReadableStream<Uint8Array>({
     start(nextController) {
       controller = nextController;
-      if (closed) { nextController.close(); return; }
+      if (closed) {
+        nextController.close();
+        return;
+      }
       send(`retry: 3000\nevent: ready\ndata: {}\n\n`);
       heartbeat = setInterval(() => send(`: heartbeat\n\n`), 15_000);
     },

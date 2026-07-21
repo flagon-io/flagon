@@ -13,9 +13,10 @@ const COMPANY_SIZES = ["1-9", "10-49", "50-199", "200-999", "1000+"].map(
 export function ContactSalesForm() {
   const pathname = usePathname();
   const [companySize, setCompanySize] = useState("");
-  const [status, setStatus] = useState<
-    { tone: "success" | "error"; message: string } | null
-  >(null);
+  const [status, setStatus] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
   const [pending, setPending] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -110,7 +111,11 @@ export function ContactSalesForm() {
         />
       </div>
 
-      <button type="submit" disabled={pending} className={`w-full ${buttonClass} py-2.5`}>
+      <button
+        type="submit"
+        disabled={pending}
+        className={`w-full ${buttonClass} py-2.5`}
+      >
         {pending ? "Sending..." : "Contact sales"}
       </button>
       <p className={hintClass}>

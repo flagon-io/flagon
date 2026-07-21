@@ -78,72 +78,72 @@ export function MobileNav() {
       */}
       {open && mounted
         ? createPortal(
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Site navigation"
-          className="fixed inset-0 z-50 flex flex-col bg-[#09090b]"
-        >
-          <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-4">
-            {/* Same mark and spacing as the site header, so opening the menu
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Site navigation"
+              className="fixed inset-0 z-50 flex flex-col bg-[#09090b]"
+            >
+              <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-4">
+                {/* Same mark and spacing as the site header, so opening the menu
                 reads as the header expanding rather than as a different page
                 sliding over it. */}
-            <Link
-              href="/"
-              className="flex items-center gap-2.5"
-              onClick={close}
-            >
-              <FlagonMark className="h-7 w-7" />
-              <span className="text-[15px] font-semibold tracking-tight text-zinc-100">
-                {brand.name}
-              </span>
-            </Link>
-            <button
-              type="button"
-              onClick={close}
-              aria-label="Close menu"
-              className="flex h-10 w-10 items-center justify-center rounded-md text-zinc-300 transition hover:bg-white/5 hover:text-zinc-100"
-            >
-              <X className="h-5 w-5" aria-hidden />
-            </button>
-          </div>
+                <Link
+                  href="/"
+                  className="flex items-center gap-2.5"
+                  onClick={close}
+                >
+                  <FlagonMark className="h-7 w-7" />
+                  <span className="text-[15px] font-semibold tracking-tight text-zinc-100">
+                    {brand.name}
+                  </span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={close}
+                  aria-label="Close menu"
+                  className="flex h-10 w-10 items-center justify-center rounded-md text-zinc-300 transition hover:bg-white/5 hover:text-zinc-100"
+                >
+                  <X className="h-5 w-5" aria-hidden />
+                </button>
+              </div>
 
-          <nav className="flex-1 overflow-y-auto px-4 py-6">
-            <ul className="space-y-1">
-              {brand.nav.map((item) =>
-                item.href ? (
-                  <li key={item.label}>
-                    <Link
-                      href={item.href}
-                      onClick={close}
-                      className="flex items-center justify-between border-b border-white/5 py-4 text-lg font-medium text-zinc-200 transition hover:text-white"
-                    >
-                      {item.label}
-                    </Link>
-                  </li>
-                ) : null,
-              )}
-            </ul>
+              <nav className="flex-1 overflow-y-auto px-4 py-6">
+                <ul className="space-y-1">
+                  {brand.nav.map((item) =>
+                    item.href ? (
+                      <li key={item.label}>
+                        <Link
+                          href={item.href}
+                          onClick={close}
+                          className="flex items-center justify-between border-b border-white/5 py-4 text-lg font-medium text-zinc-200 transition hover:text-white"
+                        >
+                          {item.label}
+                        </Link>
+                      </li>
+                    ) : null,
+                  )}
+                </ul>
 
-            <div className="mt-8 space-y-3">
-              <Link
-                href={appHref("/new?plan=free")}
-                onClick={close}
-                className="block rounded-md bg-teal-500 px-5 py-3 text-center text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
-              >
-                Start for free
-              </Link>
-              <Link
-                href={appHref("/signin")}
-                onClick={close}
-                className="block rounded-md border border-white/10 px-5 py-3 text-center text-sm font-semibold text-zinc-300 transition hover:border-white/20 hover:text-zinc-100"
-              >
-                Sign in
-              </Link>
-            </div>
-          </nav>
-        </div>,
-        document.body,
+                <div className="mt-8 space-y-3">
+                  <Link
+                    href={appHref("/new?plan=free")}
+                    onClick={close}
+                    className="block rounded-md bg-teal-500 px-5 py-3 text-center text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
+                  >
+                    Start for free
+                  </Link>
+                  <Link
+                    href={appHref("/signin")}
+                    onClick={close}
+                    className="block rounded-md border border-white/10 px-5 py-3 text-center text-sm font-semibold text-zinc-300 transition hover:border-white/20 hover:text-zinc-100"
+                  >
+                    Sign in
+                  </Link>
+                </div>
+              </nav>
+            </div>,
+            document.body,
           )
         : null}
     </div>

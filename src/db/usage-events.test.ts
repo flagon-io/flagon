@@ -12,8 +12,8 @@ import postgres from "postgres";
  */
 const canRun = Boolean(
   process.env.DATABASE_URL_APP &&
-    process.env.DATABASE_URL_OWNER &&
-    process.env.BETTER_AUTH_SECRET,
+  process.env.DATABASE_URL_OWNER &&
+  process.env.BETTER_AUTH_SECRET,
 );
 
 const HOBBY_LIMIT = 10_000_000;
@@ -120,9 +120,27 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
     // receipt is the unique index, so this is settled by Postgres rather than
     // by a read-then-write that could interleave.
     const replays = await Promise.all([
-      recordUsageEvent({ orgId: proOrg, meter: METER, quantity: 40, eventKey: "evt-replay", at }),
-      recordUsageEvent({ orgId: proOrg, meter: METER, quantity: 40, eventKey: "evt-replay", at }),
-      recordUsageEvent({ orgId: proOrg, meter: METER, quantity: 999, eventKey: "evt-replay", at }),
+      recordUsageEvent({
+        orgId: proOrg,
+        meter: METER,
+        quantity: 40,
+        eventKey: "evt-replay",
+        at,
+      }),
+      recordUsageEvent({
+        orgId: proOrg,
+        meter: METER,
+        quantity: 40,
+        eventKey: "evt-replay",
+        at,
+      }),
+      recordUsageEvent({
+        orgId: proOrg,
+        meter: METER,
+        quantity: 999,
+        eventKey: "evt-replay",
+        at,
+      }),
     ]);
     for (const replay of replays) expect(replay.status).toBe("duplicate");
 
@@ -149,14 +167,22 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
 
     // Landing exactly ON the allowance is allowed.
     const atLimit = await recordUsageEvent({
-      orgId: hobbyOrg, meter: METER, quantity: 1, eventKey: "evt-at-limit", at,
+      orgId: hobbyOrg,
+      meter: METER,
+      quantity: 1,
+      eventKey: "evt-at-limit",
+      at,
     });
     expect(atLimit.status).toBe("recorded");
     expect(await counterOf(hobbyOrg)).toBe(HOBBY_LIMIT);
 
     // One past it is not.
     const over = await recordUsageEvent({
-      orgId: hobbyOrg, meter: METER, quantity: 1, eventKey: "evt-over", at,
+      orgId: hobbyOrg,
+      meter: METER,
+      quantity: 1,
+      eventKey: "evt-over",
+      at,
     });
     expect(over.status).toBe("quota_exceeded");
     if (over.status === "quota_exceeded") {
@@ -177,7 +203,11 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
     // Which means the same id is accepted once there is room again.
     await seedCounter(hobbyOrg, HOBBY_LIMIT - 1);
     const retried = await recordUsageEvent({
-      orgId: hobbyOrg, meter: METER, quantity: 1, eventKey: "evt-over", at,
+      orgId: hobbyOrg,
+      meter: METER,
+      quantity: 1,
+      eventKey: "evt-over",
+      at,
     });
     expect(retried.status).toBe("recorded");
   });
@@ -188,7 +218,11 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
     await seedCounter(hobbyOrg, HOBBY_LIMIT - 4);
 
     const straddle = await recordUsageEvent({
-      orgId: hobbyOrg, meter: METER, quantity: 10, eventKey: "evt-straddle", at,
+      orgId: hobbyOrg,
+      meter: METER,
+      quantity: 10,
+      eventKey: "evt-straddle",
+      at,
     });
     expect(straddle.status).toBe("quota_exceeded");
     // Not partially served: the counter is untouched, so the receipt and the
@@ -218,7 +252,9 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
     );
 
     const recorded = outcomes.filter((o) => o.status === "recorded").length;
-    const rejected = outcomes.filter((o) => o.status === "quota_exceeded").length;
+    const rejected = outcomes.filter(
+      (o) => o.status === "quota_exceeded",
+    ).length;
     expect(recorded).toBe(headroom);
     expect(rejected).toBe(10 - headroom);
     expect(await counterOf(hobbyOrg)).toBe(HOBBY_LIMIT);
@@ -232,9 +268,8 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
   });
 
   it("compacts into rollups exactly once, however many times it runs", async () => {
-    const { recordUsageEvent, compactUsageEvents } = await import(
-      "@/lib/usage-events.server"
-    );
+    const { recordUsageEvent, compactUsageEvents } =
+      await import("@/lib/usage-events.server");
     const at = day("2026-08-09");
 
     const [project] = await owner`
@@ -245,10 +280,27 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
 
     // Three events on one day: two org-level, one project-scoped. They should
     // fold into two rollup rows, not three.
-    await recordUsageEvent({ orgId: otherOrg, meter: METER, quantity: 100, eventKey: "c1", at });
-    await recordUsageEvent({ orgId: otherOrg, meter: METER, quantity: 250, eventKey: "c2", at });
     await recordUsageEvent({
-      orgId: otherOrg, meter: METER, quantity: 70, eventKey: "c3", at, projectId,
+      orgId: otherOrg,
+      meter: METER,
+      quantity: 100,
+      eventKey: "c1",
+      at,
+    });
+    await recordUsageEvent({
+      orgId: otherOrg,
+      meter: METER,
+      quantity: 250,
+      eventKey: "c2",
+      at,
+    });
+    await recordUsageEvent({
+      orgId: otherOrg,
+      meter: METER,
+      quantity: 70,
+      eventKey: "c3",
+      at,
+      projectId,
     });
 
     const first = await compactUsageEvents({ orgId: otherOrg });
@@ -272,7 +324,13 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
 
     // Concurrent workers do not double-count either: FOR UPDATE SKIP LOCKED
     // means the second one takes only rows the first has not claimed.
-    await recordUsageEvent({ orgId: otherOrg, meter: METER, quantity: 33, eventKey: "c4", at });
+    await recordUsageEvent({
+      orgId: otherOrg,
+      meter: METER,
+      quantity: 33,
+      eventKey: "c4",
+      at,
+    });
     await Promise.all([
       compactUsageEvents({ orgId: otherOrg }),
       compactUsageEvents({ orgId: otherOrg }),
@@ -296,34 +354,100 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
     // One request can produce an evaluation event AND a sync event under the
     // SAME key: receipts are scoped per meter, so the two do not collide.
     const shared = "req-shared-1";
-    expect((await recordUsageEvent({ orgId: proOrg, meter: METER, quantity: 12, eventKey: shared, at })).status).toBe("recorded");
-    expect((await recordUsageEvent({ orgId: proOrg, meter: SYNC, quantity: 1, eventKey: shared, at })).status).toBe("recorded");
+    expect(
+      (
+        await recordUsageEvent({
+          orgId: proOrg,
+          meter: METER,
+          quantity: 12,
+          eventKey: shared,
+          at,
+        })
+      ).status,
+    ).toBe("recorded");
+    expect(
+      (
+        await recordUsageEvent({
+          orgId: proOrg,
+          meter: SYNC,
+          quantity: 1,
+          eventKey: shared,
+          at,
+        })
+      ).status,
+    ).toBe("recorded");
 
     // ...and a retry of that request deduplicates against both.
-    expect((await recordUsageEvent({ orgId: proOrg, meter: METER, quantity: 12, eventKey: shared, at })).status).toBe("duplicate");
-    expect((await recordUsageEvent({ orgId: proOrg, meter: SYNC, quantity: 1, eventKey: shared, at })).status).toBe("duplicate");
+    expect(
+      (
+        await recordUsageEvent({
+          orgId: proOrg,
+          meter: METER,
+          quantity: 12,
+          eventKey: shared,
+          at,
+        })
+      ).status,
+    ).toBe("duplicate");
+    expect(
+      (
+        await recordUsageEvent({
+          orgId: proOrg,
+          meter: SYNC,
+          quantity: 1,
+          eventKey: shared,
+          at,
+        })
+      ).status,
+    ).toBe("duplicate");
     expect(await counterOf(proOrg, SYNC)).toBe(1);
 
     // Pro is never refused syncs: its 50M is an allowance to be billed past,
     // not a ceiling.
     await seedCounter(proOrg, 200_000_000, SYNC);
-    expect((await recordUsageEvent({ orgId: proOrg, meter: SYNC, quantity: 1, eventKey: "pro-sync-over", at })).status).toBe("recorded");
+    expect(
+      (
+        await recordUsageEvent({
+          orgId: proOrg,
+          meter: SYNC,
+          quantity: 1,
+          eventKey: "pro-sync-over",
+          at,
+        })
+      ).status,
+    ).toBe("recorded");
 
     // Hobby IS refused, at its own 5M ceiling and independently of its
     // evaluation counter: a polling fleet burns syncs without evaluating.
     await seedCounter(hobbyOrg, 5_000_000, SYNC);
     await seedCounter(hobbyOrg, 0);
-    const refused = await recordUsageEvent({ orgId: hobbyOrg, meter: SYNC, quantity: 1, eventKey: "hobby-sync-over", at });
+    const refused = await recordUsageEvent({
+      orgId: hobbyOrg,
+      meter: SYNC,
+      quantity: 1,
+      eventKey: "hobby-sync-over",
+      at,
+    });
     expect(refused.status).toBe("quota_exceeded");
-    if (refused.status === "quota_exceeded") expect(refused.allowance).toBe(5_000_000);
+    if (refused.status === "quota_exceeded")
+      expect(refused.allowance).toBe(5_000_000);
     // Evaluations still work: the two ceilings are independent.
-    expect((await recordUsageEvent({ orgId: hobbyOrg, meter: METER, quantity: 1, eventKey: "hobby-eval-ok", at })).status).toBe("recorded");
+    expect(
+      (
+        await recordUsageEvent({
+          orgId: hobbyOrg,
+          meter: METER,
+          quantity: 1,
+          eventKey: "hobby-eval-ok",
+          at,
+        })
+      ).status,
+    ).toBe("recorded");
   });
 
   it("marks orgs with pending work and only sweeps those", async () => {
-    const { recordUsageEvent, sweepUsageEvents } = await import(
-      "@/lib/usage-events.server"
-    );
+    const { recordUsageEvent, sweepUsageEvents } =
+      await import("@/lib/usage-events.server");
     const at = day("2026-10-05");
 
     const markerOf = async (orgId: string) => {
@@ -335,7 +459,11 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
 
     // Recording sets the marker, in the same transaction as the receipt.
     await recordUsageEvent({
-      orgId: proOrg, meter: METER, quantity: 7, eventKey: "mark-1", at,
+      orgId: proOrg,
+      meter: METER,
+      quantity: 7,
+      eventKey: "mark-1",
+      at,
     });
     expect(await markerOf(proOrg)).not.toBeNull();
 
@@ -377,7 +505,9 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
 
     // And one tenant's context never reaches another's rows.
     const { withTenant } = await import("@/db/tenant");
-    const seen = await withTenant(hobbyOrg, (tx) => tx.select().from(usageEvents));
+    const seen = await withTenant(hobbyOrg, (tx) =>
+      tx.select().from(usageEvents),
+    );
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((row) => row.organizationId === hobbyOrg)).toBe(true);
   });
@@ -398,34 +528,45 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
     expect(winners).toHaveLength(1);
 
     // A live lease keeps everyone else out.
-    expect(await claimInvoice({ orgId: proOrg, stripeInvoiceId: invoiceId })).toBeNull();
+    expect(
+      await claimInvoice({ orgId: proOrg, stripeInvoiceId: invoiceId }),
+    ).toBeNull();
 
     // Completion is terminal: no later delivery can bill this invoice again.
     await completeInvoiceClaim({ orgId: proOrg, claimId: winners[0]!.id });
-    expect(await claimInvoice({ orgId: proOrg, stripeInvoiceId: invoiceId })).toBeNull();
+    expect(
+      await claimInvoice({ orgId: proOrg, stripeInvoiceId: invoiceId }),
+    ).toBeNull();
 
     // ...and a release cannot resurrect a completed claim.
     await releaseInvoiceClaim({ orgId: proOrg, claimId: winners[0]!.id });
-    expect(await claimInvoice({ orgId: proOrg, stripeInvoiceId: invoiceId })).toBeNull();
+    expect(
+      await claimInvoice({ orgId: proOrg, stripeInvoiceId: invoiceId }),
+    ).toBeNull();
   });
 
   it("makes a failed or expired claim retryable", async () => {
-    const { claimInvoice, releaseInvoiceClaim } = await import(
-      "@/lib/invoice-claims.server"
-    );
+    const { claimInvoice, releaseInvoiceClaim } =
+      await import("@/lib/invoice-claims.server");
     const failed = `in_fail_${stamp}`;
     const expired = `in_expire_${stamp}`;
 
     // A worker that errors releases its claim, and the next delivery retries
     // immediately rather than waiting out the lease.
-    const first = await claimInvoice({ orgId: proOrg, stripeInvoiceId: failed });
+    const first = await claimInvoice({
+      orgId: proOrg,
+      stripeInvoiceId: failed,
+    });
     expect(first).not.toBeNull();
     await releaseInvoiceClaim({
       orgId: proOrg,
       claimId: first!.id,
       error: "stripe timed out",
     });
-    const retry = await claimInvoice({ orgId: proOrg, stripeInvoiceId: failed });
+    const retry = await claimInvoice({
+      orgId: proOrg,
+      stripeInvoiceId: failed,
+    });
     expect(retry).not.toBeNull();
     expect(retry!.attempts).toBe(2);
 
@@ -437,7 +578,10 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
       leaseSeconds: -1,
     });
     expect(dead).not.toBeNull();
-    const reclaimed = await claimInvoice({ orgId: proOrg, stripeInvoiceId: expired });
+    const reclaimed = await claimInvoice({
+      orgId: proOrg,
+      stripeInvoiceId: expired,
+    });
     expect(reclaimed).not.toBeNull();
     expect(reclaimed!.attempts).toBe(2);
   });
@@ -451,10 +595,13 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
     // adds invoice items runs exactly once.
     const results = await Promise.all(
       Array.from({ length: 4 }, () =>
-        withInvoiceClaim({ orgId: proOrg, stripeInvoiceId: invoiceId }, async () => {
-          sideEffects += 1;
-          return "billed";
-        }),
+        withInvoiceClaim(
+          { orgId: proOrg, stripeInvoiceId: invoiceId },
+          async () => {
+            sideEffects += 1;
+            return "billed";
+          },
+        ),
       ),
     );
 
@@ -479,20 +626,37 @@ describe.skipIf(!canRun)("durable usage ingest", () => {
       await import("@/lib/usage-events.server");
     const at = day("2026-09-01");
 
-    await recordUsageEvent({ orgId: otherOrg, meter: METER, quantity: 5, eventKey: "p1", at });
+    await recordUsageEvent({
+      orgId: otherOrg,
+      meter: METER,
+      quantity: 5,
+      eventKey: "p1",
+      at,
+    });
     await compactUsageEvents({ orgId: otherOrg });
-    await recordUsageEvent({ orgId: otherOrg, meter: METER, quantity: 5, eventKey: "p2", at });
+    await recordUsageEvent({
+      orgId: otherOrg,
+      meter: METER,
+      quantity: 5,
+      eventKey: "p2",
+      at,
+    });
 
     // Nothing is old enough yet, and the pending one is unbilled usage that
     // must never be dropped by age.
-    expect(await purgeCompactedEvents({ orgId: otherOrg, retentionDays: 30 })).toBe(0);
+    expect(
+      await purgeCompactedEvents({ orgId: otherOrg, retentionDays: 30 }),
+    ).toBe(0);
 
     // Age the compacted rows past the window.
     await owner`
       UPDATE usage_events SET compacted_at = now() - interval '60 days'
       WHERE organization_id = ${otherOrg}::uuid AND compacted_at IS NOT NULL
     `;
-    const purged = await purgeCompactedEvents({ orgId: otherOrg, retentionDays: 30 });
+    const purged = await purgeCompactedEvents({
+      orgId: otherOrg,
+      retentionDays: 30,
+    });
     expect(purged).toBeGreaterThan(0);
 
     const remaining = await owner`

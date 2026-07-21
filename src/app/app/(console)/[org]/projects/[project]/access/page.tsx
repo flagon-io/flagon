@@ -38,8 +38,8 @@ export default async function ProjectAccessPage({
   return (
     <div>
       <p className="text-sm leading-6 text-zinc-500">
-        Organization owners and admins have full control; every member can
-        see this project. Grants give members or teams a bigger role here.
+        Organization owners and admins have full control; every member can see
+        this project. Grants give members or teams a bigger role here.
       </p>
       <div className="mt-5">
         <AccessPanel

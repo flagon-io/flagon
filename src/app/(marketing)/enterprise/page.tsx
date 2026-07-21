@@ -1,11 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import {
-  BadgeCheck,
-  FileText,
-  Gauge,
-  Headset,
-} from "lucide-react";
+import { BadgeCheck, FileText, Gauge, Headset } from "lucide-react";
 import { brand } from "@/lib/brand";
 import { BleedBand } from "@/components/bleed-band";
 import { PageHero } from "@/components/page-hero";

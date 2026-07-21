@@ -31,22 +31,22 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-| Script          | Description                       |
-| --------------- | --------------------------------- |
-| `npm run dev`   | Start the dev server (Turbopack)  |
-| `npm run build` | Production build                  |
-| `npm run start` | Serve the production build        |
-| `npm run lint`  | Lint with ESLint                  |
+| Script          | Description                      |
+| --------------- | -------------------------------- |
+| `npm run dev`   | Start the dev server (Turbopack) |
+| `npm run build` | Production build                 |
+| `npm run start` | Serve the production build       |
+| `npm run lint`  | Lint with ESLint                 |
 
 ## Project layout
 
 One repository serves three surfaces. In production they live on subdomains; locally they are reached by path.
 
-| Surface   | Production           | Local path | Source                  |
-| --------- | -------------------- | ---------- | ----------------------- |
-| Marketing | `www.flagon.io`      | `/`        | `src/app/(marketing)/`  |
-| App       | `app.flagon.io/<org>`| `/app`     | `src/app/app/`          |
-| API       | `api.flagon.io`      | `/api`     | `src/app/api/`          |
+| Surface   | Production            | Local path | Source                 |
+| --------- | --------------------- | ---------- | ---------------------- |
+| Marketing | `www.flagon.io`       | `/`        | `src/app/(marketing)/` |
+| App       | `app.flagon.io/<org>` | `/app`     | `src/app/app/`         |
+| API       | `api.flagon.io`       | `/api`     | `src/app/api/`         |
 
 Host-based routing is handled in `src/proxy.ts`. The API always responds in JSON, including 404s and errors. Health check: `GET /api/healthz`.
 

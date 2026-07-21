@@ -59,7 +59,13 @@ export function ProjectCard({
   evaluations,
 }: {
   orgSlug: string;
-  project: { slug: string; name: string; createdAt: Date };
+  project: {
+    slug: string;
+    name: string;
+    description: string;
+    topics: string[];
+    createdAt: Date;
+  };
   owners: ProjectOwner[];
   /** Evaluations this project served in the current period. */
   evaluations: number;
@@ -67,10 +73,14 @@ export function ProjectCard({
   const shown = owners.slice(0, 3);
   const overflow = owners.length - shown.length;
 
+  // h-full, plus the spacer above the footer, is what makes a card fill its
+  // grid row. The row is already sized to the tallest card in the grid
+  // (auto-rows-fr on the list); without h-full a sparse card floats at its
+  // natural height and the list reads as ragged rather than as a grid.
   return (
     <Link
       href={appPath(`/${orgSlug}/projects/${project.slug}`)}
-      className="group flex flex-col border border-white/10 bg-white/2 p-4 transition hover:border-white/20 hover:bg-white/4"
+      className="group flex h-full flex-col border border-white/10 bg-white/2 p-4 transition hover:border-white/20 hover:bg-white/4"
     >
       <div className="flex items-start gap-3">
         <span
@@ -117,6 +127,39 @@ export function ProjectCard({
           </div>
         ) : null}
       </div>
+
+      {/* Always rendered, empty or not. A project with no description keeps
+          the two lines of room the others use, so the topics and the footer
+          line up across the row instead of sliding up to meet the title. */}
+      <p className="mt-3 line-clamp-2 min-h-10 text-xs leading-5 text-zinc-500">
+        {project.description}
+      </p>
+
+      {/* Chips, not links: the whole card is already an anchor, and an anchor
+          inside an anchor is invalid HTML that browsers resolve by guessing.
+          The topic is clickable on the project's own About rail. */}
+      {project.topics.length ? (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {project.topics.slice(0, 4).map((topic) => (
+            <span
+              key={topic}
+              className="rounded-full border border-teal-400/20 bg-teal-400/10 px-2 py-0.5 text-[11px] text-teal-300"
+            >
+              {topic}
+            </span>
+          ))}
+          {project.topics.length > 4 ? (
+            <span className="px-1 py-0.5 text-[11px] text-zinc-600">
+              +{project.topics.length - 4}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* A spacer rather than `mt-auto` on the footer: mt-auto would REPLACE
+          the footer's top margin, so a card whose content already fills the
+          row would have its rule sitting flush against the topics. */}
+      <div className="flex-1" aria-hidden />
 
       <div className="mt-4 flex items-baseline justify-between gap-3 border-t border-white/5 pt-3 text-xs">
         <span className="text-zinc-500">

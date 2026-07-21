@@ -28,7 +28,9 @@ function marketingRoutes(dir: string, prefix = ""): string[] {
     // single URL to list, so they are out of scope for a static sitemap.
     if (entry.name.startsWith("[")) continue;
     const segment = entry.name.startsWith("(") ? "" : `/${entry.name}`;
-    found.push(...marketingRoutes(join(dir, entry.name), `${prefix}${segment}`));
+    found.push(
+      ...marketingRoutes(join(dir, entry.name), `${prefix}${segment}`),
+    );
   }
   return found;
 }

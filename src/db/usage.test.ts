@@ -8,8 +8,8 @@ import postgres from "postgres";
  */
 const canRun = Boolean(
   process.env.DATABASE_URL_APP &&
-    process.env.DATABASE_URL_OWNER &&
-    process.env.BETTER_AUTH_SECRET,
+  process.env.DATABASE_URL_OWNER &&
+  process.env.BETTER_AUTH_SECRET,
 );
 
 const day = (iso: string) => new Date(`${iso}T00:00:00Z`);
@@ -111,9 +111,8 @@ describe.skipIf(!canRun)("usage metering", () => {
   });
 
   it("slices by project and keeps the parts summing to the whole", async () => {
-    const { recordUsage, usageView, usageSummary, ORG_LEVEL } = await import(
-      "@/lib/usage.server"
-    );
+    const { recordUsage, usageView, usageSummary, ORG_LEVEL } =
+      await import("@/lib/usage.server");
 
     const [alpha] = await owner`
       INSERT INTO projects (organization_id, slug, name)
@@ -148,7 +147,10 @@ describe.skipIf(!canRun)("usage metering", () => {
 
     // The invariant that keeps a per-project view honest: however the cents
     // are allocated, the breakdown adds up to exactly what is billed.
-    const allocated = byProject.rows.reduce((sum, row) => sum + row.costCents, 0);
+    const allocated = byProject.rows.reduce(
+      (sum, row) => sum + row.costCents,
+      0,
+    );
     expect(allocated).toBe(summary.usageCents);
     expect(byProject.rows.map((row) => row.key).sort()).toEqual(
       [ORG_LEVEL, alpha.id as string, beta.id as string].sort(),
@@ -218,9 +220,9 @@ describe.skipIf(!canRun)("usage metering", () => {
     });
     const frozenTotal = snapshot!.lines.reduce((s, l) => s + l.costCents, 0);
     expect(frozenTotal).toBe(period.usageCents);
-    expect(totalsFromSnapshot(snapshot!.period, snapshot!.lines).overageCents).toBe(
-      period.overageCents,
-    );
+    expect(
+      totalsFromSnapshot(snapshot!.period, snapshot!.lines).overageCents,
+    ).toBe(period.overageCents);
 
     // Once invoiced, closing again is a no-op: the period cannot be re-billed
     // or re-priced, which is what makes the Stripe webhook exactly-once.
@@ -247,8 +249,8 @@ describe.skipIf(!canRun)("usage metering", () => {
     // Same number of groups: the deleted project's usage stays its own,
     // rather than silently folding into the organization bucket.
     expect(after.rows.map((row) => row.key).sort()).toEqual(keys.sort());
-    expect(
-      after.rows.some((row) => row.label === "Deleted project"),
-    ).toBe(true);
+    expect(after.rows.some((row) => row.label === "Deleted project")).toBe(
+      true,
+    );
   });
 });

@@ -20,7 +20,12 @@ export async function DELETE(
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
   const { slug, project, grant_id } = await params;
-  const result = await resolveProjectContext(request, slug, project, "projects:write");
+  const result = await resolveProjectContext(
+    request,
+    slug,
+    project,
+    "projects:write",
+  );
   if (!result.ok) return apiError(result.status, result.code, result.message);
   const { ctx } = result;
 
@@ -29,7 +34,11 @@ export async function DELETE(
   }
 
   // Non-UUID ids can't exist; answer 404 without asking Postgres to cast.
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(grant_id)) {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      grant_id,
+    )
+  ) {
     return apiError(404, "not_found", "Grant not found.");
   }
 

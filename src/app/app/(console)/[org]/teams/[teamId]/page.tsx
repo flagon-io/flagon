@@ -8,7 +8,7 @@ import { db } from "@/db/client";
 import { users } from "@/db/auth-schema";
 import { Package } from "lucide-react";
 import { auth } from "@/lib/auth";
-import { listTeamProjectGrants } from "@/lib/project-access.server";
+import { listTeamProjects } from "@/lib/project-access.server";
 import { listTeamRoster } from "@/lib/teams.server";
 import { resolveOrg } from "../../resolve-org";
 import {
@@ -53,9 +53,9 @@ export default async function TeamPage({ params }: Params) {
   )?.role;
   const canManage = viewerRole === "owner" || viewerRole === "admin";
 
-  const [teamMemberRows, projectGrants] = await Promise.all([
+  const [teamMemberRows, teamProjects] = await Promise.all([
     listTeamRoster(team.id),
-    listTeamProjectGrants(org.id, team.id),
+    listTeamProjects(org.id, team.id),
   ]);
   const memberUserIds = teamMemberRows.map((row) => row.userId);
   const userRows = memberUserIds.length
@@ -103,30 +103,45 @@ export default async function TeamPage({ params }: Params) {
         {team.name}
       </h1>
       <p className="mt-1 text-sm text-zinc-500">
-        {members.length} {members.length === 1 ? "member" : "members"} ·
-        created {dateFormat.format(team.createdAt)}
+        {members.length} {members.length === 1 ? "member" : "members"} · created{" "}
+        {dateFormat.format(team.createdAt)}
       </p>
 
       <h2 className="mt-8 flex items-center gap-2 text-sm font-semibold text-zinc-100">
         <Package className="h-4 w-4 text-zinc-500" aria-hidden />
-        Project access
+        Projects
       </h2>
-      {projectGrants.length ? (
+      {/* Ownership and access are separate facts about the same project, so
+        they are shown on ONE row rather than in two lists: a team that owns a
+        project it can no longer open is the row worth noticing, and two lists
+        would bury it by showing it in only one of them. */}
+      {teamProjects.length ? (
         <ul className="mt-3 divide-y divide-white/5 border border-white/10">
-          {projectGrants.map((grant) => (
-            <li key={grant.project.id}>
+          {teamProjects.map((entry) => (
+            <li key={entry.project.id}>
               <Link
-                href={appPath(`/${orgSlug}/projects/${grant.project.slug}`)}
+                href={appPath(`/${orgSlug}/projects/${entry.project.slug}`)}
                 className="flex items-center gap-3 px-4 py-2.5 text-sm transition hover:bg-white/2"
               >
                 <span className="min-w-0 flex-1 truncate font-medium text-zinc-200">
-                  {grant.project.name}
+                  {entry.project.name}
                 </span>
                 <span className="truncate font-mono text-xs text-zinc-500">
-                  {grant.project.slug}
+                  {entry.project.slug}
                 </span>
-                <span className="text-xs uppercase tracking-wider text-zinc-400">
-                  {grant.role}
+                {entry.owner ? (
+                  <span className="rounded-full border border-teal-400/20 bg-teal-400/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-teal-300">
+                    Owner
+                  </span>
+                ) : null}
+                <span
+                  className={
+                    entry.role
+                      ? "text-xs uppercase tracking-wider text-zinc-400"
+                      : "text-xs uppercase tracking-wider text-zinc-600"
+                  }
+                >
+                  {entry.role ?? "No access"}
                 </span>
               </Link>
             </li>
@@ -134,8 +149,10 @@ export default async function TeamPage({ params }: Params) {
         </ul>
       ) : (
         <p className="mt-3 text-sm leading-6 text-zinc-500">
-          No project access yet. Grant it from a project&apos;s Access panel
-          and everyone on this team gets the role at once.
+          This team neither owns nor can open any project. Grant access from a
+          project&apos;s Access panel and everyone on this team gets the role at
+          once; name the team as an owner from the project&apos;s Overview to
+          record that it is responsible for one.
         </p>
       )}
 

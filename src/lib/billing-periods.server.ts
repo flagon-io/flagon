@@ -90,7 +90,12 @@ export async function selectablePeriods(input: {
   current: PeriodWindow;
   count?: number;
 }): Promise<
-  { window: PeriodWindow; key: string; status: PeriodStatus; isCurrent: boolean }[]
+  {
+    window: PeriodWindow;
+    key: string;
+    status: PeriodStatus;
+    isCurrent: boolean;
+  }[]
 > {
   const closed = await listPeriods({ orgId: input.orgId, limit: 36 });
   const byStart = new Map(closed.map((period) => [period.periodStart, period]));
@@ -177,7 +182,10 @@ async function freezeLines(
       .groupBy(usageRollups.meter, usageRollups.projectId),
   );
 
-  const byMeter = new Map<string, { projectId: string | null; quantity: number }[]>();
+  const byMeter = new Map<
+    string,
+    { projectId: string | null; quantity: number }[]
+  >();
   for (const row of rows) {
     const quantity = Number(row.quantity);
     if (quantity <= 0) continue;
@@ -188,7 +196,9 @@ async function freezeLines(
 
   const projectIds = [
     ...new Set(
-      rows.map((row) => row.projectId).filter((id): id is string => Boolean(id)),
+      rows
+        .map((row) => row.projectId)
+        .filter((id): id is string => Boolean(id)),
     ),
   ];
   const names = projectIds.length
@@ -328,7 +338,9 @@ export async function closePeriod(input: {
   });
 }
 
-function toBillingPeriod(row: typeof billingPeriods.$inferSelect): BillingPeriod {
+function toBillingPeriod(
+  row: typeof billingPeriods.$inferSelect,
+): BillingPeriod {
   return {
     id: row.id,
     periodStart: String(row.periodStart),
@@ -480,7 +492,10 @@ export function breakdownFromSnapshot(
   lines: FrozenLine[],
   groupBy: "product" | "project" | "meter",
 ): UsageBreakdownRow[] {
-  const totals = new Map<string, { label: string; quantity: number; costCents: number }>();
+  const totals = new Map<
+    string,
+    { label: string; quantity: number; costCents: number }
+  >();
   for (const line of lines) {
     const key =
       groupBy === "meter"
@@ -503,5 +518,7 @@ export function breakdownFromSnapshot(
   }
   return [...totals]
     .map(([key, entry]) => ({ key, ...entry }))
-    .sort((a, b) => b.costCents - a.costCents || a.label.localeCompare(b.label));
+    .sort(
+      (a, b) => b.costCents - a.costCents || a.label.localeCompare(b.label),
+    );
 }

@@ -19,10 +19,16 @@ config({ path: [".env.local", ".env"] });
 const [slug, name, email, plan = "free"] = process.argv.slice(2);
 
 if (!slug || !name || !email) {
-  console.error("Usage: node scripts/org-claim.mjs <slug> <name> <owner-email> [plan]");
+  console.error(
+    "Usage: node scripts/org-claim.mjs <slug> <name> <owner-email> [plan]",
+  );
   process.exit(1);
 }
-if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) || slug.length < 2 || slug.length > 39) {
+if (
+  !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) ||
+  slug.length < 2 ||
+  slug.length > 39
+) {
   console.error(
     "Slug must be 2-39 chars: lowercase alphanumeric with single hyphens, no leading/trailing hyphen.",
   );
@@ -36,11 +42,19 @@ if (!["free", "pro", "enterprise"].includes(plan)) {
 // App routes are static siblings of the /app/<org> segment: an org with one
 // of these slugs would be UNREACHABLE. Refuse even in sudo mode.
 const ROUTE_SHADOWED = new Set([
-  "signin", "signup", "forgot-password", "reset-password", "settings",
-  "new", "invitations", "api",
+  "signin",
+  "signup",
+  "forgot-password",
+  "reset-password",
+  "settings",
+  "new",
+  "invitations",
+  "api",
 ]);
 if (ROUTE_SHADOWED.has(slug)) {
-  console.error(`"${slug}" shadows an app route and would be unreachable. Pick another.`);
+  console.error(
+    `"${slug}" shadows an app route and would be unreachable. Pick another.`,
+  );
   process.exit(1);
 }
 
@@ -61,7 +75,8 @@ try {
     process.exit(1);
   }
 
-  const [existing] = await sql`SELECT id FROM organizations WHERE slug = ${slug}`;
+  const [existing] =
+    await sql`SELECT id FROM organizations WHERE slug = ${slug}`;
   if (existing) {
     console.error(`An organization with the slug "${slug}" already exists.`);
     process.exit(1);

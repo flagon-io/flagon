@@ -48,16 +48,16 @@ export default function GettingStartedPage() {
         company, not one per app.
       </p>
       <p className={p}>
-        Every account gets one free Hobby organization. It is capped rather
-        than billed, so it can never produce an invoice.
+        Every account gets one free Hobby organization. It is capped rather than
+        billed, so it can never produce an invoice.
       </p>
 
       <h2 className={h2}>2. Add a project</h2>
       <p className={p}>
-        Projects are where work lives. They carry an overview, ownership
-        (which teams and people are responsible), and per-project access
-        roles. Products attach to projects, so creating one first gives
-        everything after it somewhere to live.
+        Projects are where work lives. They carry an overview, ownership (which
+        teams and people are responsible), and per-project access roles.
+        Products attach to projects, so creating one first gives everything
+        after it somewhere to live.
       </p>
       <p className={p}>
         Ownership is documentation, not permission: naming a team as an owner
@@ -70,8 +70,8 @@ export default function GettingStartedPage() {
         On the Feature Flags page, create a flag. A flag has a stable{" "}
         <span className={code}>key</span> your code uses forever, a type
         (boolean, string, integer, float, or JSON), and one or more{" "}
-        <em>variants</em>: the possible values it can serve. One variant is
-        the fallback, served when no targeting rule matches.
+        <em>variants</em>: the possible values it can serve. One variant is the
+        fallback, served when no targeting rule matches.
       </p>
       <p className={p}>
         A boolean flag is on or off. Every other type takes a variant table, so
@@ -81,8 +81,8 @@ export default function GettingStartedPage() {
 
       <h2 className={h2}>4. Create a credential</h2>
       <p className={p}>
-        Applications authenticate with a token. Which kind depends on where
-        your code runs, and the difference matters:
+        Applications authenticate with a token. Which kind depends on where your
+        code runs, and the difference matters:
       </p>
       <ul className="mt-3 list-disc space-y-2 pl-5">
         <li className={li}>
@@ -100,10 +100,10 @@ export default function GettingStartedPage() {
         </li>
       </ul>
       <p className={p}>
-        Client tokens are created on the Feature Flags page; organization
-        tokens under Organization &rarr; API tokens. Treat an organization
-        token like a password, and rotate it if it leaks: rotation keeps the
-        token&apos;s name and scopes and replaces only the secret.
+        Client tokens are created on the Feature Flags page; organization tokens
+        under Organization &rarr; API tokens. Treat an organization token like a
+        password, and rotate it if it leaks: rotation keeps the token&apos;s
+        name and scopes and replaces only the secret.
       </p>
       <p className={p}>
         There is a third kind, a{" "}
@@ -125,16 +125,19 @@ export default function GettingStartedPage() {
           OFREP
         </a>
         , the OpenFeature Remote Evaluation Protocol, so you use standard
-        OpenFeature SDKs rather than a vendor client. The fastest possible
-        check is a single request:
+        OpenFeature SDKs rather than a vendor client. The fastest possible check
+        is a single request:
       </p>
-      <CodeBlock lang="bash" code={`curl -X POST ${brand.apiUrl}/ofrep/v1/evaluate/flags \\
+      <CodeBlock
+        lang="bash"
+        code={`curl -X POST ${brand.apiUrl}/ofrep/v1/evaluate/flags \\
   -H "Authorization: Bearer <your token>" \\
   -H "Content-Type: application/json" \\
-  -d '{"context":{"targetingKey":"user-123"}}'`} />
+  -d '{"context":{"targetingKey":"user-123"}}'`}
+      />
       <p className={p}>
-        That returns every flag in the organization, evaluated for that
-        context. See{" "}
+        That returns every flag in the organization, evaluated for that context.
+        See{" "}
         <Link href="/docs/feature-flags" className={a}>
           Feature Flags
         </Link>{" "}

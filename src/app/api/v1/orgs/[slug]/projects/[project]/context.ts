@@ -43,7 +43,12 @@ export async function resolveProjectContext(
     return {
       ok: false,
       status,
-      code: status === 403 ? "insufficient_scope" : status === 401 ? "unauthorized" : "not_found",
+      code:
+        status === 403
+          ? "insufficient_scope"
+          : status === 401
+            ? "unauthorized"
+            : "not_found",
       message:
         status === 403
           ? `This token is missing the ${scope} scope.`
@@ -56,7 +61,12 @@ export async function resolveProjectContext(
   const { org, actor } = access.access;
   const project = await getProject(org.id, projectSlug);
   if (!project) {
-    return { ok: false, status: 404, code: "not_found", message: "Project not found." };
+    return {
+      ok: false,
+      status: 404,
+      code: "not_found",
+      message: "Project not found.",
+    };
   }
 
   // An organization token has no membership to resolve a project role from.
@@ -65,7 +75,10 @@ export async function resolveProjectContext(
   // resolves the owner's real role, so it can never do more to a project than
   // the human behind it could.
   if (actor.kind === "org_token") {
-    return { ok: true, ctx: { org, project, userId: null, role: "admin", actor } };
+    return {
+      ok: true,
+      ctx: { org, project, userId: null, role: "admin", actor },
+    };
   }
 
   const orgMembers = await db
@@ -80,7 +93,12 @@ export async function resolveProjectContext(
     members: orgMembers,
   });
   if (!role) {
-    return { ok: false, status: 404, code: "not_found", message: "Project not found." };
+    return {
+      ok: false,
+      status: 404,
+      code: "not_found",
+      message: "Project not found.",
+    };
   }
 
   return { ok: true, ctx: { org, project, userId: actor.userId, role, actor } };

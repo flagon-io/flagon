@@ -37,7 +37,12 @@ export async function resolveTeamContext(
     return {
       ok: false,
       status,
-      code: status === 403 ? "insufficient_scope" : status === 401 ? "unauthorized" : "not_found",
+      code:
+        status === 403
+          ? "insufficient_scope"
+          : status === 401
+            ? "unauthorized"
+            : "not_found",
       message:
         status === 403
           ? `This token is missing the ${scope} scope.`
@@ -51,10 +56,17 @@ export async function resolveTeamContext(
   const [team] = await db
     .select()
     .from(teamsTable)
-    .where(and(eq(teamsTable.organizationId, org.id), eq(teamsTable.id, teamId)))
+    .where(
+      and(eq(teamsTable.organizationId, org.id), eq(teamsTable.id, teamId)),
+    )
     .limit(1);
   if (!team) {
-    return { ok: false, status: 404, code: "not_found", message: "Team not found." };
+    return {
+      ok: false,
+      status: 404,
+      code: "not_found",
+      message: "Team not found.",
+    };
   }
 
   return {

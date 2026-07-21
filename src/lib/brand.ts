@@ -31,10 +31,7 @@ export const brand = {
    * about what you can use right now, so an unbuilt product listed here reads
    * as a promise rather than a roadmap. Add one the day it lands, not before.
    */
-  products: [
-    "Catalog",
-    "Feature Flags",
-  ] as const,
+  products: ["Catalog", "Feature Flags"] as const,
 
   colors: {
     bg: "#09090b",

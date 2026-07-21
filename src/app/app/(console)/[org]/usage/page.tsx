@@ -183,11 +183,12 @@ export default async function UsagePage({
   // number producing 429s would be worse than showing none. Only meaningful on
   // a capped plan viewing the period that is actually accruing.
   const isCurrentPeriod = isoDay(window.from) === isoDay(context.current.from);
-  const cappedMeters = billing && isCurrentPeriod
-    ? [EVALUATION_METER, SYNC_METER].filter(
-        (meter) => hardCap(context.plan, meter) !== null,
-      )
-    : [];
+  const cappedMeters =
+    billing && isCurrentPeriod
+      ? [EVALUATION_METER, SYNC_METER].filter(
+          (meter) => hardCap(context.plan, meter) !== null,
+        )
+      : [];
   const quotas = await Promise.all(
     cappedMeters.map(async (meter) => ({
       meter,
@@ -321,7 +322,9 @@ export default async function UsagePage({
               </div>
               <div className="text-right">
                 <div className="text-sm text-zinc-400">
-                  {totals.overageCents > 0 ? "Billed on top" : "Beyond included"}
+                  {totals.overageCents > 0
+                    ? "Billed on top"
+                    : "Beyond included"}
                 </div>
                 <div
                   className={`mt-1 text-3xl font-semibold tracking-tight tabular-nums ${
@@ -396,7 +399,9 @@ export default async function UsagePage({
                   className="h-2 w-2 shrink-0 rounded-full"
                   style={{ background: colors[row.key] ?? "#71717a" }}
                 />
-                <span className="truncate text-sm text-zinc-100">{row.label}</span>
+                <span className="truncate text-sm text-zinc-100">
+                  {row.label}
+                </span>
               </div>
               <div className="w-40 text-right text-sm tabular-nums text-zinc-300">
                 {formatQuantity(row.quantity)}
@@ -408,7 +413,8 @@ export default async function UsagePage({
           ))
         ) : (
           <div className="border-b border-white/5 px-4 py-8 text-center text-sm text-zinc-500">
-            No usage recorded {isFiltered ? "for this filter" : "in this period"}.
+            No usage recorded{" "}
+            {isFiltered ? "for this filter" : "in this period"}.
           </div>
         )}
       </div>
@@ -489,14 +495,20 @@ export default async function UsagePage({
             </dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-zinc-400">Included usage credit ({plan.name})</dt>
+            <dt className="text-zinc-400">
+              Included usage credit ({plan.name})
+            </dt>
             <dd className="tabular-nums text-teal-300">
               -{formatCents(totals.creditAppliedCents)}
             </dd>
           </div>
           <div className="flex justify-between border-t border-white/10 pt-3 text-base">
             <dt className="font-medium text-zinc-100">
-              {isFrozen ? "Invoiced" : billing ? "Total this period" : "Would be billed"}
+              {isFrozen
+                ? "Invoiced"
+                : billing
+                  ? "Total this period"
+                  : "Would be billed"}
             </dt>
             <dd className="font-semibold tabular-nums text-zinc-100">
               {formatCents(totalCents)}
@@ -525,8 +537,8 @@ export default async function UsagePage({
                 SIZE the cap, not to be spent: Hobby is never invoiced, so
                 quoting it describes a bill that cannot happen and invites
                 comparison against Pro's credit, which is real money. */}
-            Hobby includes enough usage for a side project and is never
-            billed. Requests are refused at the cap rather than charged.{" "}
+            Hobby includes enough usage for a side project and is never billed.
+            Requests are refused at the cap rather than charged.{" "}
             <Link
               href={appPath(`/${slug}/billing`)}
               className="text-teal-400 transition hover:text-teal-300"

@@ -9,8 +9,8 @@ import postgres from "postgres";
  */
 const canRun = Boolean(
   process.env.DATABASE_URL_APP &&
-    process.env.DATABASE_URL_OWNER &&
-    process.env.BETTER_AUTH_SECRET,
+  process.env.DATABASE_URL_OWNER &&
+  process.env.BETTER_AUTH_SECRET,
 );
 
 describe.skipIf(!canRun)("device sessions", () => {
@@ -40,7 +40,12 @@ describe.skipIf(!canRun)("device sessions", () => {
 
     // Sign-up opens session #1 on this device.
     const signUp = await auth.api.signUpEmail({
-      body: { email, password, name: "Session Tester", username: `sess${stamp}` },
+      body: {
+        email,
+        password,
+        name: "Session Tester",
+        username: `sess${stamp}`,
+      },
       headers: CHROME(),
     });
     const userId = signUp.user.id;

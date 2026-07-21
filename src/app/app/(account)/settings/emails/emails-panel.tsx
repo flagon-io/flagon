@@ -60,9 +60,10 @@ export function EmailsPanel({
   verifyError: "expired" | "invalid" | null;
 }) {
   const router = useRouter();
-  const [status, setStatus] = useState<
-    { tone: "success" | "error"; message: string } | null
-  >(null);
+  const [status, setStatus] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [newEmail, setNewEmail] = useState("");
 

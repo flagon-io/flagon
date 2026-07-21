@@ -42,7 +42,15 @@ export default async function AccountLayout({
               {brand.name}
             </span>
           </Link>
-          <div className="flex items-center gap-3"><Link href={marketingHref("/")} className={`${subtleButtonClass} gap-1.5 text-xs`}>Return to site <ArrowUpRight className="h-3.5 w-3.5" /></Link><UserMenu /></div>
+          <div className="flex items-center gap-3">
+            <Link
+              href={marketingHref("/")}
+              className={`${subtleButtonClass} gap-1.5 text-xs`}
+            >
+              Return to site <ArrowUpRight className="h-3.5 w-3.5" />
+            </Link>
+            <UserMenu />
+          </div>
         </div>
       </header>
 

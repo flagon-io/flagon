@@ -89,7 +89,11 @@ export default function ProductsPage() {
       <BleedBand>
         <div className="grid grid-cols-1 divide-y divide-white/10 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
           {products.map(({ name, href, icon: Icon, tagline, body, points }) => (
-            <Link key={name} href={href} className="group flex flex-col p-8 transition hover:bg-white/2">
+            <Link
+              key={name}
+              href={href}
+              className="group flex flex-col p-8 transition hover:bg-white/2"
+            >
               <div className="flex items-center gap-2.5">
                 <Icon className="h-5 w-5 text-teal-400" aria-hidden />
                 <h2 className="text-lg font-semibold text-zinc-100">{name}</h2>
@@ -98,12 +102,20 @@ export default function ProductsPage() {
                   aria-hidden
                 />
               </div>
-              <p className="mt-3 text-sm font-medium text-zinc-300">{tagline}</p>
+              <p className="mt-3 text-sm font-medium text-zinc-300">
+                {tagline}
+              </p>
               <p className="mt-2 text-sm leading-6 text-zinc-400">{body}</p>
               <ul className="mt-6 space-y-2">
                 {points.map((point) => (
-                  <li key={point} className="flex gap-2.5 text-sm leading-6 text-zinc-400">
-                    <span aria-hidden className="mt-2.5 h-px w-3 shrink-0 bg-teal-500/50" />
+                  <li
+                    key={point}
+                    className="flex gap-2.5 text-sm leading-6 text-zinc-400"
+                  >
+                    <span
+                      aria-hidden
+                      className="mt-2.5 h-px w-3 shrink-0 bg-teal-500/50"
+                    />
                     {point}
                   </li>
                 ))}
@@ -115,7 +127,10 @@ export default function ProductsPage() {
 
       <div className="mx-auto w-full max-w-7xl px-6 py-20 sm:px-12 lg:px-20">
         <div className="flex items-start gap-3">
-          <Layers className="mt-0.5 h-5 w-5 shrink-0 text-teal-400" aria-hidden />
+          <Layers
+            className="mt-0.5 h-5 w-5 shrink-0 text-teal-400"
+            aria-hidden
+          />
           <div className="max-w-2xl">
             <h2 className="text-xl font-semibold tracking-tight text-zinc-100">
               Why one platform beats four tools

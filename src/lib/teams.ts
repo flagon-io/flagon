@@ -13,12 +13,14 @@ export const TEAM_NAME_MAX_LENGTH = 50;
 export const TEAM_NAME_HINT = `Team names are ${TEAM_NAME_MIN_LENGTH}-${TEAM_NAME_MAX_LENGTH} characters and unique within the organization.`;
 
 export type TeamNameValidation =
-  | { ok: true; name: string }
-  | { ok: false; error: string };
+  { ok: true; name: string } | { ok: false; error: string };
 
 export function validateTeamName(rawName: string): TeamNameValidation {
   const name = rawName.trim().replace(/\s+/g, " ");
-  if (name.length < TEAM_NAME_MIN_LENGTH || name.length > TEAM_NAME_MAX_LENGTH) {
+  if (
+    name.length < TEAM_NAME_MIN_LENGTH ||
+    name.length > TEAM_NAME_MAX_LENGTH
+  ) {
     return {
       ok: false,
       error: `Team name must be between ${TEAM_NAME_MIN_LENGTH} and ${TEAM_NAME_MAX_LENGTH} characters.`,

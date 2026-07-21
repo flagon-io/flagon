@@ -17,7 +17,11 @@ import {
   useAuthBase,
 } from "../ui";
 
-export function SignInForm({ passwordWasReset }: { passwordWasReset: boolean }) {
+export function SignInForm({
+  passwordWasReset,
+}: {
+  passwordWasReset: boolean;
+}) {
   const router = useRouter();
   const base = useAuthBase();
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +99,11 @@ export function SignInForm({ passwordWasReset }: { passwordWasReset: boolean }) 
             />
           </div>
 
-          <button type="submit" disabled={pending} className={primaryButtonClass}>
+          <button
+            type="submit"
+            disabled={pending}
+            className={primaryButtonClass}
+          >
             {pending ? "Signing in..." : "Sign in"}
           </button>
         </form>

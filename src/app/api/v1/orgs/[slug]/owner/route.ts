@@ -74,7 +74,12 @@ export async function GET(
     })
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
-    .where(and(eq(members.organizationId, access.access.org.id), eq(members.role, "owner")))
+    .where(
+      and(
+        eq(members.organizationId, access.access.org.id),
+        eq(members.role, "owner"),
+      ),
+    )
     .limit(1);
   if (!owner) return apiError(404, "not_found", "Organization not found.");
   return apiJson({
@@ -102,7 +107,11 @@ export async function PUT(
   const body = await request.json().catch(() => null);
   const username = typeof body?.user === "string" ? body.user.trim() : "";
   if (!username) {
-    return apiError(400, "invalid_subject", "Provide the new owner's username.");
+    return apiError(
+      400,
+      "invalid_subject",
+      "Provide the new owner's username.",
+    );
   }
 
   const [user] = await db

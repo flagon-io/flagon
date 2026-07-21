@@ -30,11 +30,20 @@ import { uuidv7 } from "./uuidv7";
  */
 
 /** How a caller supplies its idempotency key, in precedence order. */
-const EVENT_ID_HEADERS = ["x-flagon-event-id", "idempotency-key", "x-request-id"];
+const EVENT_ID_HEADERS = [
+  "x-flagon-event-id",
+  "idempotency-key",
+  "x-request-id",
+];
 
 export type UsageIngestOutcome =
   /** Written for the first time; quota reserved. */
-  | { status: "recorded"; eventId: string; used: number; allowance: number | null }
+  | {
+      status: "recorded";
+      eventId: string;
+      used: number;
+      allowance: number | null;
+    }
   /** This event id was already recorded. Nothing changed, and that is success. */
   | { status: "duplicate"; used: number; allowance: number | null }
   /** Over the plan's hard cap. Neither receipt nor reservation was kept. */
@@ -266,7 +275,11 @@ async function quotaContextFor(orgId: string): Promise<QuotaContext> {
   // A missing org is not cached: far more likely a transient lookup failure
   // than a real answer, and caching it would pin the org to the free cap for
   // the whole TTL.
-  if (org) planCache.set(orgId, { ...context, expires: Date.now() + PLAN_CACHE_TTL_MS });
+  if (org)
+    planCache.set(orgId, {
+      ...context,
+      expires: Date.now() + PLAN_CACHE_TTL_MS,
+    });
   return context;
 }
 

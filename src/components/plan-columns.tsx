@@ -30,9 +30,7 @@ function Column({
   highlight?: boolean;
 }) {
   return (
-    <div
-      className={`flex flex-col p-8 ${highlight ? "bg-white/3" : ""}`}
-    >
+    <div className={`flex flex-col p-8 ${highlight ? "bg-white/3" : ""}`}>
       <div className="flex items-center gap-2.5">
         <h3 className="text-sm font-semibold text-zinc-100">{name}</h3>
         {popular ? (

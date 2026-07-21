@@ -256,8 +256,7 @@ export async function verifyEmailToken(token: string): Promise<ActionResult> {
 }
 
 export type SetPrimaryResult =
-  | { ok: true; email: UserEmail }
-  | { ok: false; error: string };
+  { ok: true; email: UserEmail } | { ok: false; error: string };
 
 export async function setPrimary(
   userId: string,
@@ -283,7 +282,9 @@ export async function setPrimary(
     await tx
       .update(userEmails)
       .set({ isPrimary: false, updatedAt: new Date() })
-      .where(and(eq(userEmails.userId, userId), eq(userEmails.isPrimary, true)));
+      .where(
+        and(eq(userEmails.userId, userId), eq(userEmails.isPrimary, true)),
+      );
     await tx
       .update(userEmails)
       .set({ isPrimary: true, updatedAt: new Date() })

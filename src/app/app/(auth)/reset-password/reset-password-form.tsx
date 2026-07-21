@@ -118,7 +118,11 @@ export function ResetPasswordForm({
             />
           </div>
 
-          <button type="submit" disabled={pending} className={primaryButtonClass}>
+          <button
+            type="submit"
+            disabled={pending}
+            className={primaryButtonClass}
+          >
             {pending ? "Updating password..." : "Update password"}
           </button>
         </form>

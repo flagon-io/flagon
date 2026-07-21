@@ -10,8 +10,8 @@ import postgres from "postgres";
  */
 const canRun = Boolean(
   process.env.DATABASE_URL_APP &&
-    process.env.DATABASE_URL_OWNER &&
-    process.env.BETTER_AUTH_SECRET,
+  process.env.DATABASE_URL_OWNER &&
+  process.env.BETTER_AUTH_SECRET,
 );
 
 describe.skipIf(!canRun)("teams and projects backbone", () => {
@@ -42,9 +42,8 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
     owner = postgres(process.env.DATABASE_URL_OWNER as string, { max: 1 });
     const { auth } = await import("@/lib/auth");
     ({ closePool } = await import("@/db/client"));
-    const { createProject, listProjects } = await import(
-      "@/lib/projects.server"
-    );
+    const { createProject, listProjects } =
+      await import("@/lib/projects.server");
     const { teamMemberCounts } = await import("@/lib/teams.server");
 
     // Sign up and carry the session cookie into the org-plugin calls.
@@ -124,9 +123,8 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
     expect(projects.map((p) => p.slug)).toEqual(["storefront"]);
 
     // Rename + delete round out the project lifecycle (both under RLS).
-    const { deleteProject, getProject, renameProject } = await import(
-      "@/lib/projects.server"
-    );
+    const { deleteProject, getProject, renameProject } =
+      await import("@/lib/projects.server");
     const scratch = await createProject(orgId, {
       name: "Scratch",
       slug: "scratch",
@@ -134,10 +132,57 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
     expect(scratch.ok).toBe(true);
     const scratchProject = (scratch as { ok: true; project: { id: string } })
       .project;
-    const renamed = await renameProject(orgId, scratchProject.id, "Scratch Pad");
+    const renamed = await renameProject(
+      orgId,
+      scratchProject.id,
+      "Scratch Pad",
+    );
     expect(renamed.ok && renamed.project.name).toBe("Scratch Pad");
-    expect(await deleteProject(orgId, scratchProject.id)).toBe(true);
+
+    // Details (drizzle/0029) are stored normalized, and the slug can move.
+    const { changeProjectSlug, updateProjectDetails } =
+      await import("@/lib/projects.server");
+    const detailed = await updateProjectDetails(orgId, scratchProject.id, {
+      description: "  A scratch project.  ",
+      website: "flagon.io/docs",
+      topics: "Scratch, notes scratch",
+    });
+    expect(detailed).toMatchObject({
+      ok: true,
+      project: {
+        description: "A scratch project.",
+        website: "https://flagon.io/docs",
+        topics: ["scratch", "notes"],
+      },
+    });
+    // The app rejects what the column's CHECK would also reject, with a
+    // message instead of a constraint violation.
+    expect(
+      await updateProjectDetails(orgId, scratchProject.id, {
+        topics: ["Not A Topic"],
+      }),
+    ).toMatchObject({ ok: false, code: "invalid_topics" });
+
+    // Moving the slug leaves NOTHING at the old path, and cannot collide.
+    expect(
+      await changeProjectSlug(orgId, scratchProject.id, "storefront"),
+    ).toMatchObject({ ok: false, code: "slug_taken" });
+    expect(
+      await changeProjectSlug(orgId, scratchProject.id, "New"),
+    ).toMatchObject({ ok: false, code: "invalid_slug" });
+    const moved = await changeProjectSlug(
+      orgId,
+      scratchProject.id,
+      "scratch-pad",
+    );
+    expect(moved.ok && moved.project.slug).toBe("scratch-pad");
     expect(await getProject(orgId, "scratch")).toBeNull();
+    expect((await getProject(orgId, "scratch-pad"))?.id).toBe(
+      scratchProject.id,
+    );
+
+    expect(await deleteProject(orgId, scratchProject.id)).toBe(true);
+    expect(await getProject(orgId, "scratch-pad")).toBeNull();
 
     // --- Repository-style access control -------------------------------
     const {
@@ -175,10 +220,22 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
       role: m.role,
     }));
 
-    const { listProjectOwners, replaceProjectOwners } = await import("@/lib/project-ownership.server");
+    const { listProjectOwners, replaceProjectOwners } =
+      await import("@/lib/project-ownership.server");
     const { updateProjectOverview } = await import("@/lib/projects.server");
-    expect((await updateProjectOverview(orgId, project.id, "# Storefront\n\nOwned and documented.")).ok).toBe(true);
-    expect((await replaceProjectOwners(orgId, project.id, { teamIds: [team.id] })).ok).toBe(true);
+    expect(
+      (
+        await updateProjectOverview(
+          orgId,
+          project.id,
+          "# Storefront\n\nOwned and documented.",
+        )
+      ).ok,
+    ).toBe(true);
+    expect(
+      (await replaceProjectOwners(orgId, project.id, { teamIds: [team.id] }))
+        .ok,
+    ).toBe(true);
     expect(await listProjectOwners(orgId, project.id)).toMatchObject([
       { kind: "team", subjectId: team.id, name: "Platform" },
     ]);
@@ -186,12 +243,19 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
     // An owner can also be a PERSON (drizzle/0026), so responsibility does not
     // have to be laundered through a single-member team.
     expect(
-      (await replaceProjectOwners(orgId, project.id, { teamIds: [team.id], userIds: [ownerId] })).ok,
+      (
+        await replaceProjectOwners(orgId, project.id, {
+          teamIds: [team.id],
+          userIds: [ownerId],
+        })
+      ).ok,
     ).toBe(true);
     expect(await listProjectOwners(orgId, project.id)).toHaveLength(2);
 
     // ...but only people who are actually members of this organization.
-    const stranger = await replaceProjectOwners(orgId, project.id, { userIds: ["nobody"] });
+    const stranger = await replaceProjectOwners(orgId, project.id, {
+      userIds: ["nobody"],
+    });
     expect(stranger.ok).toBe(false);
     if (!stranger.ok) expect(stranger.code).toBe("invalid_user");
     // A rejected replace leaves the previous owners untouched.
@@ -199,14 +263,29 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
 
     // Owner is implicitly admin; a plain member gets the read baseline.
     expect(
-      await resolveProjectRole({ orgId, projectId: project.id, userId: ownerId, members }),
+      await resolveProjectRole({
+        orgId,
+        projectId: project.id,
+        userId: ownerId,
+        members,
+      }),
     ).toBe("admin");
     expect(
-      await resolveProjectRole({ orgId, projectId: project.id, userId: memberRes.user.id, members }),
+      await resolveProjectRole({
+        orgId,
+        projectId: project.id,
+        userId: memberRes.user.id,
+        members,
+      }),
     ).toBe("read");
     // Non-members resolve to null (no access).
     expect(
-      await resolveProjectRole({ orgId, projectId: project.id, userId: "nobody", members }),
+      await resolveProjectRole({
+        orgId,
+        projectId: project.id,
+        userId: "nobody",
+        members,
+      }),
     ).toBeNull();
 
     // A team grant elevates everyone on the team.
@@ -223,7 +302,12 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
     });
     expect(teamGrant.ok).toBe(true);
     expect(
-      await resolveProjectRole({ orgId, projectId: project.id, userId: memberRes.user.id, members }),
+      await resolveProjectRole({
+        orgId,
+        projectId: project.id,
+        userId: memberRes.user.id,
+        members,
+      }),
     ).toBe("write");
 
     // A direct grant wins when higher; upsert is idempotent per subject.
@@ -235,28 +319,63 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
       role: "admin",
     });
     expect(
-      await resolveProjectRole({ orgId, projectId: project.id, userId: memberRes.user.id, members }),
+      await resolveProjectRole({
+        orgId,
+        projectId: project.id,
+        userId: memberRes.user.id,
+        members,
+      }),
     ).toBe("admin");
 
     const grants = await listProjectGrants(orgId, project.id);
     expect(grants).toHaveLength(2);
     expect(grants.map((g) => g.subject.type).sort()).toEqual(["team", "user"]);
 
-    // Bilateral view: the team sees the projects it holds grants on.
-    const { listTeamProjectGrants } = await import(
-      "@/lib/project-access.server"
-    );
-    const teamProjects = await listTeamProjectGrants(orgId, team.id);
+    // Bilateral view: the team sees the projects it is attached to, and by
+    // which of the two independent mechanisms.
+    const { listTeamProjects } = await import("@/lib/project-access.server");
+    const teamProjects = await listTeamProjects(orgId, team.id);
     expect(teamProjects).toHaveLength(1);
     expect(teamProjects[0].project.slug).toBe("storefront");
     expect(teamProjects[0].role).toBe("write");
+    expect(teamProjects[0].owner).toBe(true);
 
     // Revoking the direct grant falls back to the team grant.
     const directGrant = grants.find((g) => g.subject.type === "user")!;
-    expect(await removeProjectGrant(orgId, project.id, directGrant.id)).toBe(true);
+    expect(await removeProjectGrant(orgId, project.id, directGrant.id)).toBe(
+      true,
+    );
     expect(
-      await resolveProjectRole({ orgId, projectId: project.id, userId: memberRes.user.id, members }),
+      await resolveProjectRole({
+        orgId,
+        projectId: project.id,
+        userId: memberRes.user.id,
+        members,
+      }),
     ).toBe("write");
+
+    // Ownership survives the loss of access, and is still reported: a team
+    // that is responsible for a project it can no longer open is the row the
+    // team page exists to surface, so it must not fall out of the list.
+    const teamGrantRow = grants.find((g) => g.subject.type === "team")!;
+    expect(await removeProjectGrant(orgId, project.id, teamGrantRow.id)).toBe(
+      true,
+    );
+    expect(await listTeamProjects(orgId, team.id)).toMatchObject([
+      { project: { slug: "storefront" }, role: null, owner: true },
+    ]);
+    // Put it back so the rest of the flow reads against the granted state.
+    expect(
+      (
+        await upsertProjectGrant({
+          orgId,
+          projectId: project.id,
+          subjectType: "team",
+          subjectId: team.id,
+          role: "write",
+        })
+      ).ok,
+    ).toBe(true);
 
     // --- Invitation flow: invite -> sign up -> accept ------------------
     const invitation = await auth.api.createInvitation({
@@ -299,9 +418,9 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
       headers: sessionHeaders,
     });
     expect(roster!.members).toHaveLength(3);
-    expect(
-      roster!.members.map((m) => m.user.email).sort(),
-    ).toContain(invitedEmail);
+    expect(roster!.members.map((m) => m.user.email).sort()).toContain(
+      invitedEmail,
+    );
 
     // --- Exactly one owner, moved by transfer -------------------------
     const { transferOwnership } = await import("@/lib/org-owner.server");
@@ -320,7 +439,11 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
 
     // Someone outside the organization cannot receive it.
     expect(
-      await transferOwnership({ orgId, fromUserId: ownerId, toUserId: "nobody" }),
+      await transferOwnership({
+        orgId,
+        fromUserId: ownerId,
+        toUserId: "nobody",
+      }),
     ).toMatchObject({ ok: false, code: "not_a_member" });
 
     // The owner hands it over: the seat moves and they step down to admin.
@@ -339,8 +462,8 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
     const ownersNow = owners(afterTransfer!.members);
     expect(ownersNow).toHaveLength(1);
     expect(ownersNow[0].userId).toBe(memberRes.user.id);
-    expect(
-      afterTransfer!.members.find((m) => m.userId === ownerId)!.role,
-    ).toBe("admin");
+    expect(afterTransfer!.members.find((m) => m.userId === ownerId)!.role).toBe(
+      "admin",
+    );
   });
 });

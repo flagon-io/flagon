@@ -39,7 +39,8 @@ export async function renameOrganizationAction(
   name: string,
 ): Promise<OrgSettingsResult> {
   const ctx = await requireRole(orgSlug, ["owner", "admin"]);
-  if (!ctx) return { ok: false, message: "You can't manage this organization." };
+  if (!ctx)
+    return { ok: false, message: "You can't manage this organization." };
 
   const trimmed = name.trim();
   if (!trimmed || trimmed.length > 100) {

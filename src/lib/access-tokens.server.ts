@@ -64,7 +64,8 @@ export function satisfiesScope(
   return action === "read" && granted.includes(`${resource}:write`);
 }
 
-const digest = (token: string) => createHash("sha256").update(token).digest("hex");
+const digest = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
 
 export async function createAccessToken(input: {
   subjectType: "user" | "organization";
@@ -74,38 +75,95 @@ export async function createAccessToken(input: {
   expiresAt?: Date | null;
 }) {
   const name = input.name.trim();
-  if (!name || name.length > 100) return { ok: false as const, error: "Provide a token name up to 100 characters." };
-  if (!input.scopes.length || input.scopes.some((scope) => !TOKEN_SCOPES.includes(scope))) {
+  if (!name || name.length > 100)
+    return {
+      ok: false as const,
+      error: "Provide a token name up to 100 characters.",
+    };
+  if (
+    !input.scopes.length ||
+    input.scopes.some((scope) => !TOKEN_SCOPES.includes(scope))
+  ) {
     return { ok: false as const, error: "Choose at least one valid scope." };
   }
   const prefix = input.subjectType === "user" ? "flagon_pat" : "flagon_org";
   const identity = Buffer.from(input.subjectId).toString("base64url");
   const token = `${prefix}_${identity}_${randomBytes(32).toString("base64url")}`;
-  const [created] = await db.insert(accessTokens).values({
-    subjectType: input.subjectType,
-    subjectId: input.subjectId,
-    name,
-    scopes: input.scopes,
-    expiresAt: input.expiresAt,
-    secretHash: digest(token),
-  }).returning();
+  const [created] = await db
+    .insert(accessTokens)
+    .values({
+      subjectType: input.subjectType,
+      subjectId: input.subjectId,
+      name,
+      scopes: input.scopes,
+      expiresAt: input.expiresAt,
+      secretHash: digest(token),
+    })
+    .returning();
   return { ok: true as const, token, accessToken: created };
 }
 
-export const listAccessTokens = (subjectType: "user" | "organization", subjectId: string) =>
-  db.select().from(accessTokens).where(and(eq(accessTokens.subjectType, subjectType), eq(accessTokens.subjectId, subjectId))).orderBy(desc(accessTokens.createdAt));
+export const listAccessTokens = (
+  subjectType: "user" | "organization",
+  subjectId: string,
+) =>
+  db
+    .select()
+    .from(accessTokens)
+    .where(
+      and(
+        eq(accessTokens.subjectType, subjectType),
+        eq(accessTokens.subjectId, subjectId),
+      ),
+    )
+    .orderBy(desc(accessTokens.createdAt));
 
-export async function revokeAccessToken(subjectType: "user" | "organization", subjectId: string, id: string) {
-  return (await db.delete(accessTokens).where(and(eq(accessTokens.id, id), eq(accessTokens.subjectType, subjectType), eq(accessTokens.subjectId, subjectId))).returning({ id: accessTokens.id })).length > 0;
+export async function revokeAccessToken(
+  subjectType: "user" | "organization",
+  subjectId: string,
+  id: string,
+) {
+  return (
+    (
+      await db
+        .delete(accessTokens)
+        .where(
+          and(
+            eq(accessTokens.id, id),
+            eq(accessTokens.subjectType, subjectType),
+            eq(accessTokens.subjectId, subjectId),
+          ),
+        )
+        .returning({ id: accessTokens.id })
+    ).length > 0
+  );
 }
 
-export async function rotateAccessToken(subjectType: "user" | "organization", subjectId: string, id: string) {
-  const [current] = await db.select().from(accessTokens).where(and(eq(accessTokens.id, id), eq(accessTokens.subjectType, subjectType), eq(accessTokens.subjectId, subjectId))).limit(1);
+export async function rotateAccessToken(
+  subjectType: "user" | "organization",
+  subjectId: string,
+  id: string,
+) {
+  const [current] = await db
+    .select()
+    .from(accessTokens)
+    .where(
+      and(
+        eq(accessTokens.id, id),
+        eq(accessTokens.subjectType, subjectType),
+        eq(accessTokens.subjectId, subjectId),
+      ),
+    )
+    .limit(1);
   if (!current) return { ok: false as const };
   const prefix = subjectType === "user" ? "flagon_pat" : "flagon_org";
   const identity = Buffer.from(subjectId).toString("base64url");
   const token = `${prefix}_${identity}_${randomBytes(32).toString("base64url")}`;
-  const [accessToken] = await db.update(accessTokens).set({ secretHash: digest(token), lastUsedAt: null }).where(eq(accessTokens.id, id)).returning();
+  const [accessToken] = await db
+    .update(accessTokens)
+    .set({ secretHash: digest(token), lastUsedAt: null })
+    .where(eq(accessTokens.id, id))
+    .returning();
   return { ok: true as const, token, accessToken };
 }
 
@@ -121,11 +179,21 @@ export async function rotateAccessToken(subjectType: "user" | "organization", su
 export async function authenticateToken(header: string | null) {
   if (!header?.startsWith("Bearer ")) return null;
   const token = header.slice(7).trim();
-  if (!token.startsWith("flagon_org_") && !token.startsWith("flagon_pat_")) return null;
-  const [credential] = await db.select().from(accessTokens).where(and(
-    eq(accessTokens.secretHash, digest(token)),
-    or(isNull(accessTokens.expiresAt), gt(accessTokens.expiresAt, new Date())),
-  )).limit(1);
+  if (!token.startsWith("flagon_org_") && !token.startsWith("flagon_pat_"))
+    return null;
+  const [credential] = await db
+    .select()
+    .from(accessTokens)
+    .where(
+      and(
+        eq(accessTokens.secretHash, digest(token)),
+        or(
+          isNull(accessTokens.expiresAt),
+          gt(accessTokens.expiresAt, new Date()),
+        ),
+      ),
+    )
+    .limit(1);
   if (!credential) return null;
 
   // Fire-and-forget: last-used is for humans auditing which credentials are
@@ -144,14 +212,24 @@ export async function authenticateToken(header: string | null) {
   return credential;
 }
 
-export async function authenticateAccessToken(header: string | null, requiredScope: TokenScope) {
+export async function authenticateAccessToken(
+  header: string | null,
+  requiredScope: TokenScope,
+) {
   const credential = await authenticateToken(header);
-  if (!credential || !satisfiesScope(credential.scopes, requiredScope)) return null;
+  if (!credential || !satisfiesScope(credential.scopes, requiredScope))
+    return null;
   return credential;
 }
 
 export function serializeAccessToken(token: AccessToken) {
-  return { id: token.id, name: token.name, subject_type: token.subjectType, scopes: token.scopes,
-    expires_at: token.expiresAt?.toISOString() ?? null, last_used_at: token.lastUsedAt?.toISOString() ?? null,
-    created_at: token.createdAt.toISOString() };
+  return {
+    id: token.id,
+    name: token.name,
+    subject_type: token.subjectType,
+    scopes: token.scopes,
+    expires_at: token.expiresAt?.toISOString() ?? null,
+    last_used_at: token.lastUsedAt?.toISOString() ?? null,
+    created_at: token.createdAt.toISOString(),
+  };
 }

@@ -80,7 +80,15 @@ export default async function ConsoleLayout({
               fallbackSlug={activeOrg?.slug ?? null}
             />
             <div className="ml-auto flex items-center">
-              <div className="flex items-center gap-3"><Link href={marketingHref("/")} className={`${headerPillClass} hidden sm:inline-flex`}>Return to site <ArrowUpRight className="h-3.5 w-3.5" /></Link><UserMenu /></div>
+              <div className="flex items-center gap-3">
+                <Link
+                  href={marketingHref("/")}
+                  className={`${headerPillClass} hidden sm:inline-flex`}
+                >
+                  Return to site <ArrowUpRight className="h-3.5 w-3.5" />
+                </Link>
+                <UserMenu />
+              </div>
             </div>
           </div>
         </header>

@@ -58,7 +58,9 @@ export function QuotaMeter({
           {label}
         </h2>
         <p className="text-sm tabular-nums text-zinc-400">
-          <span className="font-medium text-zinc-200">{formatQuantity(used)}</span>
+          <span className="font-medium text-zinc-200">
+            {formatQuantity(used)}
+          </span>
           <span className="text-zinc-600"> / {formatQuantity(limit)}</span>
         </p>
       </div>
@@ -97,8 +99,9 @@ export function QuotaMeter({
             the thing that costs us the bandwidth. */}
         {meter === "flags.syncs" ? (
           <>
-            Sending <code className="font-mono text-zinc-400">If-None-Match</code>{" "}
-            means unchanged configuration returns 304 without counting.{" "}
+            Sending{" "}
+            <code className="font-mono text-zinc-400">If-None-Match</code> means
+            unchanged configuration returns 304 without counting.{" "}
           </>
         ) : null}
         <Link

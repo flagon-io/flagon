@@ -12,8 +12,8 @@ import postgres from "postgres";
  */
 const canRun = Boolean(
   process.env.DATABASE_URL_APP &&
-    process.env.DATABASE_URL_OWNER &&
-    process.env.BETTER_AUTH_SECRET,
+  process.env.DATABASE_URL_OWNER &&
+  process.env.BETTER_AUTH_SECRET,
 );
 
 const BASE = "https://api.flagon.io";
@@ -67,7 +67,8 @@ describe.skipIf(!canRun)("api tokens", () => {
 
   it("refuses a valid token that lacks the scope, distinctly from a bad one", async () => {
     const { createAccessToken } = await import("@/lib/access-tokens.server");
-    const { GET } = await import("@/app/api/v1/orgs/[slug]/usage/evaluations/route");
+    const { GET } =
+      await import("@/app/api/v1/orgs/[slug]/usage/evaluations/route");
     const params = { params: Promise.resolve({ slug: slugA }) };
 
     const wrong = await createAccessToken({
@@ -103,7 +104,8 @@ describe.skipIf(!canRun)("api tokens", () => {
 
   it("binds an organization token to exactly one organization", async () => {
     const { createAccessToken } = await import("@/lib/access-tokens.server");
-    const { GET } = await import("@/app/api/v1/orgs/[slug]/usage/evaluations/route");
+    const { GET } =
+      await import("@/app/api/v1/orgs/[slug]/usage/evaluations/route");
 
     const token = await createAccessToken({
       subjectType: "organization",
@@ -114,7 +116,11 @@ describe.skipIf(!canRun)("api tokens", () => {
     if (!token.ok) throw new Error("token not created");
 
     expect(
-      (await GET(get(token.token, slugA), { params: Promise.resolve({ slug: slugA }) })).status,
+      (
+        await GET(get(token.token, slugA), {
+          params: Promise.resolve({ slug: slugA }),
+        })
+      ).status,
     ).toBe(200);
 
     // Pointing it at another org must be indistinguishable from that org not
@@ -127,7 +133,8 @@ describe.skipIf(!canRun)("api tokens", () => {
 
   it("gives a personal token only what its owner already has", async () => {
     const { createAccessToken } = await import("@/lib/access-tokens.server");
-    const { GET } = await import("@/app/api/v1/orgs/[slug]/usage/evaluations/route");
+    const { GET } =
+      await import("@/app/api/v1/orgs/[slug]/usage/evaluations/route");
 
     const [user] = await owner`
       INSERT INTO users (id, name, email, email_verified)
@@ -146,7 +153,11 @@ describe.skipIf(!canRun)("api tokens", () => {
     // Not a member yet: the org must look like it does not exist, even though
     // the scope is right and the org is real.
     expect(
-      (await GET(get(pat.token, slugA), { params: Promise.resolve({ slug: slugA }) })).status,
+      (
+        await GET(get(pat.token, slugA), {
+          params: Promise.resolve({ slug: slugA }),
+        })
+      ).status,
     ).toBe(404);
 
     await owner`
@@ -154,13 +165,21 @@ describe.skipIf(!canRun)("api tokens", () => {
       VALUES (uuid_generate_v7(), ${orgA}::uuid, ${userId}, 'member')`;
 
     expect(
-      (await GET(get(pat.token, slugA), { params: Promise.resolve({ slug: slugA }) })).status,
+      (
+        await GET(get(pat.token, slugA), {
+          params: Promise.resolve({ slug: slugA }),
+        })
+      ).status,
     ).toBe(200);
 
     // Membership ending ends the token's reach, without revoking the token.
     await owner`DELETE FROM members WHERE organization_id = ${orgA}::uuid AND user_id = ${userId}`;
     expect(
-      (await GET(get(pat.token, slugA), { params: Promise.resolve({ slug: slugA }) })).status,
+      (
+        await GET(get(pat.token, slugA), {
+          params: Promise.resolve({ slug: slugA }),
+        })
+      ).status,
     ).toBe(404);
 
     await owner`DELETE FROM access_tokens WHERE subject_id = ${userId}`;
@@ -177,7 +196,13 @@ describe.skipIf(!canRun)("api tokens", () => {
       subjectType: "organization",
       subjectId: orgA,
       name: "Everything",
-      scopes: ["org:write", "flags:write", "projects:write", "members:write", "usage:read"],
+      scopes: [
+        "org:write",
+        "flags:write",
+        "projects:write",
+        "members:write",
+        "usage:read",
+      ],
     });
     if (!token.ok) throw new Error("token not created");
 
@@ -189,9 +214,8 @@ describe.skipIf(!canRun)("api tokens", () => {
   });
 
   it("records last use so a stale credential is visible", async () => {
-    const { createAccessToken, authenticateToken } = await import(
-      "@/lib/access-tokens.server"
-    );
+    const { createAccessToken, authenticateToken } =
+      await import("@/lib/access-tokens.server");
     const created = await createAccessToken({
       subjectType: "organization",
       subjectId: orgA,

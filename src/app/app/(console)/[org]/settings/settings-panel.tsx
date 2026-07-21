@@ -126,8 +126,8 @@ export function OrgSettingsPanel({
               required
             />
             <p className={hintClass}>
-              Changing this moves every URL and API path for this
-              organization; existing links stop working. {ORG_SLUG_HINT}
+              Changing this moves every URL and API path for this organization;
+              existing links stop working. {ORG_SLUG_HINT}
             </p>
           </div>
           <button
@@ -144,8 +144,8 @@ export function OrgSettingsPanel({
         <div className="mt-10 border border-red-500/20 p-5">
           <h2 className="text-sm font-semibold text-zinc-100">Danger zone</h2>
           <p className="mt-1 text-sm leading-6 text-zinc-500">
-            Deleting the organization permanently removes its projects,
-            teams, and access grants. This cannot be undone.
+            Deleting the organization permanently removes its projects, teams,
+            and access grants. This cannot be undone.
           </p>
           <form onSubmit={destroy} className="mt-4 space-y-3">
             <div className="max-w-sm">

@@ -42,7 +42,10 @@ export function OwnershipPanel({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
-  const personById = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
+  const personById = useMemo(
+    () => new Map(people.map((p) => [p.id, p])),
+    [people],
+  );
 
   const isSelected = (kind: Selection["kind"], id: string) =>
     selected.some((item) => item.kind === kind && item.id === id);
@@ -74,8 +77,7 @@ export function OwnershipPanel({
 
   const needle = query.trim().toLowerCase();
   const matches = (haystack: Array<string | null>) =>
-    !needle ||
-    haystack.some((value) => value?.toLowerCase().includes(needle));
+    !needle || haystack.some((value) => value?.toLowerCase().includes(needle));
 
   const teamResults = teams.filter((team) => matches([team.name]));
   const peopleResults = people.filter((person) =>
@@ -85,7 +87,10 @@ export function OwnershipPanel({
 
   const dirty =
     selected.length !== initial.length ||
-    selected.some((item) => !initial.some((base) => base.kind === item.kind && base.id === item.id));
+    selected.some(
+      (item) =>
+        !initial.some((base) => base.kind === item.kind && base.id === item.id),
+    );
 
   const commit = () =>
     start(async () => {
@@ -155,7 +160,9 @@ export function OwnershipPanel({
                         <Row
                           key={person.id}
                           label={person.name}
-                          meta={person.username ? `@${person.username}` : undefined}
+                          meta={
+                            person.username ? `@${person.username}` : undefined
+                          }
                           selected={isSelected("user", person.id)}
                           onClick={() => toggle("user", person.id)}
                           avatar={
@@ -181,7 +188,11 @@ export function OwnershipPanel({
                   <span className="pl-1 text-xs text-zinc-600">
                     {selected.length} selected
                   </span>
-                  <Button size="sm" disabled={pending || !dirty} onClick={commit}>
+                  <Button
+                    size="sm"
+                    disabled={pending || !dirty}
+                    onClick={commit}
+                  >
                     {pending ? "Saving…" : "Save"}
                   </Button>
                 </div>
@@ -221,7 +232,8 @@ export function OwnershipPanel({
                     // the user never opened.
                     start(async () => {
                       const next = selected.filter(
-                        (entry) => !(entry.kind === item.kind && entry.id === item.id),
+                        (entry) =>
+                          !(entry.kind === item.kind && entry.id === item.id),
                       );
                       const result = await save(next);
                       setError(result.ok ? null : result.message);
@@ -246,7 +258,13 @@ export function OwnershipPanel({
   );
 }
 
-function Group({ label, children }: { label: string; children: React.ReactNode }) {
+function Group({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="py-1">
       <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
@@ -280,9 +298,13 @@ function Row({
       {avatar}
       <span className="min-w-0 flex-1 truncate">
         {label}
-        {meta ? <span className="ml-1.5 text-xs text-zinc-600">{meta}</span> : null}
+        {meta ? (
+          <span className="ml-1.5 text-xs text-zinc-600">{meta}</span>
+        ) : null}
       </span>
-      {selected ? <Check className="h-3.5 w-3.5 shrink-0 text-teal-400" /> : null}
+      {selected ? (
+        <Check className="h-3.5 w-3.5 shrink-0 text-teal-400" />
+      ) : null}
     </button>
   );
 }

@@ -2,10 +2,7 @@
 
 import { useState } from "react";
 import { Notice, buttonClass, subtleButtonClass } from "@/components/form-ui";
-import {
-  acceptInvitationAction,
-  declineInvitationAction,
-} from "./actions";
+import { acceptInvitationAction, declineInvitationAction } from "./actions";
 
 /** Accept/decline controls; server actions redirect on success. */
 export function InvitationResponse({ invitationId }: { invitationId: string }) {

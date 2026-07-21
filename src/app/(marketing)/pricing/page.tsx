@@ -4,7 +4,12 @@ import { Braces, CreditCard, Server } from "lucide-react";
 import { brand } from "@/lib/brand";
 import { appHref } from "@/lib/urls";
 import { PLANS } from "@/lib/plans";
-import { activeMeters, formatMeterRate, formatQuantity, getMeter } from "@/lib/meters";
+import {
+  activeMeters,
+  formatMeterRate,
+  formatQuantity,
+  getMeter,
+} from "@/lib/meters";
 import { BleedBand } from "@/components/bleed-band";
 import { PageHero } from "@/components/page-hero";
 import { PlanColumns } from "@/components/plan-columns";
@@ -36,7 +41,6 @@ const included = [
     body: "Source-available under the FSL. Deploy the whole platform on your own infrastructure, for your own use, with no license fee.",
   },
 ] as const;
-
 
 /**
  * Public pricing. Same plan columns as the in-app creation flow; CTAs land
@@ -118,8 +122,8 @@ export default function PricingPage() {
             Your included usage is a{" "}
             <strong className="text-zinc-300">pooled credit</strong>, not a
             per-product allowance: spend it on whichever products you actually
-            use. At the rate above, Pro&apos;s ${PLANS.pro.includedUsageCents / 100}{" "}
-            covers roughly{" "}
+            use. At the rate above, Pro&apos;s $
+            {PLANS.pro.includedUsageCents / 100} covers roughly{" "}
             {formatQuantity(
               (PLANS.pro.includedUsageCents /
                 (getMeter("flags.evaluations")?.unitAmountCents ?? 1)) *
@@ -151,9 +155,7 @@ export default function PricingPage() {
                 <h3 className="mt-4 text-sm font-semibold text-zinc-100">
                   {title}
                 </h3>
-                <p className="mt-1.5 text-sm leading-6 text-zinc-400">
-                  {body}
-                </p>
+                <p className="mt-1.5 text-sm leading-6 text-zinc-400">{body}</p>
               </div>
             ))}
           </div>

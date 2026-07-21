@@ -24,7 +24,9 @@ import { users } from "./auth-schema";
 
 export const organizations = pgTable("organizations", {
   // UUIDv7 default (drizzle/0003_uuidv7.sql); native uuidv7() once on PG18.
-  id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`uuid_generate_v7()`),
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
   logo: text("logo"),
@@ -48,8 +50,12 @@ export const organizations = pgTable("organizations", {
    * so it fails toward doing work rather than skipping it.
    */
   usagePendingAt: timestamp("usage_pending_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 /**
@@ -112,7 +118,9 @@ export const invitations = pgTable(
 export const teams = pgTable(
   "teams",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -125,14 +133,19 @@ export const teams = pgTable(
       .defaultNow(),
   },
   (t) => [
-    uniqueIndex("teams_org_name_uidx").on(t.organizationId, sql`lower(${t.name})`),
+    uniqueIndex("teams_org_name_uidx").on(
+      t.organizationId,
+      sql`lower(${t.name})`,
+    ),
   ],
 );
 
 export const teamMembers = pgTable(
   "team_members",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     teamId: uuid("team_id")
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
@@ -152,15 +165,25 @@ export const teamMembers = pgTable(
 export const projects = pgTable(
   "projects",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     slug: text("slug").notNull(),
     name: text("name").notNull(),
+    /** One line for a list. The README is overviewMarkdown (drizzle/0029). */
+    description: text("description").notNull().default(""),
+    website: text("website").notNull().default(""),
+    topics: text("topics").array().notNull().default([]),
     overviewMarkdown: text("overview_markdown").notNull().default(""),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("projects_organization_id_slug_key").on(t.organizationId, t.slug),
@@ -176,7 +199,9 @@ export const projects = pgTable(
 export const projectRoles = pgTable(
   "project_roles",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -214,22 +239,37 @@ export const projectRoles = pgTable(
 export const projectOwners = pgTable(
   "project_owners",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
-    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
-    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }),
     /** users.id is text (BetterAuth), not uuid. */
     userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (t) => [unique("project_owners_project_id_team_id_key").on(t.projectId, t.teamId), index("project_owners_project_id_idx").on(t.projectId), index("project_owners_team_id_idx").on(t.teamId), index("project_owners_user_id_idx").on(t.userId)],
+  (t) => [
+    unique("project_owners_project_id_team_id_key").on(t.projectId, t.teamId),
+    index("project_owners_project_id_idx").on(t.projectId),
+    index("project_owners_team_id_idx").on(t.teamId),
+    index("project_owners_user_id_idx").on(t.userId),
+  ],
 );
 
 /** Organization-wide boolean feature flags (drizzle/0018). */
 export const featureFlags = pgTable(
   "feature_flags",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -237,11 +277,20 @@ export const featureFlags = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     type: text("type").notNull().default("boolean"),
-    variants: jsonb("variants").$type<Array<{ key: string; value: unknown }>>().notNull(),
+    variants: jsonb("variants")
+      // `label` is optional and human-facing only; the key is what rules
+      // reference and what OFREP reports (drizzle/0028 backfilled it for
+      // flags created when the console still asked for keys by hand).
+      .$type<Array<{ key: string; value: unknown; label?: string }>>()
+      .notNull(),
     defaultVariant: text("default_variant").notNull(),
     rules: jsonb("rules").$type<unknown[]>().notNull().default([]),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("feature_flags_organization_id_key_key").on(t.organizationId, t.key),
@@ -253,14 +302,18 @@ export const featureFlags = pgTable(
 export const clientTokens = pgTable(
   "client_tokens",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     secretHash: text("secret_hash").notNull().unique(),
     token: text("token"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [index("client_tokens_organization_id_idx").on(t.organizationId)],
 );
@@ -269,14 +322,22 @@ export const clientTokens = pgTable(
 export const segments = pgTable(
   "segments",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
-    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
     key: text("key").notNull(),
     name: text("name").notNull(),
     description: text("description"),
     criteria: jsonb("criteria").$type<Record<string, unknown>>().notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("segments_organization_id_key_key").on(t.organizationId, t.key),
@@ -289,7 +350,9 @@ export const segments = pgTable(
 export const accessTokens = pgTable(
   "access_tokens",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     subjectType: text("subject_type").notNull(),
     subjectId: text("subject_id").notNull(),
     name: text("name").notNull(),
@@ -297,7 +360,9 @@ export const accessTokens = pgTable(
     scopes: text("scopes").array().notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [index("access_tokens_subject_idx").on(t.subjectType, t.subjectId)],
 );
@@ -310,7 +375,9 @@ export const accessTokens = pgTable(
 export const usageRollups = pgTable(
   "usage_rollups",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -362,7 +429,9 @@ export const usageRollups = pgTable(
 export const usageEvents = pgTable(
   "usage_events",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -409,7 +478,9 @@ export const usageEvents = pgTable(
 export const evaluationCounters = pgTable(
   "evaluation_counters",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -454,7 +525,9 @@ export const evaluationCounters = pgTable(
 export const billingInvoiceClaims = pgTable(
   "billing_invoice_claims",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -500,7 +573,9 @@ export const billingInvoiceClaims = pgTable(
 export const billingPeriods = pgTable(
   "billing_periods",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -541,7 +616,9 @@ export const billingPeriods = pgTable(
 export const billingPeriodLines = pgTable(
   "billing_period_lines",
   {
-    id: uuid("id").primaryKey().default(sql`uuid_generate_v7()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),

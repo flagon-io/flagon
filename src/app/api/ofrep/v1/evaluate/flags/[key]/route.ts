@@ -1,27 +1,73 @@
 import { evaluateFlag, type EvaluationContext } from "@/lib/flags";
 import { asEvaluableFlag, getFlag } from "@/lib/flags.server";
 import { authenticateOfrep } from "@/lib/ofrep-auth.server";
-import { configurationVersion, etagMatches, evaluationEtag, OFREP_HEADERS, readOfrepJson, validEvaluationContext } from "@/lib/ofrep.server";
+import {
+  configurationVersion,
+  etagMatches,
+  evaluationEtag,
+  OFREP_HEADERS,
+  readOfrepJson,
+  validEvaluationContext,
+} from "@/lib/ofrep.server";
 import { meterEvaluations } from "@/lib/ofrep-usage.server";
 import { listSegments } from "@/lib/segments.server";
 
-export function OPTIONS() { return new Response(null, { status: 204, headers: OFREP_HEADERS }); }
+export function OPTIONS() {
+  return new Response(null, { status: 204, headers: OFREP_HEADERS });
+}
 
-export async function POST(request: Request, { params }: { params: Promise<{ key: string }> }) {
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ key: string }> },
+) {
   // Client tokens are allowed here, exactly as on the bulk endpoint. Refusing
   // them would be security theatre: bulk already accepts an arbitrary context
   // from a publishable token and returns EVERY flag, so a single-flag lookup
   // discloses strictly less. The client/server split is about what a token can
   // MANAGE, not about which evaluation shape it may ask for.
   const credential = await authenticateOfrep(request, true);
-  if (!credential) return Response.json({ errorCode: "UNAUTHORIZED", errorDetails: "A valid evaluation credential is required." }, { status: 401, headers: OFREP_HEADERS });
+  if (!credential)
+    return Response.json(
+      {
+        errorCode: "UNAUTHORIZED",
+        errorDetails: "A valid evaluation credential is required.",
+      },
+      { status: 401, headers: OFREP_HEADERS },
+    );
   const parsed = await readOfrepJson(request);
-  if (!parsed.ok) return Response.json({ errorCode: "INVALID_CONTEXT", errorDetails: parsed.tooLarge ? "The evaluation request is too large." : "The evaluation request must be valid JSON." }, { status: parsed.tooLarge ? 413 : 400, headers: OFREP_HEADERS });
+  if (!parsed.ok)
+    return Response.json(
+      {
+        errorCode: "INVALID_CONTEXT",
+        errorDetails: parsed.tooLarge
+          ? "The evaluation request is too large."
+          : "The evaluation request must be valid JSON.",
+      },
+      { status: parsed.tooLarge ? 413 : 400, headers: OFREP_HEADERS },
+    );
   const body = parsed.value as { context?: unknown };
-  if (!validEvaluationContext(body?.context)) return Response.json({ errorCode: "INVALID_CONTEXT", errorDetails: "A non-empty context.targetingKey is required." }, { status: 400, headers: OFREP_HEADERS });
+  if (!validEvaluationContext(body?.context))
+    return Response.json(
+      {
+        errorCode: "INVALID_CONTEXT",
+        errorDetails: "A non-empty context.targetingKey is required.",
+      },
+      { status: 400, headers: OFREP_HEADERS },
+    );
   const { key } = await params;
-  const [flag, storedSegments] = await Promise.all([getFlag(credential.orgId, key), listSegments(credential.orgId)]);
-  if (!flag) return Response.json({ key, errorCode: "FLAG_NOT_FOUND", errorDetails: `Flag '${key}' was not found.` }, { status: 404, headers: OFREP_HEADERS });
+  const [flag, storedSegments] = await Promise.all([
+    getFlag(credential.orgId, key),
+    listSegments(credential.orgId),
+  ]);
+  if (!flag)
+    return Response.json(
+      {
+        key,
+        errorCode: "FLAG_NOT_FOUND",
+        errorDetails: `Flag '${key}' was not found.`,
+      },
+      { status: 404, headers: OFREP_HEADERS },
+    );
   // Conditional request support, same shape as the bulk route. A decision is
   // a pure function of (this flag, the segments it can reference, the
   // context), so those three fully identify the representation: if none of
@@ -36,13 +82,29 @@ export async function POST(request: Request, { params }: { params: Promise<{ key
   const version = configurationVersion([flag], storedSegments);
   const etag = evaluationEtag(version, { key, context: body.context });
   if (etagMatches(request.headers.get("if-none-match"), etag)) {
-    return new Response(null, { status: 304, headers: { ...OFREP_HEADERS, ETag: etag } });
+    return new Response(null, {
+      status: 304,
+      headers: { ...OFREP_HEADERS, ETag: etag },
+    });
   }
-  const segments = storedSegments.map((segment) => ({ key: segment.key, criteria: segment.criteria as never }));
-  const evaluated = evaluateFlag(asEvaluableFlag(flag), segments, body.context as EvaluationContext);
-  const overQuota = await meterEvaluations({ request, orgId: credential.orgId, quantity: 1 });
+  const segments = storedSegments.map((segment) => ({
+    key: segment.key,
+    criteria: segment.criteria as never,
+  }));
+  const evaluated = evaluateFlag(
+    asEvaluableFlag(flag),
+    segments,
+    body.context as EvaluationContext,
+  );
+  const overQuota = await meterEvaluations({
+    request,
+    orgId: credential.orgId,
+    quantity: 1,
+  });
   if (overQuota) return overQuota;
   // no-store would forbid the client from keeping the copy it needs to
   // revalidate against, defeating the ETag entirely.
-  return Response.json(evaluated, { headers: { ...OFREP_HEADERS, ETag: etag } });
+  return Response.json(evaluated, {
+    headers: { ...OFREP_HEADERS, ETag: etag },
+  });
 }

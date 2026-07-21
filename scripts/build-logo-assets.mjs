@@ -73,7 +73,10 @@ const tealTile = `<defs>
 
 const outputs = [
   ["src/app/icon.svg", icon],
-  [".github/avatar-teal.svg", avatar({ background: tealTile, stroke: "#ffffff" })],
+  [
+    ".github/avatar-teal.svg",
+    avatar({ background: tealTile, stroke: "#ffffff" }),
+  ],
   [
     ".github/avatar-dark.svg",
     avatar({

@@ -17,7 +17,9 @@ const enabled = Boolean(process.env.STRIPE_SANDBOX_TESTS) && Boolean(key);
 
 // A live key here would create real charges. Never run against one.
 if (enabled && !key?.startsWith("sk_test_")) {
-  throw new Error("Refusing to run sandbox tests against a non-test Stripe key.");
+  throw new Error(
+    "Refusing to run sandbox tests against a non-test Stripe key.",
+  );
 }
 
 describe.skipIf(!enabled)("stripe sandbox", () => {
@@ -58,14 +60,17 @@ describe.skipIf(!enabled)("stripe sandbox", () => {
 
   it("attaches usage as invoice items that total the overage", async () => {
     const { addUsageToInvoice } = await import("./billing");
-    const { buildUsageInvoiceLines, invoiceLinesTotalCents } = await import(
-      "./usage-invoice"
-    );
-    const { applyIncludedCredit, getMeter, lineFromMeter } = await import("./meters");
+    const { buildUsageInvoiceLines, invoiceLinesTotalCents } =
+      await import("./usage-invoice");
+    const { applyIncludedCredit, getMeter, lineFromMeter } =
+      await import("./meters");
 
     const meter = getMeter("flags.evaluations")!;
     // 50M events at $1.00/1M = $50.00, against Pro's $20 credit -> $30 due.
-    const totals = applyIncludedCredit([lineFromMeter(meter, 50_000_000)], 2000);
+    const totals = applyIncludedCredit(
+      [lineFromMeter(meter, 50_000_000)],
+      2000,
+    );
     expect(totals.usageCents).toBe(5000);
     expect(totals.overageCents).toBe(3000);
 
@@ -92,7 +97,10 @@ describe.skipIf(!enabled)("stripe sandbox", () => {
     const fresh = await stripe.invoices.retrieve(invoice.id as string);
     expect(fresh.total).toBe(totals.overageCents);
 
-    const items = await stripe.invoiceItems.list({ invoice: invoice.id as string, limit: 100 });
+    const items = await stripe.invoiceItems.list({
+      invoice: invoice.id as string,
+      limit: 100,
+    });
     expect(items.data.length).toBe(lines.length);
     // The credit rides as a NEGATIVE line, so the arithmetic stays visible on
     // the customer's invoice rather than hiding inside a coupon.
@@ -102,16 +110,35 @@ describe.skipIf(!enabled)("stripe sandbox", () => {
   it("cannot double-bill a redelivered webhook", async () => {
     const { addUsageToInvoice } = await import("./billing");
     const lines = [
-      { key: "usage:flags.evaluations:2026-08-01", description: "Flag evaluations", amountCents: 1234 },
+      {
+        key: "usage:flags.evaluations:2026-08-01",
+        description: "Flag evaluations",
+        amountCents: 1234,
+      },
     ];
 
-    const invoice = await stripe.invoices.create({ customer: customerId, auto_advance: false });
+    const invoice = await stripe.invoices.create({
+      customer: customerId,
+      auto_advance: false,
+    });
     created.push(invoice.id as string);
 
-    expect(await addUsageToInvoice({ invoiceId: invoice.id as string, customerId, lines })).toBe(1);
+    expect(
+      await addUsageToInvoice({
+        invoiceId: invoice.id as string,
+        customerId,
+        lines,
+      }),
+    ).toBe(1);
     // Same call again: the line key is already present, so nothing is added.
     // This is the guarantee that makes an at-least-once webhook safe.
-    expect(await addUsageToInvoice({ invoiceId: invoice.id as string, customerId, lines })).toBe(0);
+    expect(
+      await addUsageToInvoice({
+        invoiceId: invoice.id as string,
+        customerId,
+        lines,
+      }),
+    ).toBe(0);
 
     const fresh = await stripe.invoices.retrieve(invoice.id as string);
     expect(fresh.total).toBe(1234);
@@ -125,7 +152,9 @@ describe.skipIf(!enabled)("stripe sandbox", () => {
     process.env.STRIPE_WEBHOOK_SECRET = secret;
 
     const postgres = (await import("postgres")).default;
-    const owner = postgres(process.env.DATABASE_URL_OWNER as string, { max: 1 });
+    const owner = postgres(process.env.DATABASE_URL_OWNER as string, {
+      max: 1,
+    });
     const slug = `wh-${Date.now()}`;
     let orgId = "";
 
@@ -143,7 +172,10 @@ describe.skipIf(!enabled)("stripe sandbox", () => {
         INSERT INTO usage_rollups (organization_id, meter, day, quantity)
         VALUES (${orgId}::uuid, 'flags.evaluations', '2026-05-10'::date, 50000000)`;
 
-      const invoice = await stripe.invoices.create({ customer: customerId, auto_advance: false });
+      const invoice = await stripe.invoices.create({
+        customer: customerId,
+        auto_advance: false,
+      });
       created.push(invoice.id as string);
 
       const payload = JSON.stringify({
@@ -158,15 +190,23 @@ describe.skipIf(!enabled)("stripe sandbox", () => {
           },
         },
       });
-      const header = stripe.webhooks.generateTestHeaderString({ payload, secret });
+      const header = stripe.webhooks.generateTestHeaderString({
+        payload,
+        secret,
+      });
       const { POST } = await import("@/app/api/webhooks/stripe/route");
 
       const deliver = () =>
-        POST(new Request("https://api.flagon.io/api/webhooks/stripe", {
-          method: "POST",
-          headers: { "stripe-signature": header, "content-type": "application/json" },
-          body: payload,
-        }));
+        POST(
+          new Request("https://api.flagon.io/api/webhooks/stripe", {
+            method: "POST",
+            headers: {
+              "stripe-signature": header,
+              "content-type": "application/json",
+            },
+            body: payload,
+          }),
+        );
 
       expect((await deliver()).status).toBe(200);
 
@@ -183,10 +223,13 @@ describe.skipIf(!enabled)("stripe sandbox", () => {
 
       // Stripe delivers at least once. A redelivery must change nothing.
       expect((await deliver()).status).toBe(200);
-      const afterRedelivery = await stripe.invoices.retrieve(invoice.id as string);
+      const afterRedelivery = await stripe.invoices.retrieve(
+        invoice.id as string,
+      );
       expect(afterRedelivery.total).toBe(3000);
     } finally {
-      if (orgId) await owner`DELETE FROM organizations WHERE id = ${orgId}::uuid`;
+      if (orgId)
+        await owner`DELETE FROM organizations WHERE id = ${orgId}::uuid`;
       await owner.end();
       delete process.env.STRIPE_WEBHOOK_SECRET;
     }
@@ -196,7 +239,10 @@ describe.skipIf(!enabled)("stripe sandbox", () => {
     const { getStripe } = await import("./billing");
     const secret = "whsec_sandbox_test_secret";
     const payload = JSON.stringify({ id: "evt_test", type: "invoice.created" });
-    const header = stripe.webhooks.generateTestHeaderString({ payload, secret });
+    const header = stripe.webhooks.generateTestHeaderString({
+      payload,
+      secret,
+    });
 
     const event = getStripe().webhooks.constructEvent(payload, header, secret);
     expect(event.type).toBe("invoice.created");

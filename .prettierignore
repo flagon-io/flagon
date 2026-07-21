@@ -1,0 +1,17 @@
+# Generated or vendored - never hand-formatted.
+.next
+out
+build
+storybook-static
+coverage
+node_modules
+package-lock.json
+
+# Generated from src/lib/logo-geometry.json by scripts/build-logo-assets.mjs.
+src/app/icon.svg
+.github/avatar-*.svg
+
+# Migrations are an applied historical record; reformatting them churns files
+# that must stay byte-stable as a matter of habit, even though they are
+# tracked by filename.
+drizzle

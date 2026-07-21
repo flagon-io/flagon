@@ -116,7 +116,9 @@ export function TokenManager({
     const body = await response.json();
     setSecret(body.token);
     setTokens((items) =>
-      (items ?? []).map((item) => (item.id === id ? { ...item, ...body } : item)),
+      (items ?? []).map((item) =>
+        item.id === id ? { ...item, ...body } : item,
+      ),
     );
   };
 
@@ -159,7 +161,12 @@ export function TokenManager({
               label="Name"
               hint="Use a name that identifies where this token is deployed."
             >
-              <Input name="name" required autoFocus placeholder={namePlaceholder} />
+              <Input
+                name="name"
+                required
+                autoFocus
+                placeholder={namePlaceholder}
+              />
             </Field>
 
             <div className="grid gap-1.5">
@@ -183,8 +190,12 @@ export function TokenManager({
                       className="mt-0.5 accent-teal-500"
                     />
                     <span className="min-w-0">
-                      <span className="font-mono text-xs text-zinc-200">{scope}</span>
-                      <span className="block text-xs text-zinc-600">{label}</span>
+                      <span className="font-mono text-xs text-zinc-200">
+                        {scope}
+                      </span>
+                      <span className="block text-xs text-zinc-600">
+                        {label}
+                      </span>
                     </span>
                   </label>
                 ))}
@@ -211,36 +222,44 @@ export function TokenManager({
       {tokens === null ? (
         <SkeletonRows rows={2} className="mt-4" />
       ) : (
-      <ul className="mt-4 divide-y divide-white/5 border border-white/10">
-        {tokens.map((token) => (
-          <li key={token.id} className="flex items-start gap-3 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-zinc-200">{token.name}</p>
-              <p className="mt-0.5 font-mono text-xs text-zinc-600">
-                {token.scopes.join("  ")}
-              </p>
-              <p className="mt-1 text-xs text-zinc-600">
-                Created {dateFormat.format(new Date(token.created_at))} ·{" "}
-                {relative(token.last_used_at)}
-                {token.expires_at
-                  ? ` · Expires ${dateFormat.format(new Date(token.expires_at))}`
-                  : ""}
-              </p>
-            </div>
-            <Button variant="secondary" size="sm" onClick={() => rotate(token.id)}>
-              Rotate
-            </Button>
-            <Button variant="danger" size="sm" onClick={() => revoke(token.id)}>
-              Revoke
-            </Button>
-          </li>
-        ))}
-        {!tokens.length ? (
-          <li className="px-4 py-6 text-center text-sm text-zinc-600">
-            No tokens yet.
-          </li>
-        ) : null}
-      </ul>
+        <ul className="mt-4 divide-y divide-white/5 border border-white/10">
+          {tokens.map((token) => (
+            <li key={token.id} className="flex items-start gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-zinc-200">{token.name}</p>
+                <p className="mt-0.5 font-mono text-xs text-zinc-600">
+                  {token.scopes.join("  ")}
+                </p>
+                <p className="mt-1 text-xs text-zinc-600">
+                  Created {dateFormat.format(new Date(token.created_at))} ·{" "}
+                  {relative(token.last_used_at)}
+                  {token.expires_at
+                    ? ` · Expires ${dateFormat.format(new Date(token.expires_at))}`
+                    : ""}
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => rotate(token.id)}
+              >
+                Rotate
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => revoke(token.id)}
+              >
+                Revoke
+              </Button>
+            </li>
+          ))}
+          {!tokens.length ? (
+            <li className="px-4 py-6 text-center text-sm text-zinc-600">
+              No tokens yet.
+            </li>
+          ) : null}
+        </ul>
       )}
     </div>
   );

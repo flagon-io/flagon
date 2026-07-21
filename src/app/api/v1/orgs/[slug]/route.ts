@@ -3,7 +3,11 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { members, organizations } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { isOrgAdmin, requireSession, resolveOrgAccess } from "@/lib/api-auth.server";
+import {
+  isOrgAdmin,
+  requireSession,
+  resolveOrgAccess,
+} from "@/lib/api-auth.server";
 import {
   apiError,
   apiForbiddenOrigin,
@@ -79,7 +83,11 @@ export async function PATCH(
     );
   }
   if (name !== undefined && (!name || name.length > 100)) {
-    return apiError(400, "invalid_name", "Provide a name (at most 100 characters).");
+    return apiError(
+      400,
+      "invalid_name",
+      "Provide a name (at most 100 characters).",
+    );
   }
   if (nextSlug !== undefined && nextSlug !== slug) {
     // Renaming the slug moves every URL the organization has. That is an

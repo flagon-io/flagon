@@ -75,7 +75,11 @@ export async function POST(request: Request) {
       headers: request.headers,
     });
     if (!org) {
-      return apiError(400, "create_failed", "Could not create the organization.");
+      return apiError(
+        400,
+        "create_failed",
+        "Could not create the organization.",
+      );
     }
     return apiJson(serializeOrganization(org), { status: 201 });
   } catch (error) {

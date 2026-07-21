@@ -21,6 +21,7 @@ type Params = {
     upgraded?: string;
     upgrade?: string;
     session_id?: string;
+    topic?: string;
   }>;
 };
 
@@ -41,10 +42,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * notices and the reconcile live here rather than on a plain list page.
  */
 export default async function OrgPage({ params, searchParams }: Params) {
-  const [{ org: slug }, { upgraded, upgrade, session_id }] = await Promise.all([
-    params,
-    searchParams,
-  ]);
+  const [{ org: slug }, { upgraded, upgrade, session_id, topic }] =
+    await Promise.all([params, searchParams]);
   const org = await resolveOrg(slug);
   if (!org) notFound();
 
@@ -64,7 +63,7 @@ export default async function OrgPage({ params, searchParams }: Params) {
   }
 
   const context = await orgBillingContext(org.id);
-  const [projects, owners, evaluations] = await Promise.all([
+  const [allProjects, owners, evaluations] = await Promise.all([
     listProjects(org.id),
     ownersByProject(org.id),
     usageByProject({
@@ -73,6 +72,14 @@ export default async function OrgPage({ params, searchParams }: Params) {
       meter: EVALUATION_METER,
     }),
   ]);
+
+  // Filtering here rather than in SQL: an organization's project list is the
+  // page's whole payload either way, and the unfiltered count is needed to say
+  // how many were hidden.
+  const activeTopic = topic?.trim().toLowerCase() || null;
+  const projects = activeTopic
+    ? allProjects.filter((project) => project.topics.includes(activeTopic))
+    : allProjects;
 
   return (
     <div>
@@ -101,10 +108,25 @@ export default async function OrgPage({ params, searchParams }: Params) {
             </span>
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
-            {projects.length} {projects.length === 1 ? "project" : "projects"} ·{" "}
+            {allProjects.length}{" "}
+            {allProjects.length === 1 ? "project" : "projects"} ·{" "}
             {org.members.length}{" "}
             {org.members.length === 1 ? "member" : "members"}
           </p>
+          {activeTopic ? (
+            <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+              <span>Showing {projects.length} tagged</span>
+              <span className="rounded-full border border-teal-400/20 bg-teal-400/10 px-2.5 py-0.5 text-xs text-teal-300">
+                {activeTopic}
+              </span>
+              <Link
+                href={appPath(`/${slug}`)}
+                className="text-xs text-zinc-500 underline underline-offset-4 transition hover:text-zinc-300"
+              >
+                Clear filter
+              </Link>
+            </p>
+          ) : null}
         </div>
         <div className="flex items-center gap-2 pt-1">
           {billing && plan === "free" ? <UpgradeButton orgSlug={slug} /> : null}
@@ -119,7 +141,10 @@ export default async function OrgPage({ params, searchParams }: Params) {
       </div>
 
       {projects.length ? (
-        <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        // auto-rows-fr sizes EVERY row to the tallest card in the grid, not
+        // just the tallest in its own row: a lone project on the second row
+        // otherwise renders half the height of the three above it.
+        <div className="mt-8 grid auto-rows-fr gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (
             <ProjectCard
               key={project.id}
@@ -129,6 +154,25 @@ export default async function OrgPage({ params, searchParams }: Params) {
               evaluations={evaluations.get(project.id) ?? 0}
             />
           ))}
+        </div>
+      ) : activeTopic ? (
+        // A filter that matches nothing is not an empty organization, and
+        // offering "create your first project" here would answer a question
+        // nobody asked.
+        <div className="mt-8 border border-dashed border-white/10 px-6 py-14 text-center">
+          <Package className="mx-auto h-8 w-8 text-zinc-700" aria-hidden />
+          <p className="mt-4 text-sm font-medium text-zinc-300">
+            No projects tagged {activeTopic}
+          </p>
+          <p className="mx-auto mt-1 max-w-sm text-sm leading-6 text-zinc-500">
+            Topics are set on a project&apos;s About panel.
+          </p>
+          <Link
+            href={appPath(`/${slug}`)}
+            className={`${buttonClass} mx-auto mt-6 inline-flex items-center gap-1.5`}
+          >
+            Show all projects
+          </Link>
         </div>
       ) : (
         <div className="mt-8 border border-dashed border-white/10 px-6 py-14 text-center">

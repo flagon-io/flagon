@@ -57,9 +57,7 @@ try {
   // a no-op like NOSUPERUSER) unless run by a real superuser. The restrictive
   // attributes are locked in at CREATE ROLE above and only a superuser could
   // ever loosen them.
-  await sql.unsafe(
-    `ALTER ROLE ${R} WITH LOGIN PASSWORD ${lit(password)};`,
-  );
+  await sql.unsafe(`ALTER ROLE ${R} WITH LOGIN PASSWORD ${lit(password)};`);
 
   if (dbName) {
     await sql.unsafe(`GRANT CONNECT ON DATABASE ${ident(dbName)} TO ${R};`);

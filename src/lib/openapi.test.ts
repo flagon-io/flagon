@@ -44,11 +44,16 @@ describe("OpenAPI document", () => {
     for (const { path, method, op } of operations) {
       const label = `${method.toUpperCase()} ${path}`;
       expect(op.operationId, label).toBeTruthy();
-      expect(ids.has(op.operationId as string), `duplicate id at ${label}`).toBe(false);
+      expect(
+        ids.has(op.operationId as string),
+        `duplicate id at ${label}`,
+      ).toBe(false);
       ids.add(op.operationId as string);
       expect((op.tags as string[])?.length, label).toBeGreaterThan(0);
       expect(op.summary, label).toBeTruthy();
-      expect(Object.keys(op.responses as Loose).length, label).toBeGreaterThan(0);
+      expect(Object.keys(op.responses as Loose).length, label).toBeGreaterThan(
+        0,
+      );
     }
     expect(operations.length).toBeGreaterThanOrEqual(5);
   });

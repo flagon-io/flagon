@@ -39,8 +39,8 @@ export function VerifyEmailBanner({
         <MailWarning className="h-4 w-4 shrink-0" aria-hidden />
         <span>
           Please verify your email address. We sent a link to{" "}
-          <span className="font-medium">{email}</span>. You can&apos;t add
-          other email addresses until it&apos;s verified.
+          <span className="font-medium">{email}</span>. You can&apos;t add other
+          email addresses until it&apos;s verified.
         </span>
         <span className="ml-auto flex items-center gap-3">
           {state === "sent" ? (

@@ -12,8 +12,10 @@ const h3 = "mt-8 text-base font-semibold text-zinc-100";
 const p = "mt-3 text-sm leading-6 text-zinc-400";
 const a = "text-teal-400 transition hover:text-teal-300 hover:underline";
 const code = "rounded bg-white/5 px-1 py-0.5 text-[13px] text-zinc-200";
-const th = "px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500";
-const td = "border-t border-white/5 px-4 py-2.5 align-top text-sm text-zinc-400";
+const th =
+  "px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500";
+const td =
+  "border-t border-white/5 px-4 py-2.5 align-top text-sm text-zinc-400";
 
 /**
  * The catalog: the substrate every product sits on.
@@ -54,10 +56,11 @@ export default function CatalogDocsPage() {
         to rotate, and no shared usage credit.
       </p>
       <p className={p}>
-        Every organization has exactly one <strong className="text-zinc-200">owner</strong>.
-        Ownership transfers deliberately: the current owner hands it to another
-        member and drops to admin in the same move. It is never assigned as a
-        role or handed out in an invitation.
+        Every organization has exactly one{" "}
+        <strong className="text-zinc-200">owner</strong>. Ownership transfers
+        deliberately: the current owner hands it to another member and drops to
+        admin in the same move. It is never assigned as a role or handed out in
+        an invitation.
       </p>
 
       <h3 className={h3}>Deleting an organization</h3>
@@ -68,9 +71,19 @@ export default function CatalogDocsPage() {
 
       <h2 className={h2}>Projects</h2>
       <p className={p}>
-        Projects are the unit of work: one per application, service, or
-        surface. A project carries a stable <span className={code}>slug</span>,
-        a Markdown overview, its owners, and its own access roles.
+        Projects are the unit of work: one per application, service, or surface.
+        A project carries a <span className={code}>slug</span>, a one-line
+        description, a website, topics, a Markdown overview, its owners, and its
+        own access roles.
+      </p>
+      <p className={p}>
+        The slug is the project&apos;s identity in console URLs, in SDK
+        configuration, and in every <span className={code}>/v1</span> path. It
+        can be changed by a project admin, but nothing is left behind at the old
+        one: Flagon keeps no redirect, so a stale integration gets a 404 rather
+        than being handed to whichever project claims the name next. Everything
+        else about the project, including access and ownership, follows the
+        rename.
       </p>
       <p className={p}>
         Usage is attributed to a project wherever a product can tell which one
@@ -143,10 +156,10 @@ export default function CatalogDocsPage() {
         exactly one.
       </p>
       <p className={p}>
-        Teams group members so access and ownership can be granted to a
-        durable group rather than to a list of individuals who change jobs.
-        Granting a team write access on a project gives it to everyone on that
-        team, including people who join it later.
+        Teams group members so access and ownership can be granted to a durable
+        group rather than to a list of individuals who change jobs. Granting a
+        team write access on a project gives it to everyone on that team,
+        including people who join it later.
       </p>
 
       <h2 className={h2}>Project access roles</h2>

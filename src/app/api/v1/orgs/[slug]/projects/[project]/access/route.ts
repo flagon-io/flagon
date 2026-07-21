@@ -32,7 +32,12 @@ export async function GET(
   { params }: { params: Promise<{ slug: string; project: string }> },
 ) {
   const { slug, project } = await params;
-  const result = await resolveProjectContext(request, slug, project, "projects:read");
+  const result = await resolveProjectContext(
+    request,
+    slug,
+    project,
+    "projects:read",
+  );
   if (!result.ok) return apiError(result.status, result.code, result.message);
 
   const grants = await listProjectGrants(
@@ -48,7 +53,12 @@ export async function POST(
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
   const { slug, project } = await params;
-  const result = await resolveProjectContext(request, slug, project, "projects:write");
+  const result = await resolveProjectContext(
+    request,
+    slug,
+    project,
+    "projects:write",
+  );
   if (!result.ok) return apiError(result.status, result.code, result.message);
   const { ctx } = result;
 
@@ -62,10 +72,18 @@ export async function POST(
   const teamId = typeof body?.team_id === "string" ? body.team_id : "";
 
   if (!isProjectRole(role)) {
-    return apiError(400, "invalid_role", "Role must be one of: read, write, admin.");
+    return apiError(
+      400,
+      "invalid_role",
+      "Role must be one of: read, write, admin.",
+    );
   }
   if ((username && teamId) || (!username && !teamId)) {
-    return apiError(400, "invalid_subject", "Provide exactly one of: user, team_id.");
+    return apiError(
+      400,
+      "invalid_subject",
+      "Provide exactly one of: user, team_id.",
+    );
   }
 
   let subjectType: "user" | "team";
@@ -82,7 +100,12 @@ export async function POST(
       ? await db
           .select({ id: members.id })
           .from(members)
-          .where(and(eq(members.organizationId, ctx.org.id), eq(members.userId, subject.id)))
+          .where(
+            and(
+              eq(members.organizationId, ctx.org.id),
+              eq(members.userId, subject.id),
+            ),
+          )
           .limit(1)
       : [];
     if (!subject || !membership.length) {

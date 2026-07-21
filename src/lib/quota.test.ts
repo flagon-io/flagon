@@ -50,7 +50,9 @@ describe("evaluation allowance", () => {
     const included = { unitAmountCents: 0, per: 0, includedQuantity: 25 };
     // A pricing typo must not read as "infinite credit".
     expect(allowanceFor(included, 500)).toBe(25);
-    expect(allowanceFor({ ...included, unitAmountCents: 5, per: 100 }, 0)).toBe(25);
+    expect(allowanceFor({ ...included, unitAmountCents: 5, per: 100 }, 0)).toBe(
+      25,
+    );
   });
 
   it("floors partial units: a fraction of a unit is not an entitlement", () => {
@@ -80,7 +82,9 @@ describe("allowance boundary", () => {
   });
 
   it("never rejects an uncapped plan", () => {
-    expect(exceedsAllowance(null, Number.MAX_SAFE_INTEGER, 1_000_000)).toBe(false);
+    expect(exceedsAllowance(null, Number.MAX_SAFE_INTEGER, 1_000_000)).toBe(
+      false,
+    );
   });
 });
 

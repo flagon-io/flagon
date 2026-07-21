@@ -47,7 +47,11 @@ export async function POST(
   const access = await resolveOrgAccess(request, slug, "members:write");
   if (!access.ok) return access.error;
   if (!isOrgAdmin(access.access.actor)) {
-    return apiError(403, "forbidden", "Organization administrators manage teams.");
+    return apiError(
+      403,
+      "forbidden",
+      "Organization administrators manage teams.",
+    );
   }
 
   const body = await request.json().catch(() => null);

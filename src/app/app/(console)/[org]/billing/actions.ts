@@ -15,8 +15,7 @@ import { resolveOrg } from "../resolve-org";
  * versioned API. Owners and admins only.
  */
 export type PortalResult =
-  | { ok: true; url: string }
-  | { ok: false; message: string };
+  { ok: true; url: string } | { ok: false; message: string };
 
 export async function openBillingPortal(
   orgSlug: string,
@@ -27,7 +26,8 @@ export async function openBillingPortal(
 
   const session = await auth.api.getSession({ headers: await headers() });
   const org = await resolveOrg(orgSlug);
-  if (!session || !org) return { ok: false, message: "Organization not found." };
+  if (!session || !org)
+    return { ok: false, message: "Organization not found." };
 
   const role = org.members.find((m) => m.userId === session.user.id)?.role;
   if (role !== "owner" && role !== "admin") {
@@ -59,7 +59,9 @@ export async function openBillingPortal(
     // Stripe needs a billing portal configuration saved in the dashboard
     // before it will open one; say so instead of throwing a 500 at the user.
     const message =
-      error instanceof Error ? error.message : "Could not open the billing portal.";
+      error instanceof Error
+        ? error.message
+        : "Could not open the billing portal.";
     return { ok: false, message };
   }
 }

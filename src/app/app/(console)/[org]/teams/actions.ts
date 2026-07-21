@@ -62,7 +62,10 @@ export async function addTeamMemberAction(
   const org = await resolveOrg(orgSlug);
   if (!org) return { ok: false, message: "Organization not found." };
   if (!org.members.some((m) => m.userId === userId)) {
-    return { ok: false, message: "That user isn't a member of this organization." };
+    return {
+      ok: false,
+      message: "That user isn't a member of this organization.",
+    };
   }
 
   try {

@@ -143,7 +143,10 @@ export function OrgSwitcher({
                       {planName(org.plan)}
                     </span>
                     {org.id === active?.id ? (
-                      <Check className="h-3.5 w-3.5 text-teal-400" aria-hidden />
+                      <Check
+                        className="h-3.5 w-3.5 text-teal-400"
+                        aria-hidden
+                      />
                     ) : null}
                   </span>
                 </button>

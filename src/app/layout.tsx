@@ -44,7 +44,12 @@ export default function RootLayout({
     >
       {/* No global footer here: the console owns its viewport (no document
           footer), so content surfaces render SiteBottomBar themselves. */}
-      <body className="min-h-full flex flex-col"><Suspense fallback={null}><NavigationProgress /></Suspense>{children}</body>
+      <body className="min-h-full flex flex-col">
+        <Suspense fallback={null}>
+          <NavigationProgress />
+        </Suspense>
+        {children}
+      </body>
     </html>
   );
 }

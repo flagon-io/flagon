@@ -16,7 +16,9 @@ function request(url: string) {
 describe("proxy host routing", () => {
   it("rewrites app subdomain paths under /app", () => {
     const res = proxy(request("https://app.flagon.io/acme/teams"));
-    expect(res.headers.get("x-middleware-rewrite")).toContain("/app/acme/teams");
+    expect(res.headers.get("x-middleware-rewrite")).toContain(
+      "/app/acme/teams",
+    );
     expect(res.status).not.toBe(308);
   });
 
@@ -28,7 +30,9 @@ describe("proxy host routing", () => {
   it("redirects a leaked /app prefix to the canonical URL", () => {
     const res = proxy(request("https://app.flagon.io/app/acme/teams"));
     expect(res.status).toBe(308);
-    expect(res.headers.get("location")).toBe("https://app.flagon.io/acme/teams");
+    expect(res.headers.get("location")).toBe(
+      "https://app.flagon.io/acme/teams",
+    );
   });
 
   it("redirects a bare /app to the app root", () => {

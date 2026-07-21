@@ -9,8 +9,8 @@ import postgres from "postgres";
  */
 const canRun = Boolean(
   process.env.DATABASE_URL_APP &&
-    process.env.DATABASE_URL_OWNER &&
-    process.env.BETTER_AUTH_SECRET,
+  process.env.DATABASE_URL_OWNER &&
+  process.env.BETTER_AUTH_SECRET,
 );
 
 describe.skipIf(!canRun)("multi-email lifecycle", () => {
@@ -83,8 +83,11 @@ describe.skipIf(!canRun)("multi-email lifecycle", () => {
       WHERE identifier LIKE 'user-email-verify:%' AND value = ${emails[0].id}
     `;
     expect(
-      (await verifyEmailToken((primaryToken.identifier as string).split(":")[1]))
-        .ok,
+      (
+        await verifyEmailToken(
+          (primaryToken.identifier as string).split(":")[1],
+        )
+      ).ok,
     ).toBe(true);
     const [afterPrimaryVerify] = await owner`
       SELECT email_verified FROM users WHERE id = ${userId}

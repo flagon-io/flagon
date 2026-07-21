@@ -19,7 +19,9 @@ export async function withTenant<T>(
 ): Promise<T> {
   return db.transaction(async (tx) => {
     // is_local = true -> reset at end of transaction; never leaks across the pool.
-    await tx.execute(sql`SELECT set_config('app.current_org_id', ${orgId}, true)`);
+    await tx.execute(
+      sql`SELECT set_config('app.current_org_id', ${orgId}, true)`,
+    );
     return fn(tx);
   });
 }

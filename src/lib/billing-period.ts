@@ -143,7 +143,8 @@ export function isCurrent(window: PeriodWindow, now = new Date()): boolean {
 
 /** Whole days in the window, inclusive. */
 export function periodLengthDays(window: PeriodWindow): number {
-  const ms = startOfDayUTC(window.to).getTime() - startOfDayUTC(window.from).getTime();
+  const ms =
+    startOfDayUTC(window.to).getTime() - startOfDayUTC(window.from).getTime();
   return Math.floor(ms / 86_400_000) + 1;
 }
 

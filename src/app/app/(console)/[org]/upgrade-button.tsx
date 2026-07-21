@@ -33,9 +33,7 @@ export function UpgradeButton({ orgSlug }: { orgSlug: string }) {
         <Sparkles className="h-4 w-4" aria-hidden />
         {pending ? "Heading to checkout..." : "Upgrade to Pro"}
       </button>
-      {error ? (
-        <p className="mt-2 text-xs text-red-300">{error}</p>
-      ) : null}
+      {error ? <p className="mt-2 text-xs text-red-300">{error}</p> : null}
     </div>
   );
 }

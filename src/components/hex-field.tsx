@@ -22,7 +22,9 @@ function hexPoints(cx: number, cy: number, r: number): string {
   const points: string[] = [];
   for (let i = 0; i < 6; i += 1) {
     const angle = (Math.PI / 180) * (60 * i);
-    points.push(`${(cx + r * Math.cos(angle)).toFixed(2)},${(cy + r * Math.sin(angle)).toFixed(2)}`);
+    points.push(
+      `${(cx + r * Math.cos(angle)).toFixed(2)},${(cy + r * Math.sin(angle)).toFixed(2)}`,
+    );
   }
   return points.join(" ");
 }
@@ -92,7 +94,9 @@ export function HexField({
       // `lg` (see globals.css): 300-odd animated nodes is the wrong thing to
       // ask of a phone, and a still lattice is most of the charm anyway.
       className={`pointer-events-none absolute right-0 top-0 h-[46%] w-[78%] overflow-hidden sm:h-[55%] sm:w-[62%] lg:inset-y-0 lg:h-auto ${
-        quiet ? "opacity-45 lg:w-[54%] lg:opacity-65" : "opacity-60 lg:w-[62%] lg:opacity-100"
+        quiet
+          ? "opacity-45 lg:w-[54%] lg:opacity-65"
+          : "opacity-60 lg:w-[62%] lg:opacity-100"
       }`}
       // Fades to nothing well before the headline's column. The mask lives on
       // this element because it is the only box in the tree that is exactly

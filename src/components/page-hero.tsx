@@ -116,7 +116,9 @@ export function PageHero({
         ) : null}
 
         {actions ? (
-          <div className={`flex flex-wrap items-center gap-3 ${lead ? "mt-12" : "mt-10"}`}>
+          <div
+            className={`flex flex-wrap items-center gap-3 ${lead ? "mt-12" : "mt-10"}`}
+          >
             {actions}
           </div>
         ) : null}
@@ -131,7 +133,10 @@ export function PageHero({
       {/* Where the hero's closing rule crosses the grid's verticals, marked
           exactly as every BleedBand marks its own corners. */}
       {rule ? (
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0"
+        >
           <div className="relative mx-auto w-full max-w-7xl">
             <CrossMark className="-bottom-px -left-px" />
             <CrossMark className="-bottom-px -right-px" />

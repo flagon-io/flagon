@@ -46,7 +46,9 @@ export function SkeletonRows({
   className?: string;
 }) {
   return (
-    <div className={`animate-pulse divide-y divide-white/5 border border-white/10 ${className}`}>
+    <div
+      className={`animate-pulse divide-y divide-white/5 border border-white/10 ${className}`}
+    >
       {Array.from({ length: rows }, (_, index) => (
         <div key={index} className="flex items-center gap-3 px-4 py-3.5">
           <div className="min-w-0 flex-1 space-y-2">

@@ -44,10 +44,7 @@ export default async function OnboardingLayout({
           {brand.name}
         </Link>
         <div className="flex items-center gap-3">
-          <Link
-            href={marketingHref("/")}
-            className={headerPillClass}
-          >
+          <Link href={marketingHref("/")} className={headerPillClass}>
             Return to site <ArrowUpRight className="h-3.5 w-3.5" />
           </Link>
           <UserMenu />

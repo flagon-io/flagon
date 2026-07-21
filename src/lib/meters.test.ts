@@ -41,7 +41,10 @@ describe("meter registry", () => {
     // platform does not charge for stays out of the registry entirely rather
     // than shipping as "included, not charged".
     for (const meter of METERS) {
-      expect(meter.unitAmountCents, `${meter.id} must be chargeable`).toBeGreaterThan(0);
+      expect(
+        meter.unitAmountCents,
+        `${meter.id} must be chargeable`,
+      ).toBeGreaterThan(0);
     }
     expect(activeMeters().length).toBeGreaterThan(0);
   });
@@ -80,7 +83,11 @@ describe("meter registry", () => {
     // the registry tomorrow cannot move a bill that already went out.
     // The old $0.05-per-1M-with-1M-included rate, exactly as a period closed
     // before the July 2026 repricing would have frozen it.
-    const oldRate = { unitAmountCents: 5, per: 1_000_000, includedQuantity: 1_000_000 };
+    const oldRate = {
+      unitAmountCents: 5,
+      per: 1_000_000,
+      includedQuantity: 1_000_000,
+    };
     expect(rateCostCents(oldRate, 3_000_000)).toBe(10);
     // Same quantity, today's registry rate: deliberately different, which is
     // the whole point of freezing.

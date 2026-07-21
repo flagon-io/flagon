@@ -27,9 +27,7 @@ export default async function NewOrganizationPage({
 
   const { plan } = await searchParams;
   const billing = billingEnabled();
-  const ownsFreeOrg = billing
-    ? await userOwnsFreeOrg(session.user.id)
-    : false;
+  const ownsFreeOrg = billing ? await userOwnsFreeOrg(session.user.id) : false;
 
   const preselectedPlan: PlanId | null =
     plan && isPlanId(plan) && SELF_SERVE_PLANS.includes(plan) ? plan : null;

@@ -11,9 +11,11 @@ import {
 } from "@/lib/project-access.server";
 import { replaceProjectOwners } from "@/lib/project-ownership.server";
 import {
+  changeProjectSlug,
   deleteProject,
   getProject,
   renameProject,
+  updateProjectDetails,
   updateProjectOverview,
 } from "@/lib/projects.server";
 import { resolveOrg } from "../../resolve-org";
@@ -42,27 +44,60 @@ async function requireAdminContext(orgSlug: string, projectSlug: string) {
   return { org, project };
 }
 
-async function requireProjectRole(orgSlug: string, projectSlug: string, minimum: "write" | "admin") {
-  const session = await auth.api.getSession({ headers: await headers() }); const org = await resolveOrg(orgSlug);
-  if (!session || !org) return null; const project = await getProject(org.id, projectSlug); if (!project) return null;
-  const role = await resolveProjectRole({ orgId: org.id, projectId: project.id, userId: session.user.id, members: org.members });
+async function requireProjectRole(
+  orgSlug: string,
+  projectSlug: string,
+  minimum: "write" | "admin",
+) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  const org = await resolveOrg(orgSlug);
+  if (!session || !org) return null;
+  const project = await getProject(org.id, projectSlug);
+  if (!project) return null;
+  const role = await resolveProjectRole({
+    orgId: org.id,
+    projectId: project.id,
+    userId: session.user.id,
+    members: org.members,
+  });
   return role && roleAtLeast(role, minimum) ? { org, project } : null;
 }
 
-export async function saveProjectOverviewAction(orgSlug: string, projectSlug: string, overviewMarkdown: string): Promise<AccessActionResult> {
-  const ctx = await requireProjectRole(orgSlug, projectSlug, "write"); if (!ctx) return { ok: false, message: "You can't edit this overview." };
-  const result = await updateProjectOverview(ctx.org.id, ctx.project.id, overviewMarkdown); if (!result.ok) return { ok: false, message: result.error };
-  revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`); return { ok: true, message: "" };
+export async function saveProjectOverviewAction(
+  orgSlug: string,
+  projectSlug: string,
+  overviewMarkdown: string,
+): Promise<AccessActionResult> {
+  const ctx = await requireProjectRole(orgSlug, projectSlug, "write");
+  if (!ctx) return { ok: false, message: "You can't edit this overview." };
+  const result = await updateProjectOverview(
+    ctx.org.id,
+    ctx.project.id,
+    overviewMarkdown,
+  );
+  if (!result.ok) return { ok: false, message: result.error };
+  revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`);
+  return { ok: true, message: "" };
 }
 
-export async function replaceProjectOwnersAction(orgSlug: string, projectSlug: string, selection: Array<{ kind: "team" | "user"; id: string }>): Promise<AccessActionResult> {
-  const ctx = await requireProjectRole(orgSlug, projectSlug, "admin"); if (!ctx) return { ok: false, message: "You can't assign ownership here." };
+export async function replaceProjectOwnersAction(
+  orgSlug: string,
+  projectSlug: string,
+  selection: Array<{ kind: "team" | "user"; id: string }>,
+): Promise<AccessActionResult> {
+  const ctx = await requireProjectRole(orgSlug, projectSlug, "admin");
+  if (!ctx) return { ok: false, message: "You can't assign ownership here." };
   const result = await replaceProjectOwners(ctx.org.id, ctx.project.id, {
-    teamIds: selection.filter((item) => item.kind === "team").map((item) => item.id),
-    userIds: selection.filter((item) => item.kind === "user").map((item) => item.id),
+    teamIds: selection
+      .filter((item) => item.kind === "team")
+      .map((item) => item.id),
+    userIds: selection
+      .filter((item) => item.kind === "user")
+      .map((item) => item.id),
   });
   if (!result.ok) return { ok: false, message: result.error };
-  revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`); return { ok: true, message: "" };
+  revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`);
+  return { ok: true, message: "" };
 }
 
 export async function addGrantAction(
@@ -84,7 +119,10 @@ export async function addGrantAction(
   if (input.subjectType === "user") {
     const isMember = ctx.org.members.some((m) => m.userId === input.subjectId);
     if (!isMember) {
-      return { ok: false, message: "That user isn't a member of this organization." };
+      return {
+        ok: false,
+        message: "That user isn't a member of this organization.",
+      };
     }
   } else {
     const teams = await auth.api.listOrganizationTeams({
@@ -92,7 +130,10 @@ export async function addGrantAction(
       headers: await headers(),
     });
     if (!teams.some((team) => team.id === input.subjectId)) {
-      return { ok: false, message: "That team doesn't exist in this organization." };
+      return {
+        ok: false,
+        message: "That team doesn't exist in this organization.",
+      };
     }
   }
 
@@ -138,6 +179,54 @@ export async function renameProjectAction(
   revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`);
   revalidatePath(`/app/${orgSlug}`);
   return { ok: true, message: "" };
+}
+
+/**
+ * Description, website, and topics. Write access, like the overview: these
+ * describe the project rather than govern it, and someone trusted to rewrite
+ * the README is trusted to fix a stale one-liner.
+ */
+export async function saveProjectDetailsAction(
+  orgSlug: string,
+  projectSlug: string,
+  input: { description: string; website: string; topics: string[] },
+): Promise<AccessActionResult> {
+  const ctx = await requireProjectRole(orgSlug, projectSlug, "write");
+  if (!ctx) return { ok: false, message: "You can't edit this project." };
+
+  const result = await updateProjectDetails(ctx.org.id, ctx.project.id, input);
+  if (!result.ok) return { ok: false, message: result.error };
+
+  revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`);
+  revalidatePath(`/app/${orgSlug}`);
+  return { ok: true, message: "" };
+}
+
+export type SlugChangeResult =
+  { ok: true; slug: string } | { ok: false; message: string };
+
+/**
+ * Changes the slug and reports the new one so the caller can navigate.
+ *
+ * The page the caller is standing on ceases to exist at the moment this
+ * succeeds - there is no redirect from the old slug - so returning the new
+ * value is not a convenience, it is the only way back to the project.
+ */
+export async function changeProjectSlugAction(
+  orgSlug: string,
+  projectSlug: string,
+  slug: string,
+): Promise<SlugChangeResult> {
+  const ctx = await requireAdminContext(orgSlug, projectSlug);
+  if (!ctx) return { ok: false, message: "You can't manage this project." };
+
+  const result = await changeProjectSlug(ctx.org.id, ctx.project.id, slug);
+  if (!result.ok) return { ok: false, message: result.error };
+
+  revalidatePath(`/app/${orgSlug}`);
+  revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`);
+  revalidatePath(`/app/${orgSlug}/projects/${result.project.slug}`);
+  return { ok: true, slug: result.project.slug };
 }
 
 export async function deleteProjectAction(

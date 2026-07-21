@@ -124,7 +124,10 @@ export default function FeatureFlagsProductPage() {
                   key={capability}
                   className="flex items-start gap-2.5 text-sm leading-6 text-zinc-300"
                 >
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-teal-400" aria-hidden />
+                  <Check
+                    className="mt-0.5 h-4 w-4 shrink-0 text-teal-400"
+                    aria-hidden
+                  />
                   {capability}
                 </li>
               ))}

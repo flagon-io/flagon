@@ -48,8 +48,12 @@ export async function listProjectOwners(
 
   // Teams are tenant data; users are auth-layer and joined outside the tenant
   // transaction (see src/db/tenancy.test.ts for why the two differ).
-  const teamIds = rows.map((row) => row.teamId).filter((id): id is string => Boolean(id));
-  const userIds = rows.map((row) => row.userId).filter((id): id is string => Boolean(id));
+  const teamIds = rows
+    .map((row) => row.teamId)
+    .filter((id): id is string => Boolean(id));
+  const userIds = rows
+    .map((row) => row.userId)
+    .filter((id): id is string => Boolean(id));
 
   const [teamRows, userRows] = await Promise.all([
     teamIds.length
@@ -190,7 +194,10 @@ export async function replaceProjectOwners(
     if (values.length) await tx.insert(projectOwners).values(values);
   });
 
-  return { ok: true as const, owners: await listProjectOwners(orgId, projectId) };
+  return {
+    ok: true as const,
+    owners: await listProjectOwners(orgId, projectId),
+  };
 }
 
 /**
@@ -217,8 +224,12 @@ export async function ownersByProject(
   );
   if (!rows.length) return new Map();
 
-  const teamIds = rows.map((r) => r.teamId).filter((id): id is string => Boolean(id));
-  const userIds = rows.map((r) => r.userId).filter((id): id is string => Boolean(id));
+  const teamIds = rows
+    .map((r) => r.teamId)
+    .filter((id): id is string => Boolean(id));
+  const userIds = rows
+    .map((r) => r.userId)
+    .filter((id): id is string => Boolean(id));
 
   const [teamRows, userRows] = await Promise.all([
     teamIds.length
@@ -262,10 +273,15 @@ export async function ownersByProject(
       image: user?.image ?? null,
       createdAt: row.createdAt,
     };
-    byProject.set(row.projectId, [...(byProject.get(row.projectId) ?? []), owner]);
+    byProject.set(row.projectId, [
+      ...(byProject.get(row.projectId) ?? []),
+      owner,
+    ]);
   }
   for (const owners of byProject.values()) {
-    owners.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+    owners.sort(
+      (a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name),
+    );
   }
   return byProject;
 }
@@ -273,7 +289,12 @@ export async function ownersByProject(
 /** The people and teams that can be named as owners, for the picker. */
 export async function ownerCandidates(orgId: string): Promise<{
   teams: { id: string; name: string }[];
-  people: { id: string; name: string; username: string | null; image: string | null }[];
+  people: {
+    id: string;
+    name: string;
+    username: string | null;
+    image: string | null;
+  }[];
 }> {
   const [teamRows, peopleRows] = await Promise.all([
     withTenant(orgId, (tx) =>

@@ -16,17 +16,19 @@ import {
  * fields that make sense for Flagon later (bio, URL, company, location). */
 export function ProfileForm({ initialName }: { initialName: string }) {
   const router = useRouter();
-  const [status, setStatus] = useState<
-    { tone: "success" | "error"; message: string } | null
-  >(null);
+  const [status, setStatus] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
   const [pending, setPending] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus(null);
 
-    const name = String(new FormData(event.currentTarget).get("name") ?? "")
-      .trim();
+    const name = String(
+      new FormData(event.currentTarget).get("name") ?? "",
+    ).trim();
     if (!name) {
       setStatus({ tone: "error", message: "Name can't be empty." });
       return;

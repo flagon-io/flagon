@@ -36,9 +36,7 @@ export default function PrivacyPage() {
       </section>
       <section className="space-y-2">
         <h2 className="text-lg font-semibold text-zinc-200">4. Contact</h2>
-        <p>
-          Questions about this policy can be directed to the Flagon team.
-        </p>
+        <p>Questions about this policy can be directed to the Flagon team.</p>
       </section>
     </LegalPage>
   );

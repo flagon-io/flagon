@@ -33,10 +33,23 @@ function errorResponse(description: string, code: string, message: string) {
 
 const ofrepRequestBody = {
   required: true,
-  content: { "application/json": { schema: { type: "object", required: ["context"], properties: { context: { $ref: "#/components/schemas/OfrepContext" } } } } },
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        required: ["context"],
+        properties: { context: { $ref: "#/components/schemas/OfrepContext" } },
+      },
+    },
+  },
 } as const;
 
-const ofrepErrorResponse = (description: string) => ({ description, content: { "application/json": { schema: { $ref: "#/components/schemas/OfrepError" } } } });
+const ofrepErrorResponse = (description: string) => ({
+  description,
+  content: {
+    "application/json": { schema: { $ref: "#/components/schemas/OfrepError" } },
+  },
+});
 
 export const openApiSpec = {
   openapi: "3.0.3",
@@ -183,7 +196,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
         },
       },
       patch: {
@@ -221,7 +238,11 @@ export const openApiSpec = {
             "nothing_to_update",
             "Provide at least one of: name, username.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Missing or untrusted Origin header.",
             "invalid_origin",
@@ -243,11 +264,18 @@ export const openApiSpec = {
             description: "Your personal access tokens.",
             content: {
               "application/json": {
-                schema: { type: "array", items: { $ref: "#/components/schemas/AccessToken" } },
+                schema: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/AccessToken" },
+                },
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Attempted with an access token.",
             "session_required",
@@ -270,7 +298,11 @@ export const openApiSpec = {
                 type: "object",
                 required: ["name", "scopes"],
                 properties: {
-                  name: { type: "string", maxLength: 100, example: "Local CLI" },
+                  name: {
+                    type: "string",
+                    maxLength: 100,
+                    example: "Local CLI",
+                  },
                   scopes: {
                     type: "array",
                     items: { type: "string" },
@@ -282,7 +314,8 @@ export const openApiSpec = {
                     type: "string",
                     format: "date-time",
                     nullable: true,
-                    description: "Optional expiry. Omit for a token that never expires.",
+                    description:
+                      "Optional expiry. Omit for a token that never expires.",
                   },
                 },
               },
@@ -298,8 +331,16 @@ export const openApiSpec = {
               },
             },
           },
-          "400": errorResponse("Invalid name or scopes.", "invalid_token", "Choose at least one valid scope."),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "400": errorResponse(
+            "Invalid name or scopes.",
+            "invalid_token",
+            "Choose at least one valid scope.",
+          ),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Attempted with an access token.",
             "session_required",
@@ -333,7 +374,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse("Not found.", "not_found", "Token not found."),
         },
       },
@@ -353,7 +398,11 @@ export const openApiSpec = {
         ],
         responses: {
           "204": { description: "Revoked." },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse("Not found.", "not_found", "Token not found."),
         },
       },
@@ -377,7 +426,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
         },
       },
     },
@@ -400,7 +453,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
         },
       },
       post: {
@@ -446,7 +503,11 @@ export const openApiSpec = {
             "invalid_organization_slug",
             "Slug may only contain lowercase alphanumeric characters or single hyphens, and cannot begin or end with a hyphen.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Missing or untrusted Origin header.",
             "invalid_origin",
@@ -501,7 +562,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or not a member).",
             "not_found",
@@ -553,7 +618,11 @@ export const openApiSpec = {
             "nothing_to_update",
             "Provide at least one of: name, slug.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not permitted (or missing/untrusted Origin header).",
             "forbidden",
@@ -589,7 +658,11 @@ export const openApiSpec = {
         ],
         responses: {
           "204": { description: "Organization deleted." },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not the owner (or missing/untrusted Origin header).",
             "forbidden",
@@ -631,7 +704,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or not a member).",
             "not_found",
@@ -692,7 +769,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (organization or member).",
             "not_found",
@@ -757,7 +838,11 @@ export const openApiSpec = {
             "invalid_role",
             "Role must be one of: member, admin. Ownership moves with PUT /v1/orgs/{slug}/owner.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not permitted (or missing/untrusted Origin header).",
             "you_are_not_allowed_to_update_this_member",
@@ -795,7 +880,11 @@ export const openApiSpec = {
         ],
         responses: {
           "204": { description: "Member removed." },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not permitted (or missing/untrusted Origin header).",
             "you_are_not_allowed_to_delete_this_member",
@@ -837,7 +926,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or not a member).",
             "not_found",
@@ -907,7 +1000,11 @@ export const openApiSpec = {
             "invalid_subject",
             "Provide exactly one of: user, email.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not permitted (or missing/untrusted Origin header).",
             "you_are_not_allowed_to_invite_users_to_this_organization",
@@ -951,7 +1048,11 @@ export const openApiSpec = {
         ],
         responses: {
           "204": { description: "Invitation canceled." },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not permitted (or missing/untrusted Origin header).",
             "forbidden",
@@ -991,7 +1092,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or not a member).",
             "not_found",
@@ -1047,7 +1152,11 @@ export const openApiSpec = {
             "invalid_subject",
             "Provide the new owner's username.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not the owner (or missing/untrusted Origin header).",
             "not_owner",
@@ -1111,7 +1220,8 @@ export const openApiSpec = {
             in: "query",
             required: false,
             schema: { type: "string" },
-            description: "Restrict to a meter id. Repeatable, or comma-separated.",
+            description:
+              "Restrict to a meter id. Repeatable, or comma-separated.",
           },
           {
             name: "group_by",
@@ -1141,7 +1251,8 @@ export const openApiSpec = {
             in: "query",
             required: false,
             schema: { type: "string", enum: ["1"] },
-            description: "Return running totals per bucket instead of per-bucket cost.",
+            description:
+              "Return running totals per bucket instead of per-bucket cost.",
           },
         ],
         responses: {
@@ -1158,7 +1269,11 @@ export const openApiSpec = {
             "invalid_period",
             "No billing period starts on that date.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or not a member).",
             "not_found",
@@ -1193,7 +1308,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or not a member).",
             "not_found",
@@ -1231,7 +1350,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or not a member).",
             "not_found",
@@ -1269,7 +1392,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or not a member).",
             "not_found",
@@ -1322,7 +1449,11 @@ export const openApiSpec = {
             "invalid_slug",
             "Slug may only contain lowercase alphanumeric characters or single hyphens, and cannot begin or end with a hyphen.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Missing or untrusted Origin header.",
             "invalid_origin",
@@ -1388,7 +1519,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or no access).",
             "not_found",
@@ -1401,7 +1536,7 @@ export const openApiSpec = {
         tags: ["Projects"],
         summary: "Update a project",
         description:
-          "Updates the display name (admin) and/or Markdown overview (write). The slug is stable.",
+          "Updates the display name and slug (admin), or the description, website, topics, and Markdown overview (write). Omitted fields are left unchanged. Changing `slug` MOVES the project: the old path stops resolving immediately and no redirect is left behind, so update any integration that names it. Responds 409 when the new slug is taken.",
         security: [{ bearerToken: [] }, { sessionCookie: [] }],
         parameters: [
           {
@@ -1427,7 +1562,42 @@ export const openApiSpec = {
                 type: "object",
                 properties: {
                   name: { type: "string", example: "Storefront" },
-                  overview_markdown: { type: "string", maxLength: 100000, example: "# Storefront" },
+                  slug: {
+                    type: "string",
+                    example: "storefront-web",
+                    description:
+                      "Admin only. Moves the project; the old path 404s afterwards.",
+                  },
+                  description: {
+                    type: "string",
+                    maxLength: 350,
+                    example: "Checkout and cart for the storefront.",
+                    description: "One line. Empty string clears it.",
+                  },
+                  website: {
+                    type: "string",
+                    maxLength: 255,
+                    example: "https://flagon.io",
+                    description:
+                      "http(s) only; a bare host is upgraded to https. Empty string clears it.",
+                  },
+                  topics: {
+                    type: "array",
+                    maxItems: 20,
+                    items: {
+                      type: "string",
+                      maxLength: 35,
+                      pattern: "^[a-z0-9][a-z0-9-]*$",
+                    },
+                    example: ["platform", "checkout"],
+                    description:
+                      "Replaces the whole list. Lowercased and de-duplicated.",
+                  },
+                  overview_markdown: {
+                    type: "string",
+                    maxLength: 100000,
+                    example: "# Storefront",
+                  },
                 },
               },
             },
@@ -1456,8 +1626,16 @@ export const openApiSpec = {
               },
             },
           },
-          "400": errorResponse("Invalid name.", "invalid_name", "Provide a name."),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "400": errorResponse(
+            "Invalid name.",
+            "invalid_name",
+            "Provide a name.",
+          ),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not a project admin (or missing/untrusted Origin header).",
             "forbidden",
@@ -1467,6 +1645,11 @@ export const openApiSpec = {
             "Not found (or no access).",
             "not_found",
             "Project not found.",
+          ),
+          "409": errorResponse(
+            "The requested slug is taken.",
+            "slug_taken",
+            "That slug is already used by another project in this organization.",
           ),
         },
       },
@@ -1495,7 +1678,11 @@ export const openApiSpec = {
         ],
         responses: {
           "204": { description: "Project deleted." },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not a project admin (or missing/untrusted Origin header).",
             "forbidden",
@@ -1510,12 +1697,82 @@ export const openApiSpec = {
       },
     },
     "/v1/orgs/{slug}/projects/{project}/owners": {
-      get: { operationId: "listProjectOwners", tags: ["Projects"], summary: "List owners", description: "Catalog ownership metadata, separate from access grants. An owner is a team or a person; `type` says which.", responses: { "200": { description: "Teams and people documented as responsible for the project.", content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/ProjectOwner" } } } } }, "404": errorResponse("Not found.", "not_found", "Project not found.") } },
+      get: {
+        operationId: "listProjectOwners",
+        tags: ["Projects"],
+        summary: "List owners",
+        description:
+          "Catalog ownership metadata, separate from access grants. An owner is a team or a person; `type` says which.",
+        responses: {
+          "200": {
+            description:
+              "Teams and people documented as responsible for the project.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/ProjectOwner" },
+                },
+              },
+            },
+          },
+          "404": errorResponse("Not found.", "not_found", "Project not found."),
+        },
+      },
       put: {
-        operationId: "replaceProjectOwners", tags: ["Projects"], summary: "Replace owners",
-        description: "Assigns informational ownership without granting access. Requires project admin.\n\nAn owner is a team or a person. Send `team_ids`, `user_ids`, or both; whichever list you send REPLACES that kind of owner entirely, and an omitted list clears it. Teams must belong to the organization and people must be members of it.",
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", description: "At least one of team_ids or user_ids.", properties: { team_ids: { type: "array", items: { type: "string" }, description: "Team ids. Omit to clear team owners." }, user_ids: { type: "array", items: { type: "string" }, description: "User ids of organization members. Omit to clear person owners." } } } } } },
-        responses: { "200": { description: "Updated owners.", content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/ProjectOwner" } } } } }, "400": errorResponse("Invalid owners.", "invalid_team", "Every owning team must belong to this organization."), "403": errorResponse("Forbidden.", "forbidden", "Project admin access required to assign ownership."), "404": errorResponse("Not found.", "not_found", "Project not found.") },
+        operationId: "replaceProjectOwners",
+        tags: ["Projects"],
+        summary: "Replace owners",
+        description:
+          "Assigns informational ownership without granting access. Requires project admin.\n\nAn owner is a team or a person. Send `team_ids`, `user_ids`, or both; whichever list you send REPLACES that kind of owner entirely, and an omitted list clears it. Teams must belong to the organization and people must be members of it.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                description: "At least one of team_ids or user_ids.",
+                properties: {
+                  team_ids: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Team ids. Omit to clear team owners.",
+                  },
+                  user_ids: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "User ids of organization members. Omit to clear person owners.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Updated owners.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/ProjectOwner" },
+                },
+              },
+            },
+          },
+          "400": errorResponse(
+            "Invalid owners.",
+            "invalid_team",
+            "Every owning team must belong to this organization.",
+          ),
+          "403": errorResponse(
+            "Forbidden.",
+            "forbidden",
+            "Project admin access required to assign ownership.",
+          ),
+          "404": errorResponse("Not found.", "not_found", "Project not found."),
+        },
       },
     },
     "/v1/orgs/{slug}/projects/{project}/access": {
@@ -1554,7 +1811,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or no access).",
             "not_found",
@@ -1596,12 +1857,14 @@ export const openApiSpec = {
                   user: {
                     type: "string",
                     example: "syntaqx",
-                    description: "Username of an organization member. Provide exactly one of user, team_id.",
+                    description:
+                      "Username of an organization member. Provide exactly one of user, team_id.",
                   },
                   team_id: {
                     type: "string",
                     example: "019f7cd5-3e02-7c88-9f4b-2b91acd07f13",
-                    description: "Id of a team in the organization. Provide exactly one of user, team_id.",
+                    description:
+                      "Id of a team in the organization. Provide exactly one of user, team_id.",
                   },
                   role: {
                     type: "string",
@@ -1627,7 +1890,11 @@ export const openApiSpec = {
             "invalid_subject",
             "Provide exactly one of: user, team_id.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not a project admin (or missing/untrusted Origin header).",
             "forbidden",
@@ -1678,7 +1945,11 @@ export const openApiSpec = {
         ],
         responses: {
           "204": { description: "Grant revoked." },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not a project admin (or missing/untrusted Origin header).",
             "forbidden",
@@ -1721,7 +1992,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (or not a member).",
             "not_found",
@@ -1773,7 +2048,11 @@ export const openApiSpec = {
             "invalid_team_name",
             "Team name must be between 2 and 50 characters.",
           ),
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not permitted (or missing/untrusted Origin header).",
             "you_are_not_allowed_to_create_a_new_team",
@@ -1824,7 +2103,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (organization or team).",
             "not_found",
@@ -1857,7 +2140,11 @@ export const openApiSpec = {
         ],
         responses: {
           "204": { description: "Team deleted." },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not permitted (or missing/untrusted Origin header).",
             "you_are_not_allowed_to_delete_this_team",
@@ -1906,7 +2193,11 @@ export const openApiSpec = {
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (organization or team).",
             "not_found",
@@ -1919,9 +2210,9 @@ export const openApiSpec = {
       get: {
         operationId: "listTeamProjects",
         tags: ["Teams"],
-        summary: "List a team's project access",
+        summary: "List a team's projects",
         description:
-          "The projects this team holds an explicit access grant on, with the granted role. Grants are managed on the project (POST /v1/orgs/{slug}/projects/{project}/access).",
+          "Every project this team is attached to, by access grant or by catalog ownership. `role` is the granted role, or null when the team is named as an owner without holding a grant; `owner` says whether the team is recorded as responsible for the project. Ownership grants nothing on its own. Grants are managed on the project (POST /v1/orgs/{slug}/projects/{project}/access), owners via PUT /v1/orgs/{slug}/projects/{project}/owners.",
         security: [{ bearerToken: [] }, { sessionCookie: [] }],
         parameters: [
           {
@@ -1941,30 +2232,48 @@ export const openApiSpec = {
         ],
         responses: {
           "200": {
-            description: "The team's project grants.",
+            description: "The team's projects.",
             content: {
               "application/json": {
                 schema: {
                   type: "array",
                   items: {
                     type: "object",
-                    required: ["slug", "name", "role", "granted_at"],
+                    required: ["slug", "name", "role", "owner", "granted_at"],
                     properties: {
                       slug: { type: "string", example: "storefront" },
                       name: { type: "string", example: "Storefront" },
                       role: {
                         type: "string",
-                        enum: ["read", "write", "admin"],
+                        nullable: true,
+                        enum: ["read", "write", "admin", null],
                         example: "write",
+                        description:
+                          "Null when the team owns the project but holds no access grant.",
                       },
-                      granted_at: { type: "string", format: "date-time" },
+                      owner: {
+                        type: "boolean",
+                        example: true,
+                        description:
+                          "The team is named as responsible for this project in the catalog.",
+                      },
+                      granted_at: {
+                        type: "string",
+                        format: "date-time",
+                        nullable: true,
+                        description: "Null when there is no access grant.",
+                      },
                     },
                   },
                 },
               },
             },
           },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "404": errorResponse(
             "Not found (organization or team).",
             "not_found",
@@ -2006,7 +2315,11 @@ export const openApiSpec = {
         ],
         responses: {
           "204": { description: "On the team." },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not permitted (or missing/untrusted Origin header).",
             "forbidden",
@@ -2056,7 +2369,11 @@ export const openApiSpec = {
         ],
         responses: {
           "204": { description: "Off the team." },
-          "401": errorResponse("Not signed in.", "unauthorized", "Sign in required."),
+          "401": errorResponse(
+            "Not signed in.",
+            "unauthorized",
+            "Sign in required.",
+          ),
           "403": errorResponse(
             "Not permitted (or missing/untrusted Origin header).",
             "forbidden",
@@ -2075,13 +2392,27 @@ export const openApiSpec = {
         operationId: "listFlags",
         tags: ["Flags"],
         summary: "List feature flags",
-        responses: { "200": { description: "Organization flags." }, "401": errorResponse("Unauthorized.", "unauthorized", "Sign in required.") },
+        responses: {
+          "200": { description: "Organization flags." },
+          "401": errorResponse(
+            "Unauthorized.",
+            "unauthorized",
+            "Sign in required.",
+          ),
+        },
       },
       post: {
         operationId: "createFlag",
         tags: ["Flags"],
         summary: "Create a feature flag",
-        responses: { "201": { description: "Flag created." }, "400": errorResponse("Invalid flag.", "invalid_flag", "Provide key and name.") },
+        responses: {
+          "201": { description: "Flag created." },
+          "400": errorResponse(
+            "Invalid flag.",
+            "invalid_flag",
+            "Provide key and name.",
+          ),
+        },
       },
     },
     "/v1/orgs/{slug}/flags/{key}": {
@@ -2089,80 +2420,240 @@ export const openApiSpec = {
         operationId: "getFlag",
         tags: ["Flags"],
         summary: "Get a feature flag",
-        responses: { "200": { description: "The flag." }, "404": errorResponse("Not found.", "not_found", "Flag not found.") },
+        responses: {
+          "200": { description: "The flag." },
+          "404": errorResponse("Not found.", "not_found", "Flag not found."),
+        },
       },
       patch: {
         operationId: "updateFlag",
         tags: ["Flags"],
         summary: "Update a feature flag",
-        responses: { "200": { description: "Updated flag." }, "404": errorResponse("Not found.", "not_found", "Flag not found.") },
+        responses: {
+          "200": { description: "Updated flag." },
+          "404": errorResponse("Not found.", "not_found", "Flag not found."),
+        },
       },
       delete: {
         operationId: "deleteFlag",
         tags: ["Flags"],
         summary: "Delete a feature flag",
-        responses: { "204": { description: "Flag deleted." }, "404": errorResponse("Not found.", "not_found", "Flag not found.") },
+        responses: {
+          "204": { description: "Flag deleted." },
+          "404": errorResponse("Not found.", "not_found", "Flag not found."),
+        },
       },
     },
     "/v1/orgs/{slug}/tokens": {
       get: {
-        operationId: "listOrganizationTokens", tags: ["Tokens"], summary: "List organization tokens",
+        operationId: "listOrganizationTokens",
+        tags: ["Tokens"],
+        summary: "List organization tokens",
         security: [{ sessionCookie: [] }],
         description:
           "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.",
-        responses: { "200": { description: "Tokens without secret material." } },
+        responses: {
+          "200": { description: "Tokens without secret material." },
+        },
       },
       post: {
-        operationId: "createOrganizationToken", tags: ["Tokens"], summary: "Create an organization token",
+        operationId: "createOrganizationToken",
+        tags: ["Tokens"],
+        summary: "Create an organization token",
         security: [{ sessionCookie: [] }],
         description:
           "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.",
-        responses: { "201": { description: "Token and one-time secret." }, "400": errorResponse("Invalid token.", "invalid_token", "Provide a name and scopes.") },
+        responses: {
+          "201": { description: "Token and one-time secret." },
+          "400": errorResponse(
+            "Invalid token.",
+            "invalid_token",
+            "Provide a name and scopes.",
+          ),
+        },
       },
     },
     "/v1/orgs/{slug}/tokens/{token_id}": {
-      patch: { operationId: "rotateOrganizationToken", tags: ["Tokens"], summary: "Rotate an organization token", security: [{ sessionCookie: [] }], description: "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.", responses: { "200": { description: "Token metadata and one-time replacement secret." }, "404": errorResponse("Not found.", "not_found", "Token not found.") } },
-      delete: {
-        operationId: "revokeOrganizationToken", tags: ["Tokens"], summary: "Revoke an organization token",
+      patch: {
+        operationId: "rotateOrganizationToken",
+        tags: ["Tokens"],
+        summary: "Rotate an organization token",
         security: [{ sessionCookie: [] }],
         description:
           "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.",
-        responses: { "204": { description: "Token revoked." }, "404": errorResponse("Not found.", "not_found", "Token not found.") },
+        responses: {
+          "200": {
+            description: "Token metadata and one-time replacement secret.",
+          },
+          "404": errorResponse("Not found.", "not_found", "Token not found."),
+        },
+      },
+      delete: {
+        operationId: "revokeOrganizationToken",
+        tags: ["Tokens"],
+        summary: "Revoke an organization token",
+        security: [{ sessionCookie: [] }],
+        description:
+          "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.",
+        responses: {
+          "204": { description: "Token revoked." },
+          "404": errorResponse("Not found.", "not_found", "Token not found."),
+        },
       },
     },
     "/v1/orgs/{slug}/client-tokens": {
-      get: { operationId: "listClientTokens", tags: ["Tokens"], summary: "List publishable client tokens", security: [{ sessionCookie: [] }], description: "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.", responses: { "200": { description: "Client token metadata and retrievable publishable values. Legacy hash-only entries return null until rotated." } } },
-      post: { operationId: "createClientToken", tags: ["Tokens"], summary: "Create a publishable client token", security: [{ sessionCookie: [] }], description: "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.", responses: { "201": { description: "Client token and publishable value." } } },
+      get: {
+        operationId: "listClientTokens",
+        tags: ["Tokens"],
+        summary: "List publishable client tokens",
+        security: [{ sessionCookie: [] }],
+        description:
+          "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.",
+        responses: {
+          "200": {
+            description:
+              "Client token metadata and retrievable publishable values. Legacy hash-only entries return null until rotated.",
+          },
+        },
+      },
+      post: {
+        operationId: "createClientToken",
+        tags: ["Tokens"],
+        summary: "Create a publishable client token",
+        security: [{ sessionCookie: [] }],
+        description:
+          "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.",
+        responses: {
+          "201": { description: "Client token and publishable value." },
+        },
+      },
     },
     "/v1/orgs/{slug}/client-tokens/{token_id}": {
-      patch: { operationId: "rotateClientToken", tags: ["Tokens"], summary: "Rotate a publishable client token", security: [{ sessionCookie: [] }], description: "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.", responses: { "200": { description: "Rotated client token and its retrievable value." }, "404": errorResponse("Not found.", "not_found", "Client token not found.") } },
-      delete: { operationId: "revokeClientToken", tags: ["Tokens"], summary: "Revoke a publishable client token", security: [{ sessionCookie: [] }], description: "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.", responses: { "204": { description: "Client token revoked." } } },
+      patch: {
+        operationId: "rotateClientToken",
+        tags: ["Tokens"],
+        summary: "Rotate a publishable client token",
+        security: [{ sessionCookie: [] }],
+        description:
+          "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.",
+        responses: {
+          "200": {
+            description: "Rotated client token and its retrievable value.",
+          },
+          "404": errorResponse(
+            "Not found.",
+            "not_found",
+            "Client token not found.",
+          ),
+        },
+      },
+      delete: {
+        operationId: "revokeClientToken",
+        tags: ["Tokens"],
+        summary: "Revoke a publishable client token",
+        security: [{ sessionCookie: [] }],
+        description:
+          "SESSION ONLY. Access tokens cannot manage credentials: a token able to mint tokens would make any leak permanent, because the holder issues a replacement before the one you noticed is revoked.",
+        responses: { "204": { description: "Client token revoked." } },
+      },
     },
     "/v1/orgs/{slug}/segments": {
-      get: { operationId: "listSegments", tags: ["Segments"], summary: "List targeting segments", responses: { "200": { description: "Organization segments." } } },
-      post: { operationId: "createSegment", tags: ["Segments"], summary: "Create a targeting segment", responses: { "201": { description: "Segment created." } } },
+      get: {
+        operationId: "listSegments",
+        tags: ["Segments"],
+        summary: "List targeting segments",
+        responses: { "200": { description: "Organization segments." } },
+      },
+      post: {
+        operationId: "createSegment",
+        tags: ["Segments"],
+        summary: "Create a targeting segment",
+        responses: { "201": { description: "Segment created." } },
+      },
     },
     "/v1/orgs/{slug}/segments/{key}": {
-      get: { operationId: "getSegment", tags: ["Segments"], summary: "Get a targeting segment", responses: { "200": { description: "The segment." }, "404": errorResponse("Not found.", "not_found", "Segment not found.") } },
-      patch: { operationId: "updateSegment", tags: ["Segments"], summary: "Update a targeting segment", responses: { "200": { description: "Updated segment." }, "404": errorResponse("Not found.", "not_found", "Segment not found.") } },
-      delete: { operationId: "deleteSegment", tags: ["Segments"], summary: "Delete a targeting segment", responses: { "204": { description: "Segment deleted." } } },
+      get: {
+        operationId: "getSegment",
+        tags: ["Segments"],
+        summary: "Get a targeting segment",
+        responses: {
+          "200": { description: "The segment." },
+          "404": errorResponse("Not found.", "not_found", "Segment not found."),
+        },
+      },
+      patch: {
+        operationId: "updateSegment",
+        tags: ["Segments"],
+        summary: "Update a targeting segment",
+        responses: {
+          "200": { description: "Updated segment." },
+          "404": errorResponse("Not found.", "not_found", "Segment not found."),
+        },
+      },
+      delete: {
+        operationId: "deleteSegment",
+        tags: ["Segments"],
+        summary: "Delete a targeting segment",
+        responses: { "204": { description: "Segment deleted." } },
+      },
     },
     "/ofrep/v1/evaluate/flags": {
       post: {
         operationId: "ofrepBulkEvaluate",
         tags: ["OFREP"],
         summary: "Bulk evaluate all flags",
-        description: "Static-context client evaluation. Returns all effective values and an ETag suitable for conditional polling. Publishable client tokens are accepted.",
+        description:
+          "Static-context client evaluation. Returns all effective values and an ETag suitable for conditional polling. Publishable client tokens are accepted.",
         parameters: [
-          { name: "If-None-Match", in: "header", required: false, schema: { type: "string" }, description: "ETag from the previous response for this evaluation context." },
-          { name: "flagConfigEtag", in: "query", required: false, schema: { type: "string" }, description: "Configuration metadata from an OFREP change event; reserved for standard event-stream interoperability." },
-          { name: "flagConfigLastModified", in: "query", required: false, schema: { oneOf: [{ type: "integer" }, { type: "string" }] }, description: "Last-modified metadata from an OFREP change event; reserved for standard event-stream interoperability." },
+          {
+            name: "If-None-Match",
+            in: "header",
+            required: false,
+            schema: { type: "string" },
+            description:
+              "ETag from the previous response for this evaluation context.",
+          },
+          {
+            name: "flagConfigEtag",
+            in: "query",
+            required: false,
+            schema: { type: "string" },
+            description:
+              "Configuration metadata from an OFREP change event; reserved for standard event-stream interoperability.",
+          },
+          {
+            name: "flagConfigLastModified",
+            in: "query",
+            required: false,
+            schema: { oneOf: [{ type: "integer" }, { type: "string" }] },
+            description:
+              "Last-modified metadata from an OFREP change event; reserved for standard event-stream interoperability.",
+          },
         ],
         requestBody: ofrepRequestBody,
         responses: {
-          "200": { description: "All effective flag values.", headers: { ETag: { schema: { type: "string" }, description: "Validator for this organization configuration and evaluation context." } }, content: { "application/json": { schema: { $ref: "#/components/schemas/OfrepBulkResponse" } } } },
-          "304": { description: "The evaluated representation has not changed.", headers: { ETag: { schema: { type: "string" } } } },
-          "400": ofrepErrorResponse("Invalid evaluation context."), "401": ofrepErrorResponse("Invalid access or client token."), "413": ofrepErrorResponse("Evaluation context is too large."),
+          "200": {
+            description: "All effective flag values.",
+            headers: {
+              ETag: {
+                schema: { type: "string" },
+                description:
+                  "Validator for this organization configuration and evaluation context.",
+              },
+            },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/OfrepBulkResponse" },
+              },
+            },
+          },
+          "304": {
+            description: "The evaluated representation has not changed.",
+            headers: { ETag: { schema: { type: "string" } } },
+          },
+          "400": ofrepErrorResponse("Invalid evaluation context."),
+          "401": ofrepErrorResponse("Invalid access or client token."),
+          "413": ofrepErrorResponse("Evaluation context is too large."),
         },
       },
     },
@@ -2171,11 +2662,18 @@ export const openApiSpec = {
         operationId: "ofrepConfigurationEvents",
         tags: ["OFREP"],
         summary: "Stream flag configuration invalidations",
-        description: "Authenticated server-sent event stream for browser providers. A configuration_changed event tells the client to repeat its bulk evaluation; no flag definitions or targeting rules are sent through this stream.",
+        description:
+          "Authenticated server-sent event stream for browser providers. A configuration_changed event tells the client to repeat its bulk evaluation; no flag definitions or targeting rules are sent through this stream.",
         responses: {
-          "200": { description: "SSE stream. Emits ready, configuration_changed, and heartbeat comments.", content: { "text/event-stream": { schema: { type: "string" } } } },
+          "200": {
+            description:
+              "SSE stream. Emits ready, configuration_changed, and heartbeat comments.",
+            content: { "text/event-stream": { schema: { type: "string" } } },
+          },
           "401": ofrepErrorResponse("Invalid access or client token."),
-          "503": ofrepErrorResponse("Realtime notifications are temporarily unavailable."),
+          "503": ofrepErrorResponse(
+            "Realtime notifications are temporarily unavailable.",
+          ),
         },
       },
     },
@@ -2184,10 +2682,31 @@ export const openApiSpec = {
         operationId: "ofrepEvaluateFlag",
         tags: ["OFREP"],
         summary: "Evaluate one flag",
-        description: "Dynamic-context server evaluation. Requires a secret access token scoped to flags:evaluate.",
-        parameters: [{ name: "key", in: "path", required: true, schema: { type: "string" } }],
+        description:
+          "Dynamic-context server evaluation. Requires a secret access token scoped to flags:evaluate.",
+        parameters: [
+          {
+            name: "key",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          },
+        ],
         requestBody: ofrepRequestBody,
-        responses: { "200": { description: "OFREP flag evaluation.", content: { "application/json": { schema: { $ref: "#/components/schemas/OfrepEvaluation" } } } }, "400": ofrepErrorResponse("Invalid evaluation context."), "404": ofrepErrorResponse("Flag not found."), "401": ofrepErrorResponse("Invalid access token."), "413": ofrepErrorResponse("Evaluation context is too large.") },
+        responses: {
+          "200": {
+            description: "OFREP flag evaluation.",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/OfrepEvaluation" },
+              },
+            },
+          },
+          "400": ofrepErrorResponse("Invalid evaluation context."),
+          "404": ofrepErrorResponse("Flag not found."),
+          "401": ofrepErrorResponse("Invalid access token."),
+          "413": ofrepErrorResponse("Evaluation context is too large."),
+        },
       },
     },
   },
@@ -2209,20 +2728,64 @@ export const openApiSpec = {
     },
     schemas: {
       OfrepContext: {
-        type: "object", required: ["targetingKey"], additionalProperties: true,
-        properties: { targetingKey: { type: "string", minLength: 1, maxLength: 1024, example: "user-123" } },
+        type: "object",
+        required: ["targetingKey"],
+        additionalProperties: true,
+        properties: {
+          targetingKey: {
+            type: "string",
+            minLength: 1,
+            maxLength: 1024,
+            example: "user-123",
+          },
+        },
       },
       OfrepEvaluation: {
-        type: "object", required: ["key", "value", "reason", "variant"],
-        properties: { key: { type: "string", example: "dark-theme" }, value: { nullable: true, example: true }, reason: { type: "string", enum: ["STATIC", "TARGETING_MATCH", "SPLIT", "CACHED"] }, variant: { type: "string", example: "on" }, metadata: { type: "object", additionalProperties: true } },
+        type: "object",
+        required: ["key", "value", "reason", "variant"],
+        properties: {
+          key: { type: "string", example: "dark-theme" },
+          value: { nullable: true, example: true },
+          reason: {
+            type: "string",
+            enum: ["STATIC", "TARGETING_MATCH", "SPLIT", "CACHED"],
+          },
+          variant: { type: "string", example: "on" },
+          metadata: { type: "object", additionalProperties: true },
+        },
       },
       OfrepError: {
-        type: "object", required: ["errorCode", "errorDetails"],
-        properties: { key: { type: "string" }, errorCode: { type: "string", example: "INVALID_CONTEXT" }, errorDetails: { type: "string" } },
+        type: "object",
+        required: ["errorCode", "errorDetails"],
+        properties: {
+          key: { type: "string" },
+          errorCode: { type: "string", example: "INVALID_CONTEXT" },
+          errorDetails: { type: "string" },
+        },
       },
       OfrepBulkResponse: {
-        type: "object", required: ["flags"],
-        properties: { flags: { type: "array", items: { oneOf: [{ $ref: "#/components/schemas/OfrepEvaluation" }, { $ref: "#/components/schemas/OfrepError" }] } }, eventStreams: { type: "array", items: { type: "object", additionalProperties: true } }, metadata: { type: "object", additionalProperties: true, properties: { version: { type: "string" } } } },
+        type: "object",
+        required: ["flags"],
+        properties: {
+          flags: {
+            type: "array",
+            items: {
+              oneOf: [
+                { $ref: "#/components/schemas/OfrepEvaluation" },
+                { $ref: "#/components/schemas/OfrepError" },
+              ],
+            },
+          },
+          eventStreams: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          },
+          metadata: {
+            type: "object",
+            additionalProperties: true,
+            properties: { version: { type: "string" } },
+          },
+        },
       },
       Error: {
         ...errorEnvelope,
@@ -2231,12 +2794,21 @@ export const openApiSpec = {
       User: {
         type: "object",
         description: "The authenticated user's profile.",
-        required: ["id", "username", "name", "email", "email_verified", "created_at", "updated_at"],
+        required: [
+          "id",
+          "username",
+          "name",
+          "email",
+          "email_verified",
+          "created_at",
+          "updated_at",
+        ],
         properties: {
           id: {
             type: "string",
             example: "019f7cce-cd39-77cd-9914-11953345f88e",
-            description: "UUIDv7 (accounts created before the v7 rollout keep their historical ids).",
+            description:
+              "UUIDv7 (accounts created before the v7 rollout keep their historical ids).",
           },
           username: {
             type: "string",
@@ -2292,9 +2864,24 @@ export const openApiSpec = {
             type: "string",
             example: "storefront",
             description:
-              "Stable identifier in URLs, SDK configuration, and the API; unique within the organization.",
+              "Identifier in URLs, SDK configuration, and the API; unique within the organization. Changing it via PATCH moves the project and leaves no redirect.",
           },
           name: { type: "string", example: "Storefront" },
+          description: {
+            type: "string",
+            example: "Checkout and cart for the storefront.",
+            description: "One-line summary; empty when unset.",
+          },
+          website: {
+            type: "string",
+            example: "https://flagon.io",
+            description: "Absolute http(s) URL; empty when unset.",
+          },
+          topics: {
+            type: "array",
+            items: { type: "string" },
+            example: ["platform", "checkout"],
+          },
           overview_markdown: { type: "string", example: "# Storefront" },
           created_at: { type: "string", format: "date-time" },
           updated_at: { type: "string", format: "date-time" },
@@ -2343,9 +2930,16 @@ export const openApiSpec = {
           "meters",
         ],
         properties: {
-          period_start: { type: "string", format: "date", example: "2026-07-19" },
+          period_start: {
+            type: "string",
+            format: "date",
+            example: "2026-07-19",
+          },
           period_end: { type: "string", format: "date", example: "2026-08-18" },
-          period_label: { type: "string", example: "Jul 19, 2026 - Aug 18, 2026" },
+          period_label: {
+            type: "string",
+            example: "Jul 19, 2026 - Aug 18, 2026",
+          },
           period_status: {
             type: "string",
             enum: ["open", "closed", "invoiced", "void"],
@@ -2378,7 +2972,14 @@ export const openApiSpec = {
               "Period totals per meter. Always the whole period, priced with the meter's included allowance applied across it.",
             items: {
               type: "object",
-              required: ["meter", "product", "label", "quantity", "unit", "cost_cents"],
+              required: [
+                "meter",
+                "product",
+                "label",
+                "quantity",
+                "unit",
+                "cost_cents",
+              ],
               properties: {
                 meter: { type: "string", example: "flags.evaluations" },
                 product: { type: "string", example: "flags" },
@@ -2420,7 +3021,11 @@ export const openApiSpec = {
               type: "object",
               required: ["start", "end", "cost_cents", "by_group"],
               properties: {
-                start: { type: "string", format: "date", example: "2026-07-19" },
+                start: {
+                  type: "string",
+                  format: "date",
+                  example: "2026-07-19",
+                },
                 end: { type: "string", format: "date", example: "2026-07-19" },
                 cost_cents: { type: "integer", example: 4 },
                 by_group: {
@@ -2438,7 +3043,10 @@ export const openApiSpec = {
               type: "object",
               required: ["id", "name"],
               properties: {
-                id: { type: "string", example: "019f7cd8-11c2-7a90-b3f1-52f3ec9c238e" },
+                id: {
+                  type: "string",
+                  example: "019f7cd8-11c2-7a90-b3f1-52f3ec9c238e",
+                },
                 name: { type: "string", example: "checkout" },
               },
             },
@@ -2449,9 +3057,20 @@ export const openApiSpec = {
         type: "object",
         description:
           "One billing period. Closed periods carry the totals frozen when they were billed; the open period's totals are null because they are still moving.",
-        required: ["period_start", "period_end", "label", "status", "is_current", "plan"],
+        required: [
+          "period_start",
+          "period_end",
+          "label",
+          "status",
+          "is_current",
+          "plan",
+        ],
         properties: {
-          period_start: { type: "string", format: "date", example: "2026-07-19" },
+          period_start: {
+            type: "string",
+            format: "date",
+            example: "2026-07-19",
+          },
           period_end: { type: "string", format: "date", example: "2026-08-18" },
           label: { type: "string", example: "Jul 19, 2026 - Aug 18, 2026" },
           status: {
@@ -2461,7 +3080,11 @@ export const openApiSpec = {
           is_current: { type: "boolean" },
           plan: { type: "string", enum: ["free", "pro", "enterprise"] },
           usage_cents: { type: "integer", nullable: true, example: 2512 },
-          credit_applied_cents: { type: "integer", nullable: true, example: 2000 },
+          credit_applied_cents: {
+            type: "integer",
+            nullable: true,
+            example: 2000,
+          },
           overage_cents: { type: "integer", nullable: true, example: 512 },
           stripe_invoice_id: { type: "string", nullable: true },
         },
@@ -2490,7 +3113,8 @@ export const openApiSpec = {
             type: "string",
             format: "date-time",
             nullable: true,
-            description: "Recorded at most once a minute, so it lags a busy token slightly.",
+            description:
+              "Recorded at most once a minute, so it lags a busy token slightly.",
           },
           created_at: { type: "string", format: "date-time" },
         },
@@ -2552,7 +3176,14 @@ export const openApiSpec = {
         type: "object",
         description:
           "One meter's live counter. `limit` is what the plan may CONSUME before requests are refused; `included` is what it gets before it is CHARGED. Those are different questions: on Pro the sync allowance is billed past, never refused.",
-        required: ["meter", "used", "limit", "remaining", "hard_capped", "included"],
+        required: [
+          "meter",
+          "used",
+          "limit",
+          "remaining",
+          "hard_capped",
+          "included",
+        ],
         properties: {
           meter: { type: "string", example: "flags.evaluations" },
           used: { type: "integer", format: "int64", example: 8_240_000 },
@@ -2567,7 +3198,8 @@ export const openApiSpec = {
             type: "integer",
             format: "int64",
             nullable: true,
-            description: "Null when the meter is not hard-capped. Floored at 0.",
+            description:
+              "Null when the meter is not hard-capped. Floored at 0.",
             example: 1_760_000,
           },
           hard_capped: {
@@ -2608,7 +3240,11 @@ export const openApiSpec = {
             example: "019f7cd8-11c2-7a90-b3f1-52f3ec9c238e",
             description: "UUIDv7.",
           },
-          email: { type: "string", format: "email", example: "robin@flagon.io" },
+          email: {
+            type: "string",
+            format: "email",
+            example: "robin@flagon.io",
+          },
           role: {
             type: "string",
             enum: ["member", "admin", "owner"],

@@ -60,13 +60,14 @@ export default async function MembersPage({
     query: { organizationId: org.id },
     headers: requestHeaders,
   });
-  const invitations: PanelInvitation[] = pendingInvitations(allInvitations)
-    .map((invitation) => ({
+  const invitations: PanelInvitation[] = pendingInvitations(allInvitations).map(
+    (invitation) => ({
       id: invitation.id,
       email: invitation.email,
       role: invitation.role ?? "member",
       expiresAt: new Date(invitation.expiresAt).toISOString(),
-    }));
+    }),
+  );
 
   return (
     <div>

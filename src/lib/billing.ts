@@ -139,9 +139,8 @@ export async function reconcileCheckoutSession(
   orgId: string,
   checkoutSessionId: string,
 ): Promise<boolean> {
-  const session = await getStripe().checkout.sessions.retrieve(
-    checkoutSessionId,
-  );
+  const session =
+    await getStripe().checkout.sessions.retrieve(checkoutSessionId);
   if (
     session.client_reference_id !== orgId ||
     session.mode !== "subscription" ||

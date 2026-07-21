@@ -1,4 +1,8 @@
-import { calendarMonthPeriod, isoDay, type PeriodWindow } from "./billing-period";
+import {
+  calendarMonthPeriod,
+  isoDay,
+  type PeriodWindow,
+} from "./billing-period";
 import { getMeter, type MeterRate } from "./meters";
 import { PLANS, type PlanId } from "./plans";
 
@@ -54,7 +58,9 @@ export function hardCap(plan: PlanId, meterId: string): number | null {
  * from re-pricing a bill that already went out.
  */
 export function pricingAllowance(plan: PlanId, meterId: string): number {
-  const declared = (PLANS[plan].meterAllowances as Record<string, number>)[meterId];
+  const declared = (PLANS[plan].meterAllowances as Record<string, number>)[
+    meterId
+  ];
   return declared ?? getMeter(meterId)?.includedQuantity ?? 0;
 }
 

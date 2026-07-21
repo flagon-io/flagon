@@ -51,7 +51,11 @@ export function assignColors(keys: string[]): Record<string, string> {
       hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
     }
     let slot = hash % SERIES_COLORS.length;
-    for (let probe = 0; taken.has(slot) && probe < SERIES_COLORS.length; probe += 1) {
+    for (
+      let probe = 0;
+      taken.has(slot) && probe < SERIES_COLORS.length;
+      probe += 1
+    ) {
       slot = (slot + 1) % SERIES_COLORS.length;
     }
     taken.add(slot);
@@ -67,7 +71,9 @@ function niceCeiling(maxCents: number): number {
     25, 50, 100, 250, 500, 1000, 2500, 5000, 10_000, 25_000, 50_000, 100_000,
     250_000, 500_000, 1_000_000,
   ];
-  return steps.find((step) => step >= maxCents) ?? Math.ceil(maxCents / 100) * 100;
+  return (
+    steps.find((step) => step >= maxCents) ?? Math.ceil(maxCents / 100) * 100
+  );
 }
 
 const dayLabel = new Intl.DateTimeFormat("en-US", {
@@ -111,7 +117,10 @@ export function ConsumptionChart({
 
         <div className="relative min-w-0 flex-1">
           {/* Recessive gridlines, behind the bars. */}
-          <div aria-hidden className="absolute inset-0 flex flex-col justify-between">
+          <div
+            aria-hidden
+            className="absolute inset-0 flex flex-col justify-between"
+          >
             {[0, 1, 2].map((line) => (
               <div key={line} className="h-px w-full bg-white/8" />
             ))}
@@ -164,9 +173,13 @@ export function ConsumptionChart({
                           <span
                             aria-hidden
                             className="h-2 w-2 shrink-0 rounded-full"
-                            style={{ background: colors[segment.key] ?? OTHER_COLOR }}
+                            style={{
+                              background: colors[segment.key] ?? OTHER_COLOR,
+                            }}
                           />
-                          <span>{labelFor.get(segment.key) ?? segment.key}</span>
+                          <span>
+                            {labelFor.get(segment.key) ?? segment.key}
+                          </span>
                           <span className="ml-auto pl-3 tabular-nums text-zinc-200">
                             {formatCents(segment.cents)}
                           </span>
@@ -194,7 +207,9 @@ export function ConsumptionChart({
             ]
               .filter(Boolean)
               .map((bucket, index) => (
-                <span key={`${bucket.key}-${index}`}>{formatBucket(bucket)}</span>
+                <span key={`${bucket.key}-${index}`}>
+                  {formatBucket(bucket)}
+                </span>
               ))}
           </div>
         </div>

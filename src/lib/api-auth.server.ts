@@ -52,8 +52,7 @@ export type OrgAccess = {
 };
 
 export type OrgAccessResult =
-  | { ok: true; access: OrgAccess }
-  | { ok: false; error: Response };
+  { ok: true; access: OrgAccess } | { ok: false; error: Response };
 
 /**
  * Whether the actor may perform an administrative action.
@@ -153,7 +152,11 @@ export async function resolveOrgAccess(
   if (!session) {
     return {
       ok: false,
-      error: apiError(401, "unauthorized", "Sign in or provide an access token."),
+      error: apiError(
+        401,
+        "unauthorized",
+        "Sign in or provide an access token.",
+      ),
     };
   }
   if (!org) return notFound;
@@ -221,7 +224,11 @@ export async function resolveUserAccess(
   if (!session) {
     return {
       ok: false,
-      error: apiError(401, "unauthorized", "Sign in or provide an access token."),
+      error: apiError(
+        401,
+        "unauthorized",
+        "Sign in or provide an access token.",
+      ),
     };
   }
   return {
@@ -254,12 +261,18 @@ export async function requireSession(
   }
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) {
-    return { ok: false, error: apiError(401, "unauthorized", "Sign in required.") };
+    return {
+      ok: false,
+      error: apiError(401, "unauthorized", "Sign in required."),
+    };
   }
   return { ok: true, userId: session.user.id };
 }
 
-async function memberRole(orgId: string, userId: string): Promise<OrgRole | null> {
+async function memberRole(
+  orgId: string,
+  userId: string,
+): Promise<OrgRole | null> {
   const [row] = await db
     .select({ role: members.role })
     .from(members)

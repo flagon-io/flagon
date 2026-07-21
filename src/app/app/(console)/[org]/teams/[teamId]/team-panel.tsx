@@ -130,7 +130,10 @@ export function TeamPanel({
       {members.length ? (
         <ul className="mt-4 divide-y divide-white/5 border border-white/10">
           {members.map((member) => (
-            <li key={member.userId} className="flex items-center gap-3 px-4 py-3">
+            <li
+              key={member.userId}
+              className="flex items-center gap-3 px-4 py-3"
+            >
               <span
                 aria-hidden
                 className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/10 bg-white/3 text-zinc-500"

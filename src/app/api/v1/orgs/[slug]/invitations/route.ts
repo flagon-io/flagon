@@ -97,7 +97,11 @@ export async function POST(
     );
   }
   if ((username && rawEmail) || (!username && !rawEmail)) {
-    return apiError(400, "invalid_subject", "Provide exactly one of: user, email.");
+    return apiError(
+      400,
+      "invalid_subject",
+      "Provide exactly one of: user, email.",
+    );
   }
 
   let email = rawEmail.toLowerCase();

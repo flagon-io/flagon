@@ -47,6 +47,9 @@ export async function PATCH(
   // the secret, so a leaked credential is revoked without re-granting access
   // anywhere that references it.
   return result.ok
-    ? apiJson({ ...serializeAccessToken(result.accessToken), token: result.token })
+    ? apiJson({
+        ...serializeAccessToken(result.accessToken),
+        token: result.token,
+      })
     : apiError(404, "not_found", "Token not found.");
 }

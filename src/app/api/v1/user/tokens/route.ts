@@ -1,4 +1,9 @@
-import { apiError, apiForbiddenOrigin, apiJson, isTrustedOrigin } from "@/lib/api";
+import {
+  apiError,
+  apiForbiddenOrigin,
+  apiJson,
+  isTrustedOrigin,
+} from "@/lib/api";
 import { requireSession } from "@/lib/api-auth.server";
 import {
   TOKEN_SCOPES,
@@ -36,8 +41,10 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null);
   const scopes = Array.isArray(body?.scopes)
-    ? body.scopes.filter((scope: unknown): scope is TokenScope =>
-        typeof scope === "string" && TOKEN_SCOPES.includes(scope as TokenScope),
+    ? body.scopes.filter(
+        (scope: unknown): scope is TokenScope =>
+          typeof scope === "string" &&
+          TOKEN_SCOPES.includes(scope as TokenScope),
       )
     : [];
 
@@ -46,7 +53,11 @@ export async function POST(request: Request) {
   const expiresAt =
     typeof body?.expires_at === "string" ? new Date(body.expires_at) : null;
   if (expiresAt && Number.isNaN(expiresAt.getTime())) {
-    return apiError(400, "invalid_token", "expires_at must be an ISO 8601 date.");
+    return apiError(
+      400,
+      "invalid_token",
+      "expires_at must be an ISO 8601 date.",
+    );
   }
 
   const result = await createAccessToken({

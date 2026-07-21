@@ -11,7 +11,10 @@ import "../src/app/globals.css";
  * the wrapper because that is where `src/app/layout.tsx` puts them.
  */
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
 
 const preview: Preview = {
   parameters: {

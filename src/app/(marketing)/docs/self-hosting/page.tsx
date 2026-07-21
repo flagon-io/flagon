@@ -14,8 +14,10 @@ const p = "mt-3 text-sm leading-6 text-zinc-400";
 const li = "text-sm leading-6 text-zinc-400";
 const a = "text-teal-400 transition hover:text-teal-300 hover:underline";
 const code = "rounded bg-white/5 px-1 py-0.5 text-[13px] text-zinc-200";
-const th = "px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500";
-const td = "border-t border-white/5 px-4 py-2.5 align-top text-sm text-zinc-400";
+const th =
+  "px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500";
+const td =
+  "border-t border-white/5 px-4 py-2.5 align-top text-sm text-zinc-400";
 
 /**
  * Self-hosting.
@@ -50,11 +52,11 @@ export default function SelfHostingDocsPage() {
         >
           Functional Source License
         </a>
-        . In practice: run it for your own purposes, internally or
-        commercially, without a license fee. The one thing it does not permit
-        is offering {brand.name} itself as a competing product or service. Each
-        release converts to Apache 2.0 two years after we publish it, so the
-        code you depend on becomes fully open source on a clock you can read.
+        . In practice: run it for your own purposes, internally or commercially,
+        without a license fee. The one thing it does not permit is offering{" "}
+        {brand.name} itself as a competing product or service. Each release
+        converts to Apache 2.0 two years after we publish it, so the code you
+        depend on becomes fully open source on a clock you can read.
       </p>
       <p className={p}>
         What that does not buy you is our operations. The hosted service exists
@@ -70,10 +72,13 @@ export default function SelfHostingDocsPage() {
         provisions the restricted database role, applies every migration, and
         serves on port 3000:
       </p>
-      <CodeBlock lang="bash" code={`curl -O https://raw.githubusercontent.com/flagon-io/flagon/main/compose.yml
+      <CodeBlock
+        lang="bash"
+        code={`curl -O https://raw.githubusercontent.com/flagon-io/flagon/main/compose.yml
 
 export BETTER_AUTH_SECRET=$(openssl rand -base64 32)
-docker compose --profile self-host up -d`} />
+docker compose --profile self-host up -d`}
+      />
       <p className={p}>
         The <span className={code}>self-host</span> profile is what adds the app
         container. Without it the same file starts Postgres alone, which is how
@@ -89,8 +94,7 @@ docker compose --profile self-host up -d`} />
 
       <h3 className={h3}>The image</h3>
       <p className={p}>
-        Published to{" "}
-        <span className={code}>ghcr.io/flagon-io/flagon</span> for{" "}
+        Published to <span className={code}>ghcr.io/flagon-io/flagon</span> for{" "}
         <span className={code}>linux/amd64</span> and{" "}
         <span className={code}>linux/arm64</span>, so it runs natively on Apple
         silicon and Graviton rather than under emulation. It carries the whole
@@ -130,8 +134,8 @@ docker compose --profile self-host up -d`} />
       <h2 className={h2}>Two database roles, on purpose</h2>
       <p className={p}>
         This is the part worth understanding before you deploy. {brand.name}{" "}
-        connects to Postgres as <strong className="text-zinc-200">two
-        different roles</strong>:
+        connects to Postgres as{" "}
+        <strong className="text-zinc-200">two different roles</strong>:
       </p>
       <div className="mt-4 overflow-x-auto border border-white/10">
         <table className="w-full border-collapse">
@@ -185,17 +189,19 @@ docker compose --profile self-host up -d`} />
 
       <h2 className={h2}>Environment</h2>
       <p className={p}>
-        The full annotated list is in{" "}
-        <span className={code}>.env.example</span>. The required minimum is
-        small:
+        The full annotated list is in <span className={code}>.env.example</span>
+        . The required minimum is small:
       </p>
-      <CodeBlock lang="bash" code={`# Database: two roles, as above.
+      <CodeBlock
+        lang="bash"
+        code={`# Database: two roles, as above.
 DATABASE_URL_APP=postgres://flagon_app:...@host:5432/flagon
 DATABASE_URL_OWNER=postgres://flagon_owner:...@host:5432/flagon
 
 # Auth. Generate with: openssl rand -base64 32
 BETTER_AUTH_SECRET=<long random secret>
-BETTER_AUTH_URL=https://your-host.example`} />
+BETTER_AUTH_URL=https://your-host.example`}
+      />
 
       <h3 className={h3}>Optional, and what happens without them</h3>
       <div className="mt-4 overflow-x-auto border border-white/10">
@@ -222,8 +228,8 @@ BETTER_AUTH_URL=https://your-host.example`} />
                 <span className={code}>STRIPE_SECRET_KEY</span>
               </td>
               <td className={td}>
-                Billing is off. No plan selection, no free-tier limits, no
-                caps, nothing metered. This is the self-host default.
+                Billing is off. No plan selection, no free-tier limits, no caps,
+                nothing metered. This is the self-host default.
               </td>
             </tr>
             <tr>
@@ -251,23 +257,30 @@ BETTER_AUTH_URL=https://your-host.example`} />
       </div>
 
       <h2 className={h2}>Deploy</h2>
-      <CodeBlock lang="bash" code={`npm install
+      <CodeBlock
+        lang="bash"
+        code={`npm install
 npm run db:provision   # create/update flagon_app and its grants (idempotent)
 npm run db:migrate     # apply drizzle/*.sql in order, each in a transaction
 npm run build
-npm run start`} />
+npm run start`}
+      />
       <p className={p}>
         Both database steps are safe to run on every deploy.{" "}
-        <span className={code}>db:provision</span>{" "}
-        only ever touches the restricted role, never a managed owner role, so it is safe alongside a
-        provider&apos;s own integration. <span className={code}>db:migrate</span>{" "}
-        takes an advisory lock, so overlapping deploys serialize instead of
-        racing, and skips migrations already recorded as applied.
+        <span className={code}>db:provision</span> only ever touches the
+        restricted role, never a managed owner role, so it is safe alongside a
+        provider&apos;s own integration.{" "}
+        <span className={code}>db:migrate</span> takes an advisory lock, so
+        overlapping deploys serialize instead of racing, and skips migrations
+        already recorded as applied.
       </p>
 
       <h3 className={h3}>Local development</h3>
-      <CodeBlock lang="bash" code={`npm run db:up   # Postgres, wait for healthy, provision the role, migrate
-npm run dev`} />
+      <CodeBlock
+        lang="bash"
+        code={`npm run db:up   # Postgres, wait for healthy, provision the role, migrate
+npm run dev`}
+      />
 
       <h2 className={h2}>Scheduled maintenance</h2>
       <p className={p}>
@@ -321,9 +334,9 @@ npm run dev`} />
         <span className={code}>db:migrate</span> before starting the new build.
         Migrations are plain, ordered SQL files under{" "}
         <span className={code}>drizzle/</span>, each applied once inside a
-        transaction and recorded in <span className={code}>schema_migrations</span>
-        , so you can read exactly what a release will do to your database
-        before you run it.
+        transaction and recorded in{" "}
+        <span className={code}>schema_migrations</span>, so you can read exactly
+        what a release will do to your database before you run it.
       </p>
 
       <h2 className={h2}>What you give up</h2>

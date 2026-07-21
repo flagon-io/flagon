@@ -6,11 +6,7 @@ import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { brand } from "@/lib/brand";
 import { appPath, marketingHref } from "@/lib/urls";
-import {
-  ORG_SLUG_HINT,
-  suggestOrgSlug,
-  validateOrgSlug,
-} from "@/lib/org-slug";
+import { ORG_SLUG_HINT, suggestOrgSlug, validateOrgSlug } from "@/lib/org-slug";
 import { PLANS, type PlanId } from "@/lib/plans";
 import { PlanColumns } from "@/components/plan-columns";
 import { Notice, buttonClass, hintClass } from "@/components/form-ui";
@@ -260,8 +256,8 @@ export function NewOrgForm({
         // Quiet footnote, not a warning: billing-off is the normal state for
         // self-hosted deployments, nothing needs fixing.
         <p className="mx-auto mt-8 max-w-xl text-center text-xs leading-5 text-zinc-600">
-          Billing isn&apos;t configured on this deployment, so plans
-          don&apos;t apply: every organization runs with everything unlocked.
+          Billing isn&apos;t configured on this deployment, so plans don&apos;t
+          apply: every organization runs with everything unlocked.
         </p>
       ) : null}
     </div>

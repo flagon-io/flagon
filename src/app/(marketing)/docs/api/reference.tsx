@@ -127,7 +127,10 @@ export function operationsByTag(): Map<
   string,
   { path: string; method: string; op: Operation }[]
 > {
-  const byTag = new Map<string, { path: string; method: string; op: Operation }[]>();
+  const byTag = new Map<
+    string,
+    { path: string; method: string; op: Operation }[]
+  >();
   for (const tag of spec.tags) byTag.set(tag.name, []);
   for (const [path, methods] of Object.entries(spec.paths)) {
     for (const [method, op] of Object.entries(methods)) {
@@ -256,7 +259,9 @@ function curlFor(path: string, method: string, op: Operation): string {
   return lines.join(" \\\n");
 }
 
-function successExample(op: Operation): { status: string; body: string } | null {
+function successExample(
+  op: Operation,
+): { status: string; body: string } | null {
   for (const [status, res] of Object.entries(op.responses)) {
     if (!status.startsWith("2")) continue;
     const media = res.content?.["application/json"];
@@ -310,123 +315,125 @@ export function OperationBlock({
       </summary>
 
       <div className="border-t border-white/5 px-5 pb-5 pt-4">
-      <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Prose, parameters, responses */}
-        <div className="min-w-0 space-y-5">
-          {op.description ? (
-            <p className="text-sm leading-6 text-zinc-400">{op.description}</p>
-          ) : null}
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1fr)_360px]">
+          {/* Prose, parameters, responses */}
+          <div className="min-w-0 space-y-5">
+            {op.description ? (
+              <p className="text-sm leading-6 text-zinc-400">
+                {op.description}
+              </p>
+            ) : null}
 
-          {op.parameters?.length ? (
+            {op.parameters?.length ? (
+              <div>
+                <h5 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  Parameters
+                </h5>
+                <div className="overflow-x-auto rounded-lg border border-white/10">
+                  <table className="w-full text-left text-sm">
+                    <tbody className="divide-y divide-white/5">
+                      {op.parameters.map((p) => (
+                        <tr key={`${p.in}-${p.name}`}>
+                          <td className="w-44 px-3 py-2.5 align-top">
+                            <code className="text-[13px] text-zinc-100">
+                              {p.name}
+                            </code>
+                            {p.required ? (
+                              <span className="ml-1.5 text-[10px] font-medium uppercase text-amber-400/80">
+                                required
+                              </span>
+                            ) : null}
+                            <div className="mt-0.5 text-xs text-teal-300/80">
+                              {typeLabel(p.schema)} · {p.in}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 align-top text-xs leading-5 text-zinc-400">
+                            {p.description ?? ""}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            <FieldTable schema={requestSchema} caption="Request body" />
+
             <div>
               <h5 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                Parameters
+                Responses
               </h5>
-              <div className="overflow-x-auto rounded-lg border border-white/10">
-                <table className="w-full text-left text-sm">
-                  <tbody className="divide-y divide-white/5">
-                    {op.parameters.map((p) => (
-                      <tr key={`${p.in}-${p.name}`}>
-                        <td className="w-44 px-3 py-2.5 align-top">
-                          <code className="text-[13px] text-zinc-100">
-                            {p.name}
-                          </code>
-                          {p.required ? (
-                            <span className="ml-1.5 text-[10px] font-medium uppercase text-amber-400/80">
-                              required
-                            </span>
-                          ) : null}
-                          <div className="mt-0.5 text-xs text-teal-300/80">
-                            {typeLabel(p.schema)} · {p.in}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 align-top text-xs leading-5 text-zinc-400">
-                          {p.description ?? ""}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-3">
+                {Object.entries(op.responses).map(([status, res]) => (
+                  <div
+                    key={status}
+                    className="rounded-lg border border-white/5 px-3 py-2.5"
+                  >
+                    <div className="flex items-baseline gap-2 text-sm">
+                      <code className={`font-semibold ${statusTone(status)}`}>
+                        {status}
+                      </code>
+                      <span className="text-xs text-zinc-400">
+                        {res.description}
+                      </span>
+                    </div>
+                    {res.headers
+                      ? Object.entries(res.headers).map(([name, header]) => (
+                          <p
+                            key={name}
+                            className="mt-1.5 text-xs leading-5 text-zinc-500"
+                          >
+                            <code className="text-zinc-300">{name}</code>
+                            {header.description ? (
+                              <> - {header.description}</>
+                            ) : null}
+                          </p>
+                        ))
+                      : null}
+                    {!status.startsWith("2") &&
+                    res.content?.["application/json"] ? (
+                      <pre className="mt-2 overflow-x-auto rounded-md bg-black/40 p-2.5 text-xs leading-5 text-zinc-400">
+                        <code>
+                          {JSON.stringify(
+                            res.content["application/json"].example ??
+                              exampleOf(res.content["application/json"].schema),
+                            null,
+                            2,
+                          )}
+                        </code>
+                      </pre>
+                    ) : null}
+                  </div>
+                ))}
               </div>
             </div>
-          ) : null}
+          </div>
 
-          <FieldTable schema={requestSchema} caption="Request body" />
-
-          <div>
-            <h5 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              Responses
-            </h5>
-            <div className="space-y-3">
-              {Object.entries(op.responses).map(([status, res]) => (
-                <div
-                  key={status}
-                  className="rounded-lg border border-white/5 px-3 py-2.5"
-                >
-                  <div className="flex items-baseline gap-2 text-sm">
-                    <code className={`font-semibold ${statusTone(status)}`}>
-                      {status}
-                    </code>
-                    <span className="text-xs text-zinc-400">
-                      {res.description}
-                    </span>
-                  </div>
-                  {res.headers
-                    ? Object.entries(res.headers).map(([name, header]) => (
-                        <p
-                          key={name}
-                          className="mt-1.5 text-xs leading-5 text-zinc-500"
-                        >
-                          <code className="text-zinc-300">{name}</code>
-                          {header.description ? (
-                            <> - {header.description}</>
-                          ) : null}
-                        </p>
-                      ))
-                    : null}
-                  {!status.startsWith("2") &&
-                  res.content?.["application/json"] ? (
-                    <pre className="mt-2 overflow-x-auto rounded-md bg-black/40 p-2.5 text-xs leading-5 text-zinc-400">
-                      <code>
-                        {JSON.stringify(
-                          res.content["application/json"].example ??
-                            exampleOf(res.content["application/json"].schema),
-                          null,
-                          2,
-                        )}
-                      </code>
-                    </pre>
-                  ) : null}
-                </div>
-              ))}
-            </div>
+          {/* Example rail */}
+          <div className="min-w-0 space-y-4 xl:sticky xl:top-24 xl:self-start">
+            <CodeBlock label="Example request" copyText={curl}>
+              {curl}
+            </CodeBlock>
+            {success ? (
+              <CodeBlock label={`Response · ${success.status}`}>
+                {success.body}
+              </CodeBlock>
+            ) : null}
           </div>
         </div>
 
-        {/* Example rail */}
-        <div className="min-w-0 space-y-4 xl:sticky xl:top-24 xl:self-start">
-          <CodeBlock label="Example request" copyText={curl}>
-            {curl}
-          </CodeBlock>
-          {success ? (
-            <CodeBlock label={`Response · ${success.status}`}>
-              {success.body}
-            </CodeBlock>
-          ) : null}
-        </div>
-      </div>
-
-      <TryIt
-        method={method}
-        path={path}
-        requiresAuth={Boolean(op.security?.length)}
-        params={(op.parameters ?? []).map((p) => ({
-          name: p.name,
-          in: p.in,
-          required: p.required,
-        }))}
-        bodyExample={bodyExample}
-      />
+        <TryIt
+          method={method}
+          path={path}
+          requiresAuth={Boolean(op.security?.length)}
+          params={(op.parameters ?? []).map((p) => ({
+            name: p.name,
+            in: p.in,
+            required: p.required,
+          }))}
+          bodyExample={bodyExample}
+        />
       </div>
     </details>
   );

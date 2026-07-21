@@ -19,14 +19,14 @@ describe("session cookie domain", () => {
   it("stays single-origin off the apex (localhost, previews)", () => {
     // A cookie scoped to a domain you don't serve from is dropped, so
     // cross-subdomain cookies must stay off for these.
-    expect(sessionCookieDomain("http://localhost:3000", "flagon.io")).toBeNull();
+    expect(
+      sessionCookieDomain("http://localhost:3000", "flagon.io"),
+    ).toBeNull();
     expect(
       sessionCookieDomain("https://flagon-git-main.vercel.app", "flagon.io"),
     ).toBeNull();
     // Lookalike domains must not match the apex check.
-    expect(
-      sessionCookieDomain("https://notflagon.io", "flagon.io"),
-    ).toBeNull();
+    expect(sessionCookieDomain("https://notflagon.io", "flagon.io")).toBeNull();
   });
 
   it("handles self-hosting on another apex", () => {
@@ -38,6 +38,8 @@ describe("session cookie domain", () => {
   it("returns null for unusable input", () => {
     expect(sessionCookieDomain("not-a-url", "flagon.io")).toBeNull();
     expect(sessionCookieDomain("https://app.flagon.io", "")).toBeNull();
-    expect(sessionCookieDomain("https://app.flagon.io", "localhost")).toBeNull();
+    expect(
+      sessionCookieDomain("https://app.flagon.io", "localhost"),
+    ).toBeNull();
   });
 });

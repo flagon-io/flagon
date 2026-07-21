@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { ArrowRight, BookOpen, Flag, Puzzle, Scale, Server } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  Flag,
+  Puzzle,
+  Scale,
+  Server,
+} from "lucide-react";
 import { brand } from "@/lib/brand";
 import { appHref } from "@/lib/urls";
 import { PLANS } from "@/lib/plans";
@@ -108,10 +115,16 @@ export default function Home() {
       <BleedBand>
         <div className="grid grid-cols-1 divide-y divide-white/10 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
           {products.map(({ name, href, icon: Icon, body }) => (
-            <Link key={name} href={href} className="group flex flex-col p-8 transition hover:bg-white/2">
+            <Link
+              key={name}
+              href={href}
+              className="group flex flex-col p-8 transition hover:bg-white/2"
+            >
               <div className="flex items-center gap-2.5">
                 <Icon className="h-5 w-5 text-teal-400" aria-hidden />
-                <h2 className="text-base font-semibold text-zinc-100">{name}</h2>
+                <h2 className="text-base font-semibold text-zinc-100">
+                  {name}
+                </h2>
                 <ArrowRight
                   className="ml-auto h-4 w-4 text-zinc-600 transition group-hover:translate-x-0.5 group-hover:text-teal-400"
                   aria-hidden
@@ -147,7 +160,9 @@ export default function Home() {
           {principles.map(({ icon: Icon, title, body }) => (
             <div key={title} className="p-8">
               <Icon className="h-5 w-5 text-teal-400" aria-hidden />
-              <h3 className="mt-4 text-base font-semibold text-zinc-100">{title}</h3>
+              <h3 className="mt-4 text-base font-semibold text-zinc-100">
+                {title}
+              </h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">{body}</p>
             </div>
           ))}
@@ -167,7 +182,9 @@ export default function Home() {
           {steps.map(({ step, title, body }) => (
             <div key={step}>
               <span className="font-mono text-xs text-teal-400/70">{step}</span>
-              <h3 className="mt-3 text-base font-semibold text-zinc-100">{title}</h3>
+              <h3 className="mt-3 text-base font-semibold text-zinc-100">
+                {title}
+              </h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">{body}</p>
             </div>
           ))}
@@ -201,7 +218,10 @@ export default function Home() {
             </h3>
             <dl className="mt-4 space-y-3">
               {activeMeters().map((meter) => (
-                <div key={meter.id} className="flex items-baseline justify-between gap-4">
+                <div
+                  key={meter.id}
+                  className="flex items-baseline justify-between gap-4"
+                >
                   <dt className="text-sm text-zinc-300">{meter.label}</dt>
                   <dd className="shrink-0 font-mono text-sm text-zinc-400">
                     {formatMeterRate(meter)}

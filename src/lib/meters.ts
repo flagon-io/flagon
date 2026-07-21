@@ -95,8 +95,7 @@ export const METERS: Meter[] = [
      */
     includedQuantity: 0,
     status: "active",
-    description:
-      "Every flag decision served, however it was requested.",
+    description: "Every flag decision served, however it was requested.",
   },
   {
     id: "flags.syncs",
@@ -210,7 +209,8 @@ export function allocateProRata(
   const shares = quantities.map((quantity) =>
     Math.floor((totalCents * quantity) / sum),
   );
-  let remainder = totalCents - shares.reduce((total, share) => total + share, 0);
+  let remainder =
+    totalCents - shares.reduce((total, share) => total + share, 0);
   // Hand the leftover cents to the biggest contributors, largest first.
   const order = quantities
     .map((quantity, index) => ({ quantity, index }))

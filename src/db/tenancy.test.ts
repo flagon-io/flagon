@@ -84,9 +84,10 @@ describe.skipIf(!canRun)("tenancy audit", () => {
       SELECT defaclacl::text AS acl FROM pg_default_acl
     `;
     for (const row of rows) {
-      expect(row.acl, "default ACL must not mention the app role").not.toContain(
-        appRole,
-      );
+      expect(
+        row.acl,
+        "default ACL must not mention the app role",
+      ).not.toContain(appRole);
     }
   });
 
@@ -123,7 +124,10 @@ describe.skipIf(!canRun)("tenancy audit", () => {
         continue;
       }
       if (AUTH_LAYER_TABLES.has(name)) {
-        expect(table.can_select, `${name} should be reachable (auth-layer)`).toBe(true);
+        expect(
+          table.can_select,
+          `${name} should be reachable (auth-layer)`,
+        ).toBe(true);
         continue;
       }
       // Everything else is product data: it must be tenant-isolated. An
@@ -142,7 +146,9 @@ describe.skipIf(!canRun)("tenancy audit", () => {
 
     // Stale classifications rot the audit: every listed table must exist.
     for (const name of [...AUTH_LAYER_TABLES, ...OWNER_ONLY_TABLES]) {
-      expect(seen.has(name), `${name} is classified but does not exist`).toBe(true);
+      expect(seen.has(name), `${name} is classified but does not exist`).toBe(
+        true,
+      );
     }
   });
 

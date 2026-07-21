@@ -14,8 +14,10 @@ const p = "mt-3 text-sm leading-6 text-zinc-400";
 const li = "text-sm leading-6 text-zinc-400";
 const a = "text-teal-400 transition hover:text-teal-300 hover:underline";
 const code = "rounded bg-white/5 px-1 py-0.5 text-[13px] text-zinc-200";
-const th = "px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500";
-const td = "border-t border-white/5 px-4 py-2.5 align-top text-sm text-zinc-400";
+const th =
+  "px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500";
+const td =
+  "border-t border-white/5 px-4 py-2.5 align-top text-sm text-zinc-400";
 
 /**
  * The Feature Flags product guide.
@@ -66,8 +68,11 @@ export default function FeatureFlagsDocsPage() {
         </li>
         <li className={li}>
           <strong className="font-medium text-zinc-200">Variant</strong> &mdash;
-          one named possible value. Every flag has at least one, and exactly
-          one is the fallback served when no rule matches.
+          one possible value, plus an optional label for your team to read. Its{" "}
+          <span className={code}>key</span> is derived when the variant is
+          created and then fixed, because targeting rules reference it and
+          evaluation reports it. Every flag has at least one variant, and
+          exactly one is the fallback served when no rule matches.
         </li>
         <li className={li}>
           <strong className="font-medium text-zinc-200">Targeting rule</strong>{" "}
@@ -85,8 +90,8 @@ export default function FeatureFlagsDocsPage() {
           </strong>{" "}
           &mdash; what you know about the caller. It must carry a non-empty{" "}
           <span className={code}>targetingKey</span>, which is also what
-          percentage rollouts bucket on, so the same user stays on the same
-          side of a split.
+          percentage rollouts bucket on, so the same user stays on the same side
+          of a split.
         </li>
       </ul>
 
@@ -126,8 +131,7 @@ export default function FeatureFlagsDocsPage() {
               <td className={td}>Servers, jobs, CI</td>
               <td className={td}>
                 Everything a client token can do, plus the management API.
-                Evaluation scope:{" "}
-                <span className={code}>flags:evaluate</span>.
+                Evaluation scope: <span className={code}>flags:evaluate</span>.
               </td>
             </tr>
           </tbody>
@@ -136,17 +140,25 @@ export default function FeatureFlagsDocsPage() {
       <p className={p}>
         Client tokens are created and rotated on the Feature Flags page.
         Organization tokens live under{" "}
-        <strong className="text-zinc-200">Organization &rarr; API tokens</strong>,
-        because they are a platform credential rather than a flags-specific
-        one: the same token can reach projects, members, and usage, according
-        to its scopes.
+        <strong className="text-zinc-200">
+          Organization &rarr; API tokens
+        </strong>
+        , because they are a platform credential rather than a flags-specific
+        one: the same token can reach projects, members, and usage, according to
+        its scopes.
       </p>
       <p className={p}>
-        A <strong className="text-zinc-200">personal access token</strong>{" "}
-        works here too. It acts as you, carrying your organization roles, so it can
-        never do more than you can by hand and it stops working when your
-        membership does. Tell it which organization to evaluate against by
-        sending that organization&apos;s id in{" "}
+        {/* Ends on punctuation deliberately. An inline element followed by a
+            WORD is what SWC drops the space between, and `{" "}` is not a fix
+            that survives: Prettier collapses it straight back to a literal
+            space, so format-on-save reintroduces the bug. Punctuation after
+            the closing tag cannot be collapsed into anything. */}
+        This also works with a{" "}
+        <strong className="text-zinc-200">personal access token</strong>. It
+        acts as you, carrying your organization roles, so it can never do more
+        than you can by hand and it stops working when your membership does.
+        Tell it which organization to evaluate against by sending that
+        organization&apos;s id in{" "}
         <span className={code}>X-Flagon-Organization</span>. For a shared
         production service prefer an organization token, which outlives whoever
         set it up.
@@ -155,9 +167,9 @@ export default function FeatureFlagsDocsPage() {
       <h3 className={h3}>Scopes</h3>
       <p className={p}>
         Organization and personal tokens carry scopes; client tokens do not,
-        because evaluation is the only thing they can do. Evaluating flags
-        needs just <span className={code}>flags:evaluate</span>, which is all
-        most integrations ever grant.
+        because evaluation is the only thing they can do. Evaluating flags needs
+        just <span className={code}>flags:evaluate</span>, which is all most
+        integrations ever grant.
       </p>
       <div className="mt-4 overflow-x-auto border border-white/10">
         <table className="w-full border-collapse">
@@ -199,8 +211,8 @@ export default function FeatureFlagsDocsPage() {
         A <span className={code}>:write</span> scope always includes its
         matching <span className={code}>:read</span>, so there is no need to
         grant both. Scopes never cross resources: a token with{" "}
-        <span className={code}>flags:write</span> cannot read your projects.
-        The full set also covers <span className={code}>projects</span>,{" "}
+        <span className={code}>flags:write</span> cannot read your projects. The
+        full set also covers <span className={code}>projects</span>,{" "}
         <span className={code}>members</span>,{" "}
         <span className={code}>usage</span>, and{" "}
         <span className={code}>org</span>; see the{" "}
@@ -217,11 +229,16 @@ export default function FeatureFlagsDocsPage() {
 
       <h2 className={h2}>Browser and React applications</h2>
       <p className={p}>
-        Install the OpenFeature web SDK and an OFREP web provider, then point
-        it at {brand.name} with a client token and a static context:
+        Install the OpenFeature web SDK and an OFREP web provider, then point it
+        at {brand.name} with a client token and a static context:
       </p>
-      <CodeBlock lang="bash" code={`npm install @openfeature/web-sdk @openfeature/ofrep-web-provider`} />
-      <CodeBlock lang="ts" code={`import { OpenFeature } from "@openfeature/web-sdk";
+      <CodeBlock
+        lang="bash"
+        code={`npm install @openfeature/web-sdk @openfeature/ofrep-web-provider`}
+      />
+      <CodeBlock
+        lang="ts"
+        code={`import { OpenFeature } from "@openfeature/web-sdk";
 import { OFREPWebProvider } from "@openfeature/ofrep-web-provider";
 
 await OpenFeature.setProviderAndWait(
@@ -236,17 +253,23 @@ await OpenFeature.setProviderAndWait(
 await OpenFeature.setContext({ targetingKey: userId, plan: "pro" });
 
 const client = OpenFeature.getClient();
-const enabled = client.getBooleanValue("new-checkout", false);`} />
+const enabled = client.getBooleanValue("new-checkout", false);`}
+      />
       <p className={p}>
-        Always pass a default (<span className={code}>false</span> above). It
-        is what your application serves before the first response arrives and
-        if {brand.name} is unreachable, which is what keeps a flag service from
+        Always pass a default (<span className={code}>false</span> above). It is
+        what your application serves before the first response arrives and if{" "}
+        {brand.name} is unreachable, which is what keeps a flag service from
         becoming a hard dependency of your page loading.
       </p>
 
       <h3 className={h3}>React</h3>
-      <CodeBlock lang="bash" code={`npm install @openfeature/react-sdk @openfeature/ofrep-web-provider`} />
-      <CodeBlock lang="tsx" code={`import { OpenFeatureProvider, useFlag } from "@openfeature/react-sdk";
+      <CodeBlock
+        lang="bash"
+        code={`npm install @openfeature/react-sdk @openfeature/ofrep-web-provider`}
+      />
+      <CodeBlock
+        lang="tsx"
+        code={`import { OpenFeatureProvider, useFlag } from "@openfeature/react-sdk";
 
 function Checkout() {
   const { value } = useFlag("new-checkout", false);
@@ -256,7 +279,8 @@ function Checkout() {
 // Wrap the tree once, above anything that reads a flag.
 <OpenFeatureProvider>
   <App />
-</OpenFeatureProvider>;`} />
+</OpenFeatureProvider>;`}
+      />
       <p className={p}>
         Hooks re-render on their own when configuration changes, because the
         provider emits{" "}
@@ -269,8 +293,13 @@ function Checkout() {
         Server SDKs evaluate against a <em>per-request</em> context, so the
         context is passed at the call site rather than set globally.
       </p>
-      <CodeBlock lang="bash" code={`npm install @openfeature/server-sdk @openfeature/ofrep-provider`} />
-      <CodeBlock lang="ts" code={`import { OpenFeature } from "@openfeature/server-sdk";
+      <CodeBlock
+        lang="bash"
+        code={`npm install @openfeature/server-sdk @openfeature/ofrep-provider`}
+      />
+      <CodeBlock
+        lang="ts"
+        code={`import { OpenFeature } from "@openfeature/server-sdk";
 import { OFREPProvider } from "@openfeature/ofrep-provider";
 
 await OpenFeature.setProviderAndWait(
@@ -284,7 +313,8 @@ const client = OpenFeature.getClient();
 const enabled = await client.getBooleanValue("new-checkout", false, {
   targetingKey: request.userId,
   plan: account.plan,
-});`} />
+});`}
+      />
 
       <h2 className={h2}>Other languages</h2>
       <p className={p}>
@@ -340,8 +370,8 @@ const enabled = await client.getBooleanValue("new-checkout", false, {
           >
             About OFREP
           </a>{" "}
-          &mdash; the protocol itself, if you would rather implement it
-          directly than take a dependency.
+          &mdash; the protocol itself, if you would rather implement it directly
+          than take a dependency.
         </li>
       </ul>
       <p className={p}>
@@ -362,9 +392,10 @@ const enabled = await client.getBooleanValue("new-checkout", false, {
       </p>
       <p className={p}>
         This is worth doing even though it is optional. A 304 transfers almost
-        nothing, and it is <strong className="text-zinc-200">not metered</strong>{" "}
-        &mdash; it served no decision, so it is not counted as one, and it does
-        not consume your configuration-sync allowance either.
+        nothing, and it is{" "}
+        <strong className="text-zinc-200">not metered</strong> &mdash; it served
+        no decision, so it is not counted as one, and it does not consume your
+        configuration-sync allowance either.
       </p>
       <p className={p}>
         The validator covers both the organization&apos;s configuration and the
@@ -384,8 +415,8 @@ const enabled = await client.getBooleanValue("new-checkout", false, {
       <h2 className={h2}>What gets metered</h2>
       <ul className="mt-3 list-disc space-y-2 pl-5">
         <li className={li}>
-          A single-flag evaluation records <strong className="text-zinc-200">one</strong>{" "}
-          evaluation.
+          A single-flag evaluation records{" "}
+          <strong className="text-zinc-200">one</strong> evaluation.
         </li>
         <li className={li}>
           A bulk evaluation records{" "}
@@ -400,7 +431,9 @@ const enabled = await client.getBooleanValue("new-checkout", false, {
       <p className={p}>
         Live counters are on the organization&apos;s Usage page and at{" "}
         <Link href="/docs/api" className={a}>
-          <span className={code}>GET /v1/orgs/&#123;slug&#125;/usage/evaluations</span>
+          <span className={code}>
+            GET /v1/orgs/&#123;slug&#125;/usage/evaluations
+          </span>
         </Link>
         . Hobby organizations are capped and refuse requests with{" "}
         <span className={code}>429</span> past the cap; paid plans are billed
@@ -431,9 +464,7 @@ const enabled = await client.getBooleanValue("new-checkout", false, {
                   POST /ofrep/v1/evaluate/flags/&#123;key&#125;
                 </span>
               </td>
-              <td className={td}>
-                Evaluate one flag. Supports ETag.
-              </td>
+              <td className={td}>Evaluate one flag. Supports ETag.</td>
             </tr>
             <tr>
               <td className={td}>

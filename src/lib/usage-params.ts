@@ -71,7 +71,9 @@ export function parseUsageQuery(params: URLSearchParams): UsageQuery {
 }
 
 /** Round-trips a query back to a search string, omitting defaults. */
-export function usageQueryToParams(query: Partial<UsageQuery>): URLSearchParams {
+export function usageQueryToParams(
+  query: Partial<UsageQuery>,
+): URLSearchParams {
   const params = new URLSearchParams();
   if (query.period) params.set("period", query.period);
   for (const product of query.products ?? []) params.append("product", product);
