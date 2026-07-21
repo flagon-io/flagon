@@ -21,7 +21,7 @@ export default async function NewProjectPage({
     <div className="mx-auto max-w-xl">
       <p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
         <Link
-          href={appPath(`/${slug}/projects`)}
+          href={appPath(`/${slug}`)}
           className="transition hover:text-teal-300"
         >
           Projects

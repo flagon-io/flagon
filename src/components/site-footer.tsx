@@ -9,10 +9,10 @@ const groups: FooterGroup[] = [
   {
     title: "Product",
     links: [
-      { label: "Catalog" },
-      { label: "Feature Flags" },
-      { label: "Experiments" },
-      { label: "Config" },
+      { label: "Overview", href: "/products" },
+      { label: "Feature Flags", href: "/products/feature-flags" },
+      { label: "Catalog", href: "/products/catalog" },
+      { label: "Pricing", href: "/pricing" },
     ],
   },
   {
@@ -26,10 +26,10 @@ const groups: FooterGroup[] = [
   {
     title: "Resources",
     links: [
-      { label: "Docs", href: "/docs" },
+      { label: "Documentation", href: "/docs" },
+      { label: "Getting started", href: "/docs/getting-started" },
       { label: "API reference", href: "/docs/api" },
-      { label: "Status" },
-      { label: "Changelog" },
+      { label: "Self-hosting", href: "/docs/self-hosting" },
     ],
   },
   {
@@ -38,7 +38,7 @@ const groups: FooterGroup[] = [
       { label: "Terms", href: "/terms" },
       { label: "Privacy", href: "/privacy" },
       { label: "Security", href: "/security" },
-      { label: "License (FSL)" },
+      { label: "License (FSL)", href: `${brand.repo}/blob/main/LICENSE.md` },
     ],
   },
 ];
@@ -46,6 +46,21 @@ const groups: FooterGroup[] = [
 function FooterItem({ link }: { link: FooterLink }) {
   const className =
     "text-sm text-zinc-500 transition-colors hover:text-zinc-200";
+
+  // An off-site link is an <a>, not a <Link>: next/link prefetches and
+  // client-navigates, neither of which means anything for another origin.
+  if (link.href?.startsWith("http")) {
+    return (
+      <a
+        href={link.href}
+        target="_blank"
+        rel="noreferrer"
+        className={className}
+      >
+        {link.label}
+      </a>
+    );
+  }
 
   if (link.href) {
     return (

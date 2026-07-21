@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users } from "@/db/auth-schema";
 import { auth } from "@/lib/auth";
+import { requireSession, resolveOrgAccess } from "@/lib/api-auth.server";
+import { isAssignableOrgRole } from "@/lib/org-roles";
 import { listUserTeams } from "@/lib/teams.server";
 import {
   apiError,
@@ -55,10 +57,9 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ slug: string; username: string }> },
 ) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
-
   const { slug, username } = await params;
+  const access = await resolveOrgAccess(request, slug, "members:read");
+  if (!access.ok) return access.error;
   const org = await resolveOrg(slug, request.headers);
   if (!org) return apiError(404, "not_found", "Organization not found.");
 
@@ -81,8 +82,10 @@ export async function PATCH(
   { params }: { params: Promise<{ slug: string; username: string }> },
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
+  // Membership and invitation changes go through BetterAuth, which needs the
+  // session, and are identity operations besides. Session-only, deliberately.
+  const gate = await requireSession(request);
+  if (!gate.ok) return gate.error;
 
   const { slug, username } = await params;
   const org = await resolveOrg(slug, request.headers);
@@ -93,15 +96,19 @@ export async function PATCH(
 
   const body = await request.json().catch(() => null);
   const role = typeof body?.role === "string" ? body.role : "";
-  if (!["member", "admin", "owner"].includes(role)) {
-    return apiError(400, "invalid_role", "Role must be one of: member, admin, owner.");
+  if (!isAssignableOrgRole(role)) {
+    return apiError(
+      400,
+      "invalid_role",
+      "Role must be one of: member, admin. Ownership moves with PUT /v1/orgs/{slug}/owner.",
+    );
   }
 
   try {
     await auth.api.updateMemberRole({
       body: {
         memberId: found.member.id,
-        role: role as "member" | "admin" | "owner",
+        role: role as "member" | "admin",
         organizationId: org.id,
       },
       headers: request.headers,
@@ -131,8 +138,10 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string; username: string }> },
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
+  // Membership and invitation changes go through BetterAuth, which needs the
+  // session, and are identity operations besides. Session-only, deliberately.
+  const gate = await requireSession(request);
+  if (!gate.ok) return gate.error;
 
   const { slug, username } = await params;
   const org = await resolveOrg(slug, request.headers);

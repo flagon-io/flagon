@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { organizations } from "@/db/schema";
+import { clearPlanCache } from "./usage-events.server";
 
 /**
  * Billing mode, resolved from the environment (same pattern as email):
@@ -77,6 +78,7 @@ export async function applyProSubscription(
   orgId: string,
   customerId: string | null,
   subscriptionId: string | null,
+  cycle?: { start: Date; end: Date } | null,
 ): Promise<void> {
   await db
     .update(organizations)
@@ -84,6 +86,45 @@ export async function applyProSubscription(
       plan: "pro",
       ...(customerId ? { stripeCustomerId: customerId } : {}),
       ...(subscriptionId ? { stripeSubscriptionId: subscriptionId } : {}),
+      ...(cycle
+        ? { currentPeriodStart: cycle.start, currentPeriodEnd: cycle.end }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(organizations.id, orgId));
+  // An upgrade must lift the evaluation cap immediately, not a TTL later.
+  clearPlanCache(orgId);
+}
+
+/**
+ * The subscription's current cycle. The org is the billing entity and each
+ * one runs on its own anniversary, so this window - not the calendar month -
+ * is what the usage page shows and what a period is closed on.
+ *
+ * Stripe moved these fields onto the subscription's items, so read the
+ * earliest item's window (they share one for a single-price subscription).
+ */
+export function subscriptionCycle(
+  subscription: Stripe.Subscription,
+): { start: Date; end: Date } | null {
+  const item = subscription.items?.data?.[0];
+  if (!item?.current_period_start || !item?.current_period_end) return null;
+  return {
+    start: new Date(item.current_period_start * 1000),
+    end: new Date(item.current_period_end * 1000),
+  };
+}
+
+/** Records the org's cycle without touching its plan. */
+export async function recordSubscriptionCycle(
+  orgId: string,
+  cycle: { start: Date; end: Date },
+): Promise<void> {
+  await db
+    .update(organizations)
+    .set({
+      currentPeriodStart: cycle.start,
+      currentPeriodEnd: cycle.end,
       updatedAt: new Date(),
     })
     .where(eq(organizations.id, orgId));
@@ -114,4 +155,70 @@ export async function reconcileCheckoutSession(
     typeof session.subscription === "string" ? session.subscription : null,
   );
   return true;
+}
+
+/**
+ * Stripe's hosted billing portal: payment method, invoices, cancellation.
+ * A browser flow like Checkout, so it stays app-only (not part of the
+ * versioned API contract). Returns null when the org has no Stripe
+ * customer yet, i.e. it has never been upgraded.
+ */
+export async function createBillingPortalSession(
+  customerId: string,
+  returnUrl: string,
+): Promise<string | null> {
+  const session = await getStripe().billingPortal.sessions.create({
+    customer: customerId,
+    return_url: returnUrl,
+  });
+  return session.url ?? null;
+}
+
+/**
+ * Adds a period's usage to a draft invoice: one line per meter that was
+ * used, then the plan's included credit as a negative line. Called when
+ * Stripe opens the next invoice (invoice.created), while it is still a
+ * draft, so the finalized invoice carries them.
+ *
+ * Idempotent twice over. The billing period's own status is the primary
+ * guard (see billing-periods.server.ts): a period is invoiced once because
+ * the row says so. This second check scans the invoice for line keys already
+ * present, covering a crash between attaching items and flipping the status.
+ *
+ * The scan is scoped to THIS INVOICE and paginated. Listing the customer's
+ * most recent 100 items instead - the obvious version - silently stops
+ * deduplicating once an account accumulates more than a page of history, and
+ * the failure mode is double-billing a real customer.
+ */
+export async function addUsageToInvoice(input: {
+  invoiceId: string;
+  customerId: string;
+  lines: { key: string; description: string; amountCents: number }[];
+}): Promise<number> {
+  if (!input.lines.length) return 0;
+  const stripe = getStripe();
+
+  const existing = await stripe.invoiceItems
+    .list({ invoice: input.invoiceId, limit: 100 })
+    .autoPagingToArray({ limit: 10_000 });
+  const alreadyBilled = new Set(
+    existing
+      .map((item) => item.metadata?.flagon_line_key)
+      .filter((key): key is string => Boolean(key)),
+  );
+
+  let added = 0;
+  for (const line of input.lines) {
+    if (alreadyBilled.has(line.key)) continue;
+    await stripe.invoiceItems.create({
+      customer: input.customerId,
+      invoice: input.invoiceId,
+      amount: line.amountCents,
+      currency: "usd",
+      description: line.description,
+      metadata: { flagon_line_key: line.key },
+    });
+    added += 1;
+  }
+  return added;
 }

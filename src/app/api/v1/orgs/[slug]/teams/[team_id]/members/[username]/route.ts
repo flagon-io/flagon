@@ -1,7 +1,8 @@
 import { APIError } from "better-auth/api";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users } from "@/db/auth-schema";
+import { members } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import {
   apiError,
@@ -38,11 +39,19 @@ export async function PUT(
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
   const { slug, team_id, username } = await params;
-  const result = await resolveTeamContext(request, slug, team_id);
+  const result = await resolveTeamContext(request, slug, team_id, "members:write");
   if (!result.ok) return apiError(result.status, result.code, result.message);
 
   const user = await findUser(username);
-  if (!user || !result.ctx.org.members.some((m) => m.userId === user.id)) {
+  // Checked against the table so tokens and sessions resolve identically.
+  const membership = user
+    ? await db
+        .select({ id: members.id })
+        .from(members)
+        .where(and(eq(members.organizationId, result.ctx.org.id), eq(members.userId, user.id)))
+        .limit(1)
+    : [];
+  if (!user || !membership.length) {
     return apiError(
       422,
       "not_a_member",
@@ -83,7 +92,7 @@ export async function DELETE(
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
   const { slug, team_id, username } = await params;
-  const result = await resolveTeamContext(request, slug, team_id);
+  const result = await resolveTeamContext(request, slug, team_id, "members:write");
   if (!result.ok) return apiError(result.status, result.code, result.message);
 
   const user = await findUser(username);

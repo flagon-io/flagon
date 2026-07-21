@@ -103,6 +103,12 @@ export async function renameProject(
   return { ok: true, project };
 }
 
+export async function updateProjectOverview(orgId: string, projectId: string, overviewMarkdown: string) {
+  if (overviewMarkdown.length > 100_000) return { ok: false as const, code: "overview_too_long", error: "Project overviews are limited to 100,000 characters." };
+  const [project] = await withTenant(orgId, (tx) => tx.update(projects).set({ overviewMarkdown, updatedAt: new Date() }).where(and(eq(projects.organizationId, orgId), eq(projects.id, projectId))).returning());
+  return project ? { ok: true as const, project } : { ok: false as const, code: "not_found", error: "Project not found." };
+}
+
 /** Deletes the project; access grants cascade with it. */
 export async function deleteProject(
   orgId: string,
@@ -123,6 +129,7 @@ export function serializeProject(project: Project) {
     id: project.id,
     slug: project.slug,
     name: project.name,
+    overview_markdown: project.overviewMarkdown,
     created_at: project.createdAt.toISOString(),
     updated_at: project.updatedAt.toISOString(),
   };

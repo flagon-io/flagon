@@ -55,3 +55,25 @@ BetterAuth's generateId). DB-side defaults: `uuid_generate_v7()` from
 `drizzle/0003_uuidv7.sql`. When Postgres 18 is available (Neon is on 17), swap
 both for the natives. Existing rows keep their historical ids.
 <!-- END:nextjs-agent-rules -->
+
+## This repository is the whole product, on its own
+
+Flagon is THIS repository, complete. Every capability ships here and works
+here: evaluation, metering, quota enforcement, billing, the console, the API.
+There is no companion service that has to exist first, and no feature may be
+left half-built on the promise that something external will finish it.
+
+Microservices (a Go edge evaluator, a sync-serving CDN node) are an
+OPTIONAL AUGMENTATION, added later to serve the same contracts more cheaply
+than routing everything through Vercel. They REPLACE a call path; they never
+introduce one. So:
+
+- Never gate a feature, a meter, or a migration on "once the edge exists".
+  If it cannot be finished here, it is not ready to start.
+- Never write a comment or a doc that implies a code path is waiting on an
+  external service. Describe what this repository does today.
+- A new ingest, evaluation, or serving path must work end to end through the
+  Next.js routes in `src/app/api/`. An external implementation of the same
+  contract is a deployment choice, not a prerequisite.
+- Self-hosting a single deployment of this repo is a fully supported way to
+  run Flagon, and the tests must pass without any external service.

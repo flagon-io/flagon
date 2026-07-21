@@ -1,5 +1,9 @@
 import { APIError } from "better-auth/api";
+import { eq } from "drizzle-orm";
+import { db } from "@/db/client";
+import { users } from "@/db/auth-schema";
 import { auth } from "@/lib/auth";
+import { requireSession, resolveUserAccess } from "@/lib/api-auth.server";
 import {
   apiError,
   apiForbiddenOrigin,
@@ -41,15 +45,27 @@ function serializeUser(user: SessionUser) {
 }
 
 export async function GET(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
-  return apiJson(serializeUser(session.user));
+  // Readable with a personal token; organization tokens are refused, because
+  // "the current user" is a question a credential with no human behind it
+  // cannot answer.
+  const access = await resolveUserAccess(request, null);
+  if (!access.ok) return access.error;
+  const [user] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, access.userId))
+    .limit(1);
+  if (!user) return apiError(404, "not_found", "User not found.");
+  return apiJson(serializeUser(user));
 }
 
 export async function PATCH(request: Request) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
+  // Profile changes go through BetterAuth, which needs the session, so this
+  // stays session-only. A token reading the profile is useful; a token
+  // renaming its owner is not worth the blast radius.
+  const gate = await requireSession(request);
+  if (!gate.ok) return gate.error;
 
   const body = await request.json().catch(() => null);
   const updates: { name?: string; username?: string } = {};
@@ -82,6 +98,10 @@ export async function PATCH(request: Request) {
     throw error;
   }
 
-  const fresh = await auth.api.getSession({ headers: request.headers });
-  return apiJson(serializeUser((fresh ?? session).user));
+  const [fresh] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, gate.userId))
+    .limit(1);
+  return apiJson(serializeUser(fresh));
 }

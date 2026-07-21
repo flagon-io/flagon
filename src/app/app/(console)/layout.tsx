@@ -1,14 +1,15 @@
-import { appPath } from "@/lib/urls";
+import { appPath, marketingHref } from "@/lib/urls";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { brand } from "@/lib/brand";
-import { FlagonMark } from "@/lib/logo";
+import { ArrowUpRight } from "lucide-react";
+import { headerPillClass } from "@/components/form-ui";
 import { UserMenu } from "@/components/user-menu";
 import { listEmails } from "@/lib/user-emails";
 import { OrgSwitcher, type SwitcherOrg } from "./org-switcher";
 import { SidebarNav } from "./sidebar-nav";
+import { MobileConsoleNav } from "./mobile-console-nav";
 import { VerifyEmailBanner } from "../verify-email-banner";
 
 /**
@@ -70,15 +71,17 @@ export default async function ConsoleLayout({
         {/* h-14 + border on the SAME element as the switcher band next door,
             so both borders land on the same pixel row. */}
         <header className="flex h-14 shrink-0 border-b border-white/5">
-          <div className="flex flex-1 items-center justify-between px-4 sm:px-6">
-            <Link href={appPath("")} className="flex items-center gap-2 md:hidden">
-              <FlagonMark className="h-6 w-6" />
-              <span className="text-sm font-semibold tracking-tight">
-                {brand.name}
-              </span>
-            </Link>
-            <div aria-hidden className="hidden md:block" />
-            <UserMenu />
+          <div className="flex flex-1 items-center justify-between gap-3 px-4 sm:px-6">
+            {/* Only below md, where the sidebar is hidden. */}
+            <MobileConsoleNav
+              orgs={switcherOrgs}
+              activeOrgId={activeOrg?.id ?? null}
+              orgSlugs={switcherOrgs.map((org) => org.slug)}
+              fallbackSlug={activeOrg?.slug ?? null}
+            />
+            <div className="ml-auto flex items-center">
+              <div className="flex items-center gap-3"><Link href={marketingHref("/")} className={`${headerPillClass} hidden sm:inline-flex`}>Return to site <ArrowUpRight className="h-3.5 w-3.5" /></Link><UserMenu /></div>
+            </div>
           </div>
         </header>
 
@@ -93,7 +96,7 @@ export default async function ConsoleLayout({
             links live in the account menu / marketing pages. Content sits in
             a centered column regardless of how much width it uses. */}
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
+          <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
             {children}
           </div>
         </main>

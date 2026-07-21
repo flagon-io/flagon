@@ -4,6 +4,9 @@ import { Braces, CreditCard, Server } from "lucide-react";
 import { brand } from "@/lib/brand";
 import { appHref } from "@/lib/urls";
 import { PLANS } from "@/lib/plans";
+import { activeMeters, formatMeterRate, formatQuantity, getMeter } from "@/lib/meters";
+import { BleedBand } from "@/components/bleed-band";
+import { PageHero } from "@/components/page-hero";
 import { PlanColumns } from "@/components/plan-columns";
 
 export const metadata: Metadata = {
@@ -41,34 +44,33 @@ const included = [
  */
 export default function PricingPage() {
   return (
-    <div className="relative overflow-hidden">
-      {/* Ambient glow behind the hero + Pro column */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-150"
-        style={{
-          background:
-            "radial-gradient(50% 40% at 50% 0%, rgba(20,184,166,0.12) 0%, rgba(20,184,166,0.04) 50%, transparent 100%)",
-        }}
-      />
-
-      <div className="relative mx-auto w-full max-w-7xl px-6 py-20">
-        {/* Hero */}
-        <div>
-          <h1 className="max-w-2xl text-5xl font-semibold leading-[1.05] tracking-tight text-zinc-100 sm:text-6xl">
+    <div className="relative">
+      <PageHero
+        eyebrow="Pricing"
+        title={
+          <>
             Pay for usage,
             <br />
             <span className="text-zinc-500">not seats.</span>
-          </h1>
-          <p className="mt-6 max-w-md text-base leading-7 text-zinc-400">
-            Start free, no card required. Upgrade to Pro when you&apos;re
-            ready to ship for real.
-          </p>
-        </div>
+          </>
+        }
+        lede={
+          <>
+            Start free, no card required. Upgrade to Pro when you&apos;re ready
+            to ship for real, and pay for what you actually serve.
+          </>
+        }
+        footnote={`One pooled credit across every product. Self-host it free, forever.`}
+        rule={false}
+      />
 
-        {/* Plans */}
-        <div className="mt-14">
+      <div className="relative mx-auto w-full max-w-7xl px-6 pb-20 sm:px-12 lg:px-20">
+        {/* Plans: ruled edge to edge, so the plan band divides the page rather
+            than sitting on it. Its own top rule closes the hero, which is why
+            the hero above draws none. */}
+        <BleedBand className="bg-white/2">
           <PlanColumns
+            bare
             freeCta={
               <Link href={appHref("/new?plan=free")} className={outlineCta}>
                 Start for free
@@ -85,19 +87,61 @@ export default function PricingPage() {
               </Link>
             }
           />
+        </BleedBand>
+
+        {/* Rates, straight from the meter registry. Rendering them rather than
+            writing them down is what stops the pricing page and the invoice
+            from ever quoting different numbers. */}
+        <div className="mt-8">
+          <h2 className="text-sm font-semibold text-zinc-300">
+            Usage beyond your included credit
+          </h2>
+          <dl className="mt-3 max-w-2xl divide-y divide-white/5 border border-white/10">
+            {activeMeters().map((meter) => (
+              <div
+                key={meter.id}
+                className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-4 py-3"
+              >
+                <div>
+                  <dt className="text-sm text-zinc-200">{meter.label}</dt>
+                  <dd className="mt-0.5 text-xs leading-5 text-zinc-500">
+                    {meter.description}
+                  </dd>
+                </div>
+                <dd className="shrink-0 font-mono text-sm text-zinc-300">
+                  {formatMeterRate(meter)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
+            Your included usage is a{" "}
+            <strong className="text-zinc-300">pooled credit</strong>, not a
+            per-product allowance: spend it on whichever products you actually
+            use. At the rate above, Pro&apos;s ${PLANS.pro.includedUsageCents / 100}{" "}
+            covers roughly{" "}
+            {formatQuantity(
+              (PLANS.pro.includedUsageCents /
+                (getMeter("flags.evaluations")?.unitAmountCents ?? 1)) *
+                (getMeter("flags.evaluations")?.per ?? 0),
+            )}{" "}
+            flag evaluations if that is all you run, or any mix across products
+            adding up to the same money.
+          </p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
+            Hobby is capped rather than billed, so it can never produce an
+            invoice. Pro and Enterprise are billed past their included usage and
+            are never cut off.
+          </p>
         </div>
 
-        {/* Every plan includes */}
-        <div className="mt-24">
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-100">
-            Every plan includes
-          </h2>
-          <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-3">
+        {/* Every plan includes: same edge-to-edge rules, and the columns are
+            divided by their own rules rather than boxed as three cards, so the
+            band reads as one block instead of a row of tiles. */}
+        <BleedBand outerClassName="mt-24">
+          <div className="grid grid-cols-1 divide-y divide-white/10 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             {included.map(({ icon: Icon, title, body }) => (
-              <div
-                key={title}
-                className="border border-white/10 bg-white/2 p-6"
-              >
+              <div key={title} className="p-8">
                 <span
                   aria-hidden
                   className="flex h-10 w-10 items-center justify-center border border-teal-500/20 bg-teal-500/10 text-teal-300"
@@ -113,7 +157,7 @@ export default function PricingPage() {
               </div>
             ))}
           </div>
-        </div>
+        </BleedBand>
 
         {/* Closing CTA */}
         <div className="relative mt-24 overflow-hidden border border-white/10 px-6 py-14 text-center">

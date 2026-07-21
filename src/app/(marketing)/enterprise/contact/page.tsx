@@ -35,7 +35,7 @@ export default function EnterpriseContactPage() {
   return (
     <div className="grid flex-1 grid-cols-1 lg:grid-cols-2">
       {/* Pitch panel */}
-      <div className="relative overflow-hidden bg-[#07100f] px-6 py-14 sm:px-12 lg:px-16 lg:py-20">
+      <div className="relative overflow-hidden border-r border-white/10 bg-[#07100f] px-6 py-16 sm:px-12 lg:px-20 lg:py-28">
         {/* Ambient gradient */}
         <div
           aria-hidden
@@ -47,7 +47,7 @@ export default function EnterpriseContactPage() {
         />
         <div className="relative mx-auto w-full max-w-xl lg:ml-auto lg:mr-8">
           <FlagonMark className="h-10 w-10" />
-          <p className="mt-8 text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
+          <p className="mt-8 font-mono text-xs uppercase tracking-[0.25em] text-teal-400/80">
             Enterprise
           </p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight text-zinc-100">
@@ -83,7 +83,7 @@ export default function EnterpriseContactPage() {
       </div>
 
       {/* Form panel */}
-      <div className="flex items-start justify-center px-6 py-14 sm:px-12 lg:px-16 lg:py-20">
+      <div className="flex items-start justify-center px-6 py-16 sm:px-12 lg:px-20 lg:py-28">
         <div className="w-full max-w-xl lg:ml-8 lg:mr-auto">
           <p className="mb-6 text-xs text-zinc-500">
             All fields marked with an asterisk (*) are required.

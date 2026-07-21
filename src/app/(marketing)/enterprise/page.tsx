@@ -7,6 +7,8 @@ import {
   Headset,
 } from "lucide-react";
 import { brand } from "@/lib/brand";
+import { BleedBand } from "@/components/bleed-band";
+import { PageHero } from "@/components/page-hero";
 
 export const metadata: Metadata = {
   title: `Enterprise · ${brand.name}`,
@@ -43,33 +45,25 @@ const pillars = [
  */
 export default function EnterprisePage() {
   return (
-    <div className="relative overflow-hidden">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-150"
-        style={{
-          background:
-            "radial-gradient(50% 40% at 50% 0%, rgba(20,184,166,0.12) 0%, rgba(20,184,166,0.04) 50%, transparent 100%)",
-        }}
-      />
-
-      <div className="relative mx-auto w-full max-w-7xl px-6 py-20">
-        {/* Hero */}
-        <div className="max-w-3xl">
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
-            Enterprise
-          </p>
-          <h1 className="mt-4 text-5xl font-semibold leading-[1.05] tracking-tight text-zinc-100 sm:text-6xl">
+    <div className="relative">
+      <PageHero
+        eyebrow="Enterprise"
+        title={
+          <>
             The whole platform,
             <br />
             <span className="text-zinc-500">on your terms.</span>
-          </h1>
-          <p className="mt-6 max-w-xl text-base leading-7 text-zinc-400">
-            Everything in Pro, with fixed pricing from your usage estimates,
-            no hard caps, and support that answers. Built for teams where the
+          </>
+        }
+        lede={
+          <>
+            Everything in Pro, with fixed pricing from your usage estimates, no
+            hard caps, and support that answers. Built for teams where the
             platform going down is not an option.
-          </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
+          </>
+        }
+        actions={
+          <>
             <Link
               href="/enterprise/contact"
               className="inline-block rounded-full bg-teal-500 px-6 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
@@ -82,15 +76,18 @@ export default function EnterprisePage() {
             >
               View pricing
             </Link>
-          </div>
-        </div>
+          </>
+        }
+        rule={false}
+      />
 
-        {/* Pillars */}
-        <div className="mt-20 grid grid-cols-1 divide-y divide-white/10 border border-white/10 bg-white/2 sm:grid-cols-2 sm:divide-y-0">
+      {/* Pillars, ruled edge to edge like every other section on the site. */}
+      <BleedBand>
+        <div className="grid grid-cols-1 divide-y divide-white/10 sm:grid-cols-2 sm:divide-y-0">
           {pillars.map(({ icon: Icon, title, body }, index) => (
             <div
               key={title}
-              className={`p-8 ${index >= 2 ? "sm:border-t sm:border-white/10" : ""} ${index % 2 === 1 ? "sm:border-l sm:border-white/10" : ""}`}
+              className={`p-10 ${index >= 2 ? "sm:border-t sm:border-white/10" : ""} ${index % 2 === 1 ? "sm:border-l sm:border-white/10" : ""}`}
             >
               <span
                 aria-hidden
@@ -107,9 +104,11 @@ export default function EnterprisePage() {
             </div>
           ))}
         </div>
+      </BleedBand>
 
+      <div className="relative mx-auto w-full max-w-7xl px-6 pb-24 sm:px-12 lg:px-20">
         {/* Closing CTA */}
-        <div className="relative mt-20 overflow-hidden border border-white/10 px-6 py-14 text-center">
+        <div className="relative mt-20 overflow-hidden border border-white/10 px-6 py-16 text-center">
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0"

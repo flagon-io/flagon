@@ -86,13 +86,24 @@ export function PlanColumns({
   freeCta,
   proCta,
   enterpriseCta,
+  bare = false,
 }: {
   freeCta?: React.ReactNode;
   proCta?: React.ReactNode;
   enterpriseCta?: React.ReactNode;
+  /**
+   * Drop the outer border and background, for callers that already provide
+   * them (a BleedBand rules the block itself, and doubling the border would
+   * draw two lines a pixel apart).
+   */
+  bare?: boolean;
 }) {
   return (
-    <div className="grid grid-cols-1 divide-y divide-white/10 border border-white/10 bg-white/2 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+    <div
+      className={`grid grid-cols-1 divide-y divide-white/10 lg:grid-cols-3 lg:divide-x lg:divide-y-0 ${
+        bare ? "" : "border border-white/10 bg-white/2"
+      }`}
+    >
       <Column
         name={PLANS.free.name}
         price="$0"

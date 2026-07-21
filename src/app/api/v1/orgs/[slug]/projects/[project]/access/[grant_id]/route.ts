@@ -20,7 +20,7 @@ export async function DELETE(
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
   const { slug, project, grant_id } = await params;
-  const result = await resolveProjectContext(request, slug, project);
+  const result = await resolveProjectContext(request, slug, project, "projects:write");
   if (!result.ok) return apiError(result.status, result.code, result.message);
   const { ctx } = result;
 

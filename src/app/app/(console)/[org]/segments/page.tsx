@@ -1,0 +1,12 @@
+import Link from "next/link";
+import { Plus, ScanSearch } from "lucide-react";
+import { notFound } from "next/navigation";
+import { Button } from "@/components/form-controls";
+import { Modal, ModalActions, ModalClose } from "@/components/modal";
+import { NameKeyFields } from "@/components/name-key-fields";
+import { SubmitButton } from "@/components/submit-button";
+import { appPath } from "@/lib/urls";
+import { listSegments } from "@/lib/segments.server";
+import { resolveOrg } from "../resolve-org";
+import { createSegmentAction, deleteSegmentAction } from "./actions";
+export default async function SegmentsPage({ params }: { params: Promise<{ org: string }> }) { const { org: slug } = await params; const org = await resolveOrg(slug); if (!org) notFound(); const segments = await listSegments(org.id); return <div><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">{org.name}</p><h1 className="mt-3 text-2xl font-semibold text-zinc-100">Segments</h1><p className="mt-1 text-sm text-zinc-500">Reusable audiences shared by every feature flag.</p></div><Modal title="Create segment" description="Create a reusable audience, then define its membership criteria." trigger={<Button className="gap-1.5"><Plus className="h-4 w-4" /> New segment</Button>}><form action={createSegmentAction.bind(null, slug)} className="grid gap-4"><NameKeyFields namePlaceholder="Beta customers" keyPlaceholder="beta-customers" keyHint="Generated from the name and referenced by targeting rules. Edit it to customize." /><ModalActions><ModalClose /><SubmitButton pendingLabel="Creating…">Create segment</SubmitButton></ModalActions></form></Modal></div><ul className="mt-8 divide-y divide-white/5 border border-white/10">{segments.map((segment) => <li key={segment.id} className="flex items-center gap-3 px-4 py-3"><ScanSearch className="h-4 w-4 text-zinc-500" /><Link href={appPath(`/${slug}/segments/${segment.key}`)} className="flex-1"><p className="text-sm text-zinc-200">{segment.name}</p><p className="text-xs text-zinc-600"><code>{segment.key}</code> · {(segment.criteria as { items?: unknown[] }).items?.length ?? 0} criteria</p></Link><form action={deleteSegmentAction.bind(null, slug, segment.key)}><Button type="submit" variant="ghost" size="sm" className="text-red-400">Delete</Button></form></li>)}{!segments.length ? <li className="px-4 py-10 text-center text-sm text-zinc-600">No segments yet.</li> : null}</ul></div>; }

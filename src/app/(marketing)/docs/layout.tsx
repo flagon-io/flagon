@@ -19,13 +19,23 @@ export default function DocsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Ordering: concepts and product docs first, the API
-  // reference last. "Documentation" itself is the home link.
+  // Ordering: how you RUN it, then what it does, then the reference.
+  //
+  // Self-hosting sits in "Get started" rather than in a "Platform" section
+  // near the bottom, because where a capability appears in a sidebar is a
+  // claim about how important it is. Running the whole platform yourself,
+  // unmetered, is one of the main reasons to choose this product at all;
+  // listing it after the product guides files it as an appendix for people
+  // with unusual requirements, which is the opposite of true. Reading it as
+  // the second thing on the page is the point.
   const navModel: DocsNavModel = {
     groups: [
       {
         label: "Get started",
-        items: [{ label: "Getting started", href: null }],
+        items: [
+          { label: "Getting started", href: "/docs/getting-started" },
+          { label: "Self-hosting", href: "/docs/self-hosting" },
+        ],
       },
       {
         label: "Concepts",
@@ -34,13 +44,9 @@ export default function DocsLayout({
       {
         label: "Products",
         items: [
-          { label: "Catalog", href: null },
-          { label: "Feature Flags", href: null },
+          { label: "Catalog", href: "/docs/catalog" },
+          { label: "Feature Flags", href: "/docs/feature-flags" },
         ],
-      },
-      {
-        label: "Platform",
-        items: [{ label: "Self-hosting", href: null }],
       },
       {
         label: "Reference",

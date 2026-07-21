@@ -175,6 +175,28 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
       role: m.role,
     }));
 
+    const { listProjectOwners, replaceProjectOwners } = await import("@/lib/project-ownership.server");
+    const { updateProjectOverview } = await import("@/lib/projects.server");
+    expect((await updateProjectOverview(orgId, project.id, "# Storefront\n\nOwned and documented.")).ok).toBe(true);
+    expect((await replaceProjectOwners(orgId, project.id, { teamIds: [team.id] })).ok).toBe(true);
+    expect(await listProjectOwners(orgId, project.id)).toMatchObject([
+      { kind: "team", subjectId: team.id, name: "Platform" },
+    ]);
+
+    // An owner can also be a PERSON (drizzle/0026), so responsibility does not
+    // have to be laundered through a single-member team.
+    expect(
+      (await replaceProjectOwners(orgId, project.id, { teamIds: [team.id], userIds: [ownerId] })).ok,
+    ).toBe(true);
+    expect(await listProjectOwners(orgId, project.id)).toHaveLength(2);
+
+    // ...but only people who are actually members of this organization.
+    const stranger = await replaceProjectOwners(orgId, project.id, { userIds: ["nobody"] });
+    expect(stranger.ok).toBe(false);
+    if (!stranger.ok) expect(stranger.code).toBe("invalid_user");
+    // A rejected replace leaves the previous owners untouched.
+    expect(await listProjectOwners(orgId, project.id)).toHaveLength(2);
+
     // Owner is implicitly admin; a plain member gets the read baseline.
     expect(
       await resolveProjectRole({ orgId, projectId: project.id, userId: ownerId, members }),
@@ -280,5 +302,45 @@ describe.skipIf(!canRun)("teams and projects backbone", () => {
     expect(
       roster!.members.map((m) => m.user.email).sort(),
     ).toContain(invitedEmail);
+
+    // --- Exactly one owner, moved by transfer -------------------------
+    const { transferOwnership } = await import("@/lib/org-owner.server");
+    const owners = <T extends { role: string }>(m: T[]) =>
+      m.filter((row) => row.role === "owner");
+    expect(owners(roster!.members)).toHaveLength(1);
+
+    // A non-owner cannot hand the organization to anyone.
+    expect(
+      await transferOwnership({
+        orgId,
+        fromUserId: memberRes.user.id,
+        toUserId: ownerId,
+      }),
+    ).toMatchObject({ ok: false, code: "not_owner" });
+
+    // Someone outside the organization cannot receive it.
+    expect(
+      await transferOwnership({ orgId, fromUserId: ownerId, toUserId: "nobody" }),
+    ).toMatchObject({ ok: false, code: "not_a_member" });
+
+    // The owner hands it over: the seat moves and they step down to admin.
+    expect(
+      await transferOwnership({
+        orgId,
+        fromUserId: ownerId,
+        toUserId: memberRes.user.id,
+      }),
+    ).toEqual({ ok: true });
+
+    const afterTransfer = await auth.api.getFullOrganization({
+      query: { organizationSlug: orgSlug },
+      headers: sessionHeaders,
+    });
+    const ownersNow = owners(afterTransfer!.members);
+    expect(ownersNow).toHaveLength(1);
+    expect(ownersNow[0].userId).toBe(memberRes.user.id);
+    expect(
+      afterTransfer!.members.find((m) => m.userId === ownerId)!.role,
+    ).toBe("admin");
   });
 });

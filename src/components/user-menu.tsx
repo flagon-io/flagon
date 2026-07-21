@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Building2, LogOut, Settings } from "lucide-react";
+import { Building2, LayoutGrid, LogOut, Settings } from "lucide-react";
 import { authClient, useSession } from "@/lib/auth-client";
 import { appHref } from "@/lib/urls";
+import { headerPillClass } from "@/components/form-ui";
 
 /**
  * Session-aware account control, shared by the marketing header and the
@@ -13,14 +14,22 @@ import { appHref } from "@/lib/urls";
  *
  * - resolving: neutral skeleton (no sign-in flash for signed-in users)
  * - signed out: Sign in / Get started, linking to the app surface
- * - signed in: avatar dropdown (identity, dashboard,
- *   settings, sign out)
+ * - signed in: avatar dropdown (identity, dashboard, settings, sign out)
+ *
+ * On marketing pages (`showDashboardLink`) a Dashboard button sits next to
+ * the avatar: from www, getting into the app is the whole point of being
+ * signed in, so it should never be buried in a menu.
  *
  * Session state comes from useSession (client-side /api/auth/get-session), so
  * static marketing pages stay static. The *.flagon.io cookie makes the session
  * visible from www in production; locally everything is one origin anyway.
  */
-export function UserMenu() {
+export function UserMenu({
+  showDashboardLink = false,
+}: {
+  /** Marketing surfaces: surface a direct link into the app. */
+  showDashboardLink?: boolean;
+} = {}) {
   const { data: session, isPending } = useSession();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -88,7 +97,15 @@ export function UserMenu() {
     "flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-left text-sm text-zinc-300 transition hover:bg-white/5 hover:text-zinc-100";
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className="relative flex items-center gap-3">
+      {showDashboardLink ? (
+        <Link
+          href={appHref("/")}
+          className={`hidden sm:inline-flex ${headerPillClass}`}
+        >
+          Dashboard
+        </Link>
+      ) : null}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -117,6 +134,15 @@ export function UserMenu() {
 
           <div className="my-1 border-t border-white/5" />
 
+          <Link
+            href={appHref("/")}
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className={itemClass}
+          >
+            <LayoutGrid className="h-4 w-4 text-zinc-500" aria-hidden />
+            Dashboard
+          </Link>
           <Link
             href={appHref("/settings/organizations")}
             role="menuitem"

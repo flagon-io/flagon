@@ -6,15 +6,14 @@ import { brand } from "@/lib/brand";
 
 /**
  * Marketing nav with the current page highlighted (white) against muted
- * siblings. Disabled entries render until their pages exist.
+ * siblings. Every entry points somewhere: nothing here is a placeholder.
  */
 export function SiteNav() {
   const pathname = usePathname();
 
   return (
     <nav className="hidden items-center gap-1 md:flex">
-      {brand.nav.map((item) =>
-        item.href ? (
+      {brand.nav.map((item) => (
           <Link
             key={item.label}
             href={item.href}
@@ -31,17 +30,7 @@ export function SiteNav() {
           >
             {item.label}
           </Link>
-        ) : (
-          <span
-            key={item.label}
-            aria-disabled
-            title="Coming soon"
-            className="cursor-not-allowed rounded-md px-3 py-2 text-sm text-zinc-500"
-          >
-            {item.label}
-          </span>
-        ),
-      )}
+        ))}
     </nav>
   );
 }

@@ -9,10 +9,12 @@ import {
   resolveProjectRole,
   upsertProjectGrant,
 } from "@/lib/project-access.server";
+import { replaceProjectOwners } from "@/lib/project-ownership.server";
 import {
   deleteProject,
   getProject,
   renameProject,
+  updateProjectOverview,
 } from "@/lib/projects.server";
 import { resolveOrg } from "../../resolve-org";
 
@@ -38,6 +40,29 @@ async function requireAdminContext(orgSlug: string, projectSlug: string) {
   });
   if (!role || !roleAtLeast(role, "admin")) return null;
   return { org, project };
+}
+
+async function requireProjectRole(orgSlug: string, projectSlug: string, minimum: "write" | "admin") {
+  const session = await auth.api.getSession({ headers: await headers() }); const org = await resolveOrg(orgSlug);
+  if (!session || !org) return null; const project = await getProject(org.id, projectSlug); if (!project) return null;
+  const role = await resolveProjectRole({ orgId: org.id, projectId: project.id, userId: session.user.id, members: org.members });
+  return role && roleAtLeast(role, minimum) ? { org, project } : null;
+}
+
+export async function saveProjectOverviewAction(orgSlug: string, projectSlug: string, overviewMarkdown: string): Promise<AccessActionResult> {
+  const ctx = await requireProjectRole(orgSlug, projectSlug, "write"); if (!ctx) return { ok: false, message: "You can't edit this overview." };
+  const result = await updateProjectOverview(ctx.org.id, ctx.project.id, overviewMarkdown); if (!result.ok) return { ok: false, message: result.error };
+  revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`); return { ok: true, message: "" };
+}
+
+export async function replaceProjectOwnersAction(orgSlug: string, projectSlug: string, selection: Array<{ kind: "team" | "user"; id: string }>): Promise<AccessActionResult> {
+  const ctx = await requireProjectRole(orgSlug, projectSlug, "admin"); if (!ctx) return { ok: false, message: "You can't assign ownership here." };
+  const result = await replaceProjectOwners(ctx.org.id, ctx.project.id, {
+    teamIds: selection.filter((item) => item.kind === "team").map((item) => item.id),
+    userIds: selection.filter((item) => item.kind === "user").map((item) => item.id),
+  });
+  if (!result.ok) return { ok: false, message: result.error };
+  revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`); return { ok: true, message: "" };
 }
 
 export async function addGrantAction(
@@ -111,7 +136,7 @@ export async function renameProjectAction(
   if (!result.ok) return { ok: false, message: result.error };
 
   revalidatePath(`/app/${orgSlug}/projects/${projectSlug}`);
-  revalidatePath(`/app/${orgSlug}/projects`);
+  revalidatePath(`/app/${orgSlug}`);
   return { ok: true, message: "" };
 }
 
@@ -125,6 +150,6 @@ export async function deleteProjectAction(
   const removed = await deleteProject(ctx.org.id, ctx.project.id);
   if (!removed) return { ok: false, message: "That project no longer exists." };
 
-  revalidatePath(`/app/${orgSlug}/projects`);
+  revalidatePath(`/app/${orgSlug}`);
   return { ok: true, message: "" };
 }

@@ -3,7 +3,9 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users } from "@/db/auth-schema";
 import { auth } from "@/lib/auth";
+import { requireSession, resolveOrgAccess } from "@/lib/api-auth.server";
 import { pendingInvitations } from "@/lib/invitations";
+import { isAssignableOrgRole } from "@/lib/org-roles";
 import {
   apiError,
   apiForbiddenOrigin,
@@ -55,10 +57,9 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
-
   const { slug } = await params;
+  const access = await resolveOrgAccess(request, slug, "members:read");
+  if (!access.ok) return access.error;
   const org = await resolveOrg(slug, request.headers);
   if (!org) return apiError(404, "not_found", "Organization not found.");
 
@@ -74,8 +75,10 @@ export async function POST(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
+  // Membership and invitation changes go through BetterAuth, which needs the
+  // session, and are identity operations besides. Session-only, deliberately.
+  const gate = await requireSession(request);
+  if (!gate.ok) return gate.error;
 
   const { slug } = await params;
   const org = await resolveOrg(slug, request.headers);
@@ -86,8 +89,12 @@ export async function POST(
   const username = typeof body?.user === "string" ? body.user.trim() : "";
   const rawEmail = typeof body?.email === "string" ? body.email.trim() : "";
 
-  if (!["member", "admin", "owner"].includes(role)) {
-    return apiError(400, "invalid_role", "Role must be one of: member, admin, owner.");
+  if (!isAssignableOrgRole(role)) {
+    return apiError(
+      400,
+      "invalid_role",
+      "Role must be one of: member, admin. Ownership is transferred, not invited.",
+    );
   }
   if ((username && rawEmail) || (!username && !rawEmail)) {
     return apiError(400, "invalid_subject", "Provide exactly one of: user, email.");
@@ -114,7 +121,7 @@ export async function POST(
     const invitation = await auth.api.createInvitation({
       body: {
         email,
-        role: role as "member" | "admin" | "owner",
+        role: role as "member" | "admin",
         organizationId: org.id,
         resend: true,
       },

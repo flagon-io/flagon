@@ -1,5 +1,6 @@
 import { APIError } from "better-auth/api";
 import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/api-auth.server";
 import {
   apiError,
   apiForbiddenOrigin,
@@ -17,8 +18,10 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string; invitation_id: string }> },
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
+  // Cancelling an invitation is an identity operation and runs through
+  // BetterAuth, which needs the session. Session-only, deliberately.
+  const gate = await requireSession(request);
+  if (!gate.ok) return gate.error;
 
   const { invitation_id } = await params;
   try {

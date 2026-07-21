@@ -1,9 +1,14 @@
-import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Flag, Lock } from "lucide-react";
+import { roleAtLeast } from "@/lib/project-access";
+import {
+  listProjectOwners,
+  ownerCandidates,
+} from "@/lib/project-ownership.server";
 import { resolveProjectContext } from "./resolve-project";
+import { replaceProjectOwnersAction, saveProjectOverviewAction } from "./actions";
+import { OverviewEditor } from "./overview-editor";
+import { OwnershipPanel } from "./ownership-panel";
 
 type Params = { params: Promise<{ org: string; project: string }> };
 
@@ -13,51 +18,85 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 }
 
 const dateFormat = new Intl.DateTimeFormat("en-US", {
-  month: "long",
+  month: "short",
   day: "numeric",
   year: "numeric",
+  timeZone: "UTC",
 });
 
-/** Project overview tab: what's here now, what's landing next. */
+/**
+ * Project overview: the README, with the facts about the project beside it.
+ *
+ * The sidebar carries METADATA only - ownership, dates, the identifiers people
+ * paste into a terminal. Navigation lives in the tab bar overhead, so the
+ * Access card that used to sit here was a second, worse route to a tab that
+ * was already one click away, dressed up as content.
+ */
 export default async function ProjectOverviewPage({ params }: Params) {
   const { org: orgSlug, project: projectSlug } = await params;
   const ctx = await resolveProjectContext(orgSlug, projectSlug);
   if (!ctx) notFound();
 
-  return (
-    <div>
-      <p className="text-sm text-zinc-500">
-        Created {dateFormat.format(ctx.project.createdAt)}
-      </p>
+  const [owners, candidates] = await Promise.all([
+    listProjectOwners(ctx.org.id, ctx.project.id),
+    ownerCandidates(ctx.org.id),
+  ]);
 
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="border border-white/10 p-5 text-sm">
-          <div className="flex items-center gap-2 font-medium text-zinc-200">
-            <Flag className="h-4 w-4 text-zinc-500" aria-hidden />
-            Feature Flags
-          </div>
-          <p className="mt-2 leading-6 text-zinc-500">
-            The first product to land here. Flags belong to the organization
-            and this project sees them by default; targeting narrows access.
-          </p>
-          <p className="mt-3 text-xs uppercase tracking-wider text-zinc-600">
-            Coming soon
-          </p>
-        </div>
-        <Link
-          href={appPath(`/${orgSlug}/projects/${projectSlug}/access`)}
-          className="border border-white/10 p-5 text-sm transition hover:border-white/20 hover:bg-white/2"
-        >
-          <div className="flex items-center gap-2 font-medium text-zinc-200">
-            <Lock className="h-4 w-4 text-zinc-500" aria-hidden />
-            Access
-          </div>
-          <p className="mt-2 leading-6 text-zinc-500">
-            Who can do what here: members and teams hold read, write, or
-            admin roles on this project.
-          </p>
-        </Link>
-      </div>
+  return (
+    <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_260px]">
+      <OverviewEditor
+        initial={ctx.project.overviewMarkdown}
+        canEdit={roleAtLeast(ctx.role, "write")}
+        save={saveProjectOverviewAction.bind(null, orgSlug, projectSlug)}
+      />
+
+      {/* A metadata rail, not a stack of cards: one hairline separates it from
+          the README and the groups separate from each other by space alone.
+          Boxing each fact made three of them look like three features. */}
+      <aside className="space-y-6 lg:border-l lg:border-white/10 lg:pl-8">
+        <OwnershipPanel
+          teams={candidates.teams}
+          people={candidates.people}
+          initial={owners.map((owner) => ({
+            kind: owner.kind,
+            id: owner.subjectId,
+          }))}
+          canManage={roleAtLeast(ctx.role, "admin")}
+          save={replaceProjectOwnersAction.bind(null, orgSlug, projectSlug)}
+        />
+
+        <section>
+          <h2 className="text-sm font-medium text-zinc-300">Details</h2>
+          <dl className="mt-3 space-y-2.5 text-xs">
+            <Detail label="Identifier">
+              <code className="font-mono text-zinc-300">{ctx.project.slug}</code>
+            </Detail>
+            <Detail label="Your role">
+              <span className="capitalize text-zinc-300">{ctx.role}</span>
+            </Detail>
+            <Detail label="Created">
+              <span className="text-zinc-300">
+                {dateFormat.format(ctx.project.createdAt)}
+              </span>
+            </Detail>
+          </dl>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function Detail({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-zinc-600">{label}</dt>
+      <dd className="min-w-0 truncate text-right">{children}</dd>
     </div>
   );
 }

@@ -7,9 +7,10 @@ import {
   Activity,
   CreditCard,
   Flag,
-  Home,
+  KeyRound,
   Package,
   Settings,
+  ScanSearch,
   UserRound,
   Users,
   type LucideIcon,
@@ -49,23 +50,26 @@ type NavSection = {
 
 /**
  * The console map, ordered by frequency of use. The backbone is daily work:
- * Overview and Projects, with org-level product surfaces joining "Products"
- * as they ship (project-scoped surfaces live inside each project's own
- * pages, never here). "People" is who's here (Members) and how they group
- * (Teams); "Organization" is the administrative cluster - usage, money,
- * configuration. Give an item a `path` when its surface lands and it goes
- * live in the nav.
+ * Projects, which is the org root itself, with org-level product surfaces
+ * joining "Products" as they ship (project-scoped surfaces live inside each
+ * project's own pages, never here). "People" is who's here (Members) and how
+ * they group (Teams); "Organization" is the administrative cluster - usage,
+ * money, configuration. Give an item a `path` when its surface lands and it
+ * goes live in the nav.
  */
 const SECTIONS: NavSection[] = [
   {
     items: [
-      { label: "Overview", icon: Home, path: "", exact: true },
-      { label: "Projects", icon: Package, path: "projects" },
+      // The org root IS the project list; there is no separate overview.
+      { label: "Projects", icon: Package, path: "", exact: true },
     ],
   },
   {
     heading: "Products",
-    items: [{ label: "Feature Flags", icon: Flag }],
+    items: [
+      { label: "Feature Flags", icon: Flag, path: "flags" },
+      { label: "Segments", icon: ScanSearch, path: "segments" },
+    ],
   },
   {
     heading: "People",
@@ -77,9 +81,10 @@ const SECTIONS: NavSection[] = [
   {
     heading: "Organization",
     items: [
-      { label: "Usage", icon: Activity },
-      { label: "Billing", icon: CreditCard },
-      { label: "Settings", icon: Settings },
+      { label: "Usage", icon: Activity, path: "usage" },
+      { label: "API tokens", icon: KeyRound, path: "settings/tokens" },
+      { label: "Billing", icon: CreditCard, path: "billing" },
+      { label: "Settings", icon: Settings, path: "settings", exact: true },
     ],
   },
 ];

@@ -1,0 +1,81 @@
+# Publishes the self-hostable image to GitHub Container Registry.
+#
+# Tags follow what people actually pin to: a moving `latest` from the default
+# branch, plus immutable semver tags from releases, so a self-host can choose
+# between "track the project" and "never move without me saying so".
+name: Publish image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  # Build on pull requests too, without pushing: an image that stopped building
+  # should fail the PR, not the release.
+  pull_request:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Required for build provenance attestation.
+      id-token: write
+      attestations: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=Flagon
+            org.opencontainers.image.description=The self-hostable developer platform
+            org.opencontainers.image.licenses=FSL-1.1-ALv2
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # arm64 matters more than it looks: a lot of self-hosters are on
+          # Apple silicon or Graviton, and an amd64-only image quietly runs
+          # under emulation and feels broken.
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

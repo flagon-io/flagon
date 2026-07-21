@@ -4,12 +4,9 @@ import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  CreditCard,
   KeyRound,
   Mail,
-  Bell,
   Building2,
-  Paintbrush,
   Radio,
   Settings2,
   User,
@@ -20,19 +17,12 @@ const sections = [
   { href: appPath("/settings/account"), label: "Account", icon: Settings2 },
   { href: appPath("/settings/emails"), label: "Emails", icon: Mail },
   { href: appPath("/settings/sessions"), label: "Sessions", icon: Radio },
+  { href: appPath("/settings/tokens"), label: "Access tokens", icon: KeyRound },
   {
     href: appPath("/settings/organizations"),
     label: "Organizations",
     icon: Building2,
   },
-];
-
-/** Flagon-shaped sections that land later; visible so the map is clear. */
-const upcoming = [
-  { label: "Appearance", icon: Paintbrush },
-  { label: "Notifications", icon: Bell },
-  { label: "Access tokens", icon: KeyRound },
-  { label: "Billing", icon: CreditCard },
 ];
 
 /** The app lives at /app/... locally but at the subdomain root in production;
@@ -67,23 +57,6 @@ export function SettingsNav() {
           </Link>
         );
       })}
-
-      <div className="mt-4 border-t border-white/5 pt-4">
-        {upcoming.map(({ label, icon: Icon }) => (
-          <span
-            key={label}
-            aria-disabled
-            title="Coming soon"
-            className="flex cursor-not-allowed items-center gap-2.5 rounded-md px-3 py-1.5 text-zinc-600"
-          >
-            <Icon className="h-4 w-4 shrink-0" aria-hidden />
-            {label}
-            <span className="ml-auto rounded-full border border-white/10 px-1.5 text-[10px] uppercase tracking-wide text-zinc-600">
-              Soon
-            </span>
-          </span>
-        ))}
-      </div>
     </nav>
   );
 }

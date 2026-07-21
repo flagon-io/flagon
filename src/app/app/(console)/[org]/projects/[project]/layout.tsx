@@ -23,7 +23,7 @@ export default async function ProjectLayout({
     <div>
       <p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
         <Link
-          href={appPath(`/${orgSlug}/projects`)}
+          href={appPath(`/${orgSlug}`)}
           className="transition hover:text-teal-300"
         >
           Projects

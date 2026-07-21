@@ -5,12 +5,25 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Mail, UserRound, X } from "lucide-react";
-import { Notice, buttonClass, hintClass } from "@/components/form-ui";
+import {
+  ASSIGNABLE_ORG_ROLES,
+  ORG_ROLE_DESCRIPTIONS,
+  ORG_ROLE_LABELS,
+  TRANSFER_OWNERSHIP_HINT,
+  type OrgRole,
+} from "@/lib/org-roles";
+import {
+  Notice,
+  buttonClass,
+  hintClass,
+  subtleButtonClass,
+} from "@/components/form-ui";
 import { Input, Label, Select } from "@/ui";
 import {
   cancelInvitationAction,
   inviteMemberAction,
   removeMemberAction,
+  transferOwnershipAction,
   updateMemberRoleAction,
 } from "./actions";
 
@@ -31,11 +44,11 @@ export type PanelInvitation = {
   expiresAt: string;
 };
 
-const ROLE_OPTIONS = [
-  { value: "member", label: "Member" },
-  { value: "admin", label: "Admin" },
-  { value: "owner", label: "Owner" },
-];
+// Ownership is transferred, not assigned, so it is never an option here.
+const ROLE_OPTIONS = ASSIGNABLE_ORG_ROLES.map((role) => ({
+  value: role,
+  label: ORG_ROLE_LABELS[role],
+}));
 
 const dateFormat = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -67,6 +80,14 @@ export function MembersPanel({
   const [role, setRole] = useState("member");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [transferTo, setTransferTo] = useState("");
+  const [confirmingTransfer, setConfirmingTransfer] = useState(false);
+
+  const isOwner =
+    members.find((member) => member.userId === viewerUserId)?.role === "owner";
+  const transferable = members.filter(
+    (member) => member.userId !== viewerUserId,
+  );
 
   async function invite(event: React.FormEvent) {
     event.preventDefault();
@@ -208,7 +229,9 @@ export function MembersPanel({
                   {dateFormat.format(new Date(member.createdAt))}
                 </div>
               </div>
-              {canManage && !isViewer ? (
+              {/* The owner's seat is not editable here: it moves only by
+                  transferring ownership, and the owner can't be removed. */}
+              {canManage && !isViewer && member.role !== "owner" ? (
                 <>
                   <div className="w-32">
                     <Select
@@ -238,13 +261,79 @@ export function MembersPanel({
                 </>
               ) : (
                 <span className="text-xs uppercase tracking-wider text-zinc-500">
-                  {member.role}
+                  {ORG_ROLE_LABELS[member.role as OrgRole] ?? member.role}
                 </span>
               )}
             </li>
           );
         })}
       </ul>
+
+      {isOwner ? (
+        <div className="mt-10 border border-white/10 p-4">
+          <h2 className="text-sm font-semibold text-zinc-100">
+            Transfer ownership
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-zinc-500">
+            {ORG_ROLE_DESCRIPTIONS.owner} {TRANSFER_OWNERSHIP_HINT}
+          </p>
+          {transferable.length ? (
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <div className="min-w-56 flex-1">
+                <Label htmlFor="transfer-owner">New owner</Label>
+                <Select
+                  id="transfer-owner"
+                  value={transferTo}
+                  onValueChange={(value) => {
+                    setTransferTo(value);
+                    setConfirmingTransfer(false);
+                  }}
+                  placeholder="Choose a member"
+                  options={transferable.map((member) => ({
+                    value: member.userId,
+                    label: member.name,
+                  }))}
+                />
+              </div>
+              {confirmingTransfer ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmingTransfer(false);
+                      run(() => transferOwnershipAction(orgSlug, transferTo));
+                    }}
+                    className={buttonClass}
+                  >
+                    Yes, transfer ownership
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingTransfer(false)}
+                    className="text-sm text-zinc-500 transition hover:text-zinc-300"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={!transferTo}
+                  onClick={() => setConfirmingTransfer(true)}
+                  className={subtleButtonClass}
+                >
+                  Transfer ownership
+                </button>
+              )}
+            </div>
+          ) : (
+            <p className={`${hintClass} mt-3`}>
+              Invite someone first: ownership can only move to an existing
+              member.
+            </p>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

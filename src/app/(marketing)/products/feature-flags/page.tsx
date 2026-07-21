@@ -1,0 +1,173 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { Check, Gauge, Puzzle, ShieldCheck, Split } from "lucide-react";
+import { brand } from "@/lib/brand";
+import { appHref } from "@/lib/urls";
+import { BleedBand } from "@/components/bleed-band";
+import { PageHero } from "@/components/page-hero";
+
+export const metadata: Metadata = {
+  title: `Feature Flags · ${brand.name}`,
+  description: `Typed feature flags served over OpenFeature's OFREP: targeting rules, reusable segments, percentage rollouts, and no proprietary SDK to adopt.`,
+};
+
+/**
+ * Feature Flags, as a marketing page.
+ *
+ * The argument, not the manual. Anything a reader has to DO lives in
+ * /docs/feature-flags; this page's whole job is to make the case that
+ * standards-based flag serving is worth switching to.
+ */
+const pillars = [
+  {
+    icon: Puzzle,
+    title: "No proprietary SDK",
+    body: `${brand.name} implements OFREP, the OpenFeature Remote Evaluation Protocol. You install a standard OpenFeature SDK and point it at us. Nothing in your application code is specific to ${brand.name}, which means adopting us is a config change and so is leaving.`,
+  },
+  {
+    icon: Split,
+    title: "Targeting that stays readable",
+    body: "Ordered rules, reusable segments, and percentage rollouts bucketed on a stable targeting key, so the same user stays on the same side of a split. Define an audience once and share it across every flag instead of copying criteria.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Your rules never leave the server",
+    body: "Client tokens are publishable and receive evaluated values only, never your targeting rules or segment definitions. Shipping a credential in a browser bundle does not ship your logic with it.",
+  },
+  {
+    icon: Gauge,
+    title: "Priced so it stays boring",
+    body: "Usage-based, no seats, and conditional requests mean an unchanged configuration returns 304 and costs nothing at all. Most teams never leave their included credit.",
+  },
+] as const;
+
+const capabilities = [
+  "Boolean, string, integer, float, and JSON flags",
+  "Ordered targeting rules with first-match-wins",
+  "Reusable segments shared by every flag",
+  "Percentage rollouts on a stable targeting key",
+  "Server and client credentials, scoped separately",
+  "Realtime invalidation stream, with polling fallback",
+  "Full REST API and OpenAPI spec",
+  "Self-host the whole thing, unmetered",
+] as const;
+
+export default function FeatureFlagsProductPage() {
+  return (
+    <div className="relative">
+      <PageHero
+        eyebrow="Feature Flags"
+        title={
+          <>
+            Ship behind flags.
+            <br />
+            <span className="text-zinc-500">Without the lock-in.</span>
+          </>
+        }
+        lede={
+          <>
+            Typed feature flags with targeting, segments, and rollouts, served
+            over the OpenFeature standard. The SDK you integrate is the one the
+            spec defines, not one we wrote.
+          </>
+        }
+        actions={
+          <>
+            <Link
+              href={appHref("/new?plan=free")}
+              className="rounded-md bg-teal-500 px-5 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
+            >
+              Start for free
+            </Link>
+            <Link
+              href="/docs/feature-flags"
+              className="rounded-md border border-white/10 px-5 py-2.5 text-sm font-semibold text-zinc-300 transition hover:border-white/20 hover:text-zinc-100"
+            >
+              Read the docs
+            </Link>
+          </>
+        }
+        rule={false}
+      />
+
+      <BleedBand>
+        <div className="grid grid-cols-1 divide-y divide-white/10 sm:grid-cols-2 sm:divide-x lg:divide-y-0">
+          {pillars.map(({ icon: Icon, title, body }, index) => (
+            <div
+              key={title}
+              className={`p-8 ${index < 2 ? "" : "sm:border-t sm:border-white/10"}`}
+            >
+              <Icon className="h-5 w-5 text-teal-400" aria-hidden />
+              <h2 className="mt-4 text-base font-semibold text-zinc-100">
+                {title}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">{body}</p>
+            </div>
+          ))}
+        </div>
+      </BleedBand>
+
+      <div className="mx-auto w-full max-w-7xl px-6 py-20 sm:px-12 lg:px-20">
+        {/* grid-cols-1 is not redundant: a grid item defaults to min-width:auto,
+            so the code block below refuses to shrink under its longest line and
+            widens the whole column past the viewport, overflow-x-auto
+            notwithstanding. Tailwind's grid-cols-1 is minmax(0,1fr), which is
+            what actually lets it shrink and scroll inside its own box. */}
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-tight text-zinc-100">
+              What you get
+            </h2>
+            <ul className="mt-6 space-y-3">
+              {capabilities.map((capability) => (
+                <li
+                  key={capability}
+                  className="flex items-start gap-2.5 text-sm leading-6 text-zinc-300"
+                >
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-teal-400" aria-hidden />
+                  {capability}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <h2 className="text-2xl font-semibold tracking-tight text-zinc-100">
+              Three lines to your first flag
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-zinc-400">
+              Install the standard SDK, point it at {brand.name}, and read a
+              value. Always with a default, so a flag service can never become a
+              hard dependency of your application starting.
+            </p>
+            <pre className="mt-6 overflow-x-auto border border-white/10 bg-black/30 p-5 text-[13px] leading-6 text-zinc-300">
+              <code>{`import { OpenFeature } from "@openfeature/web-sdk";
+import { OFREPWebProvider } from "@openfeature/ofrep-web-provider";
+
+await OpenFeature.setProviderAndWait(
+  new OFREPWebProvider({
+    baseUrl: "${brand.apiUrl}/ofrep/v1",
+    headers: [["Authorization", \`Bearer \${TOKEN}\`]],
+  }),
+);
+
+const enabled = OpenFeature.getClient()
+  .getBooleanValue("new-checkout", false);`}</code>
+            </pre>
+            <p className="mt-4 text-sm leading-6 text-zinc-500">
+              Server SDKs work the same way, evaluating against a per-request
+              context. See the{" "}
+              <Link
+                href="/docs/feature-flags"
+                className="text-teal-400 transition hover:text-teal-300 hover:underline"
+              >
+                Feature Flags documentation
+              </Link>{" "}
+              for targeting, segments, and caching.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

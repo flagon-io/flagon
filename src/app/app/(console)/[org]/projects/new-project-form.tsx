@@ -96,11 +96,11 @@ export function NewProjectForm({ orgSlug }: { orgSlug: string }) {
           {PROJECT_SLUG_HINT}
         </p>
       </div>
-      <div className="flex items-center gap-3 border-t border-white/5 pt-5">
+      <div className="flex items-center justify-end gap-3 border-t border-white/5 pt-5">
         <button type="submit" disabled={pending} className={buttonClass}>
           {pending ? "Creating..." : "Create project"}
         </button>
-        <Link href={appPath(`/${orgSlug}/projects`)} className={subtleButtonClass}>
+        <Link href={appPath(`/${orgSlug}`)} className={subtleButtonClass}>
           Cancel
         </Link>
       </div>

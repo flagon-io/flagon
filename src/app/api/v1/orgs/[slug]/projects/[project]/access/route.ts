@@ -1,6 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users } from "@/db/auth-schema";
+import { members } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import {
   apiError,
@@ -31,7 +32,7 @@ export async function GET(
   { params }: { params: Promise<{ slug: string; project: string }> },
 ) {
   const { slug, project } = await params;
-  const result = await resolveProjectContext(request, slug, project);
+  const result = await resolveProjectContext(request, slug, project, "projects:read");
   if (!result.ok) return apiError(result.status, result.code, result.message);
 
   const grants = await listProjectGrants(
@@ -47,7 +48,7 @@ export async function POST(
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
   const { slug, project } = await params;
-  const result = await resolveProjectContext(request, slug, project);
+  const result = await resolveProjectContext(request, slug, project, "projects:write");
   if (!result.ok) return apiError(result.status, result.code, result.message);
   const { ctx } = result;
 
@@ -75,7 +76,16 @@ export async function POST(
       .from(users)
       .where(eq(users.username, username.toLowerCase()))
       .limit(1);
-    if (!subject || !ctx.org.members.some((m) => m.userId === subject.id)) {
+    // Membership is checked against the table rather than a session-loaded
+    // org, so the check is identical whether a human or a token is calling.
+    const membership = subject
+      ? await db
+          .select({ id: members.id })
+          .from(members)
+          .where(and(eq(members.organizationId, ctx.org.id), eq(members.userId, subject.id)))
+          .limit(1)
+      : [];
+    if (!subject || !membership.length) {
       return apiError(
         422,
         "not_a_member",

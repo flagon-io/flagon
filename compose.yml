@@ -1,3 +1,25 @@
+# Flagon, in Docker. One file, two jobs, chosen by profile.
+#
+#   docker compose up -d --wait              # DEVELOPMENT: Postgres only.
+#                                            # You run the app with `npm run dev`.
+#                                            # `npm run db:up` also provisions
+#                                            # the app role and migrates.
+#
+#   docker compose --profile self-host up -d # SELF-HOSTING: Postgres AND the
+#                                            # app, published on :3000, with
+#                                            # the restricted role provisioned
+#                                            # and migrations applied on boot.
+#
+# The app is behind a profile rather than in a second compose file. Two files
+# describing the same stack drift: a variable renamed in one, a Postgres major
+# bumped in the other, and the self-hosted path quietly stops matching the one
+# that gets exercised every day. Here there is one Postgres definition, so
+# self-hosters run exactly the database development runs against.
+#
+# Everything optional is optional: no Stripe key means billing is off and
+# nothing is metered; no Resend key means verification links are printed to the
+# logs instead of emailed. Neither stops the platform working.
+
 name: flagon
 
 services:
@@ -7,26 +29,76 @@ services:
     environment:
       POSTGRES_DB: flagon
       POSTGRES_USER: flagon_owner
-      POSTGRES_PASSWORD: flagon_owner
+      # CHANGE THIS when self-hosting. It owns your entire schema.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flagon_owner}
     ports:
-      - "5432:5432"
+      # Loopback, not 0.0.0.0. Development needs the port because the app runs
+      # on the host; a self-hosted box does not, since the app container
+      # reaches Postgres over the compose network. Binding to every interface
+      # would put a database whose default password is written in this file on
+      # the network. Override POSTGRES_BIND only if you know you want that.
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - flagon_pg:/var/lib/postgresql/data
-      - ./.docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U flagon_owner -d flagon"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # Stripe webhook listener for local dev. Starts with `docker compose up -d`
-  # and forwards sandbox events to the app's webhook route. If .env.local has
-  # no STRIPE_SECRET_KEY the container logs a note and exits cleanly - billing
-  # stays off, nothing else is affected. When it IS running, the first lines
-  # of `docker compose logs stripe` print the signing secret (whsec_...) -
-  # put that in .env.local as STRIPE_WEBHOOK_SECRET and restart the dev
-  # server, or plan upgrades will never apply locally.
+  # The platform itself. Profiled, so `docker compose up` in a checkout does
+  # not start a second copy of the app on the port `npm run dev` wants.
+  app:
+    profiles: [self-host]
+    image: ghcr.io/flagon-io/flagon:${FLAGON_VERSION:-latest}
+    # Swap the line above for this to run your own working tree instead:
+    # build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      # Two roles, on purpose. The app connects as the restricted role, which
+      # cannot bypass row-level security; the owner is used only to provision
+      # that role and to run migrations. Collapsing them into one connection
+      # silently disables every tenant isolation guarantee in the product.
+      DATABASE_URL_OWNER: postgres://flagon_owner:${POSTGRES_PASSWORD:-flagon_owner}@postgres:5432/flagon
+      DATABASE_URL_APP: postgres://flagon_app:${FLAGON_APP_PASSWORD:-flagon_app}@postgres:5432/flagon
+
+      # Sign in cannot work without this. Generate one with:
+      #   openssl rand -base64 32
+      # Checked by the container on boot, not with a `${VAR:?}` here: Compose
+      # interpolates this value even when the service is excluded by profile,
+      # so requiring it would make development refuse to start Postgres over a
+      # secret only self-hosting needs.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+
+      # Single-host deployments reach the app and API by path (/app, /api), so
+      # no subdomain setup is required. Set your own domain to use subdomains.
+      NEXT_PUBLIC_ROOT_DOMAIN: ${NEXT_PUBLIC_ROOT_DOMAIN:-localhost}
+
+      # Optional. Unset means: billing off, email printed to the logs.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # Enables the scheduled endpoints; point your own scheduler at
+      # /api/cron/compact (hourly) and /api/cron/cleanup (daily).
+      CRON_SECRET: ${CRON_SECRET:-}
+
+  # Stripe webhook listener, for local development against a sandbox.
+  #
+  #   npm run stripe:listen
+  #
+  # The first lines of its log print the signing secret (whsec_...) - put that
+  # in .env.local as STRIPE_WEBHOOK_SECRET and restart the dev server, or plan
+  # upgrades will never apply locally. Profiled, because billing is optional
+  # and an unconfigured listener exiting on every `up` reads like a failure.
   stripe:
+    profiles: [stripe]
     image: stripe/stripe-cli:latest
     restart: on-failure
     env_file:

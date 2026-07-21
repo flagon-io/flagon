@@ -58,7 +58,7 @@ export function ProjectSettingsPanel({
       setError(result.message);
       return;
     }
-    router.push(appPath(`/${orgSlug}/projects`));
+    router.push(appPath(`/${orgSlug}`));
     router.refresh();
   }
 

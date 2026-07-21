@@ -1,6 +1,6 @@
 -- Grants become EXPLICIT, per table. The blanket default-privileges
--- auto-grant to flagon_app is removed (scripts/db-provision.mjs +
--- .docker/postgres/initdb/00-roles.sql): from now on a table a migration
+-- auto-grant to flagon_app is removed (scripts/db-provision.mjs,
+-- db/roles.sql): from now on a table a migration
 -- forgets to secure is UNREACHABLE by the app (fails closed, loudly)
 -- instead of reachable without row-level security (leaks silently).
 --

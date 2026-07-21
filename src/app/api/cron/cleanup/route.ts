@@ -23,6 +23,8 @@ export async function GET(request: Request) {
     return apiError(401, "unauthorized", "Invalid cron secret.");
   }
 
+  // Usage compaction lives in /api/cron/compact on an hourly schedule; this
+  // endpoint stays daily and expiry-only.
   const removed = await cleanupExpired();
   return apiJson({ removed });
 }

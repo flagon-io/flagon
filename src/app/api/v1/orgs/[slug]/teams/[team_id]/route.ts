@@ -24,7 +24,7 @@ export async function GET(
   { params }: { params: Promise<{ slug: string; team_id: string }> },
 ) {
   const { slug, team_id } = await params;
-  const result = await resolveTeamContext(request, slug, team_id);
+  const result = await resolveTeamContext(request, slug, team_id, "members:read");
   if (!result.ok) return apiError(result.status, result.code, result.message);
   return apiJson(serializeTeam(result.ctx.team));
 }
@@ -35,7 +35,7 @@ export async function DELETE(
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
   const { slug, team_id } = await params;
-  const result = await resolveTeamContext(request, slug, team_id);
+  const result = await resolveTeamContext(request, slug, team_id, "members:write");
   if (!result.ok) return apiError(result.status, result.code, result.message);
 
   try {

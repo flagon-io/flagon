@@ -53,7 +53,7 @@ export function NewTeamForm({ orgSlug }: { orgSlug: string }) {
         />
         <p className={hintClass}>{TEAM_NAME_HINT}</p>
       </div>
-      <div className="flex items-center gap-3 border-t border-white/5 pt-5">
+      <div className="flex items-center justify-end gap-3 border-t border-white/5 pt-5">
         <button type="submit" disabled={pending} className={buttonClass}>
           {pending ? "Creating..." : "Create team"}
         </button>

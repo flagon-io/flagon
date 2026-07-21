@@ -1,6 +1,8 @@
-import { APIError } from "better-auth/api";
+import { eq } from "drizzle-orm";
+import { db } from "@/db/client";
 import { isUniqueViolation } from "@/db/errors";
-import { auth } from "@/lib/auth";
+import { teams } from "@/db/schema";
+import { isOrgAdmin, resolveOrgAccess } from "@/lib/api-auth.server";
 import {
   apiError,
   apiForbiddenOrigin,
@@ -20,35 +22,20 @@ import { serializeTeam } from "@/lib/teams.server";
  * checks apply - the same enforcement the console gets. Documented in
  * src/lib/openapi.ts; keep the two in sync.
  */
-async function resolveOrg(slug: string, headers: Headers) {
-  try {
-    return await auth.api.getFullOrganization({
-      query: { organizationSlug: slug },
-      headers,
-    });
-  } catch (error) {
-    // Authorization failures are 404s (no existence leak); real errors surface.
-    if (error instanceof APIError) return null;
-    throw error;
-  }
-}
-
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
-
   const { slug } = await params;
-  const org = await resolveOrg(slug, request.headers);
-  if (!org) return apiError(404, "not_found", "Organization not found.");
+  const access = await resolveOrgAccess(request, slug, "members:read");
+  if (!access.ok) return access.error;
 
-  const teams = await auth.api.listOrganizationTeams({
-    query: { organizationId: org.id },
-    headers: request.headers,
-  });
-  return apiJson(teams.map(serializeTeam));
+  const rows = await db
+    .select()
+    .from(teams)
+    .where(eq(teams.organizationId, access.access.org.id))
+    .orderBy(teams.createdAt);
+  return apiJson(rows.map(serializeTeam));
 }
 
 export async function POST(
@@ -56,12 +43,12 @@ export async function POST(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return apiError(401, "unauthorized", "Sign in required.");
-
   const { slug } = await params;
-  const org = await resolveOrg(slug, request.headers);
-  if (!org) return apiError(404, "not_found", "Organization not found.");
+  const access = await resolveOrgAccess(request, slug, "members:write");
+  if (!access.ok) return access.error;
+  if (!isOrgAdmin(access.access.actor)) {
+    return apiError(403, "forbidden", "Organization administrators manage teams.");
+  }
 
   const body = await request.json().catch(() => null);
   const validation = validateTeamName(
@@ -71,11 +58,14 @@ export async function POST(
     return apiError(400, "invalid_team_name", validation.error);
   }
 
+  // Inserted directly rather than through the plugin helper, which requires a
+  // session and so could never serve a token. The admin check above is the
+  // same gate the plugin applies.
   try {
-    const team = await auth.api.createTeam({
-      body: { name: validation.name, organizationId: org.id },
-      headers: request.headers,
-    });
+    const [team] = await db
+      .insert(teams)
+      .values({ name: validation.name, organizationId: access.access.org.id })
+      .returning();
     return apiJson(serializeTeam(team), { status: 201 });
   } catch (error) {
     // Unique violation on (organization_id, lower(name)).
@@ -84,13 +74,6 @@ export async function POST(
         409,
         "team_already_exists",
         "A team with that name already exists in this organization.",
-      );
-    }
-    if (error instanceof APIError) {
-      return apiError(
-        error.statusCode,
-        error.body?.code?.toLowerCase() ?? "create_failed",
-        error.body?.message ?? "Could not create the team.",
       );
     }
     throw error;

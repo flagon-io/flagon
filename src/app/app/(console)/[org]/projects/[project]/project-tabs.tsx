@@ -3,7 +3,7 @@
 import { appPath } from "@/lib/urls";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Flag, Home, Lock, Settings, type LucideIcon } from "lucide-react";
+import { Home, Lock, Settings, type LucideIcon } from "lucide-react";
 
 /** The app lives at /app/... locally but at the subdomain root in production;
  * normalize both sides so active states match either way. */
@@ -38,7 +38,6 @@ export function ProjectTabs({
 
   const tabs: Tab[] = [
     { label: "Overview", icon: Home, path: "", exact: true },
-    { label: "Feature Flags", icon: Flag },
     { label: "Access", icon: Lock, path: "access" },
     ...(canManage
       ? [{ label: "Settings", icon: Settings, path: "settings" }]

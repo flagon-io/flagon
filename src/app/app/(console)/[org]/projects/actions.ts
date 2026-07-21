@@ -20,6 +20,6 @@ export async function createProjectAction(
   const result = await createProject(org.id, input);
   if (!result.ok) return { ok: false, message: result.error };
 
-  revalidatePath(`/app/${orgSlug}/projects`);
+  revalidatePath(`/app/${orgSlug}`);
   return { ok: true, message: "" };
 }

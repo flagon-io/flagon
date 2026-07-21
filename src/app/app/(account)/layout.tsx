@@ -1,10 +1,12 @@
-import { appPath } from "@/lib/urls";
+import { appPath, marketingHref } from "@/lib/urls";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { brand } from "@/lib/brand";
 import { FlagonMark } from "@/lib/logo";
+import { ArrowUpRight } from "lucide-react";
+import { subtleButtonClass } from "@/components/form-ui";
 import { SiteBottomBar } from "@/components/site-bottom-bar";
 import { UserMenu } from "@/components/user-menu";
 import { listEmails } from "@/lib/user-emails";
@@ -40,7 +42,7 @@ export default async function AccountLayout({
               {brand.name}
             </span>
           </Link>
-          <UserMenu />
+          <div className="flex items-center gap-3"><Link href={marketingHref("/")} className={`${subtleButtonClass} gap-1.5 text-xs`}>Return to site <ArrowUpRight className="h-3.5 w-3.5" /></Link><UserMenu /></div>
         </div>
       </header>
 

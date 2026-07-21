@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { brand } from "@/lib/brand";
+import { GridBackdrop } from "@/components/grid-backdrop";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteBottomBar } from "@/components/site-bottom-bar";
@@ -42,9 +43,13 @@ export default function MarketingLayout({
 }) {
   return (
     <>
+      {/* The grid the whole marketing site sits on. Fixed and behind
+          everything, so the verticals stay continuous while the page scrolls
+          past them. */}
+      <GridBackdrop />
       <SiteHeader />
       {/* flex-1 pins the footer to the viewport bottom on short pages. */}
-      <div className="flex flex-1 flex-col">{children}</div>
+      <div className="relative z-10 flex flex-1 flex-col">{children}</div>
       <SiteFooter />
       <SiteBottomBar />
     </>

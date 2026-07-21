@@ -8,6 +8,7 @@ import {
   Rocket,
   Server,
   ShieldCheck,
+  type LucideIcon,
 } from "lucide-react";
 import { brand } from "@/lib/brand";
 
@@ -16,14 +17,31 @@ export const metadata: Metadata = {
   description: `Guides and reference documentation for ${brand.name}: the self-hostable developer platform.`,
 };
 
-// Ordering: getting started and concepts first, then the
-// products, with the API reference as the final section.
-const sections = [
+// Ordering: getting started and concepts first, then the products, with the
+// Self-hosting is second, matching the sidebar: running it yourself is a
+// headline capability, not a footnote. API reference last. Typed explicitly so a section can go
+// back to `href: null` (unbuilt) without the placeholder branch below
+// becoming unreachable and losing its types.
+type DocsSection = {
+  title: string;
+  description: string;
+  href: string | null;
+  icon: LucideIcon;
+};
+
+const sections: readonly DocsSection[] = [
   {
     title: "Getting started",
     description: `Create an account, set up your first organization, and ship on ${brand.name}.`,
-    href: null,
+    href: "/docs/getting-started",
     icon: Rocket,
+  },
+  {
+    title: "Self-hosting",
+    description:
+      "Run the whole platform yourself, free and unmetered, with every feature enabled. One command to start.",
+    href: "/docs/self-hosting",
+    icon: Server,
   },
   {
     title: "Authentication",
@@ -36,22 +54,15 @@ const sections = [
     title: "Catalog",
     description:
       "Projects, teams, ownership, and permissions - the foundation everything plugs into.",
-    href: null,
+    href: "/docs/catalog",
     icon: BookOpen,
   },
   {
     title: "Feature Flags",
     description:
       "OpenFeature-based flags on top of the catalog. First product out of the gate.",
-    href: null,
+    href: "/docs/feature-flags",
     icon: Flag,
-  },
-  {
-    title: "Self-hosting",
-    description:
-      "Run the whole platform on your own infrastructure: Postgres, environment, deploy.",
-    href: null,
-    icon: Server,
   },
   {
     title: "API reference",
@@ -60,7 +71,7 @@ const sections = [
     href: "/docs/api",
     icon: Braces,
   },
-] as const;
+];
 
 export default function DocsHomePage() {
   return (

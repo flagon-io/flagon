@@ -1,0 +1,17 @@
+# Keep the build context small and, more importantly, keep secrets out of it.
+.env
+.env.*
+!.env.example
+
+node_modules
+.next
+.git
+.github
+.vercel
+.claude
+
+# Local-only tooling and artifacts.
+*.log
+coverage
+playwright-report
+test-results

@@ -9,6 +9,7 @@ export const brand = {
   url: "https://www.flagon.io",
   apiUrl: "https://api.flagon.io",
   github: "https://github.com/flagon-io",
+  repo: "https://github.com/flagon-io/flagon",
   salesEmail: "sales@flagon.io",
 
   eyebrow: "The self-hostable developer platform",
@@ -17,19 +18,22 @@ export const brand = {
   description:
     "One hub for your projects, environments, and teams, with the products you'd otherwise buy or build stitched right in. One catalog, one login, one bill, everything sharing the same foundation.",
 
-  /** Header nav; href null = page doesn't exist yet (rendered disabled). */
+  /** Header nav. Every entry points somewhere. */
   nav: [
-    { label: "Products", href: null },
+    { label: "Products", href: "/products" },
     { label: "Enterprise", href: "/enterprise" },
     { label: "Pricing", href: "/pricing" },
     { label: "Docs", href: "/docs" },
   ] as const,
 
+  /**
+   * Products that actually ship today. The homepage renders these as a claim
+   * about what you can use right now, so an unbuilt product listed here reads
+   * as a promise rather than a roadmap. Add one the day it lands, not before.
+   */
   products: [
     "Catalog",
     "Feature Flags",
-    "Experiments",
-    "Config",
   ] as const,
 
   colors: {

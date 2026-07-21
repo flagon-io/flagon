@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { organizations } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { absoluteAppUrl } from "@/lib/absolute-url";
 import {
   applyProSubscription,
   billingEnabled,
@@ -63,7 +64,9 @@ export async function startProCheckout(
   }
 
   const stripe = getStripe();
-  const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+  // Absolute, and correct on every surface: app.flagon.io/<org> in
+  // production, http://localhost:3000/app/<org> locally.
+  const orgUrl = await absoluteAppUrl(`/${org.slug}`);
 
   // Self-heal: if this org's customer already carries a live subscription
   // (e.g. a completed checkout whose webhook never arrived), apply it
@@ -78,7 +81,7 @@ export async function startProCheckout(
     );
     if (live) {
       await applyProSubscription(org.id, row.stripeCustomerId, live.id);
-      return { ok: true, url: `${baseURL}/app/${org.slug}?upgraded=1` };
+      return { ok: true, url: `${orgUrl}?upgraded=1` };
     }
   }
 
@@ -104,8 +107,8 @@ export async function startProCheckout(
     subscription_data: { metadata: { organization_id: org.id } },
     // {CHECKOUT_SESSION_ID} is substituted by Stripe; the org page uses it
     // to reconcile immediately on return, independent of webhook delivery.
-    success_url: `${baseURL}/app/${org.slug}?upgraded=1&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${baseURL}/app/${org.slug}?upgrade=canceled`,
+    success_url: `${orgUrl}?upgraded=1&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${orgUrl}?upgrade=canceled`,
   });
 
   if (!checkout.url) {

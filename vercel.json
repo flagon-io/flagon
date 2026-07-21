@@ -6,6 +6,10 @@
         {
             "path": "/api/cron/cleanup",
             "schedule": "0 4 * * *"
+        },
+        {
+            "path": "/api/cron/compact",
+            "schedule": "17 * * * *"
         }
     ],
     "git": {

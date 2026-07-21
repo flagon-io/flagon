@@ -3,12 +3,14 @@ import { brand } from "@/lib/brand";
 import { FlagonMark } from "@/lib/logo";
 import { SiteNav } from "@/components/site-nav";
 import { UserMenu } from "@/components/user-menu";
+import { MobileNav } from "@/components/mobile-nav";
 
 /**
  * Marketing header, rendered once in the marketing route-group layout. The
  * nav highlights the current page; the right side is session-aware: Sign in /
- * Get started when anonymous, the avatar dropdown when signed in (the
- * *.flagon.io session cookie spans www).
+ * Get started when anonymous, and when signed in a Dashboard button next to
+ * the avatar dropdown (the *.flagon.io session cookie spans www, so www
+ * knows you're signed in and should hand you straight to the app).
  */
 export function SiteHeader() {
   return (
@@ -23,7 +25,10 @@ export function SiteHeader() {
           </Link>
           <SiteNav />
         </div>
-        <UserMenu />
+        <div className="flex items-center gap-1">
+          <UserMenu showDashboardLink />
+          <MobileNav />
+        </div>
       </div>
     </header>
   );

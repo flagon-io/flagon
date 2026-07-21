@@ -8,8 +8,10 @@ import {
 import { roleAtLeast } from "@/lib/project-access";
 import {
   deleteProject,
+  getProject,
   renameProject,
   serializeProject,
+  updateProjectOverview,
 } from "@/lib/projects.server";
 import { resolveProjectContext } from "./context";
 
@@ -29,7 +31,7 @@ export async function GET(
   { params }: { params: Promise<{ slug: string; project: string }> },
 ) {
   const { slug, project } = await params;
-  const result = await resolveProjectContext(request, slug, project);
+  const result = await resolveProjectContext(request, slug, project, "projects:read");
   if (!result.ok) return apiError(result.status, result.code, result.message);
 
   return apiJson({
@@ -44,26 +46,23 @@ export async function PATCH(
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
   const { slug, project } = await params;
-  const result = await resolveProjectContext(request, slug, project);
+  const result = await resolveProjectContext(request, slug, project, "projects:write");
   if (!result.ok) return apiError(result.status, result.code, result.message);
-  if (!roleAtLeast(result.ctx.role, "admin")) {
-    return apiError(403, "forbidden", "Project admin access required.");
-  }
-
   const body = await request.json().catch(() => null);
-  const name = typeof body?.name === "string" ? body.name : "";
-  if (!name.trim()) {
-    return apiError(400, "invalid_name", "Provide a name.");
+  if (!body || (typeof body.name !== "string" && typeof body.overview_markdown !== "string")) return apiError(400, "invalid_update", "Provide name or overview_markdown.");
+  if (typeof body.name === "string") {
+    if (!roleAtLeast(result.ctx.role, "admin")) return apiError(403, "forbidden", "Project admin access required to rename a project.");
+    const renamed = await renameProject(result.ctx.org.id, result.ctx.project.id, body.name);
+    if (!renamed.ok) return apiError(400, renamed.code, renamed.error);
   }
-
-  const renamed = await renameProject(
-    result.ctx.org.id,
-    result.ctx.project.id,
-    name,
-  );
-  if (!renamed.ok) return apiError(400, renamed.code, renamed.error);
+  if (typeof body.overview_markdown === "string") {
+    if (!roleAtLeast(result.ctx.role, "write")) return apiError(403, "forbidden", "Project write access required to edit the overview.");
+    const updated = await updateProjectOverview(result.ctx.org.id, result.ctx.project.id, body.overview_markdown);
+    if (!updated.ok) return apiError(400, updated.code, updated.error);
+  }
+  const projectResult = await getProject(result.ctx.org.id, result.ctx.project.slug);
   return apiJson({
-    ...serializeProject(renamed.project),
+    ...serializeProject(projectResult ?? result.ctx.project),
     role: result.ctx.role,
   });
 }
@@ -74,7 +73,7 @@ export async function DELETE(
 ) {
   if (!isTrustedOrigin(request)) return apiForbiddenOrigin();
   const { slug, project } = await params;
-  const result = await resolveProjectContext(request, slug, project);
+  const result = await resolveProjectContext(request, slug, project, "projects:write");
   if (!result.ok) return apiError(result.status, result.code, result.message);
   if (!roleAtLeast(result.ctx.role, "admin")) {
     return apiError(403, "forbidden", "Project admin access required.");

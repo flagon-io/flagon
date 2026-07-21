@@ -1,32 +1,11 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import {
-  organizations,
-  members,
-  invitations,
-  teams,
-  teamMembers,
-  projects,
-  projectRoles,
-  userEmails,
-  rateLimits,
-  leads,
-} from "./schema";
+import { schema as appSchema } from "./schema";
 import * as authSchema from "./auth-schema";
 
-const schema = {
-  organizations,
-  members,
-  invitations,
-  teams,
-  teamMembers,
-  projects,
-  projectRoles,
-  userEmails,
-  rateLimits,
-  leads,
-  ...authSchema,
-};
+// Sourced from schema.ts rather than re-listed: a table added there was
+// silently missing from the query client for as long as the two lists drifted.
+const schema = { ...appSchema, ...authSchema };
 
 /**
  * Base database client, connecting as the RESTRICTED `flagon_app` role
@@ -69,7 +48,7 @@ const globalForDb = globalThis as unknown as {
   __flagonPgClient?: ReturnType<typeof postgres>;
 };
 
-const client =
+export const pgClient =
   globalForDb.__flagonPgClient ??
   postgres(connectionString, {
     max: 10,
@@ -77,13 +56,13 @@ const client =
   });
 
 if (process.env.NODE_ENV !== "production") {
-  globalForDb.__flagonPgClient = client;
+  globalForDb.__flagonPgClient = pgClient;
 }
 
-export const db = drizzle(client, { schema });
+export const db = drizzle(pgClient, { schema });
 
 /** Close the underlying pool (used by tests / graceful shutdown). */
-export const closePool = () => client.end();
+export const closePool = () => pgClient.end();
 
 export type Database = typeof db;
 export { schema };
