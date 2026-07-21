@@ -3,6 +3,18 @@
 # Tags follow what people actually pin to: a moving `latest` from the default
 # branch, plus immutable semver tags from releases, so a self-host can choose
 # between "track the project" and "never move without me saying so".
+#
+# Each architecture is built on a runner of that architecture, in parallel,
+# and the two results are stitched into one multi-arch manifest at the end.
+#
+# The obvious alternative - one runner, QEMU, `platforms: amd64,arm64` - is
+# what this used to do, and it is slow in the worst way. QEMU emulates every
+# instruction, so `npm ci` and `next build` (both CPU-bound, both full of
+# exactly the work emulation handles worst) ran several times slower than
+# native, and because both platforms shared one runner they ran one after the
+# other rather than at the same time. Native arm64 runners are free and
+# unlimited on public repositories and available on private ones, so the
+# emulation is no longer buying anything.
 name: Publish image
 
 on:
@@ -19,14 +31,24 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            # arm64 matters more than it looks: a lot of self-hosters are on
+            # Apple silicon or Graviton, and an amd64-only image quietly runs
+            # under emulation and feels broken.
+            runner: ubuntu-24.04-arm
+
     permissions:
       contents: read
       packages: write
-      # Required for build provenance attestation.
-      id-token: write
-      attestations: write
 
     steps:
       - uses: actions/checkout@v7
@@ -38,7 +60,13 @@ jobs:
         id: node
         run: echo "version=$(tr -dc '0-9.' < .nvmrc)" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-qemu-action@v4
+      # "linux/amd64" is not usable as an artifact name or a cache scope.
+      - name: Platform slug
+        id: slug
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: echo "value=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
@@ -49,7 +77,85 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive tags and labels
+      # Labels only. Tags belong to the manifest list, which does not exist
+      # until the merge job below.
+      - name: Derive labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.title=Flagon
+            org.opencontainers.image.description=The self-hostable developer platform
+            org.opencontainers.image.licenses=FSL-1.1-ALv2
+
+      - name: Build
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            NODE_VERSION=${{ steps.node.outputs.version }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Per-platform scope: one shared scope means each architecture keeps
+          # evicting the other's layers and neither ever gets a warm cache.
+          cache-from: type=gha,scope=${{ steps.slug.outputs.value }}
+          cache-to: type=gha,mode=max,scope=${{ steps.slug.outputs.value }}
+          # Pushed by digest, untagged. Tagging here would have the two
+          # architectures race to own the same tag, with the loser's image
+          # simply gone. Provenance is attested once, on the final manifest.
+          provenance: false
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ steps.slug.outputs.value }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish manifest
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      # Required for build provenance attestation.
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
         id: meta
         uses: docker/metadata-action@v6
         with:
@@ -59,32 +165,30 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
-          labels: |
-            org.opencontainers.image.title=Flagon
-            org.opencontainers.image.description=The self-hostable developer platform
-            org.opencontainers.image.licenses=FSL-1.1-ALv2
 
-      - name: Build and push
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          build-args: |
-            NODE_VERSION=${{ steps.node.outputs.version }}
-          # arm64 matters more than it looks: a lot of self-hosters are on
-          # Apple silicon or Graviton, and an amd64-only image quietly runs
-          # under emulation and feels broken.
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      # The attestation subject is the manifest LIST, not either architecture,
+      # so it has to be read back after the list is created.
+      - name: Resolve manifest digest
+        id: manifest
+        env:
+          TAG: ${{ steps.meta.outputs.version }}
+        run: |
+          image="${REGISTRY}/${IMAGE_NAME}:${TAG}"
+          digest="$(docker buildx imagetools inspect "$image" \
+            --format '{{json .Manifest}}' | jq -r .digest)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          docker buildx imagetools inspect "$image"
 
       - name: Attest build provenance
-        if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.manifest.outputs.digest }}
           push-to-registry: true
