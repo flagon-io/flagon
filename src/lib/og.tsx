@@ -114,7 +114,12 @@ export function OgImage() {
             fontSize: 24,
           }}
         >
-          Coming soon
+          {/* A durable fact, not a status. This slot said "Coming soon" well
+              past launch, because nothing about shipping forces anyone to
+              revisit a social preview - it is the one surface you never look
+              at on your own site. Anything here must stay true without
+              maintenance. */}
+          Source-available
         </div>
         <div style={{ display: "flex", color: colors.muted }}>
           {brand.domain}
