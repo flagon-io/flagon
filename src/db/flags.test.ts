@@ -230,6 +230,19 @@ describe.skipIf(!canRun)("organization feature flags", () => {
     expect(
       await authenticateAccessToken(`Bearer ${server.token}`, "flags:evaluate"),
     ).toBeNull();
+    // The console's create form asks for the KEY alone, so a flag with no name
+    // has to be creatable here rather than only through a form that invents
+    // one - otherwise /v1 demands a field the console never collects. Created
+    // last so it does not join the evaluation payloads asserted above.
+    expect((await createFlag(orgId, { key: "unnamed-flag" })).ok).toBe(true);
+    expect((await getFlag(orgId, "unnamed-flag"))?.name).toBe("unnamed-flag");
+    // An invalid key stays an invalid KEY, rather than resurfacing as a
+    // complaint about the name that was derived from it.
+    expect(await createFlag(orgId, { key: "Nope!" })).toMatchObject({
+      ok: false,
+      code: "invalid_key",
+    });
+
     const { db } = await import("@/db/client");
     const { featureFlags, clientTokens, segments } =
       await import("@/db/schema");

@@ -26,12 +26,15 @@ export async function POST(
   const context = await resolveFlagOrg(request, slug, "flags:write");
   if ("error" in context) return context.error;
   const body = await request.json().catch(() => null);
-  if (!body || typeof body.key !== "string" || typeof body.name !== "string") {
-    return apiError(400, "invalid_flag", "Provide key and name.");
+  // `name` is optional: createFlag names the flag after its key when it is
+  // omitted, which is what the console relies on since its create form asks
+  // for the key alone.
+  if (!body || typeof body.key !== "string") {
+    return apiError(400, "invalid_flag", "Provide a key.");
   }
   const result = await createFlag(context.org.id, {
     key: body.key,
-    name: body.name,
+    name: typeof body.name === "string" ? body.name : undefined,
     description:
       typeof body.description === "string" ? body.description : undefined,
     type: typeof body.type === "string" ? body.type : undefined,

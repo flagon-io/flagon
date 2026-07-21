@@ -71,14 +71,12 @@ export async function createFlagAction(orgSlug: string, form: FormData) {
   } catch {
     return;
   }
-  const key = String(form.get("key") ?? "");
   const result = await createFlag(org.id, {
-    // The create form asks only for the key, because that is the string the
-    // SDK is given and the one thing that cannot be changed later. A flag is
-    // therefore born named after itself, and renaming it on the flag page is
-    // a free, purely human-facing edit.
-    name: String(form.get("name") ?? "").trim() || key,
-    key,
+    // No name: the form asks only for the key, because that is the string the
+    // SDK is given and the one thing that cannot change later. createFlag
+    // names the flag after its key, so the API and the console agree on what
+    // a flag minimally needs. Renaming it later is a free, human-facing edit.
+    key: String(form.get("key") ?? ""),
     description: String(form.get("description") ?? ""),
     type,
     variants,

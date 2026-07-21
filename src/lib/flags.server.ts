@@ -33,7 +33,16 @@ export async function getFlag(orgId: string, key: string) {
 
 type FlagInput = {
   key: string;
-  name: string;
+  /**
+   * Optional: a flag with no name is named after its key.
+   *
+   * The console asks only for the key - that is the string the SDK is given,
+   * and the only one that cannot change - so the name has to be derivable
+   * HERE rather than in the form's action, or the API would demand a field
+   * the console does not collect and the two would disagree about what a flag
+   * minimally is.
+   */
+  name?: string;
   description?: string;
   type?: FlagType;
   variants?: Variant[];
@@ -41,7 +50,13 @@ type FlagInput = {
   rules?: TargetingRule[];
 };
 export async function createFlag(orgId: string, input: FlagInput) {
-  const valid = validateKeyAndName(input);
+  const valid = validateKeyAndName({
+    key: input.key,
+    // normalizeFlagKey runs inside validateKeyAndName, so the fallback uses
+    // the raw key: an invalid key is reported as invalid_key rather than
+    // reappearing as an invalid_name complaint about a name nobody typed.
+    name: input.name?.trim() || input.key.trim(),
+  });
   if (!valid.ok) return valid;
   const type =
     input.type && FLAG_TYPES.includes(input.type) ? input.type : "boolean";

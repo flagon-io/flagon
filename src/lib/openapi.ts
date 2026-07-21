@@ -2405,12 +2405,59 @@ export const openApiSpec = {
         operationId: "createFlag",
         tags: ["Flags"],
         summary: "Create a feature flag",
+        description:
+          "Creates an organization-wide flag. Only `key` is required: a flag with no `name` is named after its key, which is what the console does. Omitting `variants` gives the type's defaults (on/off for boolean).",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["key"],
+                properties: {
+                  key: {
+                    type: "string",
+                    example: "new-checkout",
+                    description:
+                      "The string your SDK asks for. Immutable once created.",
+                  },
+                  name: {
+                    type: "string",
+                    example: "New checkout",
+                    description: "Human-facing; defaults to the key.",
+                  },
+                  description: { type: "string", nullable: true },
+                  type: {
+                    type: "string",
+                    enum: ["boolean", "string", "integer", "float", "object"],
+                    default: "boolean",
+                  },
+                  variants: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Variant" },
+                  },
+                  default_variant: {
+                    type: "string",
+                    example: "on",
+                    description:
+                      "Variant key served when no rule matches; defaults to the first variant.",
+                  },
+                },
+              },
+            },
+          },
+        },
         responses: {
           "201": { description: "Flag created." },
           "400": errorResponse(
             "Invalid flag.",
             "invalid_flag",
-            "Provide key and name.",
+            "Provide a key.",
+          ),
+          "409": errorResponse(
+            "That key already exists in this organization.",
+            "key_taken",
+            "That flag key is already in use.",
           ),
         },
       },
@@ -2429,6 +2476,33 @@ export const openApiSpec = {
         operationId: "updateFlag",
         tags: ["Flags"],
         summary: "Update a feature flag",
+        description:
+          "Updates the flag in place. Omitted fields are left unchanged; `variants` and `rules` REPLACE the stored list rather than merging into it. The key is immutable - rules, rollouts, and evaluation history all reference it.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  name: { type: "string", example: "New checkout" },
+                  description: { type: "string", nullable: true },
+                  variants: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Variant" },
+                  },
+                  default_variant: { type: "string", example: "on" },
+                  rules: {
+                    type: "array",
+                    description:
+                      "Ordered targeting rules; the first match wins.",
+                    items: { type: "object" },
+                  },
+                },
+              },
+            },
+          },
+        },
         responses: {
           "200": { description: "Updated flag." },
           "404": errorResponse("Not found.", "not_found", "Flag not found."),
@@ -2848,6 +2922,34 @@ export const openApiSpec = {
             example: "free",
           },
           created_at: { type: "string", format: "date-time" },
+        },
+      },
+      Variant: {
+        type: "object",
+        description:
+          "One possible value of a flag. `key` is the machine identity: rules and rollouts reference it, and OFREP reports it as `variant`. `label` is human-facing only and never affects evaluation. The console derives the key from the value when a variant is created and then freezes it.",
+        required: ["key", "value"],
+        properties: {
+          key: {
+            type: "string",
+            example: "on",
+            pattern: "^[a-z][a-z0-9._-]{0,127}$",
+          },
+          value: {
+            description: "Typed to match the flag's type.",
+            oneOf: [
+              { type: "boolean" },
+              { type: "string" },
+              { type: "number" },
+              { type: "object" },
+            ],
+          },
+          label: {
+            type: "string",
+            maxLength: 60,
+            example: "Dark blue",
+            description: "Shown instead of the value in the console.",
+          },
         },
       },
       Project: {
