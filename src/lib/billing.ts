@@ -244,3 +244,106 @@ export async function addUsageToInvoice(input: {
   }
   return added;
 }
+
+export type BillingSummary = {
+  subscription: {
+    status: string;
+    /** Recurring amount across every item, in cents. */
+    amountCents: number;
+    currency: string;
+    interval: "day" | "week" | "month" | "year" | null;
+    intervalCount: number;
+    /** When the current cycle renews (or ends, if cancelling). */
+    renewsAt: Date | null;
+    cancelAtPeriodEnd: boolean;
+    /** How Stripe collects: a saved card, or an emailed invoice. */
+    collection: "charge_automatically" | "send_invoice";
+  } | null;
+  card: {
+    brand: string;
+    last4: string;
+    expMonth: number;
+    expYear: number;
+  } | null;
+};
+
+/**
+ * What a customer is actually on, read from Stripe at render time.
+ *
+ * The billing page used to describe a PLAN - the marketing feature list -
+ * which is the wrong answer for anyone who negotiated their terms: an
+ * enterprise customer paying $2,400 a year was shown Pro's $20 and a bullet
+ * saying "fixed pricing from usage estimates". Reading the subscription itself
+ * means the page cannot disagree with the invoice, whatever the agreement was,
+ * and it works identically for self-serve and contract customers.
+ *
+ * Returns null if Stripe cannot be reached. A billing page that 500s because
+ * an upstream call failed is worse than one that falls back to plan data, so
+ * every caller treats this as best-effort.
+ */
+export async function getBillingSummary(
+  customerId: string,
+): Promise<BillingSummary | null> {
+  try {
+    const stripe = getStripe();
+    // Invoices are deliberately NOT fetched: the portal already lists them
+    // with PDFs and receipts, and duplicating that here would be a second
+    // billing history to keep honest for no new capability.
+    const [subscriptions, customer] = await Promise.all([
+      stripe.subscriptions.list({
+        customer: customerId,
+        limit: 1,
+        status: "all",
+      }),
+      stripe.customers.retrieve(customerId, {
+        expand: ["invoice_settings.default_payment_method"],
+      }),
+    ]);
+
+    const subscription = subscriptions.data[0] ?? null;
+    const price = subscription?.items.data[0]?.price;
+    const amountCents =
+      subscription?.items.data.reduce(
+        (sum, item) =>
+          sum + (item.price.unit_amount ?? 0) * (item.quantity ?? 1),
+        0,
+      ) ?? 0;
+    // Stripe moved the cycle onto the items; read the first one's window.
+    const periodEnd = subscription?.items.data[0]?.current_period_end ?? null;
+
+    const paymentMethod =
+      !("deleted" in customer && customer.deleted) &&
+      customer.invoice_settings?.default_payment_method &&
+      typeof customer.invoice_settings.default_payment_method !== "string"
+        ? customer.invoice_settings.default_payment_method
+        : null;
+
+    return {
+      subscription: subscription
+        ? {
+            status: subscription.status,
+            amountCents,
+            currency: price?.currency ?? "usd",
+            interval: price?.recurring?.interval ?? null,
+            intervalCount: price?.recurring?.interval_count ?? 1,
+            renewsAt: periodEnd ? new Date(periodEnd * 1000) : null,
+            cancelAtPeriodEnd: subscription.cancel_at_period_end,
+            collection:
+              subscription.collection_method === "send_invoice"
+                ? "send_invoice"
+                : "charge_automatically",
+          }
+        : null,
+      card: paymentMethod?.card
+        ? {
+            brand: paymentMethod.card.brand,
+            last4: paymentMethod.card.last4,
+            expMonth: paymentMethod.card.exp_month,
+            expYear: paymentMethod.card.exp_year,
+          }
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}

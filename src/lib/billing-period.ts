@@ -118,21 +118,31 @@ export function recentPeriods(
 /**
  * The usage window a subscription invoice should carry.
  *
- * Stripe's recurring invoice bills the base fee for the period it is OPENING
- * (`period_start` is in the future relative to the service already rendered).
- * Usage is billed in ARREARS, so the days that belong on this invoice are the
- * cycle that just ended: up to the day before the new one starts.
+ * An invoice carries TWO different periods and they mean opposite things.
+ * Verified against a Stripe test clock (src/db/billing-invoice.test.ts): for a
+ * renewal opened on 15 Feb after a cycle that ran 15 Jan - 15 Feb,
  *
- * Reading the invoice's own period as the usage window - which is the obvious
- * and wrong thing to do - bills an empty future window and never charges for
- * anything.
+ *   invoice.period_start..period_end   15 Jan .. 15 Feb   the cycle that ENDED
+ *   line.period                        15 Feb .. 15 Mar   the service AHEAD
+ *
+ * So the invoice's own period IS the arrears window, and the line period is
+ * the future one. This function previously assumed the reverse - that
+ * period_start opened the next cycle - and subtracted a further month, which
+ * billed the month before the one that had just elapsed. Nothing double-billed;
+ * every invoice was simply a month behind, so the elapsed cycle went unbilled
+ * and a cancelled customer's final month never appeared at all.
+ *
+ * Returns null when nothing has elapsed. A `subscription_create` invoice has
+ * period_start == period_end, and an inverted window would otherwise be handed
+ * to a query that reads it as a range.
  */
-export function arrearsPeriodFor(invoicePeriodStart: Date): PeriodWindow {
-  const nextCycleStart = startOfDayUTC(invoicePeriodStart);
-  return {
-    from: addMonthsUTC(nextCycleStart, -1),
-    to: addDaysUTC(nextCycleStart, -1),
-  };
+export function invoiceUsageWindow(input: {
+  periodStart: Date;
+  periodEnd: Date;
+}): PeriodWindow | null {
+  const from = startOfDayUTC(input.periodStart);
+  const to = addDaysUTC(startOfDayUTC(input.periodEnd), -1);
+  return to.getTime() < from.getTime() ? null : { from, to };
 }
 
 /** Whether `now` falls inside the window (open period detection). */

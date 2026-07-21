@@ -10,7 +10,7 @@ import {
   getStripe,
   subscriptionCycle,
 } from "@/lib/billing";
-import { arrearsPeriodFor } from "@/lib/billing-period";
+import { invoiceUsageWindow } from "@/lib/billing-period";
 import {
   closePeriod,
   getPeriod,
@@ -134,7 +134,14 @@ export async function POST(request: Request) {
         .limit(1);
       if (!org) break;
 
-      const window = arrearsPeriodFor(new Date(invoice.period_start * 1000));
+      // The invoice's OWN period is the cycle that just ended (its line items
+      // carry the upcoming one). A subscription_create invoice covers no
+      // elapsed time at all and yields null.
+      const window = invoiceUsageWindow({
+        periodStart: new Date(invoice.period_start * 1000),
+        periodEnd: new Date(invoice.period_end * 1000),
+      });
+      if (!window) break;
 
       // Freeze the window before billing it: the snapshot is what gets
       // invoiced, and its status is what makes this exactly-once.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   addMonthsUTC,
-  arrearsPeriodFor,
+  invoiceUsageWindow,
   calendarMonthPeriod,
   currentPeriodFor,
   formatPeriod,
@@ -62,14 +62,36 @@ describe("period windows", () => {
     expect(isoDay(addMonthsUTC(day("2026-01-31"), 1))).toBe("2026-02-28");
   });
 
-  it("bills usage in arrears, not for the window the invoice opens", () => {
-    // THE BUG THIS EXISTS TO PREVENT: a recurring invoice's own period is the
-    // service window it is OPENING. Billing usage against that window charges
-    // an empty future range and never invoices anything real. The usage on
-    // this invoice is the cycle that just ended.
-    const window = arrearsPeriodFor(day("2026-08-19"));
-    expect(isoDay(window.from)).toBe("2026-07-19");
-    expect(isoDay(window.to)).toBe("2026-08-18");
+  it("bills the cycle the invoice's own period covers", () => {
+    // Verified against a Stripe test clock (src/db/billing-invoice.test.ts):
+    // a renewal opened on 19 Aug carries invoice.period = 19 Jul .. 19 Aug,
+    // the cycle that ENDED, while its LINE period is the month ahead. The
+    // arrears window is therefore the invoice's own period, up to the day
+    // before it closes.
+    //
+    // THE BUG THIS EXISTS TO PREVENT: reading period_start as the start of the
+    // cycle being opened and subtracting another month. That billed 19 Jun ..
+    // 18 Jul - a month behind - so the elapsed cycle went unbilled and a
+    // cancelled customer's last month never appeared on any invoice.
+    const window = invoiceUsageWindow({
+      periodStart: day("2026-07-19"),
+      periodEnd: day("2026-08-19"),
+    });
+    expect(window).not.toBeNull();
+    expect(isoDay(window!.from)).toBe("2026-07-19");
+    expect(isoDay(window!.to)).toBe("2026-08-18");
+  });
+
+  it("has no usage window when no time has elapsed", () => {
+    // A subscription_create invoice: period_start == period_end. Returning a
+    // window here would invert it (to before from) and hand a backwards range
+    // to the rollup query.
+    expect(
+      invoiceUsageWindow({
+        periodStart: day("2026-07-19"),
+        periodEnd: day("2026-07-19"),
+      }),
+    ).toBeNull();
   });
 
   it("knows whether a window is still open", () => {

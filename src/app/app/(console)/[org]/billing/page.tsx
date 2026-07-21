@@ -3,8 +3,11 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Check } from "lucide-react";
+import { eq } from "drizzle-orm";
+import { db } from "@/db/client";
+import { organizations } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { billingEnabled } from "@/lib/billing";
+import { billingEnabled, getBillingSummary } from "@/lib/billing";
 import { PLANS, isPlanId, type PlanId } from "@/lib/plans";
 import { marketingHref } from "@/lib/urls";
 import { resolveOrg } from "../resolve-org";
@@ -12,6 +15,46 @@ import { UpgradeButton } from "../upgrade-button";
 import { ManageBillingButton } from "./billing-actions-ui";
 
 export const metadata: Metadata = { title: "Billing" };
+
+const dateFormat = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+function money(cents: number, currency: string): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currency.toUpperCase(),
+    // Whole dollars stay whole: "$20", not "$20.00", unless there are cents to
+    // show - a usage true-up of $30.14 has to keep them.
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+  }).format(cents / 100);
+}
+
+/** "per month", or "every 3 months" when the interval is not 1. */
+function intervalLabel(subscription: {
+  interval: string | null;
+  intervalCount: number;
+}): string {
+  if (!subscription.interval) return "";
+  return subscription.intervalCount === 1
+    ? `per ${subscription.interval}`
+    : `every ${subscription.intervalCount} ${subscription.interval}s`;
+}
+
+/** Stripe's statuses, in words a customer can act on. */
+const STATUS_COPY: Record<string, string> = {
+  active: "Active",
+  trialing: "In trial",
+  past_due: "Payment past due",
+  unpaid: "Unpaid",
+  canceled: "Canceled",
+  incomplete: "Awaiting payment",
+  incomplete_expired: "Expired",
+  paused: "Paused",
+};
 
 /**
  * Billing - `app.flagon.io/<org>/billing`: the current plan, what it
@@ -39,6 +82,34 @@ export default async function BillingPage({
   const plan = PLANS[planId];
   const billing = billingEnabled();
 
+  // The portal is Stripe's, so it only exists for an org Stripe knows about.
+  // Rendering the button without a customer turned a state that is perfectly
+  // normal - an enterprise org invoiced by agreement, a plan set by hand -
+  // into a red error the person could only discover by clicking.
+  const [row] = await db
+    .select({ customerId: organizations.stripeCustomerId })
+    .from(organizations)
+    .where(eq(organizations.id, org.id))
+    .limit(1);
+  const hasStripeCustomer = Boolean(row?.customerId);
+
+  // Read from Stripe when there is a customer, so what this page says is what
+  // the invoice will say - including for an organization whose terms were
+  // negotiated rather than picked off the pricing page. Best-effort: a Stripe
+  // outage degrades this to the plan description instead of erroring.
+  const summary =
+    billing && row?.customerId ? await getBillingSummary(row.customerId) : null;
+
+  // Enterprise is priced per agreement (priceMonthly is null), so there is no
+  // plan number to print. Reading it off PLANS.pro - which is what this did -
+  // put "$20 per month" under the word Enterprise on a contract customer's own
+  // billing page. A live subscription always wins over both.
+  const priceLine = summary?.subscription
+    ? `${money(summary.subscription.amountCents, summary.subscription.currency)} ${intervalLabel(summary.subscription)}`
+    : plan.priceMonthly === null
+      ? "Custom pricing, billed by agreement"
+      : `$${plan.priceMonthly} per month`;
+
   return (
     <div>
       <p className="text-xs font-medium uppercase tracking-[0.2em] text-teal-400/80">
@@ -62,19 +133,52 @@ export default async function BillingPage({
                 Current plan
               </span>
             </div>
-            <p className="mt-1 text-sm text-zinc-500">
-              {planId === "free"
-                ? "$0 per month"
-                : `$${PLANS.pro.priceMonthly} per month`}
-            </p>
+            <p className="mt-1 text-sm text-zinc-500">{priceLine}</p>
+            {summary?.subscription ? (
+              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
+                <span
+                  className={
+                    ["past_due", "unpaid", "incomplete"].includes(
+                      summary.subscription.status,
+                    )
+                      ? "font-medium text-amber-300"
+                      : "text-zinc-400"
+                  }
+                >
+                  {STATUS_COPY[summary.subscription.status] ??
+                    summary.subscription.status}
+                </span>
+                {summary.subscription.renewsAt ? (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span>
+                      {/* A subscription set to cancel does not "renew" on the
+                          date it ends, and saying so is how someone finds out
+                          too late that they are still being charged. */}
+                      {summary.subscription.cancelAtPeriodEnd
+                        ? `Ends ${dateFormat.format(summary.subscription.renewsAt)}`
+                        : `Renews ${dateFormat.format(summary.subscription.renewsAt)}`}
+                    </span>
+                  </>
+                ) : null}
+                <span aria-hidden>·</span>
+                <span>
+                  {summary.subscription.collection === "send_invoice"
+                    ? "Invoiced by email"
+                    : summary.card
+                      ? `${summary.card.brand.replace(/^\w/, (letter: string) => letter.toUpperCase())} ending ${summary.card.last4}`
+                      : "No payment method on file"}
+                </span>
+              </p>
+            ) : null}
           </div>
           {billing ? (
             <div className="pt-1">
               {planId === "free" ? (
                 <UpgradeButton orgSlug={slug} />
-              ) : (
+              ) : hasStripeCustomer ? (
                 <ManageBillingButton orgSlug={slug} />
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -108,8 +212,13 @@ export default async function BillingPage({
               </Link>
               .
             </>
-          ) : (
+          ) : hasStripeCustomer ? (
             "Payment method, invoices, and cancellation are handled in the billing portal."
+          ) : (
+            // No Stripe customer on a paid plan means nothing was ever charged
+            // through Checkout: an agreement, or a plan set by an operator.
+            // Saying so beats a portal link that cannot open.
+            "This organization is invoiced by agreement rather than through Stripe Checkout, so there is no self-serve portal for it."
           )}
         </p>
       ) : (
