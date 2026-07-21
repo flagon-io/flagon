@@ -35,7 +35,7 @@ export default async function FlagPage({
         {flag.name !== flag.key ? (
           <span className="text-sm text-zinc-400">{flag.name}</span>
         ) : null}
-        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+        <span className="rounded-full border border-white/10 bg-white/4 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
           {flag.type === "object" ? "JSON" : flag.type}
         </span>
       </div>
@@ -60,7 +60,7 @@ export default async function FlagPage({
           name,
         }))}
       />
-      <section className="mt-12 border border-red-500/20 bg-red-500/[0.025] p-5">
+      <section className="mt-12 border border-red-500/20 bg-red-500/2.5 p-5">
         <div className="flex items-center justify-between gap-6">
           <div>
             <h2 className="text-sm font-semibold text-red-300">Danger zone</h2>
