@@ -191,7 +191,7 @@ export function FlagDefinitionEditor({
             {variants.map((variant, index) => (
               <div
                 key={index}
-                className="grid items-start gap-3 border border-white/8 bg-white/[0.02] p-3 md:grid-cols-[1fr_220px_auto]"
+                className="grid items-start gap-3 border border-white/8 bg-white/2 p-3 md:grid-cols-[1fr_220px_auto]"
               >
                 <Field label="Value">
                   <VariantValue
@@ -316,9 +316,9 @@ export function FlagDefinitionEditor({
           {rules.map((rule, index) => (
             <article
               key={index}
-              className="border border-white/10 bg-white/[0.02] shadow-sm shadow-black/20"
+              className="border border-white/10 bg-white/2 shadow-sm shadow-black/20"
             >
-              <header className="flex items-center gap-3 border-b border-white/8 bg-white/[0.025] px-4 py-3">
+              <header className="flex items-center gap-3 border-b border-white/8 bg-white/2.5 px-4 py-3">
                 <span className="rounded border border-teal-500/20 bg-teal-500/8 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-teal-400">
                   {index === 0 ? "If" : "Else if"}
                 </span>

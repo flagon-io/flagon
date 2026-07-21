@@ -21,7 +21,7 @@ export function OverviewEditor({
   const [error, setError] = useState("");
   if (!editing)
     return (
-      <section className="border border-white/10 bg-white/[0.02]">
+      <section className="border border-white/10 bg-white/2">
         <div className="flex items-center border-b border-white/10 px-5 py-3">
           <BookOpen className="mr-2 h-4 w-4 text-zinc-500" />
           <h2 className="text-sm font-semibold text-zinc-200">Overview</h2>
@@ -68,7 +68,7 @@ export function OverviewEditor({
       </section>
     );
   return (
-    <section className="border border-white/10 bg-white/[0.02]">
+    <section className="border border-white/10 bg-white/2">
       <div className="flex items-center gap-1 border-b border-white/10 px-4 py-2">
         <button
           type="button"
