@@ -35,9 +35,9 @@ export default function CatalogDocsPage() {
         Catalog
       </h1>
       <p className={p}>
-        The catalog is the part of {brand.name} that answers &ldquo;what do we
-        have, and who is responsible for it&rdquo;. Every other product attaches
-        to it, so getting the shape right once means nothing downstream has to
+        The catalog is the part of Flagon that answers &ldquo;what do we have,
+        and who is responsible for it&rdquo;. Every other product attaches to
+        it, so getting the shape right once means nothing downstream has to
         reinvent projects, permissions, or ownership.
       </p>
 

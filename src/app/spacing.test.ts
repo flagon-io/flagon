@@ -61,4 +61,48 @@ describe("rendered spacing", () => {
       ).toEqual([]);
     },
   );
+
+  /**
+   * The same bug, one shape further out: an INTERPOLATION fused to the prose
+   * after it, as in "Flagon, Inc.is a very small company". The source had the
+   * space, on the same line, and the compiler took it anyway.
+   *
+   * React marks the boundary between two adjacent text nodes with an empty
+   * comment, which is exactly where an interpolated value meets the text
+   * around it. So a letter on BOTH sides of that marker, with no whitespace on
+   * either, means a space that existed in the source is not in the output.
+   * That needs no dictionary of brand strings and no guess about which
+   * interpolations are prose - the marker only appears where two text nodes
+   * met, and prose either side of it should never collide.
+   */
+  it.skipIf(!existsSync(PRERENDERED))(
+    "never fuses an interpolated value onto the text beside it",
+    () => {
+      // A WORD on the left (optionally ending in a sentence's full stop) and a
+      // word on the right. `$<!-- -->20`, `6<!-- -->.`, and
+      // `security@<!-- -->flagon.io` are correct and deliberate: a value
+      // butting against punctuation or a symbol is normal.
+      //
+      // The full stop has to be preceded by a letter, which is what separates
+      // "Inc.<!-- -->is" (a fused sentence) from "*.<!-- -->flagon.io" (a
+      // wildcard domain that is supposed to read as one token).
+      const pattern = /(?:[A-Za-z]|[A-Za-z]\.)<!-- -->[A-Za-z]/g;
+      const offences: string[] = [];
+
+      for (const file of htmlFiles(PRERENDERED)) {
+        const html = readFileSync(file, "utf8");
+        for (const match of html.matchAll(pattern)) {
+          const context = html
+            .slice(Math.max(0, match.index - 60), match.index + 40)
+            .replace(/\s+/g, " ");
+          offences.push(`${file.replace(process.cwd(), "")}: ...${context}`);
+        }
+      }
+
+      expect(
+        offences,
+        `An interpolated value ran into the next word. Use an explicit {" "}:\n${offences.join("\n")}`,
+      ).toEqual([]);
+    },
+  );
 });

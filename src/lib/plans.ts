@@ -33,6 +33,40 @@ export function usageIsAutoInvoiced(plan: PlanId): boolean {
   return plan === "pro";
 }
 
+/**
+ * How a plan's usage should be PRESENTED. Three modes, because three plans
+ * answer "what did this cost me?" in genuinely different ways:
+ *
+ *   priced      Dollars are the answer. Usage is priced, credit is applied,
+ *               the remainder is billed. Only Pro.
+ *
+ *   capped      There is no bill and there never will be, so the honest frame
+ *               is headroom: a percentage of the allowance, and a cap that
+ *               refuses rather than charges. Only Hobby.
+ *
+ *   contracted  The fee was negotiated up front from usage estimates, so a
+ *               period's metered value is NOT what the customer owes. Showing
+ *               it as money quotes a bill that will never arrive. The honest
+ *               frame is consumption against the agreed envelope.
+ *
+ * The distinction is easy to lose because Enterprise's includedUsageCents is
+ * 0, which means "no self-serve credit", NOT "every unit is billable". Priced
+ * rendering on a contracted plan therefore produces the worst possible page:
+ * a $0.00 subscription line, the full metered value as a subtotal, no credit
+ * against it, and a total the customer has never been asked to pay.
+ *
+ * Cost is still COMPUTED for contracted orgs and frozen into the period
+ * snapshot (billing-periods.server.ts) - a renewal true-up and any internal
+ * margin review read exactly that. It is the DISPLAY that is withheld.
+ */
+export type UsageDisplay = "priced" | "capped" | "contracted";
+
+export function usageDisplay(plan: PlanId): UsageDisplay {
+  if (plan === "pro") return "priced";
+  if (plan === "enterprise") return "contracted";
+  return "capped";
+}
+
 export const PLANS = {
   // NOTE: the id "free" is the stable identifier (database plan column,
   // API enum); "Hobby" is its display name. Renaming the id would be a data

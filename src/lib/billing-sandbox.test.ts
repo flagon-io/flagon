@@ -235,6 +235,150 @@ describe.skipIf(!enabled)("stripe sandbox", () => {
     }
   });
 
+  /**
+   * Discounts, against the real Stripe object graph.
+   *
+   * This is not something a unit test can honestly cover. The coupon hangs off
+   * `discount.source.coupon` on the current API version - it used to be
+   * `discount.coupon` - and getting the expand path wrong fails SILENTLY: the
+   * discount maps to null and the console cheerfully bills a customer on three
+   * free months at full list price. Only Stripe can say whether we read it
+   * correctly.
+   */
+  describe("discounts", () => {
+    const coupons: string[] = [];
+    const subscriptions: string[] = [];
+
+    afterAll(async () => {
+      for (const id of subscriptions) {
+        await stripe.subscriptions.cancel(id).catch(() => {});
+      }
+      for (const id of coupons) {
+        await stripe.coupons.del(id).catch(() => {});
+      }
+    });
+
+    async function subscribeWithCoupon(couponParams: {
+      percent_off?: number;
+      amount_off?: number;
+      currency?: string;
+      duration: "once" | "repeating" | "forever";
+      duration_in_months?: number;
+      name?: string;
+      applies_to?: { products: string[] };
+    }) {
+      const { ensureProPriceId, getBillingSummary } = await import("./billing");
+      const priceId = await ensureProPriceId();
+      const coupon = await stripe.coupons.create(couponParams);
+      coupons.push(coupon.id);
+
+      // A dedicated customer per case: a subscription carries one discount,
+      // and reusing the shared customer would leak state between assertions.
+      const customer = await stripe.customers.create({
+        name: "Flagon discount test",
+        // send_invoice needs a deliverable address, even in the sandbox.
+        email: "sandbox-discount@example.com",
+        metadata: { flagon_test: "1" },
+      });
+      const subscription = await stripe.subscriptions.create({
+        customer: customer.id,
+        items: [{ price: priceId }],
+        discounts: [{ coupon: coupon.id }],
+        // No payment method on a sandbox customer, so let the invoice sit as
+        // a draft rather than failing the whole create on collection.
+        collection_method: "send_invoice",
+        days_until_due: 30,
+      });
+      subscriptions.push(subscription.id);
+
+      const summary = await getBillingSummary(customer.id);
+      return { summary, priceId, customerId: customer.id };
+    }
+
+    it("reads a 100%-off promotion instead of quoting list price", async () => {
+      const { summary } = await subscribeWithCoupon({
+        percent_off: 100,
+        duration: "repeating",
+        duration_in_months: 3,
+        name: "Founding customer",
+      });
+
+      expect(summary?.discount).not.toBeNull();
+      expect(summary?.discount?.label).toBe("Founding customer");
+      expect(summary?.discount?.percentOff).toBe(100);
+      expect(summary?.discount?.durationLabel).toBe("for 3 months");
+      // Repeating coupons carry an end date, which is the difference between
+      // "you pay nothing" and "you pay nothing until October".
+      expect(summary?.discount?.endsAt).toBeInstanceOf(Date);
+
+      // The whole point: list stays $20, the charge is $0.
+      expect(summary?.subscription?.listAmountCents).toBe(2000);
+      expect(summary?.subscription?.amountCents).toBe(0);
+      // Stripe's own arithmetic, when there is an invoice to preview. A freshly
+      // created subscription may have none yet, in which case the preview is
+      // null by design; but if Stripe will quote a number it must be the $0 the
+      // 100%-off coupon produces, never the list price.
+      if (summary?.nextInvoiceCents !== null) {
+        expect(summary?.nextInvoiceCents).toBe(0);
+      }
+    });
+
+    it("reports an unrestricted coupon as reaching usage", async () => {
+      // Unrestricted coupons discount the WHOLE invoice, and
+      // addUsageToInvoice puts metered overage on that same invoice. The
+      // console has to be able to say so.
+      const { summary } = await subscribeWithCoupon({
+        percent_off: 50,
+        duration: "forever",
+      });
+
+      expect(summary?.discount?.scope).toBe("all");
+      expect(summary?.subscription?.amountCents).toBe(1000);
+      expect(summary?.discount?.durationLabel).toBe("forever");
+      // No name set, so it describes itself.
+      expect(summary?.discount?.label).toBe("50% off");
+    });
+
+    it("reports a product-restricted coupon as subscription-only", async () => {
+      const priceId = await (await import("./billing")).ensureProPriceId();
+      const price = await stripe.prices.retrieve(priceId);
+
+      const { summary } = await subscribeWithCoupon({
+        amount_off: 500,
+        currency: "usd",
+        duration: "forever",
+        applies_to: { products: [price.product as string] },
+      });
+
+      // Restricted to the Pro product, so metered usage is billed in full.
+      expect(summary?.discount?.scope).toBe("subscription");
+      expect(summary?.discount?.amountOffCents).toBe(500);
+      expect(summary?.subscription?.amountCents).toBe(1500);
+    });
+
+    it("reports no discount when there is none", async () => {
+      const { ensureProPriceId, getBillingSummary } = await import("./billing");
+      const customer = await stripe.customers.create({
+        name: "Flagon undiscounted test",
+        email: "sandbox-undiscounted@example.com",
+        metadata: { flagon_test: "1" },
+      });
+      const subscription = await stripe.subscriptions.create({
+        customer: customer.id,
+        items: [{ price: await ensureProPriceId() }],
+        collection_method: "send_invoice",
+        days_until_due: 30,
+      });
+      subscriptions.push(subscription.id);
+
+      const summary = await getBillingSummary(customer.id);
+      expect(summary?.discount).toBeNull();
+      // Undiscounted: the two amounts agree, so nothing renders struck through.
+      expect(summary?.subscription?.amountCents).toBe(2000);
+      expect(summary?.subscription?.listAmountCents).toBe(2000);
+    });
+  });
+
   it("verifies webhook signatures and rejects forgeries", async () => {
     const { getStripe } = await import("./billing");
     const secret = "whsec_sandbox_test_secret";

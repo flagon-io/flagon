@@ -14,6 +14,30 @@
 
 html {
   color-scheme: dark;
+
+  /*
+   * Two rules that exist because of one thing: `100vw` INCLUDES the classic
+   * scrollbar, so it is wider than the space content actually occupies.
+   *
+   * BleedBand escapes its centred parent with `w-screen` + a half-width
+   * offset, which leaves it overhanging by half a scrollbar on each side. That
+   * overhang made the document horizontally scrollable, and once a document
+   * scrolls sideways every centred element centres on the SCROLL width rather
+   * than the viewport - so the whole page drew a few pixels left of where it
+   * belonged, on exactly the pages long enough to have a scrollbar.
+   *
+   * `clip` rather than `hidden`: hidden turns the root into a scroll
+   * container, which silently breaks `position: sticky` descendants.
+   */
+  overflow-x: clip;
+
+  /*
+   * Reserve the gutter whether or not the page scrolls, so a short page and a
+   * long one lay out identically. Without it, navigating between the two
+   * shifts everything by a scrollbar's width - which is why this looked like
+   * it "fixed itself" after moving around the site.
+   */
+  scrollbar-gutter: stable;
 }
 
 body {

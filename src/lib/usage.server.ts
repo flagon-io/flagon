@@ -226,6 +226,47 @@ export async function usageSummary(input: {
 }
 
 /**
+ * Quantity per meter in the window, unpriced.
+ *
+ * usageSummary answers the same question and then prices the result, which is
+ * wrong for a contracted organization: the money is not what they owe, and
+ * pricing a year of traffic just to throw the cents away would also apply a
+ * monthly credit across a term that is not a month.
+ *
+ * Meters with no usage are absent rather than zero. Unknown meter ids (a
+ * product retired from the registry) are kept: a contract review has to see
+ * consumption the registry no longer describes, not silently lose it.
+ */
+export async function meterQuantities(input: {
+  orgId: string;
+  window: PeriodWindow;
+  filter?: UsageFilter;
+}): Promise<Map<string, number>> {
+  const rows = await withTenant(input.orgId, (tx) =>
+    tx
+      .select({
+        meter: usageRollups.meter,
+        quantity: sql<number>`sum(${usageRollups.quantity})::bigint`,
+      })
+      .from(usageRollups)
+      .where(
+        and(
+          ...windowConditions(input.orgId, input.window),
+          ...filterConditions(input.filter),
+        ),
+      )
+      .groupBy(usageRollups.meter),
+  );
+
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    const quantity = Number(row.quantity);
+    if (quantity > 0) totals.set(row.meter, quantity);
+  }
+  return totals;
+}
+
+/**
  * Raw day-grain rows for the window: the one query every breakdown and series
  * is derived from. Kept in one place so a filter can never apply to the chart
  * but not the table.
@@ -473,7 +514,24 @@ export async function usageView(input: {
     end: isoDay(bucket.end),
     byGroup: {},
     totalCents: 0,
+    byGroupQuantity: {},
+    totalQuantity: 0,
   }));
+
+  // Quantity first, and independently of cost. A bucket fully covered by the
+  // allowance costs nothing, and folding quantity into the pricing loop below
+  // would drop it from the chart entirely - which is exactly the traffic a
+  // contracted customer most needs to see.
+  for (const entry of perMeter.values()) {
+    for (const [index, groups] of entry.groupQuantities.entries()) {
+      for (const [key, quantity] of groups) {
+        if (quantity <= 0) continue;
+        outBuckets[index].byGroupQuantity[key] =
+          (outBuckets[index].byGroupQuantity[key] ?? 0) + quantity;
+        outBuckets[index].totalQuantity += quantity;
+      }
+    }
+  }
 
   let usageCents = 0;
   for (const [meterId, entry] of perMeter) {

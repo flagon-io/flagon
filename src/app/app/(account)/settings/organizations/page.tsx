@@ -49,7 +49,7 @@ export default async function OrganizationsSettingsPage() {
           </Link>
         </div>
       ) : (
-        <ul className="mt-6 max-w-2xl space-y-2">
+        <ul className="mt-6 space-y-2">
           {orgs.map((org) => (
             <li key={org.id}>
               <Link

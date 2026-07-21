@@ -3,7 +3,6 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { ArrowUpRight } from "lucide-react";
 import { headerPillClass } from "@/components/form-ui";
 import { UserMenu } from "@/components/user-menu";
 import { listEmails } from "@/lib/user-emails";
@@ -81,11 +80,24 @@ export default async function ConsoleLayout({
             />
             <div className="ml-auto flex items-center">
               <div className="flex items-center gap-3">
+                {/* Docs sits FIRST and stays visible on mobile: looking
+                    something up is a thing people do mid-task, while leaving
+                    for the marketing site is not. No arrow on either - the
+                    pill already reads as a destination, and the glyph only
+                    added noise at this size. */}
+                <a
+                  href={marketingHref("/docs")}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={headerPillClass}
+                >
+                  Docs
+                </a>
                 <Link
                   href={marketingHref("/")}
                   className={`${headerPillClass} hidden sm:inline-flex`}
                 >
-                  Return to site <ArrowUpRight className="h-3.5 w-3.5" />
+                  Return to site
                 </Link>
                 <UserMenu />
               </div>

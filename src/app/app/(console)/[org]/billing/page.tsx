@@ -8,6 +8,7 @@ import { db } from "@/db/client";
 import { organizations } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { billingEnabled, getBillingSummary } from "@/lib/billing";
+import { coversUsage } from "@/lib/discounts";
 import { PLANS, isPlanId, type PlanId } from "@/lib/plans";
 import { marketingHref } from "@/lib/urls";
 import { resolveOrg } from "../resolve-org";
@@ -104,11 +105,26 @@ export default async function BillingPage({
   // plan number to print. Reading it off PLANS.pro - which is what this did -
   // put "$20 per month" under the word Enterprise on a contract customer's own
   // billing page. A live subscription always wins over both.
+  //
+  // amountCents is now the DISCOUNTED figure. Printing the list price at
+  // someone on three free months told them they were paying $20 a month right
+  // up until they checked their statement and found they were not.
   const priceLine = summary?.subscription
     ? `${money(summary.subscription.amountCents, summary.subscription.currency)} ${intervalLabel(summary.subscription)}`
     : plan.priceMonthly === null
       ? "Custom pricing, billed by agreement"
       : `$${plan.priceMonthly} per month`;
+
+  // Only worth striking through when the discount actually moved the number.
+  const discount = summary?.discount ?? null;
+  const listPrice =
+    summary?.subscription &&
+    summary.subscription.listAmountCents > summary.subscription.amountCents
+      ? money(
+          summary.subscription.listAmountCents,
+          summary.subscription.currency,
+        )
+      : null;
 
   return (
     <div>
@@ -133,7 +149,41 @@ export default async function BillingPage({
                 Current plan
               </span>
             </div>
-            <p className="mt-1 text-sm text-zinc-500">{priceLine}</p>
+            <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-sm text-zinc-500">
+              {listPrice ? (
+                <span className="text-zinc-600 line-through">{listPrice}</span>
+              ) : null}
+              <span className={listPrice ? "text-zinc-300" : undefined}>
+                {priceLine}
+              </span>
+            </p>
+
+            {/* A discount gets its own line with its DURATION spelled out.
+                Someone who cannot tell a permanent discount from a trial one
+                finds out the hard way, on the first invoice at full price. */}
+            {discount ? (
+              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <span className="rounded-full border border-teal-500/40 px-2 py-0.5 font-medium text-teal-300">
+                  {discount.label}
+                  {discount.durationLabel ? ` ${discount.durationLabel}` : ""}
+                </span>
+                {discount.endsAt ? (
+                  <span className="text-zinc-500">
+                    Ends {dateFormat.format(discount.endsAt)}
+                  </span>
+                ) : null}
+                {/* Which lines it reaches. addUsageToInvoice attaches metered
+                    overage to the same invoice, so an unrestricted coupon
+                    discounts usage too - worth saying out loud rather than
+                    discovering at scale. */}
+                <span className="text-zinc-500">
+                  {coversUsage(discount)
+                    ? "Applies to usage as well as the subscription"
+                    : "Applies to the subscription only"}
+                </span>
+              </p>
+            ) : null}
+
             {summary?.subscription ? (
               <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
                 <span
@@ -169,6 +219,23 @@ export default async function BillingPage({
                       ? `${summary.card.brand.replace(/^\w/, (letter: string) => letter.toUpperCase())} ending ${summary.card.last4}`
                       : "No payment method on file"}
                 </span>
+                {/* The one figure on this page that is not derived locally:
+                    Stripe's own preview, with proration, discounts, taxes and
+                    credit balance already in it. For anyone on a promotion it
+                    is the number they actually want, and the only one we can
+                    promise matches the charge. */}
+                {summary.nextInvoiceCents !== null ? (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span>
+                      Next invoice{" "}
+                      {money(
+                        summary.nextInvoiceCents,
+                        summary.subscription.currency,
+                      )}
+                    </span>
+                  </>
+                ) : null}
               </p>
             ) : null}
           </div>

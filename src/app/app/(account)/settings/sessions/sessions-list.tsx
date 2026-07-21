@@ -61,7 +61,7 @@ export function SessionsList({
   }
 
   return (
-    <div className="mt-6 max-w-2xl space-y-6">
+    <div className="mt-6 space-y-6">
       <p className="text-sm leading-6 text-zinc-400">
         This is a list of devices that are signed in to your account. Revoke any
         sessions that you do not recognize.

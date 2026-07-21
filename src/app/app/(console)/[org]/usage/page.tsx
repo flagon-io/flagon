@@ -2,9 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { eq } from "drizzle-orm";
+import { db } from "@/db/client";
+import { organizations } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { billingEnabled } from "@/lib/billing";
+import { billingEnabled, getBillingSummary } from "@/lib/billing";
 import { formatPeriod, isoDay } from "@/lib/billing-period";
+import { contractConsumption } from "@/lib/contracts.server";
+import { PACE_COPY, formatTerm } from "@/lib/contracts";
+import { coversUsage, discountedTotal } from "@/lib/discounts";
 import {
   breakdownFromSnapshot,
   getPeriod,
@@ -23,7 +29,7 @@ import {
   formatQuantity,
   getMeter,
 } from "@/lib/meters";
-import { PLANS } from "@/lib/plans";
+import { PLANS, usageDisplay } from "@/lib/plans";
 import { appPath } from "@/lib/urls";
 import { parseUsageQuery } from "@/lib/usage-params";
 import { ORG_LEVEL, cumulate, type UsageBucket } from "@/lib/usage-shared";
@@ -83,7 +89,18 @@ function foldSeries(
         else other += cents;
       }
       if (other > 0) byGroup[OTHER_KEY] = other;
-      return { ...bucket, byGroup };
+
+      // Quantity folds by the same key set, so the two views of one bucket can
+      // never disagree about which series got lumped into "Other".
+      const byGroupQuantity: Record<string, number> = {};
+      let otherQuantity = 0;
+      for (const [key, quantity] of Object.entries(bucket.byGroupQuantity)) {
+        if (kept.has(key)) byGroupQuantity[key] = quantity;
+        else otherQuantity += quantity;
+      }
+      if (otherQuantity > 0) byGroupQuantity[OTHER_KEY] = otherQuantity;
+
+      return { ...bucket, byGroup, byGroupQuantity };
     }),
   };
 }
@@ -199,14 +216,53 @@ export default async function UsagePage({
     })),
   );
 
+  // How this plan's usage should be FRAMED: priced, capped, or contracted.
+  // Read from the plan the period was billed on, not today's, so looking back
+  // at a period from before an upgrade still renders the way it was billed.
+  const display = usageDisplay(planId as Parameters<typeof usageDisplay>[0]);
+
+  // Contracted orgs measure against the agreement, and the agreement covers
+  // the whole TERM, not this period: consumption is drawn down cumulatively so
+  // a busy summer and a quiet winter net out (see src/lib/contracts.ts).
+  const contracted =
+    display === "contracted"
+      ? await contractConsumption({ orgId: org.id })
+      : null;
+
+  // The discount in force, so "Total this period" cannot claim a customer on
+  // three free months owes $20. Only meaningful where money is shown at all,
+  // and the next-invoice preview is skipped: this page does not print it.
+  const [customerRow] = billing
+    ? await db
+        .select({ customerId: organizations.stripeCustomerId })
+        .from(organizations)
+        .where(eq(organizations.id, org.id))
+        .limit(1)
+    : [];
+  const discount =
+    display === "priced" && customerRow?.customerId
+      ? ((
+          await getBillingSummary(customerRow.customerId, {
+            includeNextInvoice: false,
+          })
+        )?.discount ?? null)
+      : null;
+
   const creditPercent = includedCreditCents
     ? Math.min(
         100,
         Math.round((totals.creditAppliedCents / includedCreditCents) * 100),
       )
     : 0;
-  const subscriptionCents = billing ? (plan.priceMonthly ?? 0) * 100 : 0;
-  const totalCents = subscriptionCents + totals.overageCents;
+  // priceMonthly is null on contract pricing, and `?? 0` turned that into a
+  // confident "$0.00 subscription" line on the bill of the one customer type
+  // paying the most. Only a plan that actually HAS a price contributes one.
+  const subscriptionCents =
+    billing && plan.priceMonthly !== null ? plan.priceMonthly * 100 : 0;
+  const { discountCents, totalCents } = discountedTotal(
+    { subscriptionCents, usageCents: totals.overageCents },
+    discount,
+  );
 
   const usedMeters = new Map(totals.lines.map((line) => [line.meterId, line]));
   const meters = activeMeters().filter(
@@ -284,66 +340,80 @@ export default async function UsagePage({
         />
       </div>
 
-      {/* Included credit.
-          Hobby gets a different frame, not a different number. Its allowance
-          is a CAP, not money: it is never invoiced, so "included credit" spent
-          against "billed on top" describes a transaction that cannot occur,
-          and putting a dollar figure on it invites the reader to compare it
-          with Pro's credit, which is real. A percentage says the only thing
-          that is actually true and actionable: how much is left. */}
-      <div className="mt-6 border border-white/10 bg-white/2 p-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          {planId === "free" ? (
-            <>
-              <div>
-                <div className="text-sm text-zinc-400">Allowance used</div>
-                <div className="mt-1 text-3xl font-semibold tracking-tight tabular-nums text-zinc-100">
-                  {Math.round(creditPercent)}%
+      {/* What this period means, framed three different ways.
+
+          Contracted: consumption against the negotiated envelope, in units,
+          with no money anywhere. The fee was agreed up front from usage
+          estimates, so metered value is not a bill and rendering it as one
+          quotes a charge that will never arrive.
+
+          Hobby: a percentage. Its allowance is a CAP, not money: it is never
+          invoiced, so "included credit" spent against "billed on top" describes
+          a transaction that cannot occur, and putting a dollar figure on it
+          invites comparison with Pro's credit, which is real.
+
+          Pro: dollars, because dollars are the answer. */}
+      {display === "contracted" ? (
+        <ContractPanel contracted={contracted} />
+      ) : (
+        <div className="mt-6 border border-white/10 bg-white/2 p-6">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            {display === "capped" ? (
+              <>
+                <div>
+                  <div className="text-sm text-zinc-400">Allowance used</div>
+                  <div className="mt-1 text-3xl font-semibold tracking-tight tabular-nums text-zinc-100">
+                    {Math.round(creditPercent)}%
+                  </div>
                 </div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm text-zinc-400">Billed this period</div>
-                <div className="mt-1 text-3xl font-semibold tracking-tight text-zinc-500">
-                  Never
+                <div className="text-right">
+                  <div className="text-sm text-zinc-400">
+                    Billed this period
+                  </div>
+                  <div className="mt-1 text-3xl font-semibold tracking-tight text-zinc-500">
+                    Never
+                  </div>
                 </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div>
-                <div className="text-sm text-zinc-400">Included credit</div>
-                <div className="mt-1 text-3xl font-semibold tracking-tight tabular-nums text-zinc-100">
-                  {formatCents(totals.creditAppliedCents)}
-                  <span className="text-lg font-normal text-zinc-500">
-                    {" / "}
-                    {formatCents(includedCreditCents)}
-                  </span>
+              </>
+            ) : (
+              <>
+                <div>
+                  <div className="text-sm text-zinc-400">Included credit</div>
+                  <div className="mt-1 text-3xl font-semibold tracking-tight tabular-nums text-zinc-100">
+                    {formatCents(totals.creditAppliedCents)}
+                    <span className="text-lg font-normal text-zinc-500">
+                      {" / "}
+                      {formatCents(includedCreditCents)}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm text-zinc-400">
-                  {totals.overageCents > 0
-                    ? "Billed on top"
-                    : "Beyond included"}
+                <div className="text-right">
+                  <div className="text-sm text-zinc-400">
+                    {totals.overageCents > 0
+                      ? "Billed on top"
+                      : "Beyond included"}
+                  </div>
+                  <div
+                    className={`mt-1 text-3xl font-semibold tracking-tight tabular-nums ${
+                      totals.overageCents > 0
+                        ? "text-zinc-100"
+                        : "text-zinc-500"
+                    }`}
+                  >
+                    {formatCents(totals.overageCents)}
+                  </div>
                 </div>
-                <div
-                  className={`mt-1 text-3xl font-semibold tracking-tight tabular-nums ${
-                    totals.overageCents > 0 ? "text-zinc-100" : "text-zinc-500"
-                  }`}
-                >
-                  {formatCents(totals.overageCents)}
-                </div>
-              </div>
-            </>
-          )}
+              </>
+            )}
+          </div>
+          <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-white/5">
+            <div
+              className="h-full rounded-full bg-teal-500 transition-all"
+              style={{ width: `${creditPercent}%` }}
+            />
+          </div>
         </div>
-        <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-white/5">
-          <div
-            className="h-full rounded-full bg-teal-500 transition-all"
-            style={{ width: `${creditPercent}%` }}
-          />
-        </div>
-      </div>
+      )}
 
       {/* Consumption over the period */}
       <div className="mt-6 border border-white/10 bg-white/2 p-6">
@@ -355,7 +425,9 @@ export default async function UsagePage({
             <p className="mt-1 text-xs text-zinc-500">
               {query.cumulative
                 ? "Running total across the period"
-                : "Cost per bucket, allowance drawn down in order"}
+                : display === "contracted"
+                  ? "Consumption per bucket"
+                  : "Cost per bucket, allowance drawn down in order"}
             </p>
           </div>
           <ChartControls
@@ -369,6 +441,7 @@ export default async function UsagePage({
             series={folded.series}
             colors={colors}
             cumulative={query.cumulative}
+            unit={display === "contracted" ? "quantity" : "cents"}
           />
         </div>
       </div>
@@ -384,7 +457,12 @@ export default async function UsagePage({
                 : "Product"}
           </div>
           <div className="w-40 text-right">Usage</div>
-          <div className="w-24 text-right">Charge</div>
+          {/* Dropped, not zeroed, on a contracted plan: a "Charge" column full
+              of dollar figures nobody will be invoiced for is worse than no
+              column, and $0.00 would be an outright lie. */}
+          {display === "contracted" ? null : (
+            <div className="w-24 text-right">Charge</div>
+          )}
         </div>
 
         {rows.length ? (
@@ -406,9 +484,11 @@ export default async function UsagePage({
               <div className="w-40 text-right text-sm tabular-nums text-zinc-300">
                 {formatQuantity(row.quantity)}
               </div>
-              <div className="w-24 text-right text-sm font-medium tabular-nums text-zinc-100">
-                {formatCents(row.costCents)}
-              </div>
+              {display === "contracted" ? null : (
+                <div className="w-24 text-right text-sm font-medium tabular-nums text-zinc-100">
+                  {formatCents(row.costCents)}
+                </div>
+              )}
             </div>
           ))
         ) : (
@@ -424,7 +504,9 @@ export default async function UsagePage({
         <div className="flex items-center gap-4 border-b border-white/10 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
           <div className="min-w-0 flex-1">Meter</div>
           <div className="w-40 text-right">Usage</div>
-          <div className="w-24 text-right">Charge</div>
+          {display === "contracted" ? null : (
+            <div className="w-24 text-right">Charge</div>
+          )}
         </div>
         {meters.map((meter) => {
           const line = usedMeters.get(meter.id);
@@ -441,7 +523,14 @@ export default async function UsagePage({
               <div className="min-w-0 flex-1">
                 <div className="text-sm text-zinc-100">{meter.label}</div>
                 <div className="mt-0.5 text-xs text-zinc-500">
-                  {PRODUCTS[meter.product].label} · {formatMeterRate(meter)}
+                  {PRODUCTS[meter.product].label}
+                  {/* The published rate is not what a contracted customer
+                      pays - their price was negotiated - so quoting it here
+                      would invite them to multiply it out and arrive at a
+                      number that is not their bill. */}
+                  {display === "contracted"
+                    ? ` · ${meter.unit}`
+                    : ` · ${formatMeterRate(meter)}`}
                 </div>
               </div>
               <div className="w-40 text-right text-sm tabular-nums text-zinc-300">
@@ -459,73 +548,118 @@ export default async function UsagePage({
                     <span className="text-zinc-600">{meter.unit}</span>
                   </>
                 )}
-                {billable > 0 ? (
+                {billable > 0 && display !== "contracted" ? (
                   <div className="mt-0.5 text-[11px] text-amber-300/80">
                     {formatQuantity(billable)} billable
                   </div>
                 ) : null}
               </div>
-              <div
-                className={`w-24 text-right text-sm tabular-nums ${
-                  line?.costCents
-                    ? "font-medium text-zinc-100"
-                    : "text-zinc-600"
-                }`}
-              >
-                {formatCents(line?.costCents ?? 0)}
-              </div>
+              {display === "contracted" ? null : (
+                <div
+                  className={`w-24 text-right text-sm tabular-nums ${
+                    line?.costCents
+                      ? "font-medium text-zinc-100"
+                      : "text-zinc-600"
+                  }`}
+                >
+                  {formatCents(line?.costCents ?? 0)}
+                </div>
+              )}
             </div>
           );
         })}
 
-        {/* Where the money goes, in the order it's charged. */}
-        <dl className="space-y-2 px-4 py-5 text-sm">
-          {billing ? (
+        {/* Where the money goes, in the order it's charged.
+
+            Absent entirely on a contracted plan. Every line in it - a
+            subscription price that is not their price, a credit that is not
+            their credit, a total nobody will invoice - would be wrong, and
+            zeroing them would be wrong more confidently. */}
+        {display === "contracted" ? null : (
+          <dl className="space-y-2 px-4 py-5 text-sm">
+            {billing ? (
+              <div className="flex justify-between">
+                <dt className="text-zinc-400">Subscription ({plan.name})</dt>
+                <dd className="tabular-nums text-zinc-200">
+                  {formatCents(subscriptionCents)}
+                </dd>
+              </div>
+            ) : null}
             <div className="flex justify-between">
-              <dt className="text-zinc-400">Subscription ({plan.name})</dt>
+              <dt className="text-zinc-400">Usage subtotal</dt>
               <dd className="tabular-nums text-zinc-200">
-                {formatCents(subscriptionCents)}
+                {formatCents(totals.usageCents)}
               </dd>
             </div>
-          ) : null}
-          <div className="flex justify-between">
-            <dt className="text-zinc-400">Usage subtotal</dt>
-            <dd className="tabular-nums text-zinc-200">
-              {formatCents(totals.usageCents)}
-            </dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-zinc-400">
-              Included usage credit ({plan.name})
-            </dt>
-            <dd className="tabular-nums text-teal-300">
-              -{formatCents(totals.creditAppliedCents)}
-            </dd>
-          </div>
-          <div className="flex justify-between border-t border-white/10 pt-3 text-base">
-            <dt className="font-medium text-zinc-100">
-              {isFrozen
-                ? "Invoiced"
-                : billing
-                  ? "Total this period"
-                  : "Would be billed"}
-            </dt>
-            <dd className="font-semibold tabular-nums text-zinc-100">
-              {formatCents(totalCents)}
-            </dd>
-          </div>
-        </dl>
+            <div className="flex justify-between">
+              <dt className="text-zinc-400">
+                Included usage credit ({plan.name})
+              </dt>
+              <dd className="tabular-nums text-teal-300">
+                -{formatCents(totals.creditAppliedCents)}
+              </dd>
+            </div>
+            {/* A promotion is its OWN line, never folded into the credit above.
+                They are different things - one is what the plan includes, the
+                other is a discount that will expire - and a customer has to be
+                able to see both to understand what happens when it ends. */}
+            {discount && discountCents > 0 ? (
+              <div className="flex justify-between">
+                <dt className="text-zinc-400">
+                  {discount.label}
+                  {discount.durationLabel ? ` ${discount.durationLabel}` : ""}
+                  {!coversUsage(discount) && totals.overageCents > 0 ? (
+                    <span className="ml-1.5 text-xs text-zinc-500">
+                      (subscription only)
+                    </span>
+                  ) : null}
+                </dt>
+                <dd className="tabular-nums text-teal-300">
+                  -{formatCents(discountCents)}
+                </dd>
+              </div>
+            ) : null}
+            <div className="flex justify-between border-t border-white/10 pt-3 text-base">
+              <dt className="font-medium text-zinc-100">
+                {isFrozen
+                  ? "Invoiced"
+                  : billing
+                    ? "Total this period"
+                    : "Would be billed"}
+              </dt>
+              <dd className="font-semibold tabular-nums text-zinc-100">
+                {formatCents(totalCents)}
+              </dd>
+            </div>
+          </dl>
+        )}
       </div>
 
       {isFiltered ? (
         <p className="mt-4 text-xs text-zinc-500">
           The totals above cover the whole period. Filters narrow the chart and
-          the breakdown, not what gets billed.
+          the breakdown, not what{" "}
+          {display === "contracted"
+            ? "counts toward the agreement"
+            : "gets billed"}
+          .
         </p>
       ) : null}
 
       <p className="mt-4 text-sm leading-6 text-zinc-500">
-        {planId === "pro" ? (
+        {display === "contracted" ? (
+          <>
+            {/* No dollar figure anywhere for a contracted organization. The
+                fee was agreed up front from usage estimates, so a metered
+                total is not a bill and showing one as if it were invites
+                someone to budget against a number we will never send. */}
+            Your plan is priced by agreement, so nothing here is charged
+            automatically. Usage is tracked against the volumes in your
+            contract, measured across the whole term rather than month by month,
+            and we will reach out to coordinate before anything exceeds what was
+            agreed.
+          </>
+        ) : planId === "pro" ? (
           <>
             Pro includes {formatCents(includedCreditCents)} of usage each
             period: your subscription comes back as credit, and only what
@@ -555,6 +689,137 @@ export default async function UsagePage({
           </>
         )}
       </p>
+    </div>
+  );
+}
+
+const PACE_TONE: Record<string, string> = {
+  under: "border-white/10 text-zinc-400",
+  on: "border-teal-500/40 text-teal-300",
+  // Amber, not red: consuming ahead of estimate is a conversation to have, not
+  // a failure. Nothing is refused and nothing is auto-charged.
+  over: "border-amber-500/40 text-amber-300",
+};
+
+/**
+ * Consumption against the negotiated agreement. The contracted plan's answer
+ * to "what did this cost me?", which is: that is not the question your plan
+ * asks. No money appears here at any point.
+ *
+ * The envelope is TERM-WIDE and drawn down cumulatively, so the headline pair
+ * is consumption against elapsed term. That is what makes a seasonal customer
+ * legible: 58% of the volume against 61% of the year is exactly on plan, and a
+ * monthly frame would have called the same customer a problem in July.
+ */
+function ContractPanel({
+  contracted,
+}: {
+  contracted: Awaited<ReturnType<typeof contractConsumption>>;
+}) {
+  // No agreement on file is an ordinary state - paperwork not entered yet, or
+  // an org between terms - so it says so plainly instead of erroring or, worse,
+  // falling back to the priced view this plan must never see.
+  if (!contracted) {
+    return (
+      <div className="mt-6 border border-white/10 bg-white/2 p-6">
+        <div className="text-sm text-zinc-400">Contracted plan</div>
+        <p className="mt-2 text-sm leading-6 text-zinc-500">
+          Usage is tracked against your agreement. The contracted volumes
+          aren&apos;t recorded here yet, so this page shows consumption on its
+          own for now.
+        </p>
+      </div>
+    );
+  }
+
+  const { status } = contracted;
+  const elapsed = Math.round(status.elapsedPercent);
+
+  return (
+    <div className="mt-6 border border-white/10 bg-white/2 p-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <div className="text-sm text-zinc-400">Contract usage</div>
+        <div className="text-xs text-zinc-500">
+          {formatTerm(status.term)} · {elapsed}% of term elapsed
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-5">
+        {status.envelopes.map((envelope) => {
+          const used = Math.round(envelope.usedPercent ?? 0);
+          return (
+            <div key={envelope.meter}>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <div className="text-sm text-zinc-300">{envelope.label}</div>
+                <div className="text-sm tabular-nums text-zinc-100">
+                  {formatQuantity(envelope.used)}
+                  {envelope.contracted !== null ? (
+                    <span className="text-zinc-500">
+                      {" / "}
+                      {formatQuantity(envelope.contracted)} {envelope.unit}
+                    </span>
+                  ) : (
+                    <span className="text-zinc-500"> {envelope.unit}</span>
+                  )}
+                </div>
+              </div>
+
+              {envelope.contracted !== null ? (
+                <>
+                  <div className="relative mt-2 h-2 w-full overflow-hidden rounded-full bg-white/5">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        used > 100 ? "bg-amber-400" : "bg-teal-500"
+                      }`}
+                      style={{ width: `${Math.min(used, 100)}%` }}
+                    />
+                    {/* Where the term is. A bar read without it says nothing:
+                        70% consumed is reassuring in November and alarming in
+                        February, and only the marker tells them apart. */}
+                    <div
+                      aria-hidden
+                      className="absolute inset-y-0 w-px bg-white/50"
+                      style={{ left: `${Math.min(elapsed, 100)}%` }}
+                    />
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+                    <span>{used}% of contract</span>
+                    {envelope.pace ? (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 ${
+                          PACE_TONE[envelope.pace] ?? PACE_TONE.on
+                        }`}
+                      >
+                        {PACE_COPY[envelope.pace]}
+                      </span>
+                    ) : null}
+                    {envelope.projected !== null ? (
+                      // Explicitly hedged. A linear projection is the wrong
+                      // lens on seasonal traffic, which is the traffic this
+                      // whole model exists to absorb, so it never leads.
+                      <span>
+                        {formatQuantity(envelope.projected)} by term end at the
+                        current pace
+                      </span>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <p className="mt-1.5 text-xs text-zinc-500">
+                  Not covered by a contracted volume. Recorded here so it can be
+                  reviewed at renewal.
+                </p>
+              )}
+            </div>
+          );
+        })}
+
+        {status.envelopes.length ? null : (
+          <p className="text-sm text-zinc-500">
+            No usage recorded against this agreement yet.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

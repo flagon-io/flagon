@@ -5,8 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { brand } from "@/lib/brand";
 import { FlagonMark } from "@/lib/logo";
-import { ArrowUpRight } from "lucide-react";
-import { subtleButtonClass } from "@/components/form-ui";
+import { headerPillClass } from "@/components/form-ui";
 import { SiteBottomBar } from "@/components/site-bottom-bar";
 import { UserMenu } from "@/components/user-menu";
 import { listEmails } from "@/lib/user-emails";
@@ -43,11 +42,22 @@ export default async function AccountLayout({
             </span>
           </Link>
           <div className="flex items-center gap-3">
+            {/* The same two pills as the console header. This used to be a
+                squared-off subtle button, which made the identical action look
+                like different chrome depending on which surface you were on. */}
+            <a
+              href={marketingHref("/docs")}
+              target="_blank"
+              rel="noreferrer"
+              className={headerPillClass}
+            >
+              Docs
+            </a>
             <Link
               href={marketingHref("/")}
-              className={`${subtleButtonClass} gap-1.5 text-xs`}
+              className={`${headerPillClass} hidden sm:inline-flex`}
             >
-              Return to site <ArrowUpRight className="h-3.5 w-3.5" />
+              Return to site
             </Link>
             <UserMenu />
           </div>

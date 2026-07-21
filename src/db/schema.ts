@@ -645,6 +645,55 @@ export const billingPeriodLines = pgTable(
 );
 
 /**
+ * The negotiated envelope for a contracted organization
+ * (drizzle/0030_org_contracts.sql).
+ *
+ * Enterprise pricing is fixed up front from usage estimates, so metered value
+ * is not what the customer owes. This row is what the contracted usage view
+ * reads instead of dollars: volume agreed for the whole term, drawn down
+ * cumulatively across it, so a heavy summer and a quiet winter net out
+ * exactly as the agreement intends.
+ *
+ * Product data: tenant-scoped RLS, query through withTenant.
+ */
+export const orgContracts = pgTable(
+  "org_contracts",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Inclusive day window, matching the usage_rollups grain. */
+    termStart: date("term_start").notNull(),
+    termEnd: date("term_end").notNull(),
+    /**
+     * Contracted volume per meter for the whole term, keyed by meter id. Same
+     * shape as PLANS[plan].meterAllowances: a contract is a plan instance for
+     * one organization. Quantity, never cents - re-pricing a meter must not
+     * change what the agreement covered.
+     */
+    meterAllowances: jsonb("meter_allowances")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    note: text("note"),
+    /** active | expired | void - see the migration. */
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("org_contracts_org_term_idx").on(t.organizationId, t.termStart),
+  ],
+);
+
+/**
  * All email addresses a user owns (drizzle/0002_user_emails.sql). Source of
  * truth for multi-email; "user".email mirrors the primary row via hooks in
  * src/lib/auth.ts. Global auth table: no RLS, no org scope.

@@ -113,7 +113,7 @@ export function EmailsPanel({
   }
 
   return (
-    <div className="mt-6 max-w-2xl space-y-6">
+    <div className="mt-6 space-y-6">
       <p className="text-sm leading-6 text-zinc-400">
         Emails you can use to sign in to your account and where {brand.name}
         {" sends"} notifications. Any verified address works at sign-in.

@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Check, Gauge, Puzzle, ShieldCheck, Split } from "lucide-react";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  Gauge,
+  Puzzle,
+  ShieldCheck,
+  Split,
+} from "lucide-react";
 import { brand } from "@/lib/brand";
 import { appHref } from "@/lib/urls";
 import { BleedBand } from "@/components/bleed-band";
@@ -51,6 +59,64 @@ const capabilities = [
   "Full REST API and OpenAPI spec",
   "Self-host the whole thing, source-available",
 ] as const;
+
+/**
+ * Where to send someone who is sold: ours first, then the standard itself.
+ *
+ * The spec link is deliberately present rather than hidden. "No proprietary
+ * SDK" is the page's central claim, and a claim like that is worth more when
+ * the reader can go read the standard without our help.
+ */
+const reading = [
+  {
+    href: "/docs/getting-started",
+    title: "Getting started",
+    body: "Create a flag, get a token, and read a value from your app.",
+    external: false,
+  },
+  {
+    href: "/docs/feature-flags",
+    title: "Feature Flags documentation",
+    body: "Targeting rules, segments, rollouts, caching, and the SDK setup.",
+    external: false,
+  },
+  {
+    href: "https://openfeature.dev",
+    title: "OpenFeature and OFREP",
+    body: "The vendor-neutral standard and the evaluation protocol we serve.",
+    external: true,
+  },
+] as const;
+
+function ReadingRow({
+  title,
+  body,
+  external,
+}: {
+  title: string;
+  body: string;
+  external: boolean;
+}) {
+  return (
+    <>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-zinc-200">{title}</p>
+        <p className="mt-1 text-sm leading-6 text-zinc-500">{body}</p>
+      </div>
+      {external ? (
+        <ArrowUpRight
+          className="h-4 w-4 shrink-0 text-zinc-600 transition group-hover:text-teal-400"
+          aria-hidden
+        />
+      ) : (
+        <ArrowRight
+          className="h-4 w-4 shrink-0 text-zinc-600 transition group-hover:text-teal-400"
+          aria-hidden
+        />
+      )}
+    </>
+  );
+}
 
 export default function FeatureFlagsProductPage() {
   return (
@@ -108,11 +174,9 @@ export default function FeatureFlagsProductPage() {
       </BleedBand>
 
       <div className="mx-auto w-full max-w-7xl px-6 py-20 sm:px-12 lg:px-20">
-        {/* grid-cols-1 is not redundant: a grid item defaults to min-width:auto,
-            so the code block below refuses to shrink under its longest line and
-            widens the whole column past the viewport, overflow-x-auto
-            notwithstanding. Tailwind's grid-cols-1 is minmax(0,1fr), which is
-            what actually lets it shrink and scroll inside its own box. */}
+        {/* minmax(0,1fr) on both tracks, not the default 1fr: a grid item's
+            min-width is auto, so any long unbroken string inside a column
+            widens the whole grid past the viewport rather than wrapping. */}
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div>
             <h2 className="text-2xl font-semibold tracking-tight text-zinc-100">
@@ -134,40 +198,45 @@ export default function FeatureFlagsProductPage() {
             </ul>
           </div>
 
+          {/* This column used to carry an integration snippet, which made the
+              page start explaining OFREP - the manual, on the page whose job is
+              the argument. Anyone convinced enough to want the code wants the
+              documentation, not an excerpt of it, so the column now hands them
+              off instead of teaching. */}
           <div>
             <h2 className="text-2xl font-semibold tracking-tight text-zinc-100">
-              Three lines to your first flag
+              Built on a standard, not our SDK
             </h2>
             <p className="mt-3 text-sm leading-6 text-zinc-400">
-              Install the standard SDK, point it at {brand.name}, and read a
-              value. Always with a default, so a flag service can never become a
-              hard dependency of your application starting.
+              You install an OpenFeature SDK and point it at Flagon over OFREP,
+              the protocol&apos;s remote evaluation spec. Both are open and
+              neither is ours, so the integration you write is portable by
+              construction.
             </p>
-            <pre className="mt-6 overflow-x-auto border border-white/10 bg-black/30 p-5 text-[13px] leading-6 text-zinc-300">
-              <code>{`import { OpenFeature } from "@openfeature/web-sdk";
-import { OFREPWebProvider } from "@openfeature/ofrep-web-provider";
 
-await OpenFeature.setProviderAndWait(
-  new OFREPWebProvider({
-    baseUrl: "${brand.apiUrl}/ofrep/v1",
-    headers: [["Authorization", \`Bearer \${TOKEN}\`]],
-  }),
-);
-
-const enabled = OpenFeature.getClient()
-  .getBooleanValue("new-checkout", false);`}</code>
-            </pre>
-            <p className="mt-4 text-sm leading-6 text-zinc-500">
-              Server SDKs work the same way, evaluating against a per-request
-              context. See the{" "}
-              <Link
-                href="/docs/feature-flags"
-                className="text-teal-400 transition hover:text-teal-300 hover:underline"
-              >
-                Feature Flags documentation
-              </Link>{" "}
-              for targeting, segments, and caching.
-            </p>
+            <ul className="mt-6 divide-y divide-white/5 border border-white/10">
+              {reading.map((item) => (
+                <li key={item.href}>
+                  {item.external ? (
+                    <a
+                      href={item.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group flex items-center gap-4 px-5 py-4 transition hover:bg-white/2"
+                    >
+                      <ReadingRow {...item} />
+                    </a>
+                  ) : (
+                    <Link
+                      href={item.href}
+                      className="group flex items-center gap-4 px-5 py-4 transition hover:bg-white/2"
+                    >
+                      <ReadingRow {...item} />
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       </div>

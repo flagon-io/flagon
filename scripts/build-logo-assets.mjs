@@ -49,7 +49,18 @@ ${pathTags}
  * The previous avatars hardcoded a translate for the OLD art's centre, so any
  * change to the mark left it sitting off-centre inside the tile.
  */
-function avatar({ background, stroke, inset = 0.6 }) {
+/**
+ * How much of the tile the mark occupies, as a fraction of its longest side.
+ *
+ * 0.4, not the 0.6 this started at. An avatar is displayed at 20-40px in a
+ * comment thread and as a favicon-sized dot in a repo list, and at that size a
+ * mark crowding its tile reads as a smudge with no silhouette. Padding is what
+ * makes the shape legible when it is tiny, which is the only size an avatar is
+ * ever actually seen at.
+ */
+const AVATAR_INSET = 0.4;
+
+function avatar({ background, stroke, inset = AVATAR_INSET }) {
   const cx = bounds.x + bounds.width / 2;
   const cy = bounds.y + bounds.height / 2;
   const scale = (64 * inset) / Math.max(bounds.width, bounds.height);
@@ -73,6 +84,11 @@ const tealTile = `<defs>
 
 const outputs = [
   ["src/app/icon.svg", icon],
+  // The general-purpose mark. It carried HAND-COPIED path data from an older
+  // revision, so the site's own /flagon.svg was still the previous cup while
+  // everything generated had moved on. Nothing that draws the mark should be
+  // maintained by hand, including this.
+  ["public/flagon.svg", icon],
   [
     ".github/avatar-teal.svg",
     avatar({ background: tealTile, stroke: "#ffffff" }),
@@ -93,7 +109,37 @@ for (const [rel, contents] of outputs) {
   console.log(`  wrote   ${rel}`);
 }
 
+/**
+ * The PNGs, from the same SVGs that were just written.
+ *
+ * These used to be a manual export step the script only REPORTED, which is
+ * how the avatars drifted: the SVG moved, the PNG did not, and GitHub shows
+ * the PNG. sharp ships with Next, so the raster is one dependency we already
+ * have rather than a headless browser.
+ *
+ * GitHub renders an organization avatar as a circle, so anything near the
+ * corners is cropped away - another reason the mark sits well inside the tile.
+ */
+const rasters = [
+  [".github/avatar-teal.svg", ".github/avatar-teal.png", 512],
+  [".github/avatar-dark.svg", ".github/avatar-dark.png", 512],
+  // Email clients do not render SVG, so the mark ships as a PNG. This was its
+  // own script with its own copy of the path data, which is exactly how it
+  // came to be one revision behind: two sources for one drawing.
+  ["public/flagon.svg", "public/email/flagon-mark.png", 128],
+];
+
+const { default: sharp } = await import("sharp");
+
+for (const [from, to, size] of rasters) {
+  await sharp(join(root, from), { density: 384 })
+    .resize(size, size)
+    .png({ compressionLevel: 9 })
+    .toFile(join(root, to));
+  console.log(`  raster  ${to} (${size}px)`);
+}
+
 console.log(
-  "\nSVGs regenerated. PNGs (.github/avatar-*.png, public/email/flagon-mark.png)" +
-    "\nare rasterized separately - re-export them when the mark changes.",
+  `\nDone. The mark sits at ${AVATAR_INSET * 100}% of the tile; change` +
+    "\nAVATAR_INSET in this script rather than editing an asset by hand.",
 );

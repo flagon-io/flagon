@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { appPath } from "@/lib/urls";
+import { appPath, marketingHref } from "@/lib/urls";
 import {
   Activity,
+  ArrowUpRight,
+  BookOpen,
   CreditCard,
   Flag,
   KeyRound,
@@ -186,6 +188,27 @@ export function SidebarNav({
           </div>
         </div>
       ))}
+
+      {/* Documentation is pinned to the bottom of the sidebar, outside the
+          org-scoped sections, and it is the one nav entry that leaves the
+          console. People look things up WHILE working - having to go find the
+          marketing site to answer "how does targeting work" is the moment they
+          give up and guess. */}
+      <div className="mt-auto pt-5">
+        <a
+          href={marketingHref("/docs")}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+        >
+          <BookOpen className="h-4 w-4 shrink-0" aria-hidden />
+          Documentation
+          <ArrowUpRight
+            className="ml-auto h-3.5 w-3.5 opacity-60"
+            aria-hidden
+          />
+        </a>
+      </div>
     </nav>
   );
 }

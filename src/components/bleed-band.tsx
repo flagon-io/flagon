@@ -50,6 +50,12 @@ export function BleedBand({
     // Full-bleed: breaks out of any centred parent without needing the parent
     // to know about it. `w-screen` plus the negative half-width offset is what
     // keeps this working inside a max-w container.
+    //
+    // `w-screen` is 100vw, which INCLUDES the scrollbar, so this band
+    // overhangs the content area by half a scrollbar on each side. That is
+    // deliberate and handled globally: `html { overflow-x: clip }` in
+    // globals.css trims the overhang. Without that rule the document scrolls
+    // sideways and every centred element on the page drifts left.
     <div
       className={`relative left-1/2 w-screen -translate-x-1/2 border-y border-white/10 ${outerClassName}`}
     >

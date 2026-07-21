@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { brand } from "@/lib/brand";
 import "./globals.css";
 import { NavigationProgress } from "@/components/navigation-progress";
@@ -49,6 +51,12 @@ export default function RootLayout({
           <NavigationProgress />
         </Suspense>
         {children}
+        {/* Root layout, so both cover marketing AND the console: the two
+            surfaces are one deployment, and page views on app.flagon.io are
+            the ones that say whether the product is being used. Both no-op
+            outside Vercel, which keeps self-hosted deployments clean. */}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );

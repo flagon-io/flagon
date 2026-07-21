@@ -323,5 +323,21 @@ describe.skipIf(!enabled)("invoice.created, on a test clock", () => {
       limit: 100,
     });
     expect(after.data.length).toBe(before.data.length);
+
+    // ...but the period is still CLOSED with its full cents intact.
+    //
+    // This is the invariant the whole contracted-display change rests on. The
+    // console withholds money from a contract customer; it does not stop
+    // computing it. A renewal true-up, a margin review, and the operator
+    // console all read exactly this snapshot, so a period that closed empty
+    // would silently destroy the record rather than merely hide it.
+    const [snapshot] = await owner`
+      SELECT status, usage_cents FROM billing_periods
+      WHERE organization_id = ${orgId}
+      ORDER BY period_start DESC
+      LIMIT 1
+    `;
+    expect(snapshot.status).toBe("closed");
+    expect(Number(snapshot.usage_cents)).toBeGreaterThan(0);
   }, 300_000);
 });

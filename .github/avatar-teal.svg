@@ -7,7 +7,7 @@
     </linearGradient>
   </defs>
   <rect width="64" height="64" fill="url(#bg)" />
-  <g transform="translate(32 32) scale(1.0971) translate(-32 -32.5)" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
+  <g transform="translate(32 32) scale(0.7314) translate(-32 -32.5)" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
     <!-- body -->
     <path d="M18 22 L36 22 L39 50 L15 50 Z" />
     <!-- lid -->

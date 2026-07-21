@@ -20,6 +20,17 @@ export type UsageBucket = {
   /** Cost in cents per group key, allowance already drawn down. */
   byGroup: Record<string, number>;
   totalCents: number;
+  /**
+   * Raw quantity per group key, and the bucket's total. Carried alongside cost
+   * because a contracted organization charts CONSUMPTION, not money (see
+   * usageDisplay in src/lib/plans.ts), and deriving quantity back out of cents
+   * is impossible once an allowance has been drawn down against it.
+   *
+   * Unlike cost, this is never allocated pro rata - it is what was actually
+   * recorded, so it stays exact.
+   */
+  byGroupQuantity: Record<string, number>;
+  totalQuantity: number;
 };
 
 export type UsageBreakdownRow = {
@@ -50,12 +61,24 @@ export type UsageView = {
  */
 export function cumulate(buckets: UsageBucket[]): UsageBucket[] {
   const running: Record<string, number> = {};
+  const runningQuantity: Record<string, number> = {};
   let total = 0;
+  let totalQuantity = 0;
   return buckets.map((bucket) => {
     total += bucket.totalCents;
+    totalQuantity += bucket.totalQuantity;
     for (const [key, cents] of Object.entries(bucket.byGroup)) {
       running[key] = (running[key] ?? 0) + cents;
     }
-    return { ...bucket, byGroup: { ...running }, totalCents: total };
+    for (const [key, quantity] of Object.entries(bucket.byGroupQuantity)) {
+      runningQuantity[key] = (runningQuantity[key] ?? 0) + quantity;
+    }
+    return {
+      ...bucket,
+      byGroup: { ...running },
+      totalCents: total,
+      byGroupQuantity: { ...runningQuantity },
+      totalQuantity,
+    };
   });
 }

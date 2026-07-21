@@ -114,7 +114,7 @@ export const openApiSpec = {
     {
       name: "Usage",
       description:
-        "What an organization has used this period, priced per meter. Pro's subscription comes back as included usage credit; only what exceeds it is billed on top, and the invoice carries the same lines.",
+        "What an organization has used this period, priced per meter. Pro's subscription comes back as included usage credit; only what exceeds it is billed on top, and the invoice carries the same lines.\n\nOrganizations on contract pricing are reported in volume rather than money: the fee is negotiated up front from usage estimates, so a period's metered value is not what they owe. See `usage_display` on the usage response.",
     },
     {
       name: "Teams",
@@ -1181,7 +1181,7 @@ export const openApiSpec = {
         tags: ["Usage"],
         summary: "Get usage",
         description:
-          "Usage for a billing period, priced by meter, with the plan's included credit applied. Amounts are in cents.\n\nDefaults to the organization's current billing period, which follows its own subscription cycle rather than the calendar. Pass `period` (a `period_start` from `/usage/periods`) to look back. A period that has already been billed is served from its frozen snapshot, so historical responses report the rates that were actually charged.\n\nFilters and grouping are the same ones the console uses; its URL is this query string.",
+          "Usage for a billing period, priced by meter, with the plan's included credit applied. Amounts are in cents.\n\nDefaults to the organization's current billing period, which follows its own subscription cycle rather than the calendar. Pass `period` (a `period_start` from `/usage/periods`) to look back. A period that has already been billed is served from its frozen snapshot, so historical responses report the rates that were actually charged.\n\nOrganizations on contract pricing get `usage_display: \"contracted\"`: every `*_cents` field is null and the `contract` object reports consumption against the negotiated envelope, measured across the whole agreement term rather than per period. Quantities are populated in every mode, so a client that charts volume needs no special case.\n\nFilters and grouping are the same ones the console uses; its URL is this query string.",
         security: [{ bearerToken: [] }, { sessionCookie: [] }],
         parameters: [
           {
@@ -3020,15 +3020,12 @@ export const openApiSpec = {
       Usage: {
         type: "object",
         description:
-          "A period's usage, priced per meter, with the plan's included credit applied. All amounts in cents.",
+          "A period's usage, priced per meter, with the plan's included credit applied. All amounts in cents.\n\nOn a contracted plan (`usage_display: \"contracted\"`) every `*_cents` field is **null** and the `contract` object carries consumption against the negotiated envelope instead. Contract pricing is agreed up front from usage estimates, so a period's metered value is not what the organization owes and is deliberately not served as though it were. Quantities are always populated, whatever the mode.",
         required: [
           "period_start",
           "period_end",
           "plan",
-          "included_credit_cents",
-          "credit_applied_cents",
-          "usage_cents",
-          "overage_cents",
+          "usage_display",
           "meters",
         ],
         properties: {
@@ -3050,14 +3047,42 @@ export const openApiSpec = {
           },
           stripe_invoice_id: { type: "string", nullable: true },
           plan: { type: "string", enum: ["free", "pro", "enterprise"] },
-          included_credit_cents: { type: "integer", example: 2000 },
-          credit_applied_cents: { type: "integer", example: 1700 },
-          credit_remaining_cents: { type: "integer", example: 300 },
-          usage_cents: { type: "integer", example: 1700 },
+          usage_display: {
+            type: "string",
+            enum: ["priced", "capped", "contracted"],
+            description:
+              "Which fields carry meaning for this organization.\n\n- `priced` - every `*_cents` field is populated and `contract` is null.\n- `capped` - the same, but the plan is never invoiced; usage is refused at the cap rather than charged.\n- `contracted` - every `*_cents` field is null; read `contract` instead.\n\nProvided so a client never has to infer presentation from the plan id.",
+          },
+          included_credit_cents: {
+            type: "integer",
+            nullable: true,
+            example: 2000,
+            description: "Null on contract pricing.",
+          },
+          credit_applied_cents: {
+            type: "integer",
+            nullable: true,
+            example: 1700,
+            description: "Null on contract pricing.",
+          },
+          credit_remaining_cents: {
+            type: "integer",
+            nullable: true,
+            example: 300,
+            description: "Null on contract pricing.",
+          },
+          usage_cents: {
+            type: "integer",
+            nullable: true,
+            example: 1700,
+            description: "Null on contract pricing.",
+          },
           overage_cents: {
             type: "integer",
+            nullable: true,
             example: 0,
-            description: "Billed on top of the plan's base price.",
+            description:
+              "Billed on top of the plan's base price. Null on contract pricing.",
           },
           subscription_cents: {
             type: "integer",
@@ -3065,6 +3090,70 @@ export const openApiSpec = {
             example: 2000,
             description:
               "The plan's base price for the period. Null on contract pricing.",
+          },
+          contract: {
+            type: "object",
+            nullable: true,
+            description:
+              "Consumption against the negotiated agreement. Present only on contract pricing, and null when no agreement is on file.\n\nThe envelope covers the WHOLE TERM and is drawn down cumulatively across it, not reset per period. A contract negotiated from annual estimates makes no promise about any particular month, so a seasonal organization that consumes 40% of its volume in one quarter and almost nothing in the next is exactly on plan. Compare `used_quantity` against `elapsed_percent` to judge that; per-period figures cannot answer it.",
+            required: ["term_start", "term_end", "meters"],
+            properties: {
+              term_start: { type: "string", format: "date" },
+              term_end: { type: "string", format: "date" },
+              days_total: { type: "integer", example: 365 },
+              days_elapsed: { type: "integer", example: 223 },
+              elapsed_percent: { type: "number", example: 61.1 },
+              meters: {
+                type: "array",
+                description:
+                  "One entry per meter that has either a contracted volume or recorded usage. Usage on a meter the agreement never mentioned is included deliberately: it is exactly what a renewal review needs to see.",
+                items: {
+                  type: "object",
+                  required: ["meter", "used_quantity"],
+                  properties: {
+                    meter: { type: "string", example: "flags.evaluations" },
+                    label: { type: "string", example: "Flag evaluations" },
+                    unit: { type: "string", example: "evaluations" },
+                    contracted_quantity: {
+                      type: "integer",
+                      nullable: true,
+                      example: 750000000,
+                      description:
+                        "Volume agreed for the whole term. Null when the agreement is silent about this meter, which is not the same as zero.",
+                    },
+                    used_quantity: { type: "integer", example: 412000000 },
+                    remaining_quantity: {
+                      type: "integer",
+                      nullable: true,
+                      example: 338000000,
+                      description:
+                        "Floored at zero; consumption is never cut off.",
+                    },
+                    used_percent: {
+                      type: "number",
+                      nullable: true,
+                      example: 54.9,
+                      description:
+                        "Uncapped: passing 100 is a true-up to coordinate, not a limit that was hit.",
+                    },
+                    projected_quantity: {
+                      type: "integer",
+                      nullable: true,
+                      example: 674000000,
+                      description:
+                        "Term total at the current average rate. Informational only, and null early in a term: linear extrapolation is a poor lens on seasonal traffic and should never lead.",
+                    },
+                    pace: {
+                      type: "string",
+                      nullable: true,
+                      enum: ["under", "on", "over"],
+                      description:
+                        "Projected term total against the contracted volume, within a 10% tolerance. Null when too little of the term has elapsed to judge.",
+                    },
+                  },
+                },
+              },
+            },
           },
           group_by: { type: "string", enum: ["product", "project", "meter"] },
           granularity: { type: "string", enum: ["daily", "weekly", "monthly"] },
@@ -3074,24 +3163,28 @@ export const openApiSpec = {
               "Period totals per meter. Always the whole period, priced with the meter's included allowance applied across it.",
             items: {
               type: "object",
-              required: [
-                "meter",
-                "product",
-                "label",
-                "quantity",
-                "unit",
-                "cost_cents",
-              ],
+              required: ["meter", "product", "label", "quantity", "unit"],
               properties: {
                 meter: { type: "string", example: "flags.evaluations" },
                 product: { type: "string", example: "flags" },
                 label: { type: "string", example: "Flag evaluations" },
                 quantity: { type: "integer", example: 3400000 },
                 unit: { type: "string", example: "evaluations" },
-                unit_amount_cents: { type: "integer", example: 5 },
+                unit_amount_cents: {
+                  type: "integer",
+                  nullable: true,
+                  example: 5,
+                  description:
+                    "Null on contract pricing: the published rate is not what a contract customer pays, so serving it would let a client multiply out a total that is not their bill.",
+                },
                 per: { type: "integer", example: 1000000 },
                 included_quantity: { type: "integer", example: 1000000 },
-                cost_cents: { type: "integer", example: 17 },
+                cost_cents: {
+                  type: "integer",
+                  nullable: true,
+                  example: 17,
+                  description: "Null on contract pricing.",
+                },
               },
             },
           },
@@ -3101,7 +3194,7 @@ export const openApiSpec = {
               "Period totals broken down by `group_by`. Cost is split pro rata by quantity, so the parts always sum to the whole.",
             items: {
               type: "object",
-              required: ["key", "label", "quantity", "cost_cents"],
+              required: ["key", "label", "quantity"],
               properties: {
                 key: {
                   type: "string",
@@ -3111,17 +3204,22 @@ export const openApiSpec = {
                 },
                 label: { type: "string", example: "Feature Flags" },
                 quantity: { type: "integer", example: 3400000 },
-                cost_cents: { type: "integer", example: 17 },
+                cost_cents: {
+                  type: "integer",
+                  nullable: true,
+                  example: 17,
+                  description: "Null on contract pricing.",
+                },
               },
             },
           },
           series: {
             type: "array",
             description:
-              "Chronological buckets for charting. The included allowance is drawn down in time order, so buckets sum to exactly `usage_cents`.",
+              "Chronological buckets for charting. The included allowance is drawn down in time order, so buckets sum to exactly `usage_cents`.\n\nEvery bucket carries quantity alongside cost, so a contracted organization still gets a chartable series with the cost fields nulled out. Quantity is never allocated pro rata the way cost is, so it is exact.",
             items: {
               type: "object",
-              required: ["start", "end", "cost_cents", "by_group"],
+              required: ["start", "end", "quantity", "by_group_quantity"],
               properties: {
                 start: {
                   type: "string",
@@ -3129,11 +3227,23 @@ export const openApiSpec = {
                   example: "2026-07-19",
                 },
                 end: { type: "string", format: "date", example: "2026-07-19" },
-                cost_cents: { type: "integer", example: 4 },
+                cost_cents: {
+                  type: "integer",
+                  nullable: true,
+                  example: 4,
+                  description: "Null on contract pricing.",
+                },
                 by_group: {
                   type: "object",
                   additionalProperties: { type: "integer" },
-                  description: "Cost in cents per group key.",
+                  description:
+                    "Cost in cents per group key. Empty on contract pricing.",
+                },
+                quantity: { type: "integer", example: 120000 },
+                by_group_quantity: {
+                  type: "object",
+                  additionalProperties: { type: "integer" },
+                  description: "Raw quantity per group key.",
                 },
               },
             },

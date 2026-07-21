@@ -25,7 +25,12 @@ export default async function SettingsLayout({
   const displayName = user.displayUsername ?? user.username ?? user.name;
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
+    // No max-width of its own. The surrounding <main> is already max-w-7xl, and
+    // capping again here made every settings page sit narrower than the rest of
+    // the product for no reason a reader could see. The measure that actually
+    // matters - how wide a line of text or a form gets - is set on the content
+    // column below, once, instead of by each page picking its own.
+    <div className="w-full">
       <div className="flex items-center gap-3 pb-8">
         <div
           aria-hidden
@@ -42,9 +47,12 @@ export default async function SettingsLayout({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-8 md:grid-cols-[220px_1fr]">
+      <div className="grid grid-cols-1 gap-8 md:grid-cols-[220px_minmax(0,1fr)]">
         <SettingsNav />
-        <div className="min-w-0">{children}</div>
+        {/* One readable measure for every settings page. Forms and prose stop
+            at 3xl while the shell still spans the page, so the nav stays put
+            and nothing stretches into an unreadable line. */}
+        <div className="min-w-0 max-w-3xl">{children}</div>
       </div>
     </div>
   );

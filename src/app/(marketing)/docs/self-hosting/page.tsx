@@ -37,7 +37,7 @@ export default function SelfHostingDocsPage() {
         Self-hosting
       </h1>
       <p className={p}>
-        {brand.name} is one Next.js application and one Postgres database.
+        Flagon is one Next.js application and one Postgres database.
         Self-hosting runs the real platform, not a reduced &ldquo;community
         edition&rdquo;: the capabilities in this repository are the ones the
         hosted service runs on.

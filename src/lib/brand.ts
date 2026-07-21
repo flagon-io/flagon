@@ -5,6 +5,17 @@
  */
 export const brand = {
   name: "Flagon",
+  /**
+   * The contracting entity, for legal documents and the copyright line.
+   *
+   * Separate from `name` on purpose: "Flagon" is the product a customer talks
+   * about, "Flagon, Inc." is who takes their money and who a subpoena would
+   * name. Terms and Privacy have to use the second one, and it belongs here so
+   * that renaming or reincorporating is one edit rather than a search.
+   */
+  legalName: "Flagon, Inc.",
+  /** State of incorporation; governs the Terms. */
+  jurisdiction: "Delaware",
   domain: "flagon.io",
   url: "https://www.flagon.io",
   apiUrl: "https://api.flagon.io",

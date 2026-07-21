@@ -1,4 +1,4 @@
-import { formatCents } from "@/lib/meters";
+import { formatCents, formatQuantity } from "@/lib/meters";
 import type { UsageBucket } from "@/lib/usage-shared";
 
 /**
@@ -64,15 +64,40 @@ export function assignColors(keys: string[]): Record<string, string> {
   return colors;
 }
 
+/**
+ * What the bars measure.
+ *
+ * "cents" is the priced view. "quantity" is what a contracted organization
+ * sees: their agreement is denominated in volume, so charting money would put
+ * a number on the axis that nobody will ever be invoiced (see usageDisplay in
+ * src/lib/plans.ts).
+ */
+export type ChartUnit = "cents" | "quantity";
+
 /** A readable y-axis ceiling, so a quiet period doesn't render as noise. */
-function niceCeiling(maxCents: number): number {
-  if (maxCents <= 0) return 100;
-  const steps = [
-    25, 50, 100, 250, 500, 1000, 2500, 5000, 10_000, 25_000, 50_000, 100_000,
-    250_000, 500_000, 1_000_000,
-  ];
+function niceCeiling(max: number, unit: ChartUnit): number {
+  if (max <= 0) return unit === "cents" ? 100 : 10;
+  const steps =
+    unit === "cents"
+      ? [
+          25, 50, 100, 250, 500, 1000, 2500, 5000, 10_000, 25_000, 50_000,
+          100_000, 250_000, 500_000, 1_000_000,
+        ]
+      : // Volume spans far more orders of magnitude than money does: a Hobby
+        // project and a contracted fleet can differ by six zeros, so the ladder
+        // has to reach where the cents ladder stops.
+        [
+          10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000,
+          50_000, 100_000, 250_000, 500_000, 1_000_000, 2_500_000, 5_000_000,
+          10_000_000, 25_000_000, 50_000_000, 100_000_000, 250_000_000,
+          500_000_000, 1_000_000_000, 2_500_000_000, 5_000_000_000,
+          10_000_000_000,
+        ];
+  // Round the fallback to one significant figure rather than to the nearest
+  // hundred, which on a billion-unit meter is not a ceiling at all.
+  const magnitude = 10 ** Math.floor(Math.log10(max));
   return (
-    steps.find((step) => step >= maxCents) ?? Math.ceil(maxCents / 100) * 100
+    steps.find((step) => step >= max) ?? Math.ceil(max / magnitude) * magnitude
   );
 }
 
@@ -93,16 +118,27 @@ export function ConsumptionChart({
   series,
   colors,
   cumulative,
+  unit = "cents",
 }: {
   buckets: UsageBucket[];
   /** Group keys in legend order, already capped and folded. */
   series: { key: string; label: string }[];
   colors: Record<string, string>;
   cumulative: boolean;
+  unit?: ChartUnit;
 }) {
-  const max = niceCeiling(
-    Math.max(...buckets.map((bucket) => bucket.totalCents), 0),
-  );
+  // One switch decides the whole chart: which field the bars are drawn from
+  // and how every label is formatted. Nothing downstream knows the difference.
+  const valueOf = (bucket: UsageBucket, key: string): number =>
+    unit === "cents"
+      ? (bucket.byGroup[key] ?? 0)
+      : (bucket.byGroupQuantity[key] ?? 0);
+  const totalOf = (bucket: UsageBucket): number =>
+    unit === "cents" ? bucket.totalCents : bucket.totalQuantity;
+  const format = (value: number): string =>
+    unit === "cents" ? formatCents(value) : formatQuantity(value);
+
+  const max = niceCeiling(Math.max(...buckets.map(totalOf), 0), unit);
   const labelFor = new Map(series.map((entry) => [entry.key, entry.label]));
 
   return (
@@ -110,9 +146,9 @@ export function ConsumptionChart({
       <div className="flex gap-3">
         {/* y-axis */}
         <div className="flex w-14 shrink-0 flex-col justify-between py-px text-right text-[10px] tabular-nums text-zinc-600">
-          <span>{formatCents(max)}</span>
-          <span>{formatCents(Math.round(max / 2))}</span>
-          <span>$0</span>
+          <span>{format(max)}</span>
+          <span>{format(Math.round(max / 2))}</span>
+          <span>{format(0)}</span>
         </div>
 
         <div className="relative min-w-0 flex-1">
@@ -133,9 +169,9 @@ export function ConsumptionChart({
               const segments = series
                 .map((entry) => ({
                   key: entry.key,
-                  cents: bucket.byGroup[entry.key] ?? 0,
+                  value: valueOf(bucket, entry.key),
                 }))
-                .filter((segment) => segment.cents > 0)
+                .filter((segment) => segment.value > 0)
                 .reverse();
 
               return (
@@ -147,7 +183,7 @@ export function ConsumptionChart({
                     <div
                       key={segment.key}
                       style={{
-                        height: `${Math.max((segment.cents / max) * 100, 0.6)}%`,
+                        height: `${Math.max((segment.value / max) * 100, 0.6)}%`,
                         background: colors[segment.key] ?? OTHER_COLOR,
                         // 2px of surface between stacked fills; the topmost
                         // segment carries the rounded data-end.
@@ -160,7 +196,7 @@ export function ConsumptionChart({
                   {/* Hover target spans the full column height, so thin bars
                       are still reachable. */}
                   <div className="absolute inset-0 hover:bg-white/5" />
-                  {bucket.totalCents > 0 ? (
+                  {totalOf(bucket) > 0 ? (
                     <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap border border-white/10 bg-zinc-950 px-2.5 py-2 text-[11px] shadow-lg group-hover:block">
                       <div className="font-medium text-zinc-200">
                         {formatBucket(bucket)}
@@ -181,14 +217,14 @@ export function ConsumptionChart({
                             {labelFor.get(segment.key) ?? segment.key}
                           </span>
                           <span className="ml-auto pl-3 tabular-nums text-zinc-200">
-                            {formatCents(segment.cents)}
+                            {format(segment.value)}
                           </span>
                         </div>
                       ))}
                       <div className="mt-1.5 flex items-center gap-2 border-t border-white/10 pt-1.5 text-zinc-300">
                         <span>{cumulative ? "Running total" : "Total"}</span>
                         <span className="ml-auto pl-3 tabular-nums text-zinc-100">
-                          {formatCents(bucket.totalCents)}
+                          {format(totalOf(bucket))}
                         </span>
                       </div>
                     </div>

@@ -22,17 +22,17 @@ export default function PersonalTokensPage() {
       <h1 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-100">
         Access tokens
       </h1>
-      <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-500">
+      <p className="mt-1 text-sm leading-6 text-zinc-500">
         Personal credentials for the API and the CLI. They act as you: every
         organization you belong to, with the access you already have, narrowed
         by the scopes you grant. Nothing extra to configure, and no per-
         organization setup.
       </p>
-      <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
+      <p className="mt-3 text-sm leading-6 text-zinc-500">
         For a shared service, prefer an organization token: it survives you
         leaving and does not tie production to one person&apos;s account.
       </p>
-      <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-600">
+      <p className="mt-3 text-sm leading-6 text-zinc-600">
         One exception. The OFREP evaluation endpoints have no organization in
         their URL, so a personal token has to say which one it means: send the
         organization id in{" "}

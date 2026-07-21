@@ -8,10 +8,14 @@ type FooterGroup = { title: string; links: FooterLink[] };
 const groups: FooterGroup[] = [
   {
     title: "Product",
+    // Catalog leads: it is the substrate the other products attach to, and the
+    // one expected to grow the most, so the order here should read the way the
+    // lineup is meant to be understood rather than the order things shipped.
+    // Matches brand.products, which was already in this order.
     links: [
       { label: "Overview", href: "/products" },
-      { label: "Feature Flags", href: "/products/feature-flags" },
       { label: "Catalog", href: "/products/catalog" },
+      { label: "Feature Flags", href: "/products/feature-flags" },
       { label: "Pricing", href: "/pricing" },
     ],
   },
@@ -19,7 +23,6 @@ const groups: FooterGroup[] = [
     title: "Company",
     links: [
       { label: "Enterprise", href: "/enterprise" },
-      { label: "Pricing", href: "/pricing" },
       { label: "Contact sales", href: "/enterprise/contact" },
     ],
   },

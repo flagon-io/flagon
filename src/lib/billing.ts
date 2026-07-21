@@ -3,6 +3,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { organizations } from "@/db/schema";
 import { clearPlanCache } from "./usage-events.server";
+import {
+  describeDiscount,
+  discountedTotal,
+  durationLabelFor,
+  type Discount,
+} from "./discounts";
 
 /**
  * Billing mode, resolved from the environment (same pattern as email):
@@ -138,21 +144,6 @@ export function subscriptionCycle(
   };
 }
 
-/** Records the org's cycle without touching its plan. */
-export async function recordSubscriptionCycle(
-  orgId: string,
-  cycle: { start: Date; end: Date },
-): Promise<void> {
-  await db
-    .update(organizations)
-    .set({
-      currentPeriodStart: cycle.start,
-      currentPeriodEnd: cycle.end,
-      updatedAt: new Date(),
-    })
-    .where(eq(organizations.id, orgId));
-}
-
 /**
  * Reconcile a checkout return: verify the session with Stripe and apply the
  * upgrade if payment completed for this org. Safe to call on every landing;
@@ -248,8 +239,17 @@ export async function addUsageToInvoice(input: {
 export type BillingSummary = {
   subscription: {
     status: string;
-    /** Recurring amount across every item, in cents. */
+    /**
+     * What the subscription actually charges each cycle, in cents: the list
+     * amount with any discount applied.
+     */
     amountCents: number;
+    /**
+     * The undiscounted recurring amount. Equal to amountCents when there is no
+     * discount; shown struck through when there is one, so a customer on a
+     * promotion can see both what they normally pay and what they pay now.
+     */
+    listAmountCents: number;
     currency: string;
     interval: "day" | "week" | "month" | "year" | null;
     intervalCount: number;
@@ -265,6 +265,16 @@ export type BillingSummary = {
     expMonth: number;
     expYear: number;
   } | null;
+  /** The discount in force, mapped for rendering. Null when there is none. */
+  discount: Discount | null;
+  /**
+   * The total of the customer's next invoice, from Stripe's own preview, or
+   * null when it could not be previewed (no upcoming invoice, or the call
+   * failed). This is the ONE number that is not derived locally, so it is the
+   * one that can be trusted to match what gets charged: proration, discounts,
+   * taxes and credit balance are all already in it.
+   */
+  nextInvoiceCents: number | null;
 };
 
 /**
@@ -283,6 +293,14 @@ export type BillingSummary = {
  */
 export async function getBillingSummary(
   customerId: string,
+  options: {
+    /**
+     * Preview the next invoice. Off for callers that only need the discount
+     * (the usage page), because it is a third round trip to Stripe on a page
+     * render for a number that page does not show.
+     */
+    includeNextInvoice?: boolean;
+  } = {},
 ): Promise<BillingSummary | null> {
   try {
     const stripe = getStripe();
@@ -294,6 +312,12 @@ export async function getBillingSummary(
         customer: customerId,
         limit: 1,
         status: "all",
+        // The coupon hangs off the discount's SOURCE on this API version
+        // (2026-06-24.dahlia); it used to be discount.coupon directly. This is
+        // already four expansion levels (data -> discounts -> source ->
+        // coupon), which is Stripe's hard limit, so `applies_to` - a fifth
+        // level - cannot ride along here and is fetched separately below.
+        expand: ["data.discounts.source.coupon"],
       }),
       stripe.customers.retrieve(customerId, {
         expand: ["invoice_settings.default_payment_method"],
@@ -302,14 +326,48 @@ export async function getBillingSummary(
 
     const subscription = subscriptions.data[0] ?? null;
     const price = subscription?.items.data[0]?.price;
-    const amountCents =
+    const currency = price?.currency ?? "usd";
+    // The LIST amount: what the prices say, before any discount. Reporting
+    // this as the charge - which is what this did - tells a customer on three
+    // free months that they are paying $20 a month, right up until they check
+    // their card statement and find they are not.
+    const listAmountCents =
       subscription?.items.data.reduce(
         (sum, item) =>
           sum + (item.price.unit_amount ?? 0) * (item.quantity ?? 1),
         0,
       ) ?? 0;
+    // `applies_to` decides whether the discount reaches metered usage or only
+    // the subscription, and it is one expansion level past Stripe's limit on
+    // the list call, so it comes back undefined there. Fetch it directly - but
+    // only when there is actually a coupon, so an undiscounted customer pays no
+    // extra round trip.
+    const couponId = couponIdOf(subscription);
+    const appliesToProducts = couponId
+      ? await couponAppliesToProducts(stripe, couponId)
+      : [];
+    const discount = mapDiscount(subscription, currency, appliesToProducts);
+    const amountCents = discountedTotal(
+      { subscriptionCents: listAmountCents, usageCents: 0 },
+      discount,
+    ).totalCents;
     // Stripe moved the cycle onto the items; read the first one's window.
     const periodEnd = subscription?.items.data[0]?.current_period_end ?? null;
+
+    // Best-effort and separately guarded: a customer with no upcoming invoice
+    // (canceled, or never subscribed) makes this throw, which is an ordinary
+    // state and must not cost us the rest of the summary.
+    let nextInvoiceCents: number | null = null;
+    if (options.includeNextInvoice ?? true) {
+      try {
+        const preview = await stripe.invoices.createPreview({
+          customer: customerId,
+        });
+        nextInvoiceCents = preview.total;
+      } catch {
+        nextInvoiceCents = null;
+      }
+    }
 
     const paymentMethod =
       !("deleted" in customer && customer.deleted) &&
@@ -323,7 +381,8 @@ export async function getBillingSummary(
         ? {
             status: subscription.status,
             amountCents,
-            currency: price?.currency ?? "usd",
+            listAmountCents,
+            currency,
             interval: price?.recurring?.interval ?? null,
             intervalCount: price?.recurring?.interval_count ?? 1,
             renewsAt: periodEnd ? new Date(periodEnd * 1000) : null,
@@ -342,8 +401,86 @@ export async function getBillingSummary(
             expYear: paymentMethod.card.exp_year,
           }
         : null,
+      discount,
+      nextInvoiceCents,
     };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Stripe's discount, in the shape the console renders.
+ *
+ * Only the FIRST discount is mapped. Stripe allows several to stack, but a
+ * page that showed one of three and implied it was the whole story would be
+ * worse than one that showed none; the previewed next-invoice total remains
+ * correct either way, and stacking is not something we issue.
+ *
+ * `applies_to.products` is what decides scope. A coupon restricted to the Pro
+ * product reduces only the subscription; an unrestricted one also reduces the
+ * metered overage that addUsageToInvoice attaches to the same invoice. Both
+ * are deliberate choices we make per customer, so the scope is read rather
+ * than assumed - see src/lib/discounts.ts. It arrives via `appliesToProducts`
+ * because it is one expansion level past what the list call can carry.
+ */
+function mapDiscount(
+  subscription: Stripe.Subscription | null,
+  fallbackCurrency: string,
+  appliesToProducts: string[],
+): Discount | null {
+  const raw = subscription?.discounts?.[0];
+  if (!raw || typeof raw === "string") return null;
+
+  const coupon = raw.source?.coupon;
+  if (!coupon || typeof coupon === "string") return null;
+
+  const percentOff = coupon.percent_off ?? null;
+  const amountOffCents = coupon.amount_off ?? null;
+  const currency = coupon.currency ?? fallbackCurrency;
+  const restricted = appliesToProducts.length > 0;
+
+  return {
+    id: raw.id,
+    label:
+      coupon.name ?? describeDiscount({ percentOff, amountOffCents, currency }),
+    percentOff,
+    amountOffCents,
+    currency,
+    scope: restricted ? "subscription" : "all",
+    endsAt: raw.end ? new Date(raw.end * 1000) : null,
+    durationLabel: durationLabelFor(
+      coupon.duration,
+      coupon.duration_in_months ?? null,
+    ),
+  };
+}
+
+/** The coupon id behind a subscription's first discount, if any. */
+function couponIdOf(subscription: Stripe.Subscription | null): string | null {
+  const raw = subscription?.discounts?.[0];
+  if (!raw || typeof raw === "string") return null;
+  const coupon = raw.source?.coupon;
+  if (!coupon) return null;
+  return typeof coupon === "string" ? coupon : coupon.id;
+}
+
+/**
+ * The product ids a coupon is restricted to, empty when it applies to
+ * everything. `applies_to` is expandable and absent by default, so it takes
+ * its own retrieve; best-effort, because a scope we cannot read should degrade
+ * to "unrestricted" (what the customer sees) rather than break the page.
+ */
+async function couponAppliesToProducts(
+  stripe: Stripe,
+  couponId: string,
+): Promise<string[]> {
+  try {
+    const coupon = await stripe.coupons.retrieve(couponId, {
+      expand: ["applies_to"],
+    });
+    return coupon.applies_to?.products ?? [];
+  } catch {
+    return [];
   }
 }

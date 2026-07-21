@@ -1,6 +1,7 @@
 import { apiError, apiJson } from "@/lib/api";
 import { resolveOrgAccess } from "@/lib/api-auth.server";
-import { PLANS } from "@/lib/plans";
+import { PLANS, usageDisplay, type PlanId } from "@/lib/plans";
+import { contractConsumption } from "@/lib/contracts.server";
 import { formatPeriod, isoDay } from "@/lib/billing-period";
 import {
   breakdownFromSnapshot,
@@ -31,6 +32,13 @@ import { usageProjects, usageSummary, usageView } from "@/lib/usage.server";
  * A period that has been CLOSED is served from its frozen snapshot, so a
  * historical response reports the rates that were actually billed rather than
  * whatever the meter costs today.
+ *
+ * On a CONTRACTED plan every *_cents field is null and the `contract` block
+ * carries consumption against the negotiated envelope instead. The fee was
+ * agreed up front from usage estimates, so a period's metered value is not
+ * what the customer owes and must not be served as though it were. Cost is
+ * still computed and frozen into the period snapshot; it is the RESPONSE that
+ * withholds it. `usage_display` says which mode a client is in.
  *
  * Documented in src/lib/openapi.ts; keep the two in sync.
  */
@@ -96,6 +104,27 @@ export async function GET(
     isFrozen && snapshot
       ? breakdownFromSnapshot(snapshot.lines, query.groupBy)
       : view.rows;
+  const display = usageDisplay(plan as PlanId);
+
+  // Contracted organizations get consumption against the negotiated envelope
+  // instead of money. The envelope covers the whole TERM, not this period, so
+  // seasonal traffic nets out (see src/lib/contracts.ts).
+  const contracted =
+    display === "contracted"
+      ? await contractConsumption({ orgId: org.id })
+      : null;
+
+  /**
+   * Cents are NULL, not zero, on a contracted plan.
+   *
+   * The metered value of a period is not what a contract customer owes - their
+   * fee was negotiated up front from usage estimates - so serializing it as a
+   * number invites a client to sum it, chart it, or reconcile it against an
+   * invoice that will never carry it. Zero would be worse: it reads as a
+   * confident statement that the period was free.
+   */
+  const cents = (value: number): number | null =>
+    display === "contracted" ? null : value;
 
   return apiJson({
     period_start: isoDay(window.from),
@@ -104,18 +133,49 @@ export async function GET(
     period_status: snapshot?.period.status ?? "open",
     stripe_invoice_id: snapshot?.period.stripeInvoiceId ?? null,
     plan,
-    included_credit_cents:
+    /**
+     * Which fields carry meaning for this plan, so a client never has to infer
+     * it from the plan id:
+     *
+     *   priced      every *_cents field is populated; `contract` is null
+     *   capped      same, but nothing is ever invoiced
+     *   contracted  every *_cents field is null; read `contract` instead
+     */
+    usage_display: display,
+    included_credit_cents: cents(
       isFrozen && snapshot
         ? snapshot.period.includedCreditCents
         : context.includedCreditCents,
-    credit_applied_cents: totals.creditAppliedCents,
-    credit_remaining_cents: totals.creditRemainingCents,
-    usage_cents: totals.usageCents,
-    overage_cents: totals.overageCents,
+    ),
+    credit_applied_cents: cents(totals.creditAppliedCents),
+    credit_remaining_cents: cents(totals.creditRemainingCents),
+    usage_cents: cents(totals.usageCents),
+    overage_cents: cents(totals.overageCents),
     subscription_cents:
+      display !== "contracted" &&
       PLANS[plan as keyof typeof PLANS]?.priceMonthly != null
         ? (PLANS[plan as keyof typeof PLANS].priceMonthly as number) * 100
         : null,
+    contract: contracted
+      ? {
+          term_start: contracted.status.term.start,
+          term_end: contracted.status.term.end,
+          days_total: contracted.status.daysTotal,
+          days_elapsed: contracted.status.daysElapsed,
+          elapsed_percent: contracted.status.elapsedPercent,
+          meters: contracted.status.envelopes.map((envelope) => ({
+            meter: envelope.meter,
+            label: envelope.label,
+            unit: envelope.unit,
+            contracted_quantity: envelope.contracted,
+            used_quantity: envelope.used,
+            remaining_quantity: envelope.remaining,
+            used_percent: envelope.usedPercent,
+            projected_quantity: envelope.projected,
+            pace: envelope.pace,
+          })),
+        }
+      : null,
     group_by: query.groupBy,
     granularity: query.granularity,
     meters: totals.lines.map((line) => ({
@@ -124,23 +184,29 @@ export async function GET(
       label: line.label,
       quantity: line.quantity,
       unit: line.unit,
-      unit_amount_cents: line.rate.unitAmountCents,
+      // The published rate is not a contract customer's rate, so quoting it
+      // would let a client multiply out a total that is not their bill.
+      unit_amount_cents: cents(line.rate.unitAmountCents),
       per: line.rate.per,
       included_quantity: line.rate.includedQuantity,
-      cost_cents: line.costCents,
+      cost_cents: cents(line.costCents),
     })),
     groups: rows.map((row) => ({
       key: row.key,
       label: row.label,
       quantity: row.quantity,
-      cost_cents: row.costCents,
+      cost_cents: cents(row.costCents),
     })),
+    // Quantity rides alongside cost in every bucket, so a contracted client
+    // gets a chartable series even with every cents field nulled out.
     series: (query.cumulative ? cumulate(view.buckets) : view.buckets).map(
       (bucket) => ({
         start: bucket.start,
         end: bucket.end,
-        cost_cents: bucket.totalCents,
-        by_group: bucket.byGroup,
+        cost_cents: cents(bucket.totalCents),
+        by_group: display === "contracted" ? {} : bucket.byGroup,
+        quantity: bucket.totalQuantity,
+        by_group_quantity: bucket.byGroupQuantity,
       }),
     ),
     projects: projectList.map((project) => ({
