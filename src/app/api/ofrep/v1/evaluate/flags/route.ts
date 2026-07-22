@@ -1,5 +1,7 @@
+import { after } from "next/server";
 import { evaluateFlag, type EvaluationContext } from "@/lib/flags";
-import { asEvaluableFlag, listFlags } from "@/lib/flags.server";
+import { asEvaluableFlag } from "@/lib/flags.server";
+import { loadFlagConfig } from "@/lib/flag-config-cache.server";
 import { authenticateOfrep } from "@/lib/ofrep-auth.server";
 import {
   configurationVersion,
@@ -12,7 +14,6 @@ import {
 import { meterEvaluations } from "@/lib/ofrep-usage.server";
 import { recordServed } from "@/lib/flag-usage.server";
 import { isExposureReason, type ExposureReason } from "@/lib/flag-metrics";
-import { listSegments } from "@/lib/segments.server";
 
 export function OPTIONS() {
   return new Response(null, { status: 204, headers: OFREP_HEADERS });
@@ -49,10 +50,9 @@ export async function POST(request: Request) {
       { status: 400, headers: OFREP_HEADERS },
     );
   }
-  const [storedFlags, storedSegments] = await Promise.all([
-    listFlags(credential.orgId),
-    listSegments(credential.orgId),
-  ]);
+  const { flags: storedFlags, segments: storedSegments } = await loadFlagConfig(
+    credential.orgId,
+  );
   const version = configurationVersion(storedFlags, storedSegments);
   const etag = evaluationEtag(version, body.context);
   if (etagMatches(request.headers.get("if-none-match"), etag))
@@ -89,16 +89,24 @@ export async function POST(request: Request) {
   // `flags.length` evaluations just metered, one per flag. Best-effort - a
   // recording hiccup must not fail the evaluation. Runs only on a served 200;
   // the 304 above returns before any of this and is neither billed nor counted.
-  void recordServed({
-    orgId: credential.orgId,
-    evaluations: flags
-      .filter((flag) => isExposureReason(flag.reason))
-      .map((flag) => ({
-        flagKey: flag.key,
-        variantKey: flag.variant,
-        reason: flag.reason as ExposureReason,
-      })),
-  }).catch(() => {});
+  //
+  // Scheduled with after() rather than a bare `void`: this write must not block
+  // the response, but a fire-and-forget promise is not guaranteed to run once
+  // the response is sent on a serverless platform (the invocation can freeze).
+  // after() extends the invocation via waitUntil so the attribution actually
+  // lands, on both serverless and the self-hosted Node server.
+  after(() =>
+    recordServed({
+      orgId: credential.orgId,
+      evaluations: flags
+        .filter((flag) => isExposureReason(flag.reason))
+        .map((flag) => ({
+          flagKey: flag.key,
+          variantKey: flag.variant,
+          reason: flag.reason as ExposureReason,
+        })),
+    }).catch(() => {}),
+  );
 
   return Response.json(
     {

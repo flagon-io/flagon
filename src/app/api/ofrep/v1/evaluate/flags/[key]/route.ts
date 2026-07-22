@@ -1,5 +1,7 @@
+import { after } from "next/server";
 import { evaluateFlag, type EvaluationContext } from "@/lib/flags";
-import { asEvaluableFlag, getFlag } from "@/lib/flags.server";
+import { asEvaluableFlag } from "@/lib/flags.server";
+import { loadFlagConfig } from "@/lib/flag-config-cache.server";
 import { authenticateOfrep } from "@/lib/ofrep-auth.server";
 import {
   configurationVersion,
@@ -15,7 +17,6 @@ import {
   recordExposureSample,
 } from "@/lib/flag-usage.server";
 import { isExposureReason } from "@/lib/flag-metrics";
-import { listSegments } from "@/lib/segments.server";
 
 export function OPTIONS() {
   return new Response(null, { status: 204, headers: OFREP_HEADERS });
@@ -60,10 +61,10 @@ export async function POST(
       { status: 400, headers: OFREP_HEADERS },
     );
   const { key } = await params;
-  const [flag, storedSegments] = await Promise.all([
-    getFlag(credential.orgId, key),
-    listSegments(credential.orgId),
-  ]);
+  const { flags: storedFlags, segments: storedSegments } = await loadFlagConfig(
+    credential.orgId,
+  );
+  const flag = storedFlags.find((candidate) => candidate.key === key) ?? null;
   if (!flag)
     return Response.json(
       {
@@ -113,24 +114,33 @@ export async function POST(
   // hook. Recorded only after the eval was accepted (a refused eval is not a
   // check) and never on the 304 above (a revalidation served no new decision).
   // Best-effort: a usage-recording failure must not fail the evaluation.
+  //
+  // Scheduled with after() rather than a bare `void`: these writes must not
+  // block the response, but a fire-and-forget promise is not guaranteed to run
+  // once the response is sent on a serverless platform. after() extends the
+  // invocation via waitUntil so the exposure records actually land.
   if (isExposureReason(evaluated.reason)) {
     const reason = evaluated.reason;
     const targetingKey = (body.context as EvaluationContext).targetingKey;
-    void recordServerExposure({
-      orgId: credential.orgId,
-      flagKey: evaluated.key,
-      variantKey: evaluated.variant,
-      reason,
-    }).catch(() => {});
-    // A sampled, hashed raw exposure for the detail page's recent-checks stream.
-    if (typeof targetingKey === "string" && targetingKey) {
-      void recordExposureSample({
+    after(() =>
+      recordServerExposure({
         orgId: credential.orgId,
         flagKey: evaluated.key,
         variantKey: evaluated.variant,
         reason,
-        targetingKey,
-      }).catch(() => {});
+      }).catch(() => {}),
+    );
+    // A sampled, hashed raw exposure for the detail page's recent-checks stream.
+    if (typeof targetingKey === "string" && targetingKey) {
+      after(() =>
+        recordExposureSample({
+          orgId: credential.orgId,
+          flagKey: evaluated.key,
+          variantKey: evaluated.variant,
+          reason,
+          targetingKey,
+        }).catch(() => {}),
+      );
     }
   }
 

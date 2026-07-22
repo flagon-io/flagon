@@ -81,10 +81,10 @@ export function planRate(plan: PlanId, meterId: string): MeterRate | null {
  * DERIVED, not declared. Hobby's allowance is exactly what its included usage
  * credit buys at the meter's own published rate:
  *
- *   the meter's free allowance          1,000,000 evaluations
- *   + what $5.00 of credit buys       + 100,000,000 (500c / 5c per 1M)
+ *   the meter's free allowance          0 evaluations
+ *   + what $10.00 of credit buys      + 10,000,000 (1000c / 100c per 1M)
  *   -------------------------------------------------------------
- *   = 101,000,000 evaluations per month
+ *   = 10,000,000 evaluations per month
  *
  * Deriving it is what keeps the cap honest: re-price the meter or re-size
  * Hobby's credit and the cap moves with it automatically, so the number we
