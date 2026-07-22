@@ -888,6 +888,62 @@ export const orgContracts = pgTable(
 );
 
 /**
+ * Enterprise proposals (drizzle/0034_org_proposals.sql): an offer of contract
+ * terms + a price sent to a prospect as a signed link they approve or decline.
+ *
+ * GLOBAL, no RLS - accessed by an unguessable token digest before any org
+ * session exists (like an emailed verification link), so it is classified
+ * auth-layer and access-checked in application code (proposals.server.ts), NOT
+ * by tenant policy. Carries the PRICE that org_contracts does not; on
+ * acceptance the operator provisions (price -> Stripe, terms -> org_contracts).
+ */
+export const orgProposals = pgTable(
+  "org_proposals",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** SHA-256 hex digest of the link token; the raw token is never stored. */
+    tokenHash: text("token_hash").notNull().unique(),
+    status: text("status").notNull().default("draft"),
+    termStart: date("term_start").notNull(),
+    termEnd: date("term_end").notNull(),
+    meterAllowances: jsonb("meter_allowances")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    meteredAllowances: jsonb("metered_allowances")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    meteredRates: jsonb("metered_rates")
+      .$type<Record<string, { unit_amount_cents: number; per: number }>>()
+      .notNull()
+      .default({}),
+    baseFeeCents: integer("base_fee_cents").notNull().default(0),
+    interval: text("interval").notNull().default("year"),
+    message: text("message"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    declineReason: text("decline_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("org_proposals_org_idx").on(t.organizationId, t.createdAt),
+    index("org_proposals_status_idx").on(t.status),
+  ],
+);
+
+/**
  * All email addresses a user owns (drizzle/0002_user_emails.sql). Source of
  * truth for multi-email; "user".email mirrors the primary row via hooks in
  * src/lib/auth.ts. Global auth table: no RLS, no org scope.

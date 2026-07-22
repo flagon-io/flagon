@@ -38,6 +38,10 @@ const AUTH_LAYER_TABLES = new Set([
   "team_members",
   // Sales-lead intake; internal tooling, not tenant data.
   "leads",
+  // Enterprise proposals: reached by an unguessable token digest before an org
+  // RLS context exists (signed-link approval, like a verification link), so
+  // access is a digest match in application code, not a tenant policy.
+  "org_proposals",
   // Token hashes span user- and organization-owned credentials and must be
   // discoverable before an org RLS context exists. Every lookup is a digest
   // match and scope/subject checks happen in access-tokens.server.ts.

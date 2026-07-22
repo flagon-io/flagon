@@ -18,15 +18,22 @@ import {
   totalsFromSnapshot,
 } from "@/lib/billing-periods.server";
 import { withInvoiceClaim } from "@/lib/invoice-claims.server";
-import { PLANS, isPlanId, planAutoInvoicesAnything } from "@/lib/plans";
+import {
+  PLANS,
+  isPlanId,
+  planAutoInvoicesAnything,
+  subscriptionPlan,
+} from "@/lib/plans";
 import { buildUsageInvoiceLines } from "@/lib/usage-invoice";
 import { clearPlanCache } from "@/lib/usage-events.server";
 
 /**
  * Stripe webhook: the single source of plan transitions, and where a period's
- * usage becomes invoice lines. Checkout completion flips an org to Pro;
- * subscription cancellation/expiry drops it back to free; a newly opened
- * invoice gets the usage for the cycle that just ENDED. Signature-verified
+ * usage becomes invoice lines. Checkout completion flips an org to Pro; a
+ * subscription update carries the org onto the plan its metadata declares
+ * (Pro by default, or enterprise for a contract subscription); cancellation or
+ * expiry drops it back to free; a newly opened invoice gets the usage for the
+ * cycle that just ENDED. Signature-verified
  * with STRIPE_WEBHOOK_SECRET (from `stripe listen` locally, or the dashboard
  * endpoint in production). Infra endpoint - not part of the public API
  * contract.
@@ -95,10 +102,15 @@ export async function POST(request: Request) {
           subscription.status,
         );
         const cycle = active ? subscriptionCycle(subscription) : null;
+        // An active subscription may declare a non-self-serve plan (enterprise)
+        // through its metadata; a self-serve Pro sub carries no marker and
+        // resolves to pro. This is what keeps a contract subscription from
+        // being flipped to Pro on every renewal, and it syncs the enterprise
+        // cycle the same way it does Pro's.
         await db
           .update(organizations)
           .set({
-            plan: active ? "pro" : "free",
+            plan: active ? subscriptionPlan(subscription.metadata) : "free",
             stripeSubscriptionId: active ? subscription.id : null,
             // A cancelled subscription has no cycle: fall back to the
             // calendar month rather than freezing on a stale window.

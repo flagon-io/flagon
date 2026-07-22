@@ -193,3 +193,26 @@ export const SELF_SERVE_PLANS: PlanId[] = ["free", "pro"];
 export function isPlanId(value: string): value is PlanId {
   return (PLAN_IDS as readonly string[]).includes(value);
 }
+
+/**
+ * The plan an ACTIVE Stripe subscription puts its organization on.
+ *
+ * A subscription can DECLARE its plan through `metadata.flagon_plan`. This is
+ * how a non-self-serve plan gets onto an org whose subscription was created
+ * outside Checkout - an enterprise contract set up by hand in the Stripe
+ * dashboard, by a provisioning script, or by an operator tool. The marker is
+ * flagon's own billing convention; nothing outside this repo is required to
+ * read or honor it.
+ *
+ * Self-serve Pro subscriptions come through Checkout and carry no marker, so
+ * the default is `pro`. An absent, unrecognized, or `free` marker also resolves
+ * to `pro` rather than trusting an arbitrary string as a plan or subscribing an
+ * org onto the un-billable free tier - a subscription that is active is, by
+ * definition, at least Pro.
+ */
+export function subscriptionPlan(
+  metadata: { flagon_plan?: string | null } | null | undefined,
+): PlanId {
+  const declared = metadata?.flagon_plan;
+  return declared && isPlanId(declared) && declared !== "free" ? declared : "pro";
+}
