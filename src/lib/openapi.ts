@@ -2392,8 +2392,10 @@ export const openApiSpec = {
         operationId: "listFlags",
         tags: ["Flags"],
         summary: "List feature flags",
+        description:
+          "Each flag carries its usage alongside its definition: `stale` (a cleanup-candidate heuristic) with `stale_reasons`, `checks_per_hour`, `pass_rate` (boolean flags, else null), and `last_checked_at`. See GET /flags/{key}/usage for the full series.",
         responses: {
-          "200": { description: "Organization flags." },
+          "200": { description: "Organization flags, each with usage fields." },
           "401": errorResponse(
             "Unauthorized.",
             "unauthorized",
@@ -2515,6 +2517,30 @@ export const openApiSpec = {
         responses: {
           "204": { description: "Flag deleted." },
           "404": errorResponse("Not found.", "not_found", "Flag not found."),
+        },
+      },
+    },
+    "/v1/orgs/{slug}/flags/{key}/usage": {
+      get: {
+        operationId: "getFlagUsage",
+        tags: ["Flags"],
+        summary: "Get flag usage",
+        description:
+          "Per-flag usage analytics: the hourly check series, variant and targeting-reason breakdowns, the checks/hr rate, pass rate (boolean flags), and the staleness assessment.\n\nUsage comes from client-reported exposures (an OpenFeature hook posting to /ofrep/v1/exposures) plus server-side single-flag evaluations. A flag with no exposures returns zeros and a null `last_checked_at` rather than an error - not every flag has traffic, and the bulk evaluation endpoint cannot attribute checks per flag.",
+        responses: {
+          "200": {
+            description: "The flag's usage.",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/FlagUsage" },
+              },
+            },
+          },
+          "404": errorResponse(
+            "Not found.",
+            "flag_not_found",
+            "Flag not found.",
+          ),
         },
       },
     },
@@ -2924,6 +2950,80 @@ export const openApiSpec = {
           created_at: { type: "string", format: "date-time" },
         },
       },
+      FlagUsage: {
+        type: "object",
+        description:
+          "Per-flag usage analytics, derived from client-reported exposures plus server-side single-flag evaluations. All counts are over the last 30 days. A flag with no exposures returns zeros and a null last_checked_at.",
+        required: [
+          "flag_key",
+          "total_checks",
+          "checks_per_hour",
+          "stale",
+          "series",
+        ],
+        properties: {
+          flag_key: { type: "string", example: "new-checkout" },
+          total_checks: { type: "integer", example: 41200 },
+          checks_per_hour: { type: "number", example: 57.2 },
+          pass_rate: {
+            type: "number",
+            nullable: true,
+            example: 0.84,
+            description:
+              "Share of checks that returned the `on` variant. Boolean flags only; null otherwise (read `variants` for the distribution).",
+          },
+          last_checked_at: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+            description: "Most recent hour with a check, or null.",
+          },
+          stale: {
+            type: "boolean",
+            description:
+              "Whether the flag is a cleanup candidate. A suggestion, not a verdict.",
+          },
+          stale_reasons: {
+            type: "array",
+            items: { type: "string" },
+            example: ["No checks in 30 days", "No targeting rules"],
+          },
+          variants: {
+            type: "array",
+            description: "Distribution of served variants.",
+            items: {
+              type: "object",
+              required: ["variant", "count", "share"],
+              properties: {
+                variant: { type: "string", example: "on" },
+                count: { type: "integer", example: 34600 },
+                share: { type: "number", example: 0.84 },
+              },
+            },
+          },
+          reasons: {
+            type: "object",
+            description: "How flags were served, by OFREP reason.",
+            properties: {
+              STATIC: { type: "integer", example: 6600 },
+              TARGETING_MATCH: { type: "integer", example: 34600 },
+              SPLIT: { type: "integer", example: 0 },
+            },
+          },
+          series: {
+            type: "array",
+            description: "Hourly check counts over the window.",
+            items: {
+              type: "object",
+              required: ["hour", "count"],
+              properties: {
+                hour: { type: "string", format: "date-time" },
+                count: { type: "integer", example: 240 },
+              },
+            },
+          },
+        },
+      },
       Variant: {
         type: "object",
         description:
@@ -3075,21 +3175,29 @@ export const openApiSpec = {
             type: "integer",
             nullable: true,
             example: 1700,
-            description: "Null on contract pricing.",
+            description:
+              "On contract pricing this is the metered overage (usage billed OUTSIDE the base contract); the base contract's pooled figures stay null.",
           },
           overage_cents: {
             type: "integer",
             nullable: true,
             example: 0,
             description:
-              "Billed on top of the plan's base price. Null on contract pricing.",
+              "Billed on top of the plan's base price. On contract pricing this equals the metered overage.",
+          },
+          metered_overage_cents: {
+            type: "integer",
+            nullable: true,
+            example: 750,
+            description:
+              "What's billed automatically OUTSIDE the base contract this period (metered meters). Null when not on contract pricing. Covered meters are coordinated at renewal and never appear here.",
           },
           subscription_cents: {
             type: "integer",
             nullable: true,
             example: 2000,
             description:
-              "The plan's base price for the period. Null on contract pricing.",
+              "The plan's base price for the period. Null on contract pricing (the negotiated fee lives in Stripe).",
           },
           contract: {
             type: "object",
@@ -3170,20 +3278,32 @@ export const openApiSpec = {
                 label: { type: "string", example: "Flag evaluations" },
                 quantity: { type: "integer", example: 3400000 },
                 unit: { type: "string", example: "evaluations" },
+                billing_mode: {
+                  type: "string",
+                  enum: ["priced", "covered", "metered"],
+                  description:
+                    "How this meter bills. `priced` (Pro/Hobby). On contract pricing: `covered` (in the base contract's term envelope - volume, cost null, coordinated at renewal) or `metered` (billed automatically on top - cost populated).",
+                },
                 unit_amount_cents: {
                   type: "integer",
                   nullable: true,
                   example: 5,
                   description:
-                    "Null on contract pricing: the published rate is not what a contract customer pays, so serving it would let a client multiply out a total that is not their bill.",
+                    "Populated for priced and metered meters; null for covered meters, where the published rate is not what the customer pays.",
                 },
                 per: { type: "integer", example: 1000000 },
-                included_quantity: { type: "integer", example: 1000000 },
+                included_quantity: {
+                  type: "integer",
+                  example: 1000000,
+                  description:
+                    "For a metered meter this is the PER-CYCLE included allowance, which resets each billing period.",
+                },
                 cost_cents: {
                   type: "integer",
                   nullable: true,
                   example: 17,
-                  description: "Null on contract pricing.",
+                  description:
+                    "Populated for priced and metered meters; null for covered meters (not billed).",
                 },
               },
             },

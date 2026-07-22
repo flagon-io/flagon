@@ -10,6 +10,11 @@ import {
   validEvaluationContext,
 } from "@/lib/ofrep.server";
 import { meterEvaluations } from "@/lib/ofrep-usage.server";
+import {
+  recordServerExposure,
+  recordExposureSample,
+} from "@/lib/flag-usage.server";
+import { isExposureReason } from "@/lib/flag-metrics";
 import { listSegments } from "@/lib/segments.server";
 
 export function OPTIONS() {
@@ -102,6 +107,33 @@ export async function POST(
     quantity: 1,
   });
   if (overQuota) return overQuota;
+
+  // Server-side exposure: this endpoint knows exactly which flag was evaluated,
+  // so it is a real per-flag data source before any client adopts the exposure
+  // hook. Recorded only after the eval was accepted (a refused eval is not a
+  // check) and never on the 304 above (a revalidation served no new decision).
+  // Best-effort: a usage-recording failure must not fail the evaluation.
+  if (isExposureReason(evaluated.reason)) {
+    const reason = evaluated.reason;
+    const targetingKey = (body.context as EvaluationContext).targetingKey;
+    void recordServerExposure({
+      orgId: credential.orgId,
+      flagKey: evaluated.key,
+      variantKey: evaluated.variant,
+      reason,
+    }).catch(() => {});
+    // A sampled, hashed raw exposure for the detail page's recent-checks stream.
+    if (typeof targetingKey === "string" && targetingKey) {
+      void recordExposureSample({
+        orgId: credential.orgId,
+        flagKey: evaluated.key,
+        variantKey: evaluated.variant,
+        reason,
+        targetingKey,
+      }).catch(() => {});
+    }
+  }
+
   // no-store would forbid the client from keeping the copy it needs to
   // revalidate against, defeating the ETag entirely.
   return Response.json(evaluated, {

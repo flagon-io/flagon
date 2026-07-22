@@ -1,7 +1,8 @@
 import { apiError, apiJson } from "@/lib/api";
 import { resolveOrgAccess } from "@/lib/api-auth.server";
 import { PLANS, usageDisplay, type PlanId } from "@/lib/plans";
-import { contractConsumption } from "@/lib/contracts.server";
+import { contractConsumption, meteredUsage } from "@/lib/contracts.server";
+import type { UsageLine } from "@/lib/meters";
 import { formatPeriod, isoDay } from "@/lib/billing-period";
 import {
   breakdownFromSnapshot,
@@ -114,14 +115,29 @@ export async function GET(
       ? await contractConsumption({ orgId: org.id })
       : null;
 
+  // The metered half: usage billed OUTSIDE the base contract. A closed period
+  // reads its frozen metered lines; the open one prices them live for the cycle.
+  const meteredLines: UsageLine[] =
+    display === "contracted"
+      ? isFrozen && snapshot
+        ? totals.lines.filter((line) => line.billingMode === "metered")
+        : await meteredUsage({
+            orgId: org.id,
+            window,
+            contract: contracted?.contract ?? null,
+          })
+      : [];
+  const meteredByMeter = new Map(meteredLines.map((l) => [l.meterId, l]));
+  const meteredTotalCents = meteredLines.reduce(
+    (sum, line) => sum + line.costCents,
+    0,
+  );
+
   /**
-   * Cents are NULL, not zero, on a contracted plan.
-   *
-   * The metered value of a period is not what a contract customer owes - their
-   * fee was negotiated up front from usage estimates - so serializing it as a
-   * number invites a client to sum it, chart it, or reconcile it against an
-   * invoice that will never carry it. Zero would be worse: it reads as a
-   * confident statement that the period was free.
+   * Cents on a contracted plan: NULL for the base-contract fields (their fee is
+   * negotiated up front, so a per-period pooled cost would be a bill that never
+   * arrives), but the METERED overage is real money and is populated. Zero would
+   * read as "this period was free", which is the opposite of the point.
    */
   const cents = (value: number): number | null =>
     display === "contracted" ? null : value;
@@ -149,8 +165,14 @@ export async function GET(
     ),
     credit_applied_cents: cents(totals.creditAppliedCents),
     credit_remaining_cents: cents(totals.creditRemainingCents),
-    usage_cents: cents(totals.usageCents),
-    overage_cents: cents(totals.overageCents),
+    // For a contracted org the only real cost is the metered overage; the base
+    // contract's pooled figures stay null.
+    usage_cents:
+      display === "contracted" ? meteredTotalCents : totals.usageCents,
+    overage_cents:
+      display === "contracted" ? meteredTotalCents : totals.overageCents,
+    /** What's billed outside the base contract this period. Null when not contracted. */
+    metered_overage_cents: display === "contracted" ? meteredTotalCents : null,
     subscription_cents:
       display !== "contracted" &&
       PLANS[plan as keyof typeof PLANS]?.priceMonthly != null
@@ -178,19 +200,35 @@ export async function GET(
       : null,
     group_by: query.groupBy,
     granularity: query.granularity,
-    meters: totals.lines.map((line) => ({
-      meter: line.meterId,
-      product: line.product,
-      label: line.label,
-      quantity: line.quantity,
-      unit: line.unit,
-      // The published rate is not a contract customer's rate, so quoting it
-      // would let a client multiply out a total that is not their bill.
-      unit_amount_cents: cents(line.rate.unitAmountCents),
-      per: line.rate.per,
-      included_quantity: line.rate.includedQuantity,
-      cost_cents: cents(line.costCents),
-    })),
+    meters: totals.lines.map((line) => {
+      // On a contracted org a meter is covered (volume, no cost) or metered
+      // (billed on top). Metered meters carry their real rate and cost; covered
+      // meters stay null so a client can't multiply out a bill that isn't owed.
+      const metered =
+        display === "contracted" ? meteredByMeter.get(line.meterId) : null;
+      const mode =
+        display === "contracted" ? (metered ? "metered" : "covered") : "priced";
+      const rate = metered ? metered.rate : line.rate;
+      const costCents = metered ? metered.costCents : line.costCents;
+      return {
+        meter: line.meterId,
+        product: line.product,
+        label: line.label,
+        quantity: line.quantity,
+        unit: line.unit,
+        billing_mode: mode,
+        unit_amount_cents:
+          display === "contracted"
+            ? metered
+              ? rate.unitAmountCents
+              : null
+            : rate.unitAmountCents,
+        per: rate.per,
+        included_quantity: rate.includedQuantity,
+        cost_cents:
+          display === "contracted" ? (metered ? costCents : null) : costCents,
+      };
+    }),
     groups: rows.map((row) => ({
       key: row.key,
       label: row.label,

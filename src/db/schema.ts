@@ -510,6 +510,164 @@ export const evaluationCounters = pgTable(
 );
 
 /**
+ * Per-flag usage analytics (drizzle/0031_flag_usage.sql).
+ *
+ * Real per-flag "checks" cannot come from the server: the bulk OFREP endpoint
+ * evaluates every flag on every poll, so the server sees them all identically.
+ * They come from the CLIENT reporting which flags it evaluated (exposure
+ * logging). These are the aggregated store, hourly grain, carrying the served
+ * variant and reason so pass rate and targeting mix are derivable.
+ *
+ * flag_key is a dimension, not a foreign key: usage outlives a renamed flag.
+ * Privacy: counts and outcomes only, never a raw targeting identity.
+ *
+ * Product data: tenant-scoped RLS, query through withTenant.
+ */
+export const flagUsageRollups = pgTable(
+  "flag_usage_rollups",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    flagKey: text("flag_key").notNull(),
+    /** Truncated to the hour (UTC); the client pre-aggregates to this grain. */
+    hour: timestamp("hour", { withTimezone: true }).notNull(),
+    variantKey: text("variant_key").notNull(),
+    /** STATIC | TARGETING_MATCH | SPLIT - see src/lib/flags.ts. */
+    reason: text("reason").notNull(),
+    count: bigint("count", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("flag_usage_rollups_grain_idx").on(
+      t.organizationId,
+      t.flagKey,
+      t.hour,
+      t.variantKey,
+      t.reason,
+    ),
+    index("flag_usage_rollups_org_flag_hour_idx").on(
+      t.organizationId,
+      t.flagKey,
+      t.hour,
+    ),
+  ],
+);
+
+/**
+ * Daily fold of flag_usage_rollups (drizzle/0031): long-term history and
+ * staleness, kept after the hourly rows are trimmed, so "no checks in 30 days"
+ * survives hourly retention.
+ */
+export const flagUsageDaily = pgTable(
+  "flag_usage_daily",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    flagKey: text("flag_key").notNull(),
+    day: date("day").notNull(),
+    variantKey: text("variant_key").notNull(),
+    count: bigint("count", { mode: "number" }).notNull().default(0),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("flag_usage_daily_grain_idx").on(
+      t.organizationId,
+      t.flagKey,
+      t.day,
+      t.variantKey,
+    ),
+    index("flag_usage_daily_org_flag_day_idx").on(
+      t.organizationId,
+      t.flagKey,
+      t.day,
+    ),
+  ],
+);
+
+/**
+ * Exposure batch idempotency receipts (drizzle/0031). A pre-aggregated batch
+ * has no per-event key, so the batch id is the dedupe unit: a replay finds its
+ * receipt and is dropped whole before any count is applied.
+ */
+export const flagExposureBatches = pgTable(
+  "flag_exposure_batches",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    batchId: text("batch_id").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("flag_exposure_batches_receipt_idx").on(
+      t.organizationId,
+      t.batchId,
+    ),
+  ],
+);
+
+/**
+ * Sampled raw exposures for the detail page's recent-exposures stream
+ * (drizzle/0031). A diagnostics aid, not an analytics source, so it is sampled
+ * and short-lived. targeting_key_hash is a salted digest only - never the raw
+ * id - so the stream can say "a user" without saying which.
+ */
+export const flagExposureSamples = pgTable(
+  "flag_exposure_samples",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    flagKey: text("flag_key").notNull(),
+    variantKey: text("variant_key").notNull(),
+    reason: text("reason").notNull(),
+    targetingKeyHash: text("targeting_key_hash"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("flag_exposure_samples_org_flag_time_idx").on(
+      t.organizationId,
+      t.flagKey,
+      t.occurredAt,
+    ),
+  ],
+);
+
+/**
  * The expiring lease held while invoicing a period to Stripe
  * (drizzle/0024_usage_events.sql).
  *
@@ -637,6 +795,13 @@ export const billingPeriodLines = pgTable(
       .notNull()
       .default(0),
     costCents: integer("cost_cents").notNull().default(0),
+    /**
+     * How this line was treated when the period closed (drizzle/0032):
+     * priced (pro/free), covered (enterprise, volume, cost 0), or metered
+     * (enterprise, per-cycle overage billed). Frozen so history never depends
+     * on today's contract.
+     */
+    billingMode: text("billing_mode").notNull().default("priced"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -676,6 +841,25 @@ export const orgContracts = pgTable(
      */
     meterAllowances: jsonb("meter_allowances")
       .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    /**
+     * Per-CYCLE included quantity for METERED meters (drizzle/0032), keyed by
+     * meter id. Resets every billing cycle, unlike the term-wide
+     * meterAllowances. A metered meter absent here uses the meter's own
+     * includedQuantity. This is the GitHub Actions "included minutes" knob.
+     */
+    meteredAllowances: jsonb("metered_allowances")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    /**
+     * Optional negotiated overage rate per metered meter (drizzle/0032). Absent
+     * meter uses the published rate (src/lib/meters.ts). Lets a contract move a
+     * per-unit price without moving the global rate.
+     */
+    meteredRates: jsonb("metered_rates")
+      .$type<Record<string, { unit_amount_cents: number; per: number }>>()
       .notNull()
       .default({}),
     note: text("note"),

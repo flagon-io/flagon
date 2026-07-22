@@ -12,19 +12,24 @@
  * on all four sides at the max-width; only the horizontals escape.
  */
 /**
- * A crosshair marking one point where the grid's rules cross.
+ * A small square node marking one point where the grid's rules cross.
  *
- * Drafting convention, borrowed on purpose: registration marks sit at the
- * intersections on a technical drawing, and putting them where our horizontal
- * band rules meet the vertical column rules says the layout is measured rather
- * than merely decorated. Two 9px hairlines rather than a "+" glyph, so it
- * aligns to the pixel instead of to a font's baseline.
+ * Drafting convention, borrowed on purpose: a junction on a schematic is drawn
+ * as a node, not a crossing, and putting one where our horizontal band rules
+ * meet the vertical column rules says the layout is measured rather than merely
+ * decorated. A filled square (background-coloured, so the rules appear to stop
+ * at its edges and pass cleanly through the corner) reads as that node, and its
+ * hairline outline catches just enough light to register.
+ *
+ * Sized to the pixel and background-filled rather than a "+" glyph, so it lands
+ * exactly on the intersection instead of to a font's baseline.
  */
-export function CrossMark({ className }: { className: string }) {
+export function CornerMark({ className }: { className: string }) {
   return (
+    // A zero-size anchor at the corner point (positioned by `className`), with
+    // the square centred on it, so the node lands exactly where the rules meet.
     <span aria-hidden className={`absolute z-10 hidden lg:block ${className}`}>
-      <span className="absolute left-1/2 top-1/2 h-px w-2.5 -translate-x-1/2 -translate-y-1/2 bg-white/25" />
-      <span className="absolute left-1/2 top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 bg-white/25" />
+      <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 border border-white/30 bg-background" />
     </span>
   );
 }
@@ -66,10 +71,10 @@ export function BleedBand({
             rules cross the content column's verticals. */}
         {marks ? (
           <>
-            <CrossMark className="-left-px -top-px" />
-            <CrossMark className="-right-px -top-px" />
-            <CrossMark className="-bottom-px -left-px" />
-            <CrossMark className="-bottom-px -right-px" />
+            <CornerMark className="-left-px -top-px" />
+            <CornerMark className="-right-px -top-px" />
+            <CornerMark className="-bottom-px -left-px" />
+            <CornerMark className="-bottom-px -right-px" />
           </>
         ) : null}
         {children}

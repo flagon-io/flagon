@@ -15,22 +15,22 @@ export const PLAN_IDS = ["free", "pro", "enterprise"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
 /**
- * Does a period's usage become invoice lines automatically?
+ * Could a period's usage produce ANY automatic invoice line on this plan? A
+ * coarse gate for the webhook; the per-meter decision is meterAutoInvoiced in
+ * src/lib/contracts.ts.
  *
- * Only Pro. Hobby is never invoiced at all, and Enterprise is CONTRACTED: the
- * fee is negotiated up front from usage estimates, and the envelope it covers
- * lives in the agreement rather than in this codebase. That distinction is
- * easy to lose because `PLANS.enterprise.includedUsageCents` is 0 - which
- * means "no self-serve credit", NOT "every unit is billable". Attaching usage
- * to an enterprise invoice would charge the negotiated fee PLUS 100% of
- * metered usage, which is the opposite of what was signed.
+ * Pro auto-invoices everything. Enterprise auto-invoices its METERED meters
+ * (overage on products outside the base contract), so it qualifies too - the
+ * covered meters are coordinated at renewal and excluded per-meter downstream.
+ * Hobby is never invoiced.
  *
- * When contracted envelopes are modelled properly (a contracted amount that
- * becomes a credit line, so overage is a true-up), this is where that decision
- * changes - one predicate, shared by the webhook and anything that follows it.
+ * This used to be "Pro only" (`usageIsAutoInvoiced`), when enterprise was billed
+ * entirely by agreement. Enterprise now carries a real subscription with
+ * automated overage on the parts the contract does not cover, so the gate had to
+ * widen and the real decision moved to the meter level.
  */
-export function usageIsAutoInvoiced(plan: PlanId): boolean {
-  return plan === "pro";
+export function planAutoInvoicesAnything(plan: PlanId): boolean {
+  return plan === "pro" || plan === "enterprise";
 }
 
 /**

@@ -88,6 +88,7 @@ describe("OpenAPI document", () => {
       "/cron/cleanup", // scheduled maintenance (infra, CRON_SECRET-gated)
       "/cron/compact", // hourly usage compaction (infra, CRON_SECRET-gated)
       "/webhooks/stripe", // Stripe webhook (infra, signature-gated)
+      "/ofrep/v1/exposures", // flag-usage ingest (infra, client-token-gated)
       "/[...catchall]", // JSON 404 fallback
     ];
 

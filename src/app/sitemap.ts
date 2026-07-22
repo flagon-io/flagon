@@ -20,6 +20,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: "/docs/feature-flags", priority: 0.7 },
     { path: "/docs/self-hosting", priority: 0.7 },
     { path: "/docs/authentication", priority: 0.7 },
+    { path: "/docs/usage-analytics", priority: 0.7 },
     { path: "/docs/api", priority: 0.8 },
     { path: "/terms", priority: 0.5 },
     { path: "/privacy", priority: 0.5 },

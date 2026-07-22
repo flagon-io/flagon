@@ -80,19 +80,9 @@ export default async function ConsoleLayout({
             />
             <div className="ml-auto flex items-center">
               <div className="flex items-center gap-3">
-                {/* Docs sits FIRST and stays visible on mobile: looking
-                    something up is a thing people do mid-task, while leaving
-                    for the marketing site is not. No arrow on either - the
-                    pill already reads as a destination, and the glyph only
-                    added noise at this size. */}
-                <a
-                  href={marketingHref("/docs")}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={headerPillClass}
-                >
-                  Docs
-                </a>
+                {/* No Docs pill here: Documentation is pinned to the bottom of
+                    the sidebar, so a second link in the header was just the
+                    same destination twice. */}
                 <Link
                   href={marketingHref("/")}
                   className={`${headerPillClass} hidden sm:inline-flex`}

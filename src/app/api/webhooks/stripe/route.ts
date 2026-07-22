@@ -18,7 +18,7 @@ import {
   totalsFromSnapshot,
 } from "@/lib/billing-periods.server";
 import { withInvoiceClaim } from "@/lib/invoice-claims.server";
-import { PLANS, isPlanId, usageIsAutoInvoiced } from "@/lib/plans";
+import { PLANS, isPlanId, planAutoInvoicesAnything } from "@/lib/plans";
 import { buildUsageInvoiceLines } from "@/lib/usage-invoice";
 import { clearPlanCache } from "@/lib/usage-events.server";
 
@@ -136,7 +136,15 @@ export async function POST(request: Request) {
 
       // The invoice's OWN period is the cycle that just ended (its line items
       // carry the upcoming one). A subscription_create invoice covers no
-      // elapsed time at all and yields null.
+      // elapsed time at all and yields null. Stripe is moving the service period
+      // onto line items, so an invoice can arrive without usable period bounds;
+      // treat a missing or non-numeric bound as "no period to bill" rather than
+      // constructing an Invalid Date from it.
+      if (
+        typeof invoice.period_start !== "number" ||
+        typeof invoice.period_end !== "number"
+      )
+        break;
       const window = invoiceUsageWindow({
         periodStart: new Date(invoice.period_start * 1000),
         periodEnd: new Date(invoice.period_end * 1000),
@@ -155,18 +163,11 @@ export async function POST(request: Request) {
       const planId = isPlanId(period.plan) ? period.plan : "free";
 
       /**
-       * Contracted plans are invoiced by agreement, not by this handler.
-       *
-       * The org is matched by stripe_customer_id alone, so an enterprise org
-       * with a Stripe customer attached - the natural thing to do when setting
-       * up their subscription - would otherwise have a full period of usage
-       * added on top of the fee that was supposed to cover it.
-       *
-       * The period is still CLOSED above, deliberately: the frozen snapshot is
-       * what a contract review and any true-up are computed from, so it has to
-       * exist even though nothing is attached to the invoice here.
+       * Hobby is never invoiced. Pro and Enterprise are - the period stays
+       * CLOSED regardless (the frozen snapshot is what a contract review and any
+       * true-up read), but only Pro/Enterprise get lines attached here.
        */
-      if (!usageIsAutoInvoiced(planId)) break;
+      if (!planAutoInvoicesAnything(planId)) break;
 
       const snapshot = await getPeriod({
         orgId: org.id,
@@ -175,7 +176,25 @@ export async function POST(request: Request) {
       if (!snapshot) break;
 
       const totals = totalsFromSnapshot(snapshot.period, snapshot.lines);
-      const lines = buildUsageInvoiceLines(totals, {
+      /**
+       * Which lines actually bill:
+       *
+       *   Pro          everything - the whole period, pooled credit applied.
+       *   Enterprise   METERED lines only, and only where there is overage.
+       *                Covered lines are part of the negotiated base bill and
+       *                are coordinated at renewal, never auto-charged, so they
+       *                are excluded here even though they are frozen for records.
+       */
+      const billable =
+        planId === "enterprise"
+          ? {
+              ...totals,
+              lines: totals.lines.filter(
+                (line) => line.billingMode === "metered" && line.costCents > 0,
+              ),
+            }
+          : totals;
+      const lines = buildUsageInvoiceLines(billable, {
         planName: PLANS[planId].name,
         period: { from: period.periodStart, to: period.periodEnd },
       });

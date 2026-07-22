@@ -39,7 +39,10 @@ export default function DocsLayout({
       },
       {
         label: "Concepts",
-        items: [{ label: "Authentication", href: "/docs/authentication" }],
+        items: [
+          { label: "Authentication", href: "/docs/authentication" },
+          { label: "Usage analytics", href: "/docs/usage-analytics" },
+        ],
       },
       {
         label: "Products",

@@ -272,6 +272,12 @@ export type UsageLine = {
   rate: MeterRate;
   quantity: number;
   costCents: number;
+  /**
+   * How the meter bills: priced | covered | metered. Optional and defaulting to
+   * priced so the pre-contract callers (Pro/Hobby) need not set it; a contracted
+   * org's display splits covered (volume) from metered (cost) on this.
+   */
+  billingMode?: "priced" | "covered" | "metered";
 };
 
 export type UsageTotals = {

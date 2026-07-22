@@ -1,4 +1,4 @@
-import { CrossMark } from "@/components/bleed-band";
+import { CornerMark } from "@/components/bleed-band";
 import { HexField } from "@/components/hex-field";
 
 /**
@@ -138,8 +138,8 @@ export function PageHero({
           className="pointer-events-none absolute inset-x-0 bottom-0"
         >
           <div className="relative mx-auto w-full max-w-7xl">
-            <CrossMark className="-bottom-px -left-px" />
-            <CrossMark className="-bottom-px -right-px" />
+            <CornerMark className="-bottom-px -left-px" />
+            <CornerMark className="-bottom-px -right-px" />
           </div>
         </div>
       ) : null}

@@ -30,6 +30,13 @@ import {
 } from "./meters";
 import { PLANS, isPlanId, type PlanId } from "./plans";
 import { planRate } from "./quota";
+import {
+  meterBillingMode,
+  meteredRate,
+  type BillingMode,
+  type ContractBilling,
+} from "./contracts";
+import { activeContract } from "./contracts.server";
 
 /**
  * Closed billing periods: the frozen record.
@@ -148,6 +155,8 @@ export type FrozenLine = {
   quantity: number;
   rate: MeterRate;
   costCents: number;
+  /** How this meter was billed: priced | covered | metered (drizzle/0032). */
+  billingMode: BillingMode;
 };
 
 /**
@@ -163,6 +172,7 @@ async function freezeLines(
   orgId: string,
   window: PeriodWindow,
   plan: PlanId,
+  contract: ContractBilling | null,
 ): Promise<FrozenLine[]> {
   const rows = await withTenant(orgId, (tx) =>
     tx
@@ -224,13 +234,28 @@ async function freezeLines(
     // option: guessing a rate would invent a charge.
     if (!meter) continue;
 
-    // The PLAN's rate, not the registry's: a meter whose allowance is a plan
-    // property (flags.syncs) prices differently on Hobby and Pro, and it is
-    // the plan-specific rate that has to travel with the frozen line.
-    const rate = planRate(plan, meterId) ?? meterRate(meter);
+    // How this meter bills decides both the rate that gets frozen and whether
+    // any cost is frozen at all:
+    //
+    //   priced  (pro/free)   the plan's rate; a meter whose allowance is a plan
+    //                        property (flags.syncs) prices differently per plan.
+    //   covered (enterprise) in the contract's term envelope: recorded as
+    //                        volume, cost 0, coordinated at renewal not billed.
+    //   metered (enterprise) billed on top: the contract's per-cycle rate and
+    //                        included, so cost is the overage past the cycle's
+    //                        included amount.
+    const mode = meterBillingMode(plan, meterId, contract);
+    const rate =
+      mode === "metered"
+        ? (meteredRate(meterId, contract) ?? meterRate(meter))
+        : mode === "covered"
+          ? meterRate(meter)
+          : (planRate(plan, meterId) ?? meterRate(meter));
     const total = entries.reduce((sum, entry) => sum + entry.quantity, 0);
+    // Covered meters are never billed; freeze cost 0 across their lines.
+    const lineCost = mode === "covered" ? 0 : rateCostCents(rate, total);
     const shares = allocateProRata(
-      rateCostCents(rate, total),
+      lineCost,
       entries.map((entry) => entry.quantity),
     );
     for (const [index, entry] of entries.entries()) {
@@ -244,6 +269,7 @@ async function freezeLines(
         quantity: entry.quantity,
         rate,
         costCents: shares[index],
+        billingMode: mode,
       });
     }
   }
@@ -268,7 +294,12 @@ export async function closePeriod(input: {
   const existing = await getPeriod({ orgId: input.orgId, periodStart });
   if (existing && existing.period.status !== "open") return existing.period;
 
-  const lines = await freezeLines(input.orgId, input.window, planId);
+  // The contract decides per-meter billing for an enterprise org (covered vs
+  // metered). Loaded once and frozen into each line's mode + rate, so a later
+  // contract change never re-prices a closed period.
+  const contract =
+    planId === "enterprise" ? await activeContract(input.orgId) : null;
+  const lines = await freezeLines(input.orgId, input.window, planId, contract);
   const usageCents = lines.reduce((total, line) => total + line.costCents, 0);
   const creditAppliedCents = Math.min(usageCents, includedCreditCents);
   const overageCents = usageCents - creditAppliedCents;
@@ -319,6 +350,7 @@ export async function closePeriod(input: {
           per: line.rate.per,
           includedQuantity: line.rate.includedQuantity,
           costCents: line.costCents,
+          billingMode: line.billingMode,
         })),
       );
     }
@@ -392,6 +424,7 @@ export async function getPeriod(input: {
           includedQuantity: line.includedQuantity,
         },
         costCents: line.costCents,
+        billingMode: (line.billingMode as BillingMode) ?? "priced",
       })),
     };
   });
@@ -468,6 +501,7 @@ export function totalsFromSnapshot(
       rate: line.rate,
       quantity: line.quantity,
       costCents: line.costCents,
+      billingMode: line.billingMode,
     });
   }
   const usageLines = [...byMeter.values()].sort(

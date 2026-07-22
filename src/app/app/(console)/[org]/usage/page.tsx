@@ -8,7 +8,7 @@ import { organizations } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { billingEnabled, getBillingSummary } from "@/lib/billing";
 import { formatPeriod, isoDay } from "@/lib/billing-period";
-import { contractConsumption } from "@/lib/contracts.server";
+import { contractConsumption, meteredUsage } from "@/lib/contracts.server";
 import { PACE_COPY, formatTerm } from "@/lib/contracts";
 import { coversUsage, discountedTotal } from "@/lib/discounts";
 import {
@@ -28,6 +28,7 @@ import {
   formatMeterRate,
   formatQuantity,
   getMeter,
+  type UsageLine,
 } from "@/lib/meters";
 import { PLANS, usageDisplay } from "@/lib/plans";
 import { appPath } from "@/lib/urls";
@@ -229,6 +230,25 @@ export default async function UsagePage({
       ? await contractConsumption({ orgId: org.id })
       : null;
 
+  // The other half of a contracted org's usage: METERED meters, billed on top
+  // of the base contract. A closed period reads its frozen metered lines; the
+  // open one prices them live for the current cycle. This is the "clearly
+  // separated overage outside your base bill" the model requires.
+  const meteredLines: UsageLine[] =
+    display === "contracted"
+      ? isFrozen && snapshot
+        ? totals.lines.filter((line) => line.billingMode === "metered")
+        : await meteredUsage({
+            orgId: org.id,
+            window,
+            contract: contracted?.contract ?? null,
+          })
+      : [];
+  const meteredTotalCents = meteredLines.reduce(
+    (sum, line) => sum + line.costCents,
+    0,
+  );
+
   // The discount in force, so "Total this period" cannot claim a customer on
   // three free months owes $20. Only meaningful where money is shown at all,
   // and the next-invoice preview is skipped: this page does not print it.
@@ -354,7 +374,10 @@ export default async function UsagePage({
 
           Pro: dollars, because dollars are the answer. */}
       {display === "contracted" ? (
-        <ContractPanel contracted={contracted} />
+        <>
+          <ContractPanel contracted={contracted} />
+          <MeteredPanel lines={meteredLines} totalCents={meteredTotalCents} />
+        </>
       ) : (
         <div className="mt-6 border border-white/10 bg-white/2 p-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
@@ -711,6 +734,80 @@ const PACE_TONE: Record<string, string> = {
  * legible: 58% of the volume against 61% of the year is exactly on plan, and a
  * monthly frame would have called the same customer a problem in July.
  */
+/**
+ * The metered half of a contracted org's usage: what is billed ON TOP of the
+ * base contract, kept in its own clearly-labelled panel so a customer is never
+ * confused about which usage the negotiated fee covers and which is charged
+ * automatically. Renders nothing when there is no metered usage - the common
+ * case for an org whose whole footprint is covered.
+ */
+function MeteredPanel({
+  lines,
+  totalCents,
+}: {
+  lines: UsageLine[];
+  totalCents: number;
+}) {
+  if (!lines.length) return null;
+  return (
+    <div className="mt-6 border border-amber-500/20 bg-amber-500/2 p-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-100">
+            Billed outside your contract
+          </h2>
+          <p className="mt-1 text-xs text-zinc-500">
+            Usage on products your agreement doesn&apos;t cover, charged
+            automatically this billing period.
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-zinc-500">This period</div>
+          <div className="mt-0.5 text-2xl font-semibold tracking-tight tabular-nums text-zinc-100">
+            {formatCents(totalCents)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 divide-y divide-white/5 border-t border-white/10">
+        {lines.map((line) => (
+          <div
+            key={line.meterId}
+            className="flex items-center gap-4 py-3 first:pt-4"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-zinc-100">{line.label}</div>
+              <div className="mt-0.5 text-xs text-zinc-500">
+                {formatCents(line.rate.unitAmountCents)} per{" "}
+                {formatQuantity(line.rate.per)} {line.unit}
+                {line.rate.includedQuantity ? (
+                  <>
+                    {" · "}
+                    {formatQuantity(line.rate.includedQuantity)} included /
+                    cycle
+                  </>
+                ) : null}
+              </div>
+            </div>
+            <div className="w-32 text-right text-sm tabular-nums text-zinc-300">
+              {formatQuantity(line.quantity)} {line.unit}
+              {billableQuantity(line.rate, line.quantity) > 0 ? (
+                <div className="mt-0.5 text-[11px] text-amber-300/80">
+                  {formatQuantity(billableQuantity(line.rate, line.quantity))}{" "}
+                  billable
+                </div>
+              ) : null}
+            </div>
+            <div className="w-24 text-right text-sm font-medium tabular-nums text-zinc-100">
+              {formatCents(line.costCents)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ContractPanel({
   contracted,
 }: {

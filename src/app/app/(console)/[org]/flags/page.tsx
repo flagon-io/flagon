@@ -1,19 +1,27 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Flag } from "lucide-react";
+import { ArrowUpRight, Flag } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Button } from "@/components/form-controls";
-import { appPath } from "@/lib/urls";
-import { brand } from "@/lib/brand";
+import { appPath, marketingHref } from "@/lib/urls";
 import { listFlags } from "@/lib/flags.server";
 import {
   listClientTokens,
   serializeClientToken,
 } from "@/lib/client-tokens.server";
+import { flagUsageSummary, orgEmitsExposures } from "@/lib/flag-usage.server";
+import {
+  assessFlag,
+  checksPerHour,
+  passRate,
+  recentBuckets,
+} from "@/lib/flag-metrics";
+import type { FlagType } from "@/lib/flags";
 import { resolveOrg } from "../resolve-org";
 import { createFlagAction, setDefaultVariantAction } from "./actions";
 import { CreateFlagModal } from "./create-flag-modal";
 import { CredentialsPanel } from "./credentials-panel";
+import { Sparkline, StatusPill, UsageCell } from "./flag-usage-ui";
 export const metadata: Metadata = { title: "Feature Flags" };
 export default async function FlagsPage({
   params,
@@ -23,10 +31,13 @@ export default async function FlagsPage({
   const { org: slug } = await params;
   const org = await resolveOrg(slug);
   if (!org) notFound();
-  const [flags, clientTokens] = await Promise.all([
+  const [flags, clientTokens, usage, emitsExposures] = await Promise.all([
     listFlags(org.id),
     listClientTokens(org.id),
+    flagUsageSummary(org.id),
+    orgEmitsExposures(org.id),
   ]);
+  const now = new Date();
   return (
     <div>
       <div className="flex items-end justify-between gap-4">
@@ -44,62 +55,123 @@ export default async function FlagsPage({
         <CreateFlagModal action={createFlagAction.bind(null, slug)} />
       </div>
       {flags.length ? (
-        <ul className="mt-8 divide-y divide-white/5 border border-white/10">
-          {flags.map((flag) => {
-            const current = flag.variants.find(
-              (variant) => variant.key === flag.defaultVariant,
-            );
-            return (
-              <li key={flag.id} className="flex items-center gap-4 px-4 py-3.5">
-                <Flag className="h-4 w-4 text-zinc-500" />
-                <Link
-                  href={appPath(`/${slug}/flags/${flag.key}`)}
-                  className="min-w-0 flex-1"
+        <div className="mt-8 border border-white/10">
+          {/* Column header, so the trailing cells read as intentional columns
+              rather than as metrics floating at the end of each row. Widths
+              match the row cells below exactly. */}
+          <div className="flex items-center gap-4 border-b border-white/10 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1">Flag</span>
+            <span className="hidden w-24 shrink-0 sm:block">Status</span>
+            <span className="hidden w-28 shrink-0 text-right md:block">
+              Usage
+            </span>
+            <span className="hidden w-20 shrink-0 text-right lg:block">
+              24h
+            </span>
+            <span className="w-16 shrink-0 text-right">Default</span>
+          </div>
+          <ul className="divide-y divide-white/5">
+            {flags.map((flag) => {
+              const current = flag.variants.find(
+                (variant) => variant.key === flag.defaultVariant,
+              );
+              // Per-flag usage from the exposure rollups (absent = no data yet).
+              const flagUsage = usage.get(flag.key);
+              const assessment = assessFlag(flag, {
+                now,
+                lastCheckedAt: flagUsage?.lastCheckedAt
+                  ? new Date(flagUsage.lastCheckedAt)
+                  : null,
+                orgEmitsExposures: emitsExposures,
+              });
+              const perHour = flagUsage
+                ? checksPerHour(flagUsage.series, now)
+                : 0;
+              const rate = flagUsage
+                ? passRate(flagUsage.byVariant, flag.type as FlagType)
+                : null;
+              const buckets = flagUsage
+                ? recentBuckets(flagUsage.series, now, 24)
+                : [];
+              return (
+                <li
+                  key={flag.id}
+                  className="flex min-h-15 items-center gap-4 px-4 py-3"
                 >
-                  {/* The KEY leads, because it is what the code says and what
+                  <Flag className="h-4 w-4 shrink-0 text-zinc-500" />
+                  <Link
+                    href={appPath(`/${slug}/flags/${flag.key}`)}
+                    className="min-w-0 flex-1"
+                  >
+                    {/* The KEY leads, because it is what the code says and what
                     someone scanning for a flag they just wrote actually
                     remembers. A flag created without a rename is named after
                     its key, so the name is shown only when it says something
                     the key does not. */}
-                  <p className="truncate font-mono text-sm font-medium text-zinc-100">
-                    {flag.key}
-                  </p>
-                  <p className="mt-0.5 truncate text-xs text-zinc-500">
-                    {flag.name !== flag.key ? `${flag.name} · ` : ""}
-                    {flag.type} · {flag.rules.length} ordered rules
-                  </p>
-                </Link>
-                {flag.type === "boolean" ? (
-                  <form
-                    action={setDefaultVariantAction.bind(
-                      null,
-                      slug,
-                      flag.key,
-                      flag.defaultVariant === "on" ? "off" : "on",
+                    <p className="truncate font-mono text-sm font-medium text-zinc-100">
+                      {flag.key}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-zinc-500">
+                      {flag.name !== flag.key ? `${flag.name} · ` : ""}
+                      {flag.type} · {flag.rules.length} ordered rules
+                    </p>
+                  </Link>
+
+                  {/* Status: the reliable, universal signal, so it leads the
+                    usage cluster. */}
+                  <div className="hidden w-24 shrink-0 sm:block">
+                    <StatusPill assessment={assessment} />
+                  </div>
+
+                  {/* Checks + pass rate, always two lines so the column stays
+                    aligned whether a flag has traffic or not. */}
+                  <div className="hidden w-28 shrink-0 md:block">
+                    <UsageCell perHour={perHour} rate={rate} />
+                  </div>
+
+                  {/* The sparkline: real hourly checks over a baseline. Never a
+                    line drawn from uniform bulk data. */}
+                  <div className="hidden w-20 shrink-0 items-center justify-end lg:flex">
+                    <Sparkline buckets={buckets} />
+                  </div>
+
+                  {/* Fixed-width control column, so On / Off / value all land on
+                    the same right edge across every row. */}
+                  <div className="flex w-16 shrink-0 justify-end">
+                    {flag.type === "boolean" ? (
+                      <form
+                        action={setDefaultVariantAction.bind(
+                          null,
+                          slug,
+                          flag.key,
+                          flag.defaultVariant === "on" ? "off" : "on",
+                        )}
+                      >
+                        <Button
+                          type="submit"
+                          size="sm"
+                          variant="secondary"
+                          className={
+                            flag.defaultVariant === "on"
+                              ? "border-teal-500/20 bg-teal-500/10 text-teal-300"
+                              : ""
+                          }
+                        >
+                          {flag.defaultVariant === "on" ? "On" : "Off"}
+                        </Button>
+                      </form>
+                    ) : (
+                      <code className="truncate text-xs text-zinc-400">
+                        {JSON.stringify(current?.value)}
+                      </code>
                     )}
-                  >
-                    <Button
-                      type="submit"
-                      size="sm"
-                      variant="secondary"
-                      className={
-                        flag.defaultVariant === "on"
-                          ? "border-teal-500/20 bg-teal-500/10 text-teal-300"
-                          : ""
-                      }
-                    >
-                      {flag.defaultVariant === "on" ? "On" : "Off"}
-                    </Button>
-                  </form>
-                ) : (
-                  <code className="max-w-40 truncate text-xs text-zinc-400">
-                    {JSON.stringify(current?.value)}
-                  </code>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       ) : (
         <div className="mt-8 border border-dashed border-white/10 py-12 text-center text-sm text-zinc-600">
           No flags yet.
@@ -109,17 +181,32 @@ export default async function FlagsPage({
         orgSlug={slug}
         clientTokens={clientTokens.map(serializeClientToken)}
       />
+      {/* A nudge toward the docs rather than a bare endpoint. Wiring up an SDK
+          is a docs-length task - providers, evaluation context, caching modes -
+          not something a single URL on this page gets anyone through, and the
+          guide already carries the endpoint alongside the rest. */}
       <section className="mt-10 border-t border-white/10 pt-8">
-        <h2 className="text-lg font-semibold text-zinc-100">
-          OpenFeature / OFREP
-        </h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Server and client providers use the same flags; their evaluation
-          context and caching modes differ.
-        </p>
-        <code className="mt-3 block border border-white/10 bg-black/20 p-3 text-xs text-zinc-300">
-          {brand.apiUrl}/ofrep/v1
-        </code>
+        <div className="flex flex-wrap items-start justify-between gap-4 border border-white/10 bg-white/2 p-6">
+          <div className="max-w-xl">
+            <h2 className="text-lg font-semibold text-zinc-100">
+              Evaluate with OpenFeature
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-zinc-500">
+              Flagon speaks OFREP, so any OpenFeature SDK evaluates these flags
+              with no vendor lock-in. The guide walks through the server and
+              client providers, evaluation context, and caching.
+            </p>
+          </div>
+          <a
+            href={marketingHref("/docs/feature-flags")}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-teal-500/40 px-3.5 py-2 text-sm font-medium text-teal-300 transition hover:border-teal-500/60 hover:text-teal-200"
+          >
+            Integration guide
+            <ArrowUpRight className="h-4 w-4" aria-hidden />
+          </a>
+        </div>
       </section>
     </div>
   );

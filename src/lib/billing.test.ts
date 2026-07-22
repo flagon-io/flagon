@@ -1,6 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { billingEnabled, isTestModeKey } from "./billing";
-import { PLANS, PLAN_IDS, usageDisplay, usageIsAutoInvoiced } from "./plans";
+import {
+  PLANS,
+  PLAN_IDS,
+  usageDisplay,
+  planAutoInvoicesAnything,
+} from "./plans";
+import {
+  meterBillingMode,
+  meterAutoInvoiced,
+  meteredIncluded,
+  meteredRate,
+  type ContractBilling,
+} from "./contracts";
 
 describe("billing mode", () => {
   it("is off without a secret key (the self-host default)", () => {
@@ -9,19 +21,89 @@ describe("billing mode", () => {
   });
 });
 
-describe("which plans get usage attached to an invoice", () => {
-  it("is Pro alone", () => {
-    expect(usageIsAutoInvoiced("pro")).toBe(true);
-    // Hobby is never invoiced; Enterprise is contracted, and adding usage to
-    // its invoice would charge the negotiated fee PLUS all metered usage.
-    expect(usageIsAutoInvoiced("free")).toBe(false);
-    expect(usageIsAutoInvoiced("enterprise")).toBe(false);
+describe("which plans can auto-invoice usage", () => {
+  it("is Pro and Enterprise, never Hobby", () => {
+    expect(planAutoInvoicesAnything("pro")).toBe(true);
+    // Enterprise now carries a real subscription: its metered meters (overage
+    // outside the base contract) auto-bill, so the coarse gate lets it through.
+    expect(planAutoInvoicesAnything("enterprise")).toBe(true);
+    expect(planAutoInvoicesAnything("free")).toBe(false);
   });
 
   it("covers every plan that exists, so a new one has to opt in", () => {
     for (const plan of PLAN_IDS) {
-      expect(typeof usageIsAutoInvoiced(plan)).toBe("boolean");
+      expect(typeof planAutoInvoicesAnything(plan)).toBe("boolean");
     }
+  });
+});
+
+describe("per-meter billing mode (contracted orgs)", () => {
+  const contract: ContractBilling = {
+    // Feature Flags evaluations are covered by the base bill (a term envelope).
+    meterAllowances: { "flags.evaluations": 750_000_000 },
+    // Syncs are metered: 1M included per cycle, overage billed on top.
+    meteredAllowances: { "flags.syncs": 1_000_000 },
+    meteredRates: {},
+  };
+
+  it("is always priced for pro and free", () => {
+    expect(meterBillingMode("pro", "flags.evaluations", contract)).toBe(
+      "priced",
+    );
+    expect(meterBillingMode("free", "flags.syncs", null)).toBe("priced");
+  });
+
+  it("splits enterprise meters into covered and metered", () => {
+    // Named in the contract envelope -> covered (volume, not billed).
+    expect(meterBillingMode("enterprise", "flags.evaluations", contract)).toBe(
+      "covered",
+    );
+    // Not in the envelope -> metered (auto-billed), even though it has a
+    // per-cycle included allowance.
+    expect(meterBillingMode("enterprise", "flags.syncs", contract)).toBe(
+      "metered",
+    );
+    // A meter the contract never mentions is metered by default.
+    expect(meterBillingMode("enterprise", "other.meter", contract)).toBe(
+      "metered",
+    );
+  });
+
+  it("auto-invoices only the metered meters for enterprise", () => {
+    expect(meterAutoInvoiced("enterprise", "flags.evaluations", contract)).toBe(
+      false,
+    );
+    expect(meterAutoInvoiced("enterprise", "flags.syncs", contract)).toBe(true);
+    // Pro bills everything; free bills nothing.
+    expect(meterAutoInvoiced("pro", "flags.evaluations", contract)).toBe(true);
+    expect(meterAutoInvoiced("free", "flags.syncs", contract)).toBe(false);
+  });
+
+  it("resolves per-cycle included: contract override, else the meter default", () => {
+    expect(meteredIncluded("flags.syncs", contract)).toBe(1_000_000);
+    // flags.evaluations has meter includedQuantity 0 and no override here.
+    expect(meteredIncluded("flags.evaluations", contract)).toBe(0);
+  });
+
+  it("resolves the metered rate: override wins, else the published rate", () => {
+    const withOverride: ContractBilling = {
+      ...contract,
+      meteredRates: {
+        "flags.syncs": { unit_amount_cents: 50, per: 1_000_000 },
+      },
+    };
+    expect(meteredRate("flags.syncs", withOverride)).toEqual({
+      unitAmountCents: 50,
+      per: 1_000_000,
+      includedQuantity: 1_000_000,
+    });
+    // No override: the published $0.75/1M rate, with the contract's per-cycle
+    // included folded in.
+    expect(meteredRate("flags.syncs", contract)).toEqual({
+      unitAmountCents: 75,
+      per: 1_000_000,
+      includedQuantity: 1_000_000,
+    });
   });
 });
 
@@ -49,13 +131,15 @@ describe("how a plan's usage is presented", () => {
     }
   });
 
-  it("shows money only where usage is actually invoiced", () => {
-    // The two predicates have to agree: a plan whose usage lands on an invoice
-    // must show the money, and one that shows money must be able to explain
-    // where it goes.
+  it("only a capped plan is never invoiced", () => {
+    // The frames and the invoicing gate have to agree: a capped plan (Hobby)
+    // never bills, while priced (Pro) and contracted (Enterprise, for its
+    // metered meters) both do.
     for (const plan of PLAN_IDS) {
-      if (usageIsAutoInvoiced(plan)) {
-        expect(usageDisplay(plan), plan).toBe("priced");
+      if (usageDisplay(plan) === "capped") {
+        expect(planAutoInvoicesAnything(plan), plan).toBe(false);
+      } else {
+        expect(planAutoInvoicesAnything(plan), plan).toBe(true);
       }
     }
   });

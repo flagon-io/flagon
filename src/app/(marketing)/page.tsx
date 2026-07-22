@@ -234,12 +234,12 @@ export default function Home() {
       </BleedBand>
 
       {/* Close */}
-      <div className="mx-auto w-full max-w-7xl px-6 py-24">
+      <div className="mx-auto flex w-full max-w-7xl flex-col items-center px-6 py-24 text-center">
         <h2 className="max-w-2xl text-3xl font-semibold tracking-tight text-zinc-100">
           {brand.taglineLead}{" "}
           <span className="text-zinc-500">{brand.taglineFollow}</span>
         </h2>
-        <div className="mt-8 flex flex-wrap items-center gap-3">
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link
             href={appHref("/new?plan=free")}
             className="rounded-md bg-teal-500 px-5 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"

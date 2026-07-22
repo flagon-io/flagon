@@ -94,6 +94,26 @@ describe("period windows", () => {
     ).toBeNull();
   });
 
+  it("has no usage window when a bound is missing or invalid", () => {
+    // Stripe is moving the service period onto line items, so an invoice event
+    // can arrive without usable period bounds. An Invalid Date must yield null,
+    // NOT a window with a NaN edge: NaN comparisons are always false, so it
+    // would slip past the inverted-range check and throw in isoDay downstream,
+    // 500-ing the webhook and making Stripe redeliver forever.
+    expect(
+      invoiceUsageWindow({
+        periodStart: day("2026-07-19"),
+        periodEnd: new Date(NaN),
+      }),
+    ).toBeNull();
+    expect(
+      invoiceUsageWindow({
+        periodStart: new Date(NaN),
+        periodEnd: day("2026-08-19"),
+      }),
+    ).toBeNull();
+  });
+
   it("knows whether a window is still open", () => {
     const window = subscriptionPeriod(day("2026-07-19"), day("2026-08-19"));
     expect(isCurrent(window, day("2026-07-19"))).toBe(true);

@@ -5,6 +5,9 @@ import {
   isTrustedOrigin,
 } from "@/lib/api";
 import { createFlag, listFlags, serializeFlag } from "@/lib/flags.server";
+import { flagUsageSummary, orgEmitsExposures } from "@/lib/flag-usage.server";
+import { assessFlag, checksPerHour, passRate } from "@/lib/flag-metrics";
+import type { FlagType } from "@/lib/flags";
 import { resolveFlagOrg } from "./context";
 
 export async function GET(
@@ -14,7 +17,38 @@ export async function GET(
   const { slug } = await params;
   const context = await resolveFlagOrg(request, slug, "flags:read");
   if ("error" in context) return context.error;
-  return apiJson((await listFlags(context.org.id)).map(serializeFlag));
+
+  const [flags, usage, emitsExposures] = await Promise.all([
+    listFlags(context.org.id),
+    flagUsageSummary(context.org.id),
+    orgEmitsExposures(context.org.id),
+  ]);
+  const now = new Date();
+
+  // Usage rides alongside the flag definition: staleness and check volume are
+  // exactly what a client cleaning up flags or building a dashboard needs, and
+  // shipping them here keeps this endpoint the console's list, in JSON.
+  return apiJson(
+    flags.map((flag) => {
+      const flagUsage = usage.get(flag.key);
+      const lastCheckedAt = flagUsage?.lastCheckedAt ?? null;
+      const assessment = assessFlag(flag, {
+        now,
+        lastCheckedAt: lastCheckedAt ? new Date(lastCheckedAt) : null,
+        orgEmitsExposures: emitsExposures,
+      });
+      return {
+        ...serializeFlag(flag),
+        stale: assessment.stale,
+        stale_reasons: assessment.reasons,
+        checks_per_hour: flagUsage ? checksPerHour(flagUsage.series, now) : 0,
+        pass_rate: flagUsage
+          ? passRate(flagUsage.byVariant, flag.type as FlagType)
+          : null,
+        last_checked_at: lastCheckedAt,
+      };
+    }),
+  );
 }
 
 export async function POST(

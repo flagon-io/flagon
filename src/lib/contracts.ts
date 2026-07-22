@@ -1,5 +1,6 @@
 import { startOfDayUTC, type PeriodWindow } from "./billing-period";
-import { getMeter } from "./meters";
+import { getMeter, type MeterRate } from "./meters";
+import type { PlanId } from "./plans";
 
 /**
  * Contracted envelopes: what a negotiated agreement covers, and how much of it
@@ -62,6 +63,91 @@ export type ContractStatus = {
   elapsedPercent: number;
   envelopes: ContractEnvelope[];
 };
+
+/* ------------------------------------------------------------------ *
+ * Per-meter billing behaviour (the covered-vs-metered model)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The billing knobs a contract carries, separate from the ContractStatus volume
+ * view. Kept as a small structural type (not the whole contract row) so pure
+ * pricing/predicate code can take it without pulling in the database layer.
+ */
+export type ContractBilling = {
+  /** Covered meters' term-wide envelopes (volume; not billed). */
+  meterAllowances: Record<string, number>;
+  /** Metered meters' PER-CYCLE included quantity. */
+  meteredAllowances: Record<string, number>;
+  /** Optional negotiated overage rate per metered meter. */
+  meteredRates: Record<string, { unit_amount_cents: number; per: number }>;
+};
+
+/**
+ * How a meter is treated when a period closes, matching the billing_mode column
+ * (drizzle/0032):
+ *
+ *   priced   pro/free: the plan rate with pooled credit (unchanged).
+ *   covered  enterprise, in the contract's term envelope: volume, never billed.
+ *   metered  enterprise, billed on top: per-cycle included, overage auto-billed.
+ */
+export type BillingMode = "priced" | "covered" | "metered";
+
+/**
+ * A meter is COVERED only for an enterprise org and only when the contract names
+ * it in its term envelopes. Everything else an enterprise uses is METERED, so a
+ * product adopted after the contract was signed bills automatically rather than
+ * silently riding for free. Pro and free are always priced (the pre-contract
+ * path).
+ */
+export function meterBillingMode(
+  plan: PlanId,
+  meterId: string,
+  contract?: ContractBilling | null,
+): BillingMode {
+  if (plan !== "enterprise") return "priced";
+  if (contract && meterId in contract.meterAllowances) return "covered";
+  return "metered";
+}
+
+/** Whether a meter's usage auto-attaches to the org's Stripe invoice. */
+export function meterAutoInvoiced(
+  plan: PlanId,
+  meterId: string,
+  contract?: ContractBilling | null,
+): boolean {
+  if (plan === "free") return false;
+  if (plan === "pro") return true;
+  return meterBillingMode(plan, meterId, contract) === "metered";
+}
+
+/** Per-cycle included quantity for a metered meter: contract override, else the meter's own. */
+export function meteredIncluded(
+  meterId: string,
+  contract?: ContractBilling | null,
+): number {
+  const override = contract?.meteredAllowances[meterId];
+  if (override !== undefined) return override;
+  return getMeter(meterId)?.includedQuantity ?? 0;
+}
+
+/**
+ * The rate a metered meter's overage bills at, ready to price or freeze: the
+ * contract's negotiated rate if it has one, else the published meter rate, with
+ * the per-cycle included quantity folded in.
+ */
+export function meteredRate(
+  meterId: string,
+  contract?: ContractBilling | null,
+): MeterRate | null {
+  const meter = getMeter(meterId);
+  if (!meter) return null;
+  const override = contract?.meteredRates[meterId];
+  return {
+    unitAmountCents: override?.unit_amount_cents ?? meter.unitAmountCents,
+    per: override?.per ?? meter.per,
+    includedQuantity: meteredIncluded(meterId, contract),
+  };
+}
 
 const MS_PER_DAY = 86_400_000;
 

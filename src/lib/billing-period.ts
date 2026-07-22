@@ -135,11 +135,22 @@ export function recentPeriods(
  * Returns null when nothing has elapsed. A `subscription_create` invoice has
  * period_start == period_end, and an inverted window would otherwise be handed
  * to a query that reads it as a range.
+ *
+ * Returns null too when either bound is not a valid date. Stripe has been moving
+ * the service period off the invoice and onto its line items, so an invoice
+ * event can arrive without a usable period_start/period_end; an invalid Date
+ * would otherwise slip past `to < from` (NaN comparisons are always false) and
+ * blow up downstream in isoDay, 500-ing the webhook and making Stripe redeliver
+ * forever. A missing window is a no-op, which is the correct response to an
+ * invoice that carries no period to bill.
  */
 export function invoiceUsageWindow(input: {
   periodStart: Date;
   periodEnd: Date;
 }): PeriodWindow | null {
+  const startMs = input.periodStart.getTime();
+  const endMs = input.periodEnd.getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
   const from = startOfDayUTC(input.periodStart);
   const to = addDaysUTC(startOfDayUTC(input.periodEnd), -1);
   return to.getTime() < from.getTime() ? null : { from, to };
