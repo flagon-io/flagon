@@ -1,4 +1,4 @@
-import { after } from "next/server";
+import { afterResponse } from "@/lib/after-response";
 import { evaluateFlag, type EvaluationContext } from "@/lib/flags";
 import { asEvaluableFlag } from "@/lib/flags.server";
 import { loadFlagConfig } from "@/lib/flag-config-cache.server";
@@ -122,7 +122,7 @@ export async function POST(
   if (isExposureReason(evaluated.reason)) {
     const reason = evaluated.reason;
     const targetingKey = (body.context as EvaluationContext).targetingKey;
-    after(() =>
+    afterResponse(() =>
       recordServerExposure({
         orgId: credential.orgId,
         flagKey: evaluated.key,
@@ -132,7 +132,7 @@ export async function POST(
     );
     // A sampled, hashed raw exposure for the detail page's recent-checks stream.
     if (typeof targetingKey === "string" && targetingKey) {
-      after(() =>
+      afterResponse(() =>
         recordExposureSample({
           orgId: credential.orgId,
           flagKey: evaluated.key,

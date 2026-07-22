@@ -1,4 +1,4 @@
-import { after } from "next/server";
+import { afterResponse } from "@/lib/after-response";
 import { evaluateFlag, type EvaluationContext } from "@/lib/flags";
 import { asEvaluableFlag } from "@/lib/flags.server";
 import { loadFlagConfig } from "@/lib/flag-config-cache.server";
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
   // the response is sent on a serverless platform (the invocation can freeze).
   // after() extends the invocation via waitUntil so the attribution actually
   // lands, on both serverless and the self-hosted Node server.
-  after(() =>
+  afterResponse(() =>
     recordServed({
       orgId: credential.orgId,
       evaluations: flags
