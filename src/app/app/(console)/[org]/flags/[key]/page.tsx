@@ -54,7 +54,8 @@ export default async function FlagPage({
   const now = new Date();
   const assessment = assessFlag(flag, {
     now,
-    lastCheckedAt: usage.lastCheckedAt ? new Date(usage.lastCheckedAt) : null,
+    // Staleness uses real app access (exposures), not billed evaluations.
+    lastCheckedAt: usage.exposedLastAt ? new Date(usage.exposedLastAt) : null,
     orgEmitsExposures: emitsExposures,
   });
   const perHour = checksPerHour(usage.series, now);

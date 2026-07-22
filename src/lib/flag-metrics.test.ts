@@ -105,7 +105,7 @@ describe("staleness", () => {
       orgEmitsExposures: false,
     });
     expect(result.stale).toBe(true);
-    expect(result.reasons).toContain("No recorded checks");
+    expect(result.reasons).toContain("No recorded app reads");
     expect(result.reasons).toContain("No targeting rules");
     expect(result.reasons.some((r) => r.startsWith("Unchanged"))).toBe(true);
   });

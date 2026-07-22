@@ -34,18 +34,25 @@ export async function GET(
       const lastCheckedAt = flagUsage?.lastCheckedAt ?? null;
       const assessment = assessFlag(flag, {
         now,
-        lastCheckedAt: lastCheckedAt ? new Date(lastCheckedAt) : null,
+        // Staleness uses real app access (exposures), not billed evaluations.
+        lastCheckedAt: flagUsage?.exposedLastAt
+          ? new Date(flagUsage.exposedLastAt)
+          : null,
         orgEmitsExposures: emitsExposures,
       });
       return {
         ...serializeFlag(flag),
         stale: assessment.stale,
         stale_reasons: assessment.reasons,
+        // Billed evaluations (bulk + single-flag), reconciling with the invoice.
         checks_per_hour: flagUsage ? checksPerHour(flagUsage.series, now) : 0,
         pass_rate: flagUsage
           ? passRate(flagUsage.byVariant, flag.type as FlagType)
           : null,
         last_checked_at: lastCheckedAt,
+        // Client-hook app reads (real usage); null-ish until the hook is adopted.
+        exposures_30d: flagUsage?.exposedChecks ?? 0,
+        last_exposed_at: flagUsage?.exposedLastAt ?? null,
       };
     }),
   );

@@ -2393,7 +2393,7 @@ export const openApiSpec = {
         tags: ["Flags"],
         summary: "List feature flags",
         description:
-          "Each flag carries its usage alongside its definition: `stale` (a cleanup-candidate heuristic) with `stale_reasons`, `checks_per_hour`, `pass_rate` (boolean flags, else null), and `last_checked_at`. See GET /flags/{key}/usage for the full series.",
+          "Each flag carries its usage alongside its definition: `checks_per_hour` and `last_checked_at` are BILLED evaluations (reconcile with the invoice); `exposures_30d` / `last_exposed_at` are app reads from the client hook (the staleness signal); `stale` (a cleanup-candidate heuristic) with `stale_reasons`; `pass_rate` (boolean flags, else null). See GET /flags/{key}/usage for the full series.",
         responses: {
           "200": { description: "Organization flags, each with usage fields." },
           "401": errorResponse(
@@ -2953,7 +2953,7 @@ export const openApiSpec = {
       FlagUsage: {
         type: "object",
         description:
-          "Per-flag usage analytics, derived from client-reported exposures plus server-side single-flag evaluations. All counts are over the last 30 days. A flag with no exposures returns zeros and a null last_checked_at.",
+          "Per-flag usage over the last 30 days.\n\nTwo distinct signals: `total_checks` / `checks_per_hour` count BILLED EVALUATIONS (bulk + single-flag), so they reconcile with the invoice's evaluation meter. `exposures_30d` counts what the client hook reported the app actually READ - a different scale, and the basis for staleness. A flag can be billed on every config fetch yet never read: that is exactly the cleanup candidate `stale` flags.",
         required: [
           "flag_key",
           "total_checks",
@@ -2963,25 +2963,43 @@ export const openApiSpec = {
         ],
         properties: {
           flag_key: { type: "string", example: "new-checkout" },
-          total_checks: { type: "integer", example: 41200 },
+          total_checks: {
+            type: "integer",
+            example: 41200,
+            description:
+              "Billed evaluations (bulk + single-flag). Sums, across all flags, to the org's billed evaluation quantity.",
+          },
           checks_per_hour: { type: "number", example: 57.2 },
           pass_rate: {
             type: "number",
             nullable: true,
             example: 0.84,
             description:
-              "Share of checks that returned the `on` variant. Boolean flags only; null otherwise (read `variants` for the distribution).",
+              "Share of evaluations that returned the `on` variant. Boolean flags only; null otherwise (read `variants` for the distribution).",
           },
           last_checked_at: {
             type: "string",
             format: "date-time",
             nullable: true,
-            description: "Most recent hour with a check, or null.",
+            description: "Most recent hour with a billed evaluation, or null.",
+          },
+          exposures_30d: {
+            type: "integer",
+            example: 0,
+            description:
+              "Client-hook app reads (what the app actually evaluated), a different scale from billing. Zero until the exposure hook is adopted.",
+          },
+          last_exposed_at: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+            description:
+              "Most recent hour the app READ this flag (hook), or null. This, not last_checked_at, is what staleness uses.",
           },
           stale: {
             type: "boolean",
             description:
-              "Whether the flag is a cleanup candidate. A suggestion, not a verdict.",
+              "Whether the flag is a cleanup candidate: billed but not actually read, or old and inert. A suggestion, not a verdict.",
           },
           stale_reasons: {
             type: "array",

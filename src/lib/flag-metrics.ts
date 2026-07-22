@@ -23,9 +23,15 @@ export type UsagePoint = { at: string; count: number };
 export type VariantCount = { variantKey: string; count: number };
 
 /**
- * A flag's usage, as the UI and API render it. Everything is derived from the
- * rollups; a flag with no exposures has zero checks and a null lastCheckedAt,
- * which the surfaces show as an honest "no data yet" rather than a faked line.
+ * A flag's usage, as the UI and API render it.
+ *
+ * The primary fields (`totalChecks`, `series`, `byVariant`, `byReason`) count
+ * SERVED evaluations - the ones the server billed (bulk + single-flag) - so the
+ * per-flag view reconciles with the invoice. `exposed*` counts what the client
+ * hook reported the app actually READ; it is a different scale from billing and
+ * exists to drive staleness ("billed on every fetch, but never read"). A flag
+ * with no data has zero checks and null timestamps, shown as an honest "no data
+ * yet" rather than a faked line.
  */
 export type FlagUsage = {
   totalChecks: number;
@@ -34,6 +40,9 @@ export type FlagUsage = {
   byVariant: VariantCount[];
   byReason: Record<ExposureReason, number>;
   series: UsagePoint[];
+  /** Client-hook app reads (real usage), for staleness. */
+  exposedChecks: number;
+  exposedLastAt: string | null;
 };
 
 /**
@@ -150,12 +159,15 @@ export type FlagAssessment = { stale: boolean; reasons: string[] };
  * Whether a flag is a CLEANUP CANDIDATE - never an automatic verdict, always a
  * suggestion with its reasons shown so a person decides.
  *
- * Traffic is the primary signal, but only trustworthy once we know the org emits
- * exposures at all: an org that has not wired up the client hook has no traffic
- * for ANY flag, and calling every flag stale on that basis would be noise. So:
+ * The traffic signal is APP READS (exposures), NOT billed evaluations: a flag
+ * served in every bulk config fetch is billed but not necessarily used, so
+ * `lastCheckedAt` here is the last EXPOSED read. It is only trustworthy once the
+ * org emits exposures at all (the client hook), because an org that hasn't wired
+ * it up has no reads for ANY flag. So:
  *
- *   org emits exposures  -> trust traffic: stale when unchanged AND no checks in
- *                           the window.
+ *   org emits exposures  -> trust reads: stale when unchanged AND not read in
+ *                           the window. This is the "billed but never read"
+ *                           cleanup candidate.
  *   org emits none yet   -> fall back to configuration: stale only when the flag
  *                           is old, untouched, AND inert (no targeting rules) -
  *                           the classic "left in after a rollout".
@@ -183,8 +195,8 @@ export function assessFlag(
   if (noRecentTraffic) {
     reasons.push(
       opts.lastCheckedAt
-        ? `No checks in ${STALE_AFTER_DAYS} days`
-        : "No recorded checks",
+        ? `Not read in ${STALE_AFTER_DAYS} days`
+        : "No recorded app reads",
     );
   }
   if (unchanged)

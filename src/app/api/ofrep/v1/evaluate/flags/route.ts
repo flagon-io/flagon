@@ -10,6 +10,8 @@ import {
   validEvaluationContext,
 } from "@/lib/ofrep.server";
 import { meterEvaluations } from "@/lib/ofrep-usage.server";
+import { recordServed } from "@/lib/flag-usage.server";
+import { isExposureReason, type ExposureReason } from "@/lib/flag-metrics";
 import { listSegments } from "@/lib/segments.server";
 
 export function OPTIONS() {
@@ -81,6 +83,23 @@ export async function POST(request: Request) {
     sync: true,
   });
   if (overQuota) return overQuota;
+
+  // Attribute the billed bulk evaluation per flag (source 'served'), so the
+  // per-flag view reconciles with the invoice: this records exactly the
+  // `flags.length` evaluations just metered, one per flag. Best-effort - a
+  // recording hiccup must not fail the evaluation. Runs only on a served 200;
+  // the 304 above returns before any of this and is neither billed nor counted.
+  void recordServed({
+    orgId: credential.orgId,
+    evaluations: flags
+      .filter((flag) => isExposureReason(flag.reason))
+      .map((flag) => ({
+        flagKey: flag.key,
+        variantKey: flag.variant,
+        reason: flag.reason as ExposureReason,
+      })),
+  }).catch(() => {});
+
   return Response.json(
     {
       flags,

@@ -40,16 +40,21 @@ export async function GET(
   const lastCheckedAt = usage.lastCheckedAt;
   const assessment = assessFlag(flag, {
     now,
-    lastCheckedAt: lastCheckedAt ? new Date(lastCheckedAt) : null,
+    // Staleness uses real app access (exposures), not billed evaluations.
+    lastCheckedAt: usage.exposedLastAt ? new Date(usage.exposedLastAt) : null,
     orgEmitsExposures: emitsExposures,
   });
 
   return apiJson({
     flag_key: key,
+    // Billed evaluations (bulk + single-flag), reconciling with the invoice.
     total_checks: usage.totalChecks,
     checks_per_hour: checksPerHour(usage.series, now),
     pass_rate: passRate(usage.byVariant, flag.type as FlagType),
     last_checked_at: lastCheckedAt,
+    // Client-hook app reads (real usage), the staleness signal.
+    exposures_30d: usage.exposedChecks,
+    last_exposed_at: usage.exposedLastAt,
     stale: assessment.stale,
     stale_reasons: assessment.reasons,
     variants: variantDistribution(usage.byVariant).map((v) => ({

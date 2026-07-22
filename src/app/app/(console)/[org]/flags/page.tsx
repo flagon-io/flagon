@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowUpRight, Flag } from "lucide-react";
 import { notFound } from "next/navigation";
-import { Button } from "@/components/form-controls";
 import { appPath, marketingHref } from "@/lib/urls";
 import { listFlags } from "@/lib/flags.server";
 import {
@@ -18,7 +17,7 @@ import {
 } from "@/lib/flag-metrics";
 import type { FlagType } from "@/lib/flags";
 import { resolveOrg } from "../resolve-org";
-import { createFlagAction, setDefaultVariantAction } from "./actions";
+import { createFlagAction } from "./actions";
 import { CreateFlagModal } from "./create-flag-modal";
 import { CredentialsPanel } from "./credentials-panel";
 import { Sparkline, StatusPill, UsageCell } from "./flag-usage-ui";
@@ -31,12 +30,16 @@ export default async function FlagsPage({
   const { org: slug } = await params;
   const org = await resolveOrg(slug);
   if (!org) notFound();
-  const [flags, clientTokens, usage, emitsExposures] = await Promise.all([
-    listFlags(org.id),
-    listClientTokens(org.id),
-    flagUsageSummary(org.id),
-    orgEmitsExposures(org.id),
-  ]);
+  const [unsortedFlags, clientTokens, usage, emitsExposures] =
+    await Promise.all([
+      listFlags(org.id),
+      listClientTokens(org.id),
+      flagUsageSummary(org.id),
+      orgEmitsExposures(org.id),
+    ]);
+  // Ordered by key, not by last-modified: toggling a flag stamps updatedAt, and
+  // an updatedAt sort would make the row someone just clicked jump the list.
+  const flags = [...unsortedFlags].sort((a, b) => a.key.localeCompare(b.key));
   const now = new Date();
   return (
     <div>
@@ -69,19 +72,17 @@ export default async function FlagsPage({
             <span className="hidden w-20 shrink-0 text-right lg:block">
               24h
             </span>
-            <span className="w-16 shrink-0 text-right">Default</span>
           </div>
           <ul className="divide-y divide-white/5">
             {flags.map((flag) => {
-              const current = flag.variants.find(
-                (variant) => variant.key === flag.defaultVariant,
-              );
               // Per-flag usage from the exposure rollups (absent = no data yet).
               const flagUsage = usage.get(flag.key);
               const assessment = assessFlag(flag, {
                 now,
-                lastCheckedAt: flagUsage?.lastCheckedAt
-                  ? new Date(flagUsage.lastCheckedAt)
+                // Staleness is about real APP access (exposures), not billed
+                // evaluations: a flag served in every bulk fetch is not "used".
+                lastCheckedAt: flagUsage?.exposedLastAt
+                  ? new Date(flagUsage.exposedLastAt)
                   : null,
                 orgEmitsExposures: emitsExposures,
               });
@@ -134,38 +135,6 @@ export default async function FlagsPage({
                     line drawn from uniform bulk data. */}
                   <div className="hidden w-20 shrink-0 items-center justify-end lg:flex">
                     <Sparkline buckets={buckets} />
-                  </div>
-
-                  {/* Fixed-width control column, so On / Off / value all land on
-                    the same right edge across every row. */}
-                  <div className="flex w-16 shrink-0 justify-end">
-                    {flag.type === "boolean" ? (
-                      <form
-                        action={setDefaultVariantAction.bind(
-                          null,
-                          slug,
-                          flag.key,
-                          flag.defaultVariant === "on" ? "off" : "on",
-                        )}
-                      >
-                        <Button
-                          type="submit"
-                          size="sm"
-                          variant="secondary"
-                          className={
-                            flag.defaultVariant === "on"
-                              ? "border-teal-500/20 bg-teal-500/10 text-teal-300"
-                              : ""
-                          }
-                        >
-                          {flag.defaultVariant === "on" ? "On" : "Off"}
-                        </Button>
-                      </form>
-                    ) : (
-                      <code className="truncate text-xs text-zinc-400">
-                        {JSON.stringify(current?.value)}
-                      </code>
-                    )}
                   </div>
                 </li>
               );

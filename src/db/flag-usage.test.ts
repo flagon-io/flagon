@@ -46,7 +46,9 @@ describe.skipIf(!canRun)("flag usage exposure pipeline", () => {
     if (closePool) await closePool();
   });
 
-  it("folds a pre-aggregated batch into the hourly rollups", async () => {
+  it("folds a client-hook batch into EXPOSED, not billed checks", async () => {
+    // A hook batch is app-access (exposed), a different scale from billing, so
+    // it must NOT show up as billed checks - only as exposures.
     const outcome = await mod.recordExposureBatch({
       orgId,
       batchId: "batch-1",
@@ -70,14 +72,12 @@ describe.skipIf(!canRun)("flag usage exposure pipeline", () => {
     expect(outcome).toEqual({ status: "recorded", entries: 2 });
 
     const usage = await mod.flagUsageDetail(orgId, "checkout", 3650);
-    expect(usage.totalChecks).toBe(50);
-    const on = usage.byVariant.find((v) => v.variantKey === "on");
-    expect(on?.count).toBe(40);
-    expect(usage.byReason.TARGETING_MATCH).toBe(40);
-    expect(usage.byReason.STATIC).toBe(10);
+    expect(usage.exposedChecks).toBe(50);
+    // Billed checks are served-only, so the hook batch adds nothing here.
+    expect(usage.totalChecks).toBe(0);
   });
 
-  it("sums a second distinct batch onto the same grain", async () => {
+  it("sums a second distinct batch onto exposed", async () => {
     await mod.recordExposureBatch({
       orgId,
       batchId: "batch-2",
@@ -92,12 +92,10 @@ describe.skipIf(!canRun)("flag usage exposure pipeline", () => {
       ],
     });
     const usage = await mod.flagUsageDetail(orgId, "checkout", 3650);
-    const on = usage.byVariant.find((v) => v.variantKey === "on");
-    expect(on?.count).toBe(45); // 40 + 5
-    expect(usage.totalChecks).toBe(55);
+    expect(usage.exposedChecks).toBe(55); // 50 + 5
   });
 
-  it("drops a replayed batch whole, without adding a single check", async () => {
+  it("drops a replayed batch whole", async () => {
     const replay = await mod.recordExposureBatch({
       orgId,
       batchId: "batch-1", // already applied
@@ -114,21 +112,60 @@ describe.skipIf(!canRun)("flag usage exposure pipeline", () => {
     expect(replay).toEqual({ status: "duplicate" });
 
     const usage = await mod.flagUsageDetail(orgId, "checkout", 3650);
-    expect(usage.totalChecks).toBe(55); // unchanged
+    expect(usage.exposedChecks).toBe(55); // unchanged
   });
 
-  it("records a server-side exposure and surfaces it in the summary", async () => {
-    await mod.recordServerExposure({
+  it("attributes a served bulk fetch per flag, summing to the billed count", async () => {
+    // The reconciliation guarantee: recording N flags' served evaluations makes
+    // the per-flag totals SUM to the billed evaluation quantity (N).
+    await mod.recordServed({
       orgId,
-      flagKey: "settings-page",
-      variantKey: "on",
-      reason: "STATIC",
+      evaluations: [
+        { flagKey: "checkout", variantKey: "on", reason: "STATIC" },
+        { flagKey: "banner", variantKey: "off", reason: "STATIC" },
+      ],
       at: new Date(),
     });
     const summary = await mod.flagUsageSummary(orgId);
-    expect(summary.get("settings-page")?.totalChecks).toBe(1);
-    // orgEmitsExposures becomes true once there is any exposure in the window.
-    expect(await mod.orgEmitsExposures(orgId)).toBe(true);
+    // Each flag got exactly one billed check.
+    expect(summary.get("checkout")?.totalChecks).toBe(1);
+    expect(summary.get("banner")?.totalChecks).toBe(1);
+  });
+
+  it("served evaluations do NOT make an org look like it emits exposures", async () => {
+    // A fresh org with only bulk-served traffic must read as emitting no
+    // exposures, so staleness stays config-based rather than calling every
+    // served flag "used".
+    const other = await owner`
+      INSERT INTO organizations (slug, name, plan)
+      VALUES (${`served-only-${stamp}`}, 'Served Only', 'pro') RETURNING id`;
+    const otherId = other[0].id as string;
+    try {
+      await mod.recordServed({
+        orgId: otherId,
+        evaluations: [{ flagKey: "x", variantKey: "on", reason: "STATIC" }],
+        at: new Date(),
+      });
+      expect(await mod.orgEmitsExposures(otherId)).toBe(false);
+
+      // A client-hook exposure DOES flip it.
+      await mod.recordExposureBatch({
+        orgId: otherId,
+        batchId: "exp-1",
+        entries: [
+          {
+            flagKey: "x",
+            variantKey: "on",
+            reason: "STATIC",
+            hour: hour(new Date().toISOString()),
+            count: 1,
+          },
+        ],
+      });
+      expect(await mod.orgEmitsExposures(otherId)).toBe(true);
+    } finally {
+      await owner`DELETE FROM organizations WHERE id = ${otherId}::uuid`;
+    }
   });
 
   it("stores no raw targeting identity in a sample, only a hash", async () => {

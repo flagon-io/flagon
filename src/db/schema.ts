@@ -538,6 +538,12 @@ export const flagUsageRollups = pgTable(
     variantKey: text("variant_key").notNull(),
     /** STATIC | TARGETING_MATCH | SPLIT - see src/lib/flags.ts. */
     reason: text("reason").notNull(),
+    /**
+     * served | exposed (drizzle/0033): served = billed evaluations (bulk +
+     * single-flag), which SUM to the invoice; exposed = client-hook app reads,
+     * a different scale, used for staleness. Kept apart so neither lies.
+     */
+    source: text("source").notNull().default("served"),
     count: bigint("count", { mode: "number" }).notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -553,6 +559,7 @@ export const flagUsageRollups = pgTable(
       t.hour,
       t.variantKey,
       t.reason,
+      t.source,
     ),
     index("flag_usage_rollups_org_flag_hour_idx").on(
       t.organizationId,
@@ -579,6 +586,8 @@ export const flagUsageDaily = pgTable(
     flagKey: text("flag_key").notNull(),
     day: date("day").notNull(),
     variantKey: text("variant_key").notNull(),
+    /** served | exposed (drizzle/0033) - see flagUsageRollups.source. */
+    source: text("source").notNull().default("served"),
     count: bigint("count", { mode: "number" }).notNull().default(0),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
       .notNull()
@@ -596,6 +605,7 @@ export const flagUsageDaily = pgTable(
       t.flagKey,
       t.day,
       t.variantKey,
+      t.source,
     ),
     index("flag_usage_daily_org_flag_day_idx").on(
       t.organizationId,
