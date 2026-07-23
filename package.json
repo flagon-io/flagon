@@ -36,6 +36,7 @@
     "@sentry/nextjs": "^10.67.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
+    "aws4fetch": "^1.0.20",
     "better-auth": "^1.6.23",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.25.0",

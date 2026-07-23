@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { isUniqueViolation } from "@/db/errors";
 import { featureFlags, segments } from "@/db/schema";
 import { withTenant } from "@/db/tenant";
+import { markConfigDirty, publishConfig } from "@/lib/config-publish.server";
 import {
   defaultVariants,
   FLAG_TYPES,
@@ -86,8 +87,8 @@ export async function createFlag(orgId: string, input: FlagInput) {
       error: definitionError,
     };
   try {
-    const [flag] = await withTenant(orgId, (tx) =>
-      tx
+    const flag = await withTenant(orgId, async (tx) => {
+      const [row] = await tx
         .insert(featureFlags)
         .values({
           organizationId: orgId,
@@ -99,8 +100,11 @@ export async function createFlag(orgId: string, input: FlagInput) {
           defaultVariant,
           rules,
         })
-        .returning(),
-    );
+        .returning();
+      await markConfigDirty(tx, orgId);
+      return row;
+    });
+    await syncConfig(orgId);
     return { ok: true as const, flag };
   } catch (error) {
     if (isUniqueViolation(error))
@@ -147,8 +151,8 @@ export async function updateFlag(
       code: "invalid_definition",
       error: definitionError,
     };
-  const [flag] = await withTenant(orgId, (tx) =>
-    tx
+  const flag = await withTenant(orgId, async (tx) => {
+    const [row] = await tx
       .update(featureFlags)
       .set({
         name: valid.name,
@@ -165,27 +169,37 @@ export async function updateFlag(
       .where(
         and(eq(featureFlags.organizationId, orgId), eq(featureFlags.key, key)),
       )
-      .returning(),
-  );
+      .returning();
+    await markConfigDirty(tx, orgId);
+    return row;
+  });
+  await syncConfig(orgId);
   return { ok: true as const, flag };
 }
 
 export async function deleteFlag(orgId: string, key: string) {
-  return (
-    (
-      await withTenant(orgId, (tx) =>
-        tx
-          .delete(featureFlags)
-          .where(
-            and(
-              eq(featureFlags.organizationId, orgId),
-              eq(featureFlags.key, key),
-            ),
-          )
-          .returning({ id: featureFlags.id }),
+  const deleted = await withTenant(orgId, async (tx) => {
+    const rows = await tx
+      .delete(featureFlags)
+      .where(
+        and(eq(featureFlags.organizationId, orgId), eq(featureFlags.key, key)),
       )
-    ).length > 0
-  );
+      .returning({ id: featureFlags.id });
+    if (rows.length) await markConfigDirty(tx, orgId);
+    return rows.length > 0;
+  });
+  if (deleted) await syncConfig(orgId);
+  return deleted;
+}
+
+/**
+ * Write the org's evaluation artifact through to the store after a mutation, so
+ * the store is in sync the moment a save returns. Best-effort: the dirty marker
+ * was already committed in the mutation's transaction, so if this write fails
+ * the reconcile sweep republishes - a store hiccup must never fail the save.
+ */
+async function syncConfig(orgId: string): Promise<void> {
+  await publishConfig(orgId).catch(() => {});
 }
 
 export function serializeFlag(flag: FeatureFlag) {

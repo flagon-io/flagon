@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { isUniqueViolation } from "@/db/errors";
 import { segments } from "@/db/schema";
 import { withTenant } from "@/db/tenant";
+import { markConfigDirty, publishConfig } from "@/lib/config-publish.server";
 import {
   emptyCriteria,
   FLAG_KEY_PATTERN,
@@ -46,8 +47,8 @@ export async function createSegment(
       error: "Provide a valid segment name and key.",
     };
   try {
-    const [segment] = await withTenant(orgId, (tx) =>
-      tx
+    const segment = await withTenant(orgId, async (tx) => {
+      const [row] = await tx
         .insert(segments)
         .values({
           organizationId: orgId,
@@ -55,8 +56,11 @@ export async function createSegment(
           description: input.description?.trim() || null,
           criteria: input.criteria ?? emptyCriteria(),
         })
-        .returning(),
-    );
+        .returning();
+      await markConfigDirty(tx, orgId);
+      return row;
+    });
+    await syncConfig(orgId);
     return { ok: true as const, segment };
   } catch (error) {
     if (isUniqueViolation(error))
@@ -91,8 +95,8 @@ export async function updateSegment(
       code: "invalid_segment",
       error: "Provide a valid segment name.",
     };
-  const [segment] = await withTenant(orgId, (tx) =>
-    tx
+  const segment = await withTenant(orgId, async (tx) => {
+    const [row] = await tx
       .update(segments)
       .set({
         name: identity.name,
@@ -104,21 +108,33 @@ export async function updateSegment(
         updatedAt: new Date(),
       })
       .where(and(eq(segments.organizationId, orgId), eq(segments.key, key)))
-      .returning(),
-  );
+      .returning();
+    await markConfigDirty(tx, orgId);
+    return row;
+  });
+  await syncConfig(orgId);
   return { ok: true as const, segment };
 }
 export async function deleteSegment(orgId: string, key: string) {
-  return (
-    (
-      await withTenant(orgId, (tx) =>
-        tx
-          .delete(segments)
-          .where(and(eq(segments.organizationId, orgId), eq(segments.key, key)))
-          .returning({ id: segments.id }),
-      )
-    ).length > 0
-  );
+  const deleted = await withTenant(orgId, async (tx) => {
+    const rows = await tx
+      .delete(segments)
+      .where(and(eq(segments.organizationId, orgId), eq(segments.key, key)))
+      .returning({ id: segments.id });
+    if (rows.length) await markConfigDirty(tx, orgId);
+    return rows.length > 0;
+  });
+  if (deleted) await syncConfig(orgId);
+  return deleted;
+}
+
+/**
+ * Write the org's evaluation artifact through to the store after a segment
+ * mutation. Best-effort for the same reasons as the flag write path: the dirty
+ * marker is already committed, so the reconcile sweep is the safety net.
+ */
+async function syncConfig(orgId: string): Promise<void> {
+  await publishConfig(orgId).catch(() => {});
 }
 export function serializeSegment(segment: Segment) {
   return {

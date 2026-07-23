@@ -120,6 +120,24 @@ export async function startProCheckout(
           : {}),
       },
     },
+    /**
+     * Show the "Add promotion code" field.
+     *
+     * Without this there is no input at all: a customer holding a code has
+     * nowhere to type it, and the only way to discount anyone is an operator
+     * attaching a coupon to their subscription after the fact. That is fine for
+     * a negotiated deal and useless for a launch promo.
+     *
+     * Stripe distinguishes a COUPON (the discount definition) from a PROMOTION
+     * CODE (the redeemable string that points at one), and this flag accepts
+     * promotion codes only - which is why sudo mints both.
+     *
+     * Note this is mutually exclusive with pre-applying `discounts` on the
+     * session: Stripe rejects a session that does both. Self-serve upgrade is
+     * the redeem-your-own-code path; operator-applied discounts go on the
+     * subscription instead.
+     */
+    allow_promotion_codes: true,
     // {CHECKOUT_SESSION_ID} is substituted by Stripe; the org page uses it
     // to reconcile immediately on return, independent of webhook delivery.
     success_url: `${orgUrl}?upgraded=1&session_id={CHECKOUT_SESSION_ID}`,

@@ -38,6 +38,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local OFREP config store (filesystem adapter default; R2 in production)
+.flagon
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

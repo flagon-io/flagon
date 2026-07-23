@@ -46,6 +46,51 @@ services:
       timeout: 5s
       retries: 10
 
+  # Local S3, for the OFREP config store. OFREP evaluation reads each org's
+  # precomputed flag+segment artifact from object storage (Cloudflare R2 in
+  # production), so development exercises that exact path instead of a
+  # filesystem stand-in. Unprofiled: it comes up with `docker compose up` next
+  # to Postgres, and host `npm run dev` reaches it at 127.0.0.1:4566 (uncomment
+  # the FLAGON_CONFIG_STORE_* lines in .env.local). Its data is disposable - the
+  # database is the source of truth and the artifact is rebuilt on write/miss.
+  ministack:
+    image: ministackorg/ministack:latest
+    restart: unless-stopped
+    ports:
+      - "${MINISTACK_BIND:-127.0.0.1}:${MINISTACK_PORT:-4566}:4566"
+    environment:
+      AWS_ACCESS_KEY_ID: ${FLAGON_CONFIG_STORE_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${FLAGON_CONFIG_STORE_SECRET_ACCESS_KEY:-test}
+      AWS_DEFAULT_REGION: ${FLAGON_CONFIG_STORE_REGION:-us-east-1}
+
+  # One-shot: create the config bucket, then exit. Retries until ministack
+  # answers so it does not depend on a healthcheck the image may not ship, and
+  # is idempotent (an existing bucket is fine). `docker compose up --wait`
+  # treats its clean exit as success.
+  ministack-init:
+    image: amazon/aws-cli:latest
+    restart: "no"
+    depends_on:
+      - ministack
+    environment:
+      AWS_ACCESS_KEY_ID: ${FLAGON_CONFIG_STORE_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${FLAGON_CONFIG_STORE_SECRET_ACCESS_KEY:-test}
+      AWS_DEFAULT_REGION: ${FLAGON_CONFIG_STORE_REGION:-us-east-1}
+      BUCKET: ${FLAGON_CONFIG_STORE_BUCKET:-flagon-artifacts}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for i in $$(seq 1 60); do
+          if aws --endpoint-url http://ministack:4566 s3api head-bucket --bucket "$$BUCKET" 2>/dev/null; then
+            echo "config bucket ready: $$BUCKET"; exit 0
+          fi
+          if aws --endpoint-url http://ministack:4566 s3 mb "s3://$$BUCKET" 2>/dev/null; then
+            echo "config bucket created: $$BUCKET"; exit 0
+          fi
+          echo "waiting for ministack (attempt $$i)..."; sleep 2
+        done
+        echo "ministack did not become ready in time" >&2; exit 1
+
   # The platform itself. Profiled, so `docker compose up` in a checkout does
   # not start a second copy of the app on the port `npm run dev` wants.
   app:
@@ -57,9 +102,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ministack-init:
+        condition: service_completed_successfully
     ports:
       - "${PORT:-3000}:3000"
     environment:
+      # OFREP config store -> the bundled ministack S3 (reached over the compose
+      # network). Point this at Cloudflare R2 instead for a production self-host.
+      FLAGON_CONFIG_STORE_ENDPOINT: ${FLAGON_CONFIG_STORE_ENDPOINT:-http://ministack:4566}
+      FLAGON_CONFIG_STORE_BUCKET: ${FLAGON_CONFIG_STORE_BUCKET:-flagon-artifacts}
+      FLAGON_CONFIG_STORE_ACCESS_KEY_ID: ${FLAGON_CONFIG_STORE_ACCESS_KEY_ID:-test}
+      FLAGON_CONFIG_STORE_SECRET_ACCESS_KEY: ${FLAGON_CONFIG_STORE_SECRET_ACCESS_KEY:-test}
+      FLAGON_CONFIG_STORE_REGION: ${FLAGON_CONFIG_STORE_REGION:-us-east-1}
       # Two roles, on purpose. The app connects as the restricted role, which
       # cannot bypass row-level security; the owner is used only to provision
       # that role and to run migrations. Collapsing them into one connection

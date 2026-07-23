@@ -68,6 +68,17 @@ export const organizations = pgTable("organizations", {
    * so it fails toward doing work rather than skipping it.
    */
   usagePendingAt: timestamp("usage_pending_at", { withTimezone: true }),
+  /**
+   * OFREP config-store publication tracking (drizzle/0039). `configPendingAt` is
+   * the dirty marker: set in the same transaction as any flag/segment change,
+   * cleared once the artifact is written through to the store. The reconcile
+   * sweep drives off it. The remaining three record what is currently in the
+   * store, so a stale/failed publish is an observable query.
+   */
+  configPendingAt: timestamp("config_pending_at", { withTimezone: true }),
+  configVersion: text("config_version"),
+  configChecksum: text("config_checksum"),
+  configPublishedAt: timestamp("config_published_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

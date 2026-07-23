@@ -10,6 +10,10 @@
     {
       "path": "/api/cron/compact",
       "schedule": "17 * * * *"
+    },
+    {
+      "path": "/api/cron/reconcile-config",
+      "schedule": "*/5 * * * *"
     }
   ],
   "git": {
