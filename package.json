@@ -15,6 +15,8 @@
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:studio": "drizzle-kit studio",
     "org:claim": "node scripts/org-claim.mjs",
+    "price:link": "node scripts/price-book-link.mjs",
+    "seed:dev": "node scripts/seed-dev.mjs",
     "stripe:listen": "docker compose up -d stripe && docker compose logs -f stripe",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",

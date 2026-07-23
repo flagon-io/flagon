@@ -38,6 +38,48 @@ export function getStripe(): Stripe {
 
 const PRO_LOOKUP_KEY = "flagon_pro_monthly";
 let cachedProPriceId: string | null = null;
+const resolvedProductPrices = new Map<string, string>();
+
+/**
+ * Coerce a configured Stripe id into a PRICE id.
+ *
+ * Stripe's Checkout takes `line_items[].price`, which must be a `price_...`.
+ * Handing it a `prod_...` fails the call outright with "No such price" - and
+ * because product and price ids are both opaque `xxx_` strings that sit next to
+ * each other in the dashboard, configuring the product by mistake is easy to do
+ * and gives no feedback until a real customer clicks upgrade.
+ *
+ * So a product id is RESOLVED to that product's active recurring price rather
+ * than passed through to fail. There is no ambiguity worth guarding against in
+ * practice: a subscription product has one live recurring price, and if it
+ * somehow has several this picks the same one every time (Stripe returns them
+ * newest-first) rather than failing closed on an upgrade.
+ *
+ * Anything already a price id is returned untouched, so this costs nothing on
+ * the correctly-configured path.
+ */
+export async function resolveStripePriceId(id: string): Promise<string> {
+  if (!id.startsWith("prod_")) return id;
+
+  const cached = resolvedProductPrices.get(id);
+  if (cached) return cached;
+
+  const prices = await getStripe().prices.list({
+    product: id,
+    active: true,
+    type: "recurring",
+    limit: 1,
+  });
+  const price = prices.data[0];
+  if (!price) {
+    throw new Error(
+      `Stripe id "${id}" is a PRODUCT, not a price, and it has no active recurring price to fall back to. ` +
+        "Set the price id (price_...) instead - Checkout cannot take a product.",
+    );
+  }
+  resolvedProductPrices.set(id, price.id);
+  return price.id;
+}
 
 /**
  * Test mode is decided by the KEY, not by NODE_ENV.
@@ -57,7 +99,11 @@ export function isTestModeKey(key: string | undefined): boolean {
  * manual setup).
  */
 export async function ensureProPriceId(): Promise<string> {
-  if (process.env.STRIPE_PRO_PRICE_ID) return process.env.STRIPE_PRO_PRICE_ID;
+  // Resolved rather than trusted: a product id here is a silent break, and it
+  // is the single easiest thing to get wrong in this variable.
+  if (process.env.STRIPE_PRO_PRICE_ID) {
+    return resolveStripePriceId(process.env.STRIPE_PRO_PRICE_ID);
+  }
   if (cachedProPriceId) return cachedProPriceId;
 
   const stripe = getStripe();

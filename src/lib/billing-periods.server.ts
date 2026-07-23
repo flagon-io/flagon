@@ -28,8 +28,9 @@ import {
   type UsageLine,
   type UsageTotals,
 } from "./meters";
-import { PLANS, isPlanId, type PlanId } from "./plans";
-import { planRate } from "./quota";
+import { isPlanId, type PlanId } from "./plans";
+import { rateForMeter, type Entitlements } from "./entitlements";
+import { orgEntitlementContext } from "./entitlements.server";
 import {
   meterBillingMode,
   meteredRate,
@@ -66,6 +67,13 @@ export type PeriodStatus = "open" | "closed" | "invoiced" | "void";
 export async function orgBillingContext(orgId: string): Promise<{
   plan: PlanId;
   includedCreditCents: number;
+  /**
+   * The org's fully resolved terms (plan -> price version -> negotiated
+   * override). Carried so callers that need per-meter allowances or caps do not
+   * re-resolve them, and so a custom-priced org's numbers are consistent across
+   * every surface that starts here.
+   */
+  entitlements: Entitlements;
   current: PeriodWindow;
 }> {
   const [org] = await db
@@ -79,9 +87,13 @@ export async function orgBillingContext(orgId: string): Promise<{
     .limit(1);
 
   const plan: PlanId = org && isPlanId(org.plan) ? org.plan : "free";
+  // Resolved rather than read from PLANS: an org negotiated onto $100/mo Pro
+  // gets the credit it paid for, not the plan constant's $20.
+  const { entitlements } = await orgEntitlementContext(orgId);
   return {
     plan,
-    includedCreditCents: PLANS[plan].includedUsageCents,
+    includedCreditCents: entitlements.includedCreditCents,
+    entitlements,
     current: currentPeriodFor(org ?? {}),
   };
 }
@@ -173,6 +185,7 @@ async function freezeLines(
   window: PeriodWindow,
   plan: PlanId,
   contract: ContractBilling | null,
+  entitlements: Entitlements,
 ): Promise<FrozenLine[]> {
   const rows = await withTenant(orgId, (tx) =>
     tx
@@ -237,20 +250,24 @@ async function freezeLines(
     // How this meter bills decides both the rate that gets frozen and whether
     // any cost is frozen at all:
     //
-    //   priced  (pro/free)   the plan's rate; a meter whose allowance is a plan
-    //                        property (flags.syncs) prices differently per plan.
+    //   priced  (pro/free)   the org's RESOLVED rate: the plan's published rate
+    //                        unless a price version or a negotiated override
+    //                        moved the allowance or the per-unit price.
     //   covered (enterprise) in the contract's term envelope: recorded as
     //                        volume, cost 0, coordinated at renewal not billed.
     //   metered (enterprise) billed on top: the contract's per-cycle rate and
     //                        included, so cost is the overage past the cycle's
     //                        included amount.
+    //
+    // Whichever rate wins is FROZEN onto the line, so a renegotiation later
+    // can never re-price a period that has already been billed.
     const mode = meterBillingMode(plan, meterId, contract);
     const rate =
       mode === "metered"
         ? (meteredRate(meterId, contract) ?? meterRate(meter))
         : mode === "covered"
           ? meterRate(meter)
-          : (planRate(plan, meterId) ?? meterRate(meter));
+          : (rateForMeter(entitlements, meterId) ?? meterRate(meter));
     const total = entries.reduce((sum, entry) => sum + entry.quantity, 0);
     // Covered meters are never billed; freeze cost 0 across their lines.
     const lineCost = mode === "covered" ? 0 : rateCostCents(rate, total);
@@ -287,19 +304,31 @@ export async function closePeriod(input: {
   plan: string;
 }): Promise<BillingPeriod> {
   const planId = isPlanId(input.plan) ? input.plan : "free";
-  const includedCreditCents = PLANS[planId].includedUsageCents;
   const periodStart = isoDay(input.window.from);
   const periodEnd = isoDay(input.window.to);
 
   const existing = await getPeriod({ orgId: input.orgId, periodStart });
   if (existing && existing.period.status !== "open") return existing.period;
 
+  // The org's resolved terms, frozen into this period along with the lines. A
+  // custom-priced customer's credit must be the one they were sold, and it must
+  // stop moving the moment the period closes - re-reading the plan constant here
+  // was what made a $100/mo Pro customer's closed periods show $20 of credit.
+  const { entitlements } = await orgEntitlementContext(input.orgId);
+  const includedCreditCents = entitlements.includedCreditCents;
+
   // The contract decides per-meter billing for an enterprise org (covered vs
   // metered). Loaded once and frozen into each line's mode + rate, so a later
   // contract change never re-prices a closed period.
   const contract =
     planId === "enterprise" ? await activeContract(input.orgId) : null;
-  const lines = await freezeLines(input.orgId, input.window, planId, contract);
+  const lines = await freezeLines(
+    input.orgId,
+    input.window,
+    planId,
+    contract,
+    entitlements,
+  );
   const usageCents = lines.reduce((total, line) => total + line.costCents, 0);
   const creditAppliedCents = Math.min(usageCents, includedCreditCents);
   const overageCents = usageCents - creditAppliedCents;

@@ -1,5 +1,24 @@
-import { describe, it, expect } from "vitest";
-import { billingEnabled, isTestModeKey } from "./billing";
+import { describe, it, expect, vi, afterEach } from "vitest";
+
+/**
+ * The Stripe SDK is mocked at the module boundary rather than by spying on
+ * getStripe(): resolveStripePriceId calls it internally, and an ES module's
+ * internal call cannot be intercepted through the namespace object. Mocking the
+ * constructor is also what keeps this test off the network - the spy version
+ * silently made a real API request.
+ */
+const priceList = vi.hoisted(() => vi.fn());
+vi.mock("stripe", () => ({
+  default: class {
+    prices = { list: priceList };
+  },
+}));
+
+import {
+  billingEnabled,
+  isTestModeKey,
+  resolveStripePriceId,
+} from "./billing";
 import {
   PLANS,
   PLAN_IDS,
@@ -18,6 +37,52 @@ describe("billing mode", () => {
   it("is off without a secret key (the self-host default)", () => {
     expect(billingEnabled({})).toBe(false);
     expect(billingEnabled({ STRIPE_SECRET_KEY: "sk_live_abc" })).toBe(true);
+  });
+});
+
+/**
+ * Regression: a PRODUCT id configured where a price id belongs.
+ *
+ * Checkout takes `line_items[].price` and rejects a `prod_...` outright, so
+ * this misconfiguration breaks every self-serve upgrade - and it surfaces on a
+ * customer's click rather than at deploy, because product and price ids are
+ * both opaque and sit next to each other in the Stripe dashboard.
+ */
+describe("resolving a configured Stripe id", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    priceList.mockReset();
+  });
+
+  it("passes a price id straight through, with no Stripe call", async () => {
+    await expect(resolveStripePriceId("price_abc123")).resolves.toBe(
+      "price_abc123",
+    );
+    // The correctly-configured path must cost nothing.
+    expect(priceList).not.toHaveBeenCalled();
+  });
+
+  it("resolves a product id to its active recurring price", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_abc");
+    priceList.mockResolvedValue({ data: [{ id: "price_real" }] });
+
+    await expect(resolveStripePriceId("prod_UvYZ")).resolves.toBe("price_real");
+    expect(priceList).toHaveBeenCalledWith(
+      expect.objectContaining({
+        product: "prod_UvYZ",
+        active: true,
+        type: "recurring",
+      }),
+    );
+  });
+
+  it("explains itself when the product has no recurring price to use", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_abc");
+    priceList.mockResolvedValue({ data: [] });
+
+    await expect(resolveStripePriceId("prod_Empty")).rejects.toThrow(
+      /is a PRODUCT, not a price/,
+    );
   });
 });
 

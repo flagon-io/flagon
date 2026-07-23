@@ -5,7 +5,13 @@ import { withTenant } from "../db/tenant";
 import { currentPeriodFor, isoDay } from "./billing-period";
 import { getMeter } from "./meters";
 import { isPlanId, type PlanId } from "./plans";
-import { EVALUATION_METER, counterPeriodStart, hardCap } from "./quota";
+import { EVALUATION_METER, counterPeriodStart } from "./quota";
+import {
+  capForMeter,
+  planDefaults,
+  type Entitlements,
+} from "./entitlements";
+import { orgEntitlementContext } from "./entitlements.server";
 import { uuidv7 } from "./uuidv7";
 
 /**
@@ -117,7 +123,13 @@ export async function recordUsageEvent(input: {
   const context = await quotaContextFor(input.orgId);
   const plan: PlanId =
     input.plan && isPlanId(input.plan) ? input.plan : context.plan;
-  const allowance = hardCap(plan, input.meter);
+  // The org's negotiated terms only apply when the caller is talking about the
+  // plan the org is actually on. A caller asserting a DIFFERENT plan is asking
+  // a hypothetical, and answering it with this org's overrides would apply one
+  // customer's bespoke cap to a plan they are not on.
+  const entitlements =
+    plan === context.plan ? context.entitlements : planDefaults(plan);
+  const allowance = capForMeter(entitlements, input.meter);
   const at = input.at ?? new Date();
   const period = context.periodStart;
   const projectId = input.projectId ?? null;
@@ -232,7 +244,20 @@ async function readCounter(
  * 60-second window justifies.
  */
 const PLAN_CACHE_TTL_MS = 60_000;
-type QuotaContext = { plan: PlanId; periodStart: string };
+/**
+ * The org's resolved entitlements ride in the cache alongside the plan.
+ *
+ * They have to: a custom-priced org's cap comes from its own credit and
+ * allowances, so enforcement can no longer be answered by the plan id alone.
+ * Resolving them per event would put two extra queries on the hottest path in
+ * the system, and they change on exactly the same events the plan does - which
+ * is why they are cached together and dropped together.
+ */
+type QuotaContext = {
+  plan: PlanId;
+  periodStart: string;
+  entitlements: Entitlements;
+};
 const planCache = new Map<string, QuotaContext & { expires: number }>();
 
 /** Drops a cached plan; called wherever a plan transition is applied. */
@@ -252,7 +277,11 @@ export function clearPlanCache(orgId?: string): void {
 async function quotaContextFor(orgId: string): Promise<QuotaContext> {
   const cached = planCache.get(orgId);
   if (cached && cached.expires > Date.now()) {
-    return { plan: cached.plan, periodStart: cached.periodStart };
+    return {
+      plan: cached.plan,
+      periodStart: cached.periodStart,
+      entitlements: cached.entitlements,
+    };
   }
 
   const [org] = await db
@@ -267,9 +296,18 @@ async function quotaContextFor(orgId: string): Promise<QuotaContext> {
 
   // Fail toward the cap: an org we cannot resolve is not granted unlimited
   // usage on the strength of a failed lookup.
+  const plan: PlanId = org && isPlanId(org.plan) ? org.plan : "free";
+
+  // Only resolved for an org that exists. An org we could not read is capped at
+  // the plan default rather than given the benefit of an override we never saw.
+  const entitlements = org
+    ? (await orgEntitlementContext(orgId)).entitlements
+    : planDefaults(plan);
+
   const context: QuotaContext = {
-    plan: org && isPlanId(org.plan) ? org.plan : "free",
+    plan,
     periodStart: counterPeriodStart(currentPeriodFor(org ?? {})),
+    entitlements,
   };
 
   // A missing org is not cached: far more likely a transient lookup failure

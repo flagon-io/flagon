@@ -87,6 +87,10 @@ describe("OpenAPI document", () => {
       "/verify-email", // emailed-link landing (browser flow)
       "/cron/cleanup", // scheduled maintenance (infra, CRON_SECRET-gated)
       "/cron/compact", // hourly usage compaction (infra, CRON_SECRET-gated)
+      // Billing registry for the operator console (infra, INTERNAL_API_SECRET
+      // -gated). Deliberately undocumented: its shape moves in lockstep with
+      // sudo, so publishing it would imply a stability promise we do not make.
+      "/internal/registry",
       "/webhooks/stripe", // Stripe webhook (infra, signature-gated)
       "/ofrep/v1/exposures", // flag-usage ingest (infra, client-token-gated)
       "/[...catchall]", // JSON 404 fallback

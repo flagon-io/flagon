@@ -46,6 +46,21 @@ const AUTH_LAYER_TABLES = new Set([
   // discoverable before an org RLS context exists. Every lookup is a digest
   // match and scope/subject checks happen in access-tokens.server.ts.
   "access_tokens",
+  // The plan catalog (drizzle/0035, reshaped by 0037): CATALOG data, with no
+  // org scope by nature. Every org reads the same rows and the public pricing
+  // page renders from them. The app role holds SELECT only; the operator
+  // console writes as the owner.
+  "plan_versions",
+  "plan_version_meters",
+  "meters",
+  // Per-org entitlement overrides (drizzle/0036). Classified with
+  // `organizations` and for the same reason: it is an extension of the org's
+  // own billing configuration, and it is read on paths that deliberately run
+  // OUTSIDE a tenant context - the quota check on the evaluation hot path and
+  // closePeriod, neither of which is inside withTenant. Every read is by an
+  // organization_id resolved from the session, never from user input, and the
+  // app role holds SELECT only.
+  "org_entitlements",
 ]);
 
 /** Tables the app role must have NO access to at all. */

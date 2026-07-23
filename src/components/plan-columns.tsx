@@ -1,13 +1,54 @@
 import { Check } from "lucide-react";
-import { PLANS } from "@/lib/plans";
+import { formatCents } from "@/lib/meters";
+import { renderFeatures, type PlanCopyContext } from "@/lib/plan-copy";
 
 /**
- * The three plan columns, shared by the marketing pricing page and the
- * in-app organization creation flow. One joined panel with internal
- * dividers (Vercel-style), price directly under the plan name, features
- * below a rule, CTA pinned to the bottom. Callers supply the CTA nodes so
- * the pricing story is identical everywhere it appears.
+ * The plan columns, shared by the marketing pricing page and the in-app
+ * organization creation flow. One joined panel with internal dividers
+ * (Vercel-style), price directly under the plan name, features below a rule,
+ * CTA pinned to the bottom. Callers supply the CTA nodes so the pricing story
+ * is identical everywhere it appears.
+ *
+ * RENDERS FROM DATA, NOT CONSTANTS. Plans are rows now (drizzle/0037), so this
+ * takes them as a prop instead of importing PLANS. Two consequences worth
+ * naming: the column count is whatever is listed rather than hard-coded to
+ * three, and an unbilled tier renders as "Free" rather than "$0/mo" - which is
+ * what it actually is, and what stopped Hobby reading as a subscription.
  */
+
+export type PlanColumn = {
+  /** The version id, which is what `ctas` is keyed by. */
+  id: string;
+  /** The stable plan id (free/pro/enterprise), for callers that act on it. */
+  plan: string;
+  displayName: string;
+  tagline: string;
+  features: string[];
+  billable: boolean;
+  selfServe: boolean;
+  unitAmountCents: number | null;
+  interval: string;
+  highlight: boolean;
+  /** Context for {token} substitution in the bullets. */
+  copy: PlanCopyContext;
+};
+
+/**
+ * How a plan's price reads at the top of its column.
+ *
+ * Three genuinely different answers, and collapsing any two of them misleads:
+ * an unbilled tier is Free (not $0, which implies an invoice for nothing), a
+ * contract plan is Custom (there is no list price to quote), and a real
+ * subscription is its amount.
+ */
+function priceLabel(plan: PlanColumn): { price: string; period?: string } {
+  if (!plan.billable) return { price: "Free" };
+  if (plan.unitAmountCents == null) return { price: "Custom" };
+  return {
+    price: formatCents(plan.unitAmountCents).replace(/\.00$/, ""),
+    period: plan.interval === "year" ? "/yr" : "/mo",
+  };
+}
 function Column({
   name,
   popular,
@@ -81,14 +122,14 @@ function Column({
 }
 
 export function PlanColumns({
-  freeCta,
-  proCta,
-  enterpriseCta,
+  plans,
+  ctas = {},
   bare = false,
 }: {
-  freeCta?: React.ReactNode;
-  proCta?: React.ReactNode;
-  enterpriseCta?: React.ReactNode;
+  /** The listed plan versions, in display order. */
+  plans: PlanColumn[];
+  /** CTA node per plan id, so each surface supplies its own actions. */
+  ctas?: Record<string, React.ReactNode>;
   /**
    * Drop the outer border and background, for callers that already provide
    * them (a BleedBand rules the block itself, and doubling the border would
@@ -96,39 +137,43 @@ export function PlanColumns({
    */
   bare?: boolean;
 }) {
+  // Grid tracks follow the data: adding a fourth plan in the console must not
+  // silently overflow a hard-coded three-column grid.
+  const columns =
+    plans.length === 1
+      ? "lg:grid-cols-1"
+      : plans.length === 2
+        ? "lg:grid-cols-2"
+        : plans.length === 4
+          ? "lg:grid-cols-4"
+          : "lg:grid-cols-3";
+
   return (
     <div
-      className={`grid grid-cols-1 divide-y divide-white/10 lg:grid-cols-3 lg:divide-x lg:divide-y-0 ${
+      className={`grid grid-cols-1 divide-y divide-white/10 ${columns} lg:divide-x lg:divide-y-0 ${
         bare ? "" : "border border-white/10 bg-white/2"
       }`}
     >
-      <Column
-        name={PLANS.free.name}
-        price="$0"
-        period="/mo"
-        tagline={PLANS.free.tagline}
-        features={PLANS.free.features}
-        cta={freeCta}
-      />
-      <Column
-        name={PLANS.pro.name}
-        popular
-        highlight
-        price={`$${PLANS.pro.priceMonthly}`}
-        period="/mo"
-        tagline={PLANS.pro.tagline}
-        ladderFrom={PLANS.free.name}
-        features={PLANS.pro.features}
-        cta={proCta}
-      />
-      <Column
-        name={PLANS.enterprise.name}
-        price="Custom"
-        tagline={PLANS.enterprise.tagline}
-        ladderFrom={PLANS.pro.name}
-        features={PLANS.enterprise.features}
-        cta={enterpriseCta}
-      />
+      {plans.map((plan, index) => {
+        const { price, period } = priceLabel(plan);
+        return (
+          <Column
+            key={plan.id}
+            name={plan.displayName}
+            popular={plan.highlight}
+            highlight={plan.highlight}
+            price={price}
+            period={period}
+            tagline={plan.tagline}
+            // "All X features, plus:" reads off the previous column, so it
+            // stays correct however many plans there are and whatever they are
+            // called.
+            ladderFrom={index > 0 ? plans[index - 1].displayName : undefined}
+            features={renderFeatures(plan.features, plan.copy)}
+            cta={ctas[plan.id]}
+          />
+        );
+      })}
     </div>
   );
 }

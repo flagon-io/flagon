@@ -32,6 +32,24 @@ export const organizations = pgTable("organizations", {
   logo: text("logo"),
   metadata: text("metadata"),
   plan: text("plan").notNull().default("free"),
+  /**
+   * The plan VERSION this org is on (drizzle/0037). Where its price,
+   * entitlements and limits all resolve from, and what makes "who is still on
+   * 2024 pricing?" a join rather than a Stripe reconciliation. Null falls back
+   * to the plan's active version.
+   */
+  planVersionId: uuid("plan_version_id"),
+  /**
+   * A version change scheduled for the next renewal.
+   *
+   * Re-pricing mid-cycle means usage already accrued under terms that no longer
+   * exist when the invoice is cut. Deferring to a cycle boundary keeps each
+   * period priced entirely under one set of terms.
+   */
+  pendingPlanVersionId: uuid("pending_plan_version_id"),
+  pendingPlanVersionAt: timestamp("pending_plan_version_at", {
+    withTimezone: true,
+  }),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   /**
@@ -817,6 +835,216 @@ export const billingPeriodLines = pgTable(
       .defaultNow(),
   },
   (t) => [index("billing_period_lines_period_idx").on(t.billingPeriodId)],
+);
+
+/**
+ * The meter catalog (drizzle/0037), mirrored from src/lib/meters.ts.
+ *
+ * Meters are DECLARED IN CODE because they are wired to instrumentation - a
+ * meter nothing emits is not a meter. This table exists so anything that cannot
+ * import that TypeScript (the operator console) can still read labels and
+ * units. src/lib/meters.test.ts fails if the two disagree, which is what keeps
+ * the mirror honest.
+ */
+export const meters = pgTable("meters", {
+  id: text("id").primaryKey(),
+  product: text("product").notNull(),
+  label: text("label").notNull(),
+  unit: text("unit").notNull(),
+  description: text("description").notNull().default(""),
+  /** The rate charged when no plan version overrides it. */
+  unitAmountCents: integer("unit_amount_cents").notNull().default(0),
+  per: bigint("per", { mode: "number" }).notNull(),
+  status: text("status").notNull().default("active"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * A plan, versioned, in full (drizzle/0037): what it costs, what it includes,
+ * what it limits, and what the pricing page says about it.
+ *
+ * ONE ROW PER VERSION, and the whole plan is in it. The alternative - price in
+ * the database, entitlements in constants, marketing copy in JSX - is what let
+ * a price change ship a page describing the old number, and made "give Pro 100M
+ * evaluations" a code change.
+ *
+ * Publishing a new version supersedes the old one for NEW subscriptions and
+ * moves nobody. An org points at the version it bought (organizations
+ * .planVersionId) and keeps it until deliberately moved, so grandfathering is
+ * the default rather than a feature.
+ *
+ * Catalog data: global, no RLS, read by everyone, written by the operator
+ * console as the owner.
+ */
+export const planVersions = pgTable(
+  "plan_versions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    /** free | pro | enterprise. The stable plan identity across versions. */
+    plan: text("plan").notNull(),
+    /** Monotonic within a plan, for ordering and display ("Pro v3"). */
+    version: integer("version").notNull().default(1),
+    /** active (sellable, one per plan+interval) | legacy (still in force) | draft. */
+    status: text("status").notNull().default("draft"),
+    /** Operator-facing label ("Pro 2026"). */
+    label: text("label").notNull(),
+
+    /**
+     * Is this a subscription at all?
+     *
+     * False for Hobby. An unbilled tier has no Stripe price, produces no
+     * invoice, and must never render as "$0.00/month" beside real money.
+     * Surfaces branch on this rather than on `plan = 'free'`, so a future
+     * unbilled tier works without special-casing its name.
+     */
+    billable: boolean("billable").notNull().default(true),
+    /** Null for an unbilled tier, and for enterprise (priced per contract). */
+    unitAmountCents: integer("unit_amount_cents"),
+    currency: text("currency").notNull().default("usd"),
+    interval: text("interval").notNull().default("month"),
+    /** Pooled usage credit the fee returns as. Null when there is none. */
+    includedCreditCents: integer("included_credit_cents"),
+    stripePriceId: text("stripe_price_id"),
+    stripeProductId: text("stripe_product_id"),
+
+    // --- Marketing, on the same row as the numbers it describes -------------
+    displayName: text("display_name").notNull().default(""),
+    tagline: text("tagline").notNull().default(""),
+    /** Bullets, in order. May contain {tokens}; see src/lib/plan-copy.ts. */
+    features: jsonb("features").$type<string[]>().notNull().default([]),
+    /** Shown on the pricing page. */
+    listed: boolean("listed").notNull().default(false),
+    /** The emphasised column ("Popular"). */
+    highlight: boolean("highlight").notNull().default(false),
+    /** Can a customer pick this themselves? Enterprise is contact-only. */
+    selfServe: boolean("self_serve").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+
+    // --- Limits: what a plan may CREATE (null = unlimited) ------------------
+    maxProjects: integer("max_projects"),
+    maxMembers: integer("max_members"),
+    maxFreeOrgs: integer("max_free_orgs"),
+
+    effectiveFrom: date("effective_from"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("plan_versions_plan_idx").on(t.plan, t.createdAt)],
+);
+
+/**
+ * What one plan version gives you, per meter (drizzle/0037).
+ *
+ * Rows rather than the jsonb blobs 0035 used, because these are now EDITED: a
+ * row can be constrained and rendered as a table without the console
+ * reconciling two parallel objects keyed by meter id.
+ *
+ * The three modes are different products, not degrees of one - see the
+ * migration. `unavailable` in particular is not "an allowance of zero": it means
+ * the plan does not offer the product, where zero means it bills from the first
+ * unit.
+ */
+export const planVersionMeters = pgTable(
+  "plan_version_meters",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    planVersionId: uuid("plan_version_id")
+      .notNull()
+      .references(() => planVersions.id, { onDelete: "cascade" }),
+    meter: text("meter").notNull(),
+    /** included | metered | unavailable. */
+    mode: text("mode").notNull().default("included"),
+    /** Units included each cycle before pricing starts. */
+    includedQuantity: bigint("included_quantity", { mode: "number" })
+      .notNull()
+      .default(0),
+    /**
+     * What a unit costs ON THIS PLAN, as cents per `per` units. Null inherits
+     * the meter's published rate. Cents-per-N is what makes sub-cent pricing
+     * exact: $0.0025 per event is 250 cents per 100,000.
+     */
+    unitAmountCents: integer("unit_amount_cents"),
+    per: bigint("per", { mode: "number" }),
+    /** Units before requests are REFUSED. Null = never refuse (bill instead). */
+    hardCap: bigint("hard_cap", { mode: "number" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("plan_version_meters_version_idx").on(t.planVersionId)],
+);
+
+/**
+ * Per-organization entitlement overrides (drizzle/0036_org_entitlements.sql):
+ * the custom deal, for ANY plan.
+ *
+ * The missing middle between the PLANS constants (same for everyone on a plan)
+ * and org_contracts (structurally enterprise-only). This is what lets a Pro
+ * customer paying $100/mo actually RECEIVE $100 of credit instead of the
+ * plan constant's $20.
+ *
+ * Every field means "inherit" when null/empty, and they compose in one
+ * direction: PLANS -> plan_prices -> org_entitlements -> org_contracts. See
+ * src/lib/entitlements.ts for the resolution.
+ */
+export const orgEntitlements = pgTable(
+  "org_entitlements",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuid_generate_v7()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /**
+     * Null means INHERIT, which is not the same as 0. Zero is a real sellable
+     * configuration ("every unit is billable"), so the two must be distinct.
+     */
+    includedCreditCents: integer("included_credit_cents"),
+    /** Merged OVER the price's allowances per meter, so a partial override is safe. */
+    meterAllowances: jsonb("meter_allowances")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    /** Moves one customer's per-unit price without touching the published rate. */
+    meteredRates: jsonb("metered_rates")
+      .$type<Record<string, { unit_amount_cents: number; per: number }>>()
+      .notNull()
+      .default({}),
+    /**
+     * Null inherits; an explicit {} is EXPLICITLY UNCAPPED - how you lift
+     * Hobby's cap for a trial without moving the org off Hobby.
+     */
+    hardCaps: jsonb("hard_caps").$type<Record<string, number>>(),
+    note: text("note"),
+    /** active (one per org) | void (superseded, kept for history). */
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("org_entitlements_org_idx").on(t.organizationId, t.createdAt)],
 );
 
 /**

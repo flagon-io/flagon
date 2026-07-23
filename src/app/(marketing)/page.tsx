@@ -9,8 +9,8 @@ import {
 } from "lucide-react";
 import { brand } from "@/lib/brand";
 import { appHref } from "@/lib/urls";
-import { PLANS } from "@/lib/plans";
-import { activeMeters, formatMeterRate } from "@/lib/meters";
+import { activeMeters, formatCents, formatMeterRate } from "@/lib/meters";
+import { listedPlanVersions } from "@/lib/plan-catalog.server";
 import { BleedBand } from "@/components/bleed-band";
 import { PageHero } from "@/components/page-hero";
 
@@ -74,7 +74,21 @@ const steps = [
   },
 ] as const;
 
-export default function Home() {
+/**
+ * See /pricing: revalidated so a published price shows up here too. Inlined
+ * because Next statically analyses segment config.
+ */
+export const revalidate = 60;
+
+export default async function Home() {
+  const plans = await listedPlanVersions();
+  // The emphasised paid plan drives the teaser; the unbilled tier names itself.
+  const headline =
+    plans.find((plan) => plan.highlight && plan.billable) ??
+    plans.find((plan) => plan.billable) ??
+    null;
+  const freeTier = plans.find((plan) => !plan.billable) ?? null;
+
   return (
     <main className="relative flex w-full flex-1 flex-col text-zinc-100">
       {/* The front door: the one hero at `lead` size, with the animated
@@ -200,10 +214,33 @@ export default function Home() {
               Priced so it stays boring
             </h2>
             <p className="mt-3 max-w-md text-sm leading-6 text-zinc-400">
-              Hobby is free and capped, so it can never produce an invoice. Pro
-              is ${PLANS.pro.priceMonthly} a month and returns as $
-              {PLANS.pro.includedUsageCents / 100} of pooled usage across every
-              product. No seats, ever.
+              {/*
+                Read from the plan rows, not from constants. The teaser quotes
+                two numbers that move whenever pricing does, and a homepage
+                advertising last quarter's price is worse than one that says
+                nothing.
+              */}
+              {freeTier ? `${freeTier.displayName} is free and capped, so it can never produce an invoice. ` : null}
+              {headline?.unitAmountCents != null ? (
+                <>
+                  {headline.displayName} is{" "}
+                  {formatCents(headline.unitAmountCents).replace(/\.00$/, "")} a{" "}
+                  {headline.interval}
+                  {headline.includedCreditCents != null ? (
+                    <>
+                      {" "}
+                      and returns as{" "}
+                      {formatCents(headline.includedCreditCents).replace(
+                        /\.00$/,
+                        "",
+                      )}{" "}
+                      of pooled usage across every product
+                    </>
+                  ) : null}
+                  .{" "}
+                </>
+              ) : null}
+              No seats, ever.
             </p>
             <Link
               href="/pricing"

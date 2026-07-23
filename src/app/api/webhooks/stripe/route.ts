@@ -107,11 +107,18 @@ export async function POST(request: Request) {
         // resolves to pro. This is what keeps a contract subscription from
         // being flipped to Pro on every renewal, and it syncs the enterprise
         // cycle the same way it does Pro's.
+        // The price VERSION this subscription was sold at, declared by whoever
+        // created it (Checkout, or the operator console). Only ever SET, never
+        // cleared on cancellation: which price a customer bought is history,
+        // and a resubscribe should not silently land them on current pricing.
+        const declaredVersion = subscription.metadata?.flagon_plan_version_id;
+
         await db
           .update(organizations)
           .set({
             plan: active ? subscriptionPlan(subscription.metadata) : "free",
             stripeSubscriptionId: active ? subscription.id : null,
+            ...(declaredVersion ? { planVersionId: declaredVersion } : {}),
             // A cancelled subscription has no cycle: fall back to the
             // calendar month rather than freezing on a stale window.
             currentPeriodStart: cycle?.start ?? null,

@@ -3,21 +3,46 @@ import Link from "next/link";
 import { Braces, CreditCard, Server } from "lucide-react";
 import { brand } from "@/lib/brand";
 import { appHref } from "@/lib/urls";
-import { PLANS } from "@/lib/plans";
 import {
   activeMeters,
+  formatCents,
   formatMeterRate,
   formatQuantity,
-  getMeter,
 } from "@/lib/meters";
+import {
+  listedPlanVersions,
+  planRateFor,
+  toPlanColumn,
+} from "@/lib/plan-catalog.server";
 import { BleedBand } from "@/components/bleed-band";
 import { PageHero } from "@/components/page-hero";
 import { PlanColumns } from "@/components/plan-columns";
 
-export const metadata: Metadata = {
-  title: `Pricing · ${brand.name}`,
-  description: `Simple, usage-based pricing. Free to start, Pro at $${PLANS.pro.priceMonthly}/month with usage credit included, and fixed-price Enterprise contracts. No seat-based pricing, ever.`,
-};
+/**
+ * Revalidated rather than prerendered at build.
+ *
+ * This page was static, which meant plans living in the database bought
+ * nothing: publishing a price changed the console and left the public page
+ * quoting whatever was true at the last deploy.
+ *
+ * The literal is inlined because Next statically analyses segment config - an
+ * imported constant is not analysable and fails the build. Keep the three
+ * marketing pages (here, /, /terms) on the same number.
+ */
+export const revalidate = 60;
+
+export async function generateMetadata(): Promise<Metadata> {
+  const plans = await listedPlanVersions();
+  const headline = plans.find((plan) => plan.highlight && plan.billable);
+  const price =
+    headline?.unitAmountCents != null
+      ? `${headline.displayName} at ${formatCents(headline.unitAmountCents).replace(/\.00$/, "")}/${headline.interval}`
+      : "usage-based plans";
+  return {
+    title: `Pricing · ${brand.name}`,
+    description: `Simple, usage-based pricing. Free to start, ${price} with usage credit included, and fixed-price Enterprise contracts. No seat-based pricing, ever.`,
+  };
+}
 
 const ctaClass =
   "inline-block rounded-full px-5 py-2 text-sm font-semibold transition";
@@ -46,7 +71,48 @@ const included = [
  * Public pricing. Same plan columns as the in-app creation flow; CTAs land
  * on /app/new with the plan preselected (price first, org details second).
  */
-export default function PricingPage() {
+export default async function PricingPage() {
+  const versions = await listedPlanVersions();
+  const columns = versions.map(toPlanColumn);
+
+  // CTAs are per-plan: a self-serve plan links into creation with itself
+  // preselected, and a contact-only one links to sales. Derived from the row's
+  // `selfServe` rather than from its name, so a new plan gets the right call to
+  // action without this page learning about it.
+  const ctas = Object.fromEntries(
+    columns.map((plan) => [
+      plan.id,
+      plan.selfServe ? (
+        <Link
+          href={appHref(`/new?plan=${plan.plan}`)}
+          className={plan.highlight ? primaryCta : outlineCta}
+        >
+          {plan.billable ? `Get started with ${plan.displayName}` : "Start for free"}
+        </Link>
+      ) : (
+        <Link href="/enterprise/contact" className={outlineCta}>
+          Contact sales
+        </Link>
+      ),
+    ]),
+  );
+
+  // What the headline plan's credit buys, computed at ITS rate rather than the
+  // published one - a plan that re-prices evaluations must quote its own maths.
+  const headline = columns.find((plan) => plan.highlight) ?? columns[0];
+  const headlineVersion = versions.find(
+    (version) => (version.id ?? version.plan) === headline?.id,
+  );
+  const headlineRate = headlineVersion
+    ? planRateFor(headlineVersion, "flags.evaluations")
+    : null;
+  const headlineCredit = headlineVersion?.includedCreditCents ?? null;
+  const creditBuys =
+    headlineRate && headlineCredit && headlineRate.unitAmountCents > 0
+      ? headlineRate.includedQuantity +
+        (headlineCredit / headlineRate.unitAmountCents) * headlineRate.per
+      : null;
+
   return (
     <div className="relative">
       <PageHero
@@ -73,24 +139,7 @@ export default function PricingPage() {
             than sitting on it. Its own top rule closes the hero, which is why
             the hero above draws none. */}
         <BleedBand className="bg-white/2">
-          <PlanColumns
-            bare
-            freeCta={
-              <Link href={appHref("/new?plan=free")} className={outlineCta}>
-                Start for free
-              </Link>
-            }
-            proCta={
-              <Link href={appHref("/new?plan=pro")} className={primaryCta}>
-                Get started with Pro
-              </Link>
-            }
-            enterpriseCta={
-              <Link href="/enterprise/contact" className={outlineCta}>
-                Contact sales
-              </Link>
-            }
-          />
+          <PlanColumns bare plans={columns} ctas={ctas} />
         </BleedBand>
 
         {/* Rates, straight from the meter registry. Rendering them rather than
@@ -118,24 +167,28 @@ export default function PricingPage() {
               </div>
             ))}
           </dl>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
-            Your included usage is a{" "}
-            <strong className="text-zinc-300">pooled credit</strong>, not a
-            per-product allowance: spend it on whichever products you actually
-            use. At the rate above, Pro&apos;s $
-            {PLANS.pro.includedUsageCents / 100} covers roughly{" "}
-            {formatQuantity(
-              (PLANS.pro.includedUsageCents /
-                (getMeter("flags.evaluations")?.unitAmountCents ?? 1)) *
-                (getMeter("flags.evaluations")?.per ?? 0),
-            )}{" "}
-            flag evaluations if that is all you run, or any mix across products
-            adding up to the same money.
-          </p>
+          {creditBuys && headlineCredit ? (
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
+              Your included usage is a{" "}
+              <strong className="text-zinc-300">pooled credit</strong>, not a
+              per-product allowance: spend it on whichever products you actually
+              use. {headline?.displayName}&apos;s{" "}
+              {formatCents(headlineCredit).replace(/\.00$/, "")} covers roughly{" "}
+              {formatQuantity(creditBuys)} flag evaluations if that is all you
+              run, or any mix across products adding up to the same money.
+            </p>
+          ) : null}
           <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
-            Hobby is capped rather than billed, so it can never produce an
-            invoice. Pro and Enterprise are billed past their included usage and
-            are never cut off.
+            {/* Derived from the plans themselves: a tier that is not billed can
+                never produce an invoice, and saying so by name would go stale
+                the moment the tiers change. */}
+            {columns
+              .filter((plan) => !plan.billable)
+              .map((plan) => plan.displayName)
+              .join(" and ") || "Unbilled tiers are"}{" "}
+            capped rather than billed, so they can never produce an invoice.
+            Everything else is billed past its included usage and is never cut
+            off.
           </p>
         </div>
 

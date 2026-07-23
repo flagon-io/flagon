@@ -8,7 +8,7 @@ import { brand } from "@/lib/brand";
 import { appPath, marketingHref } from "@/lib/urls";
 import { ORG_SLUG_HINT, suggestOrgSlug, validateOrgSlug } from "@/lib/org-slug";
 import { PLANS, type PlanId } from "@/lib/plans";
-import { PlanColumns } from "@/components/plan-columns";
+import { PlanColumns, type PlanColumn } from "@/components/plan-columns";
 import { Notice, buttonClass, hintClass } from "@/components/form-ui";
 import { Input, Label } from "@/ui";
 import { startProCheckout } from "../../(console)/billing-actions";
@@ -25,10 +25,13 @@ export function NewOrgForm({
   billingEnabled,
   ownsFreeOrg,
   preselectedPlan,
+  plans,
 }: {
   billingEnabled: boolean;
   ownsFreeOrg: boolean;
   preselectedPlan: PlanId | null;
+  /** The listed plan versions, resolved server-side. */
+  plans: PlanColumn[];
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -206,47 +209,64 @@ export function NewOrgForm({
             </h2>
           </div>
           <div className="mt-8">
+            {/*
+              CTAs are built from the plan rows rather than hard-coded per
+              plan, so a plan added in the operator console gets a working
+              button here without this file changing. The behaviour branches on
+              what the plan IS - self-serve or not, billed or not - never on
+              its name.
+            */}
             <PlanColumns
-              freeCta={
-                <div>
-                  <button
-                    type="button"
-                    disabled={ownsFreeOrg || pending !== null}
-                    onClick={() => createOrg("free")}
-                    className="inline-block rounded-full border border-white/15 px-5 py-2 text-sm font-semibold text-zinc-200 transition hover:border-white/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {pending === "free"
-                      ? "Creating..."
-                      : "Create a Hobby organization"}
-                  </button>
-                  {ownsFreeOrg ? (
-                    <p className="mt-2 text-xs leading-5 text-amber-300/80">
-                      You already have a Hobby organization. Additional
-                      organizations start on Pro.
-                    </p>
-                  ) : null}
-                </div>
-              }
-              proCta={
-                <button
-                  type="button"
-                  disabled={pending !== null}
-                  onClick={() => createOrg("pro")}
-                  className="inline-block rounded-full bg-teal-500 px-5 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400 disabled:cursor-default disabled:opacity-60"
-                >
-                  {pending === "pro"
-                    ? "Heading to checkout..."
-                    : "Continue with Pro"}
-                </button>
-              }
-              enterpriseCta={
-                <Link
-                  href={marketingHref("/enterprise/contact")}
-                  className="inline-block rounded-full border border-white/15 px-5 py-2 text-sm font-semibold text-zinc-200 transition hover:border-white/30 hover:text-white"
-                >
-                  Contact sales
-                </Link>
-              }
+              plans={plans}
+              ctas={Object.fromEntries(
+                plans.map((plan) => {
+                  if (!plan.selfServe) {
+                    return [
+                      plan.id,
+                      <Link
+                        key={plan.id}
+                        href={marketingHref("/enterprise/contact")}
+                        className="inline-block rounded-full border border-white/15 px-5 py-2 text-sm font-semibold text-zinc-200 transition hover:border-white/30 hover:text-white"
+                      >
+                        Contact sales
+                      </Link>,
+                    ];
+                  }
+
+                  // The one-free-org rule applies to any unbilled tier.
+                  const blocked = !plan.billable && ownsFreeOrg;
+                  const planId = plan.plan as PlanId;
+                  return [
+                    plan.id,
+                    <div key={plan.id}>
+                      <button
+                        type="button"
+                        disabled={blocked || pending !== null}
+                        onClick={() => createOrg(planId)}
+                        className={
+                          plan.highlight
+                            ? "inline-block rounded-full bg-teal-500 px-5 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400 disabled:cursor-default disabled:opacity-60"
+                            : "inline-block rounded-full border border-white/15 px-5 py-2 text-sm font-semibold text-zinc-200 transition hover:border-white/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        }
+                      >
+                        {pending === planId
+                          ? plan.billable
+                            ? "Heading to checkout..."
+                            : "Creating..."
+                          : plan.billable
+                            ? `Continue with ${plan.displayName}`
+                            : `Create a ${plan.displayName} organization`}
+                      </button>
+                      {blocked ? (
+                        <p className="mt-2 text-xs leading-5 text-amber-300/80">
+                          You already have a {plan.displayName} organization.
+                          Additional organizations start on a paid plan.
+                        </p>
+                      ) : null}
+                    </div>,
+                  ];
+                }),
+              )}
             />
           </div>
         </>

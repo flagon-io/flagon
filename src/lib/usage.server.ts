@@ -32,7 +32,11 @@ import {
   type UsageLine,
   type UsageTotals,
 } from "./meters";
-import { planRate } from "./quota";
+import {
+  planDefaults,
+  rateForMeter,
+  type Entitlements,
+} from "./entitlements";
 import type { PlanId } from "./plans";
 import type { Granularity, GroupBy } from "./usage-params";
 import {
@@ -186,6 +190,14 @@ export async function usageSummary(input: {
    * capped plan, which never over-states an allowance.
    */
   plan?: PlanId;
+  /**
+   * The org's RESOLVED terms, when the caller already holds them. Takes
+   * precedence over `plan`, because a negotiated allowance or per-unit rate is
+   * exactly what pricing must honour; without it a custom-priced org would be
+   * quoted its plan's list terms on the very page that shows their bill.
+   * Omitted, this falls back to the plan's published defaults.
+   */
+  entitlements?: Entitlements;
 }): Promise<UsageSummary> {
   const rows = await withTenant(input.orgId, (tx) =>
     tx
@@ -203,7 +215,8 @@ export async function usageSummary(input: {
       .groupBy(usageRollups.meter),
   );
 
-  const plan = input.plan ?? "free";
+  const entitlements =
+    input.entitlements ?? planDefaults(input.plan ?? "free");
   const lines: UsageLine[] = [];
   for (const row of rows) {
     const meter = getMeter(row.meter);
@@ -211,7 +224,11 @@ export async function usageSummary(input: {
     const quantity = Number(row.quantity);
     if (quantity <= 0) continue;
     lines.push(
-      lineFromMeter(meter, quantity, planRate(plan, meter.id) ?? undefined),
+      lineFromMeter(
+        meter,
+        quantity,
+        rateForMeter(entitlements, meter.id) ?? undefined,
+      ),
     );
   }
   lines.sort(
@@ -445,6 +462,8 @@ export async function usageView(input: {
   granularity?: Granularity;
   /** Whose allowances to price against; see usageSummary. */
   plan?: PlanId;
+  /** The org's resolved terms; takes precedence over `plan`. See usageSummary. */
+  entitlements?: Entitlements;
 }): Promise<UsageView> {
   const groupBy = input.groupBy ?? "product";
   const granularity = input.granularity ?? "daily";
@@ -537,10 +556,13 @@ export async function usageView(input: {
   for (const [meterId, entry] of perMeter) {
     const meter = getMeter(meterId);
     if (!meter) continue;
-    // Same plan-aware rate the summary uses, so the chart and the total can
+    // Same resolved rate the summary uses, so the chart and the total can
     // never tell different stories about the same period.
     const bucketCosts = drawDown(
-      planRate(input.plan ?? "free", meterId) ?? meter,
+      rateForMeter(
+        input.entitlements ?? planDefaults(input.plan ?? "free"),
+        meterId,
+      ) ?? meter,
       entry.bucketQuantities,
     );
 

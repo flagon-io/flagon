@@ -5,6 +5,7 @@ import {
 } from "./billing-period";
 import { getMeter, type MeterRate } from "./meters";
 import { PLANS, type PlanId } from "./plans";
+import { allowanceFrom } from "./entitlements";
 
 /**
  * Hard caps: what a plan is allowed to CONSUME, as opposed to what it is
@@ -18,6 +19,14 @@ import { PLANS, type PlanId } from "./plans";
  * mid-incident to protect a $20 credit would be a far worse outcome than the
  * overage it prevents, and Enterprise contracts explicitly promise no hard
  * caps.
+ *
+ * THESE ARE THE PLAN'S PUBLISHED DEFAULTS, not any particular org's terms.
+ * Since drizzle/0035+0036 an organization can sit on a specific PRICE VERSION
+ * and carry a negotiated OVERRIDE, so what a given customer is entitled to is
+ * resolved in src/lib/entitlements.ts and every org-aware caller goes through
+ * that. What remains here is the plan layer those overrides are layered onto -
+ * still the right answer for the pricing page, which advertises the plan rather
+ * than any one customer's deal.
  */
 
 /** The meter the evaluation cap is expressed against. */
@@ -95,25 +104,17 @@ export function evaluationAllowance(plan: PlanId): number | null {
   if (plan !== "free") return null;
   const meter = getMeter(EVALUATION_METER);
   if (!meter) return null;
-  return allowanceFor(meter, PLANS.free.includedUsageCents);
+  return allowanceFrom(meter, PLANS.free.includedUsageCents);
 }
 
 /**
  * Units a credit buys at a rate, including the rate's own free allowance.
  *
- * Floored: a partial unit is not an entitlement. A rate that charges nothing
- * (or is malformed) buys nothing beyond the included quantity rather than
- * infinity, so a pricing typo fails toward the cap instead of removing it.
+ * Re-exported from entitlements.ts, where the org-aware cap derivation also
+ * needs it. One implementation, so a plan's advertised ceiling and a
+ * custom-priced org's enforced one can never be computed two different ways.
  */
-export function allowanceFor(rate: MeterRate, creditCents: number): number {
-  if (rate.unitAmountCents <= 0 || rate.per <= 0 || creditCents <= 0) {
-    return rate.includedQuantity;
-  }
-  return (
-    rate.includedQuantity +
-    Math.floor((creditCents / rate.unitAmountCents) * rate.per)
-  );
-}
+export { allowanceFrom as allowanceFor };
 
 /**
  * The key evaluation_counters is keyed by: the first day of the window the org

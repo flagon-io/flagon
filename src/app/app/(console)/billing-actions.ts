@@ -6,6 +6,7 @@ import { db } from "@/db/client";
 import { organizations } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { absoluteAppUrl } from "@/lib/absolute-url";
+import { stripePriceForCheckout } from "@/lib/plan-catalog.server";
 import {
   applyProSubscription,
   billingEnabled,
@@ -98,12 +99,27 @@ export async function startProCheckout(
       .where(eq(organizations.id, org.id));
   }
 
+  // The price book decides what Pro is sold at today (drizzle/0035), falling
+  // back to the env var and then to lookup_key/auto-create. Whichever wins, the
+  // price VERSION rides along in the subscription metadata so the webhook can
+  // stamp it onto the org - that stamp is what later answers "who is on legacy
+  // pricing?" without reconciling against Stripe.
+  const book = await stripePriceForCheckout("pro");
+  const priceId = book?.priceId ?? (await ensureProPriceId());
+
   const checkout = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    line_items: [{ price: await ensureProPriceId(), quantity: 1 }],
+    line_items: [{ price: priceId, quantity: 1 }],
     client_reference_id: org.id,
-    subscription_data: { metadata: { organization_id: org.id } },
+    subscription_data: {
+      metadata: {
+        organization_id: org.id,
+        ...(book?.planVersionId
+          ? { flagon_plan_version_id: book.planVersionId }
+          : {}),
+      },
+    },
     // {CHECKOUT_SESSION_ID} is substituted by Stripe; the org page uses it
     // to reconcile immediately on return, independent of webhook delivery.
     success_url: `${orgUrl}?upgraded=1&session_id={CHECKOUT_SESSION_ID}`,
