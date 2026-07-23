@@ -22,12 +22,13 @@
 import { config } from "dotenv";
 import postgres from "postgres";
 import Stripe from "stripe";
-import { resolveOwnerUrl } from "./db-urls.mjs";
+import { resolveOwnerUrl, resolveOwnerUrlSource } from "./db-urls.mjs";
 
 config({ path: [".env.local", ".env"] });
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
+const confirmed = args.includes("--yes");
 const explicit = args.find((arg) => !arg.startsWith("--"));
 
 const url = resolveOwnerUrl();
@@ -49,6 +50,57 @@ const PRO_LOOKUP_KEY = "flagon_pro_monthly";
 const testMode =
   process.env.STRIPE_SECRET_KEY.startsWith("sk_test_") ||
   process.env.STRIPE_SECRET_KEY.startsWith("rk_test_");
+
+/**
+ * SAY WHAT WE ARE POINTED AT, BEFORE DOING ANYTHING.
+ *
+ * `.env.local` is loaded above and DATABASE_URL_OWNER outranks POSTGRES_URL, so
+ * exporting production credentials and running this does NOT necessarily reach
+ * production - a stale local URL silently wins and the script reports success
+ * against a laptop. That is the failure this banner exists to make impossible
+ * to miss: it names the variable the URL came from, the host it resolves to,
+ * and which Stripe account is on the other end.
+ */
+function describeTarget() {
+  const source = resolveOwnerUrlSource() ?? "unknown";
+  let host = "unparseable";
+  let database = "?";
+  try {
+    const parsed = new URL(url);
+    host = parsed.hostname + (parsed.port ? `:${parsed.port}` : "");
+    database = parsed.pathname.replace(/^\//, "") || "?";
+  } catch {
+    // Leave the placeholders; never print the raw URL - it carries a password.
+  }
+  const local = /^(localhost|127\.0\.0\.1|postgres)$/.test(host.split(":")[0]);
+
+  console.log("Target");
+  console.log(`  database : ${host}/${database}  (from ${source})`);
+  console.log(`  stripe   : ${testMode ? "TEST mode" : "LIVE mode"}`);
+  console.log(`  writes   : ${dryRun ? "none (--dry-run)" : "ENABLED"}`);
+  console.log("");
+  return { local };
+}
+
+const target = describeTarget();
+
+// A live-mode write changes what real customers are charged through. Requiring
+// an explicit --yes costs one flag and removes the class of mistake where a
+// command typed for staging lands on production.
+if (!testMode && !dryRun && !confirmed) {
+  console.error(
+    "Refusing to write against a LIVE Stripe account without --yes.\n" +
+      "  Re-run with --dry-run to preview, or add --yes to proceed.",
+  );
+  process.exit(1);
+}
+if (!target.local && !dryRun && !confirmed) {
+  console.error(
+    "Refusing to write to a non-local database without --yes.\n" +
+      "  Re-run with --dry-run to preview, or add --yes to proceed.",
+  );
+  process.exit(1);
+}
 
 /**
  * Resolve whatever was configured into a real recurring price.
@@ -151,7 +203,7 @@ try {
   // created to match. Monthly is the only interval Pro is sold at today.
   const [row] = await sql`
     SELECT id, label, unit_amount_cents, included_credit_cents, stripe_price_id
-    FROM plan_prices
+    FROM plan_versions
     WHERE plan = 'pro' AND interval = 'month' AND status = 'active'
     LIMIT 1
   `;
@@ -221,7 +273,7 @@ try {
   }
 
   await sql`
-    UPDATE plan_prices
+    UPDATE plan_versions
     SET stripe_price_id = ${price.id},
         unit_amount_cents = ${amountCents},
         updated_at = now()
