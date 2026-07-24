@@ -284,4 +284,150 @@ describe.skipIf(!enabled)("invoice.created, on a test clock", () => {
       total,
     );
   }, 300_000);
+
+  /**
+   * The final-cycle case: a cancelled subscription gets no renewal invoice, so
+   * the last cycle's overage is billed by the `customer.subscription.deleted`
+   * handler on a one-off invoice instead. Self-contained (its own clock,
+   * customer, org) so it can't disturb the shared fixtures above.
+   */
+  it("bills the FINAL cycle's usage when a subscription is cancelled", async () => {
+    const { ensureProPriceId } = await import("@/lib/billing");
+    ({ closePool } = await import("@/db/client"));
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+
+    const localStamp = Date.now();
+    const localSlug = `rehearsal-cancel-${localStamp}`;
+    let localClockId = "";
+    let localCustomerId = "";
+    let localOrgId = "";
+
+    try {
+      const clock = await stripe.testHelpers.testClocks.create({
+        frozen_time: Math.floor(Date.UTC(2026, 5, 15) / 1000),
+        name: `flagon cancel ${localStamp}`,
+      });
+      localClockId = clock.id;
+
+      const customer = await stripe.customers.create({
+        name: `Flagon cancel ${localStamp}`,
+        email: `cancel-${localStamp}@example.com`,
+        test_clock: localClockId,
+        metadata: { flagon_test: "1" },
+      });
+      localCustomerId = customer.id;
+
+      const pm = await stripe.paymentMethods.create({
+        type: "card",
+        card: { token: "tok_visa" },
+      });
+      await stripe.paymentMethods.attach(pm.id, { customer: localCustomerId });
+      await stripe.customers.update(localCustomerId, {
+        invoice_settings: { default_payment_method: pm.id },
+      });
+
+      const [org] = await owner`
+        INSERT INTO organizations (slug, name, plan, stripe_customer_id)
+        VALUES (${localSlug}, 'Cancel rehearsal', 'pro', ${localCustomerId})
+        RETURNING id`;
+      localOrgId = org.id;
+
+      // The handler traces the org through metadata.organization_id, so the
+      // subscription must carry it (a self-serve sub gets this at Checkout).
+      const subscription = await stripe.subscriptions.create({
+        customer: localCustomerId,
+        items: [{ price: await ensureProPriceId() }],
+        collection_method: "charge_automatically",
+        metadata: { organization_id: localOrgId, flagon_plan: "pro" },
+      });
+      await owner`
+        UPDATE organizations SET stripe_subscription_id = ${subscription.id}
+        WHERE id = ${localOrgId}`;
+      const item = subscription.items.data[0];
+      const cStart = item.current_period_start;
+
+      // Usage inside the cycle they will cancel out of.
+      const usageDay = new Date((cStart + 86_400) * 1000)
+        .toISOString()
+        .slice(0, 10);
+      const EVALUATIONS = 60_000_000;
+      await owner`
+        INSERT INTO usage_rollups (organization_id, project_id, meter, day, quantity)
+        VALUES (${localOrgId}, NULL, 'flags.evaluations', ${usageDay}, ${EVALUATIONS})`;
+
+      const { applyIncludedCredit, getMeter, lineFromMeter } =
+        await import("@/lib/meters");
+      const { PLANS } = await import("@/lib/plans");
+      const expected = applyIncludedCredit(
+        [lineFromMeter(getMeter("flags.evaluations")!, EVALUATIONS)],
+        PLANS.pro.includedUsageCents,
+      );
+      expect(expected.overageCents).toBeGreaterThan(0);
+
+      // Cancel — a downgrade to free. No renewal invoice will ever be cut.
+      const canceled = await stripe.subscriptions.cancel(subscription.id);
+      expect(canceled.status).toBe("canceled");
+
+      const deliverDeleted = async () => {
+        const payload = JSON.stringify({
+          id: `evt_cancel_${Date.now()}`,
+          object: "event",
+          type: "customer.subscription.deleted",
+          api_version: null,
+          created: Math.floor(Date.now() / 1000),
+          data: { object: canceled },
+        });
+        const signature = stripe.webhooks.generateTestHeaderString({
+          payload,
+          secret: WEBHOOK_SECRET,
+        });
+        return POST(
+          new Request("https://api.flagon.io/webhooks/stripe", {
+            method: "POST",
+            headers: { "stripe-signature": signature },
+            body: payload,
+          }),
+        );
+      };
+
+      const res = await deliverDeleted();
+      expect(res.status).toBe(200);
+
+      // A single finalized final-cycle invoice for exactly the overage.
+      const invoices = await stripe.invoices.list({
+        customer: localCustomerId,
+        limit: 20,
+      });
+      const finals = invoices.data.filter(
+        (inv) => inv.metadata?.flagon_final_cycle,
+      );
+      expect(finals.length).toBe(1);
+      expect(finals[0].status).not.toBe("draft");
+      expect(finals[0].total).toBe(expected.overageCents);
+
+      // Org dropped to free; the period is frozen as invoiced.
+      const [orgRow] = await owner`
+        SELECT plan FROM organizations WHERE id = ${localOrgId}`;
+      expect(orgRow.plan).toBe("free");
+      const [period] = await owner`
+        SELECT status FROM billing_periods WHERE organization_id = ${localOrgId}`;
+      expect(period.status).toBe("invoiced");
+
+      // Redelivery must not mint a second invoice.
+      const res2 = await deliverDeleted();
+      expect(res2.status).toBe(200);
+      const after = await stripe.invoices.list({
+        customer: localCustomerId,
+        limit: 20,
+      });
+      expect(after.data.filter((inv) => inv.metadata?.flagon_final_cycle).length).toBe(1);
+    } finally {
+      if (localClockId)
+        await stripe.testHelpers.testClocks.del(localClockId).catch(() => {});
+      if (localOrgId)
+        await owner`DELETE FROM organizations WHERE id = ${localOrgId}`.catch(
+          () => {},
+        );
+    }
+  }, 300_000);
 });

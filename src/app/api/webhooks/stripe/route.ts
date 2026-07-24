@@ -79,16 +79,21 @@ export async function POST(request: Request) {
         // Retrieve the subscription for its cycle: this is the org's billing
         // window from now on, and the usage page has to agree with it.
         let cycle: { start: Date; end: Date } | null = null;
+        let planVersionId: string | null = null;
         if (subscriptionId) {
           const subscription =
             await getStripe().subscriptions.retrieve(subscriptionId);
           cycle = subscriptionCycle(subscription);
+          // The version this was sold at, so the grandfathering pin is set from
+          // the very first webhook rather than a later subscription.updated.
+          planVersionId = subscription.metadata?.flagon_plan_version_id ?? null;
         }
         await applyProSubscription(
           orgId,
           typeof session.customer === "string" ? session.customer : null,
           subscriptionId,
           cycle,
+          planVersionId,
         );
       }
       break;
@@ -149,20 +154,38 @@ export async function POST(request: Request) {
       if (!org) break;
 
       // The invoice's OWN period is the cycle that just ended (its line items
-      // carry the upcoming one). A subscription_create invoice covers no
-      // elapsed time at all and yields null. Stripe is moving the service period
-      // onto line items, so an invoice can arrive without usable period bounds;
-      // treat a missing or non-numeric bound as "no period to bill" rather than
-      // constructing an Invalid Date from it.
-      if (
-        typeof invoice.period_start !== "number" ||
-        typeof invoice.period_end !== "number"
-      )
-        break;
-      const window = invoiceUsageWindow({
-        periodStart: new Date(invoice.period_start * 1000),
-        periodEnd: new Date(invoice.period_end * 1000),
-      });
+      // carry the upcoming one), so it IS the arrears window.
+      let window =
+        typeof invoice.period_start === "number" &&
+        typeof invoice.period_end === "number"
+          ? invoiceUsageWindow({
+              periodStart: new Date(invoice.period_start * 1000),
+              periodEnd: new Date(invoice.period_end * 1000),
+            })
+          : null;
+
+      // Fallback: Stripe is moving the service period off the invoice and onto
+      // its line items. If the top-level bounds are gone, reconstruct the
+      // arrears cycle from the first line's FUTURE period - arrears is the cycle
+      // immediately before it (one cycle length back). Renewals only: a
+      // subscription_create invoice has no elapsed cycle to bill, and deriving
+      // one would close a phantom pre-signup period.
+      if (!window && invoice.billing_reason === "subscription_cycle") {
+        const line = invoice.lines?.data?.[0];
+        const futureStart = line?.period?.start;
+        const futureEnd = line?.period?.end;
+        if (
+          typeof futureStart === "number" &&
+          typeof futureEnd === "number" &&
+          futureEnd > futureStart
+        ) {
+          const cycleMs = (futureEnd - futureStart) * 1000;
+          window = invoiceUsageWindow({
+            periodStart: new Date(futureStart * 1000 - cycleMs),
+            periodEnd: new Date(futureStart * 1000),
+          });
+        }
+      }
       if (!window) break;
 
       // Freeze the window before billing it: the snapshot is what gets
@@ -227,19 +250,42 @@ export async function POST(request: Request) {
     case "customer.subscription.deleted": {
       const subscription = event.data.object;
       const orgId = subscription.metadata?.organization_id;
-      if (orgId) {
-        await db
-          .update(organizations)
-          .set({
-            plan: "free",
-            stripeSubscriptionId: null,
-            currentPeriodStart: null,
-            currentPeriodEnd: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(organizations.id, orgId));
-        clearPlanCache(orgId);
+      if (!orgId) break;
+
+      const [org] = await db
+        .select({
+          id: organizations.id,
+          plan: organizations.plan,
+          stripeCustomerId: organizations.stripeCustomerId,
+        })
+        .from(organizations)
+        .where(eq(organizations.id, orgId))
+        .limit(1);
+      // Org gone (deleted, which cancels the sub itself): nothing to bill or
+      // update, and a departing org is deliberately not sent a final invoice.
+      if (!org) break;
+
+      // Bill the final cycle's usage BEFORE dropping to free: a cancelled
+      // subscription gets no renewal invoice, so this event is the only chance
+      // to charge the last cycle's overage. Best-effort - a billing hiccup must
+      // not strand the org on the wrong plan.
+      try {
+        await invoiceFinalCycle(org, subscription);
+      } catch (error) {
+        console.error("[stripe webhook] final-cycle invoicing failed", error);
       }
+
+      await db
+        .update(organizations)
+        .set({
+          plan: "free",
+          stripeSubscriptionId: null,
+          currentPeriodStart: null,
+          currentPeriodEnd: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(organizations.id, orgId));
+      clearPlanCache(orgId);
       break;
     }
     default:
@@ -247,4 +293,83 @@ export async function POST(request: Request) {
   }
 
   return apiJson({ received: true });
+}
+
+/**
+ * Bill the final cycle's usage when a subscription is CANCELLED.
+ *
+ * Usage bills in arrears on the invoice that opens the NEXT cycle - but a
+ * cancelled subscription has no next cycle, so Stripe cuts no invoice and the
+ * last month's overage would be lost. There is no draft to attach to either, so
+ * this creates a one-off invoice for it, and only when there is real overage:
+ * the base fee was already paid in advance and a $0 invoice is noise.
+ *
+ * Exactly-once against a redelivered event: the closed period's status and the
+ * invoice claim are the same guards the normal invoice.created path uses.
+ */
+async function invoiceFinalCycle(
+  org: { id: string; plan: string; stripeCustomerId: string | null },
+  subscription: Stripe.Subscription,
+): Promise<void> {
+  const planId = isPlanId(org.plan) ? org.plan : "free";
+  if (!planAutoInvoicesAnything(planId)) return;
+  const customerId = org.stripeCustomerId;
+  if (!customerId) return;
+
+  const cycle = subscriptionCycle(subscription);
+  if (!cycle) return;
+  const window = invoiceUsageWindow({
+    periodStart: cycle.start,
+    periodEnd: cycle.end,
+  });
+  if (!window) return;
+
+  const period = await closePeriod({ orgId: org.id, window, plan: org.plan });
+  if (period.status === "invoiced") return;
+
+  const snapshot = await getPeriod({
+    orgId: org.id,
+    periodStart: period.periodStart,
+  });
+  if (!snapshot) return;
+  const totals = totalsFromSnapshot(snapshot.period, snapshot.lines);
+  // The base fee was billed in advance; only overage beyond the credit is owed.
+  if (totals.overageCents <= 0) return;
+
+  const lines = buildUsageInvoiceLines(totals, {
+    planName: PLANS[planId].name,
+    period: { from: period.periodStart, to: period.periodEnd },
+  });
+  if (!lines.length) return;
+
+  const collection =
+    subscription.collection_method === "send_invoice"
+      ? "send_invoice"
+      : "charge_automatically";
+  const draft = await getStripe().invoices.create({
+    customer: customerId,
+    collection_method: collection,
+    ...(collection === "send_invoice" ? { days_until_due: 30 } : {}),
+    auto_advance: false,
+    description: `Final usage (${period.periodStart} → ${period.periodEnd})`,
+    metadata: {
+      organization_id: org.id,
+      flagon_final_cycle: period.periodStart,
+    },
+  });
+  const invoiceId = draft.id;
+  if (!invoiceId) return;
+
+  await withInvoiceClaim(
+    { orgId: org.id, stripeInvoiceId: invoiceId, billingPeriodId: period.id },
+    async () => {
+      await addUsageToInvoice({ invoiceId, customerId, lines });
+      await getStripe().invoices.finalizeInvoice(invoiceId);
+      await markInvoiced({
+        orgId: org.id,
+        periodId: period.id,
+        stripeInvoiceId: invoiceId,
+      });
+    },
+  );
 }

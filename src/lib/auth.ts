@@ -11,7 +11,11 @@ import { sessionCookieDomain } from "./cookie-domain";
 import { sendEmail } from "./email";
 import { supersedeDeviceSessions } from "./sessions.server";
 import { renderBrandedEmail } from "./email-templates";
-import { billingEnabled } from "./billing";
+import {
+  billingEnabled,
+  cancelOrgSubscription,
+  cancelSubscriptionsForOwner,
+} from "./billing";
 import { normalizeOrgSlug, validateOrgSlug } from "./org-slug";
 import { appHref } from "./urls";
 import { SELF_SERVE_PLANS, isPlanId } from "./plans";
@@ -92,9 +96,18 @@ export const auth = betterAuth({
   // Plural table names (platform convention; drizzle/0005_plural_tables.sql).
   user: {
     modelName: "users",
-    // Self-service account deletion (settings danger zone).
-    // Password-confirmed on the client; revisit before billing/orgs exist.
-    deleteUser: { enabled: true },
+    // Self-service account deletion (settings danger zone). Password-confirmed
+    // on the client.
+    deleteUser: {
+      enabled: true,
+      // Cancel the Stripe subscriptions of any org this user SOLELY owns before
+      // the account (and its memberships) go away - otherwise those orgs are
+      // left ownerless with a live subscription that keeps billing a person who
+      // no longer has an account. Co-owned orgs survive and are left alone.
+      beforeDelete: async (user: { id: string }) => {
+        await cancelSubscriptionsForOwner(user.id);
+      },
+    },
   },
   session: { modelName: "sessions" },
   account: { modelName: "accounts" },
@@ -245,6 +258,14 @@ export const auth = betterAuth({
           // free-org limits; everything resolves all-on regardless.
 
           return { data: { ...org, slug, plan } };
+        },
+        // Deleting an org must cancel its Stripe subscription, or a live sub
+        // outlives the org and keeps billing a customer who has left. Cancels
+        // immediately (the org is going away); throwing here aborts the delete,
+        // which is the right failure mode - a blocked delete is recoverable, a
+        // ghost charge is not.
+        beforeDeleteOrganization: async ({ organization: org }) => {
+          await cancelOrgSubscription(org.id);
         },
       },
     }),

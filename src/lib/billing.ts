@@ -1,7 +1,7 @@
 import Stripe from "stripe";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { organizations } from "@/db/schema";
+import { members, organizations } from "@/db/schema";
 import { clearPlanCache } from "./usage-events.server";
 import {
   describeDiscount,
@@ -34,6 +34,65 @@ export function getStripe(): Stripe {
   }
   stripeClient ??= new Stripe(process.env.STRIPE_SECRET_KEY as string);
   return stripeClient;
+}
+
+/**
+ * Cancel an org's Stripe subscription immediately, if it has one.
+ *
+ * Called when the org (or its owner's account) is DELETED: a subscription that
+ * outlives the org it belongs to is a ghost that keeps billing a customer who
+ * has left. Cancels now (not at period end) because the org is going away and
+ * there is nothing left to serve.
+ *
+ * Idempotent and safe: a no-op when billing is off or there is no subscription,
+ * and treats an already-cancelled or missing subscription as done rather than an
+ * error. A genuine Stripe failure DOES throw, so the caller can abort the
+ * deletion rather than leave a live subscription behind - a blocked delete is
+ * recoverable; a ghost charge is not.
+ */
+export async function cancelOrgSubscription(orgId: string): Promise<void> {
+  if (!billingEnabled()) return;
+  const [org] = await db
+    .select({ subscriptionId: organizations.stripeSubscriptionId })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  if (!org?.subscriptionId) return;
+
+  const stripe = getStripe();
+  const existing = await stripe.subscriptions
+    .retrieve(org.subscriptionId)
+    .catch(() => null);
+  // Already gone (cancelled, or the id no longer resolves): nothing to bill.
+  if (!existing || existing.status === "canceled") return;
+  await stripe.subscriptions.cancel(org.subscriptionId);
+}
+
+/**
+ * Cancel the subscriptions of every org this user SOLELY owns.
+ *
+ * For account deletion: an org whose only owner deletes their account is left
+ * ownerless, and its subscription would keep billing a person who no longer has
+ * an account. A co-owned org is left alone - it survives its co-owner and should
+ * keep paying. Best-effort per org; a Stripe failure propagates so account
+ * deletion aborts rather than stranding a live subscription.
+ */
+export async function cancelSubscriptionsForOwner(
+  userId: string,
+): Promise<void> {
+  if (!billingEnabled()) return;
+  const owned = await db
+    .select({ orgId: members.organizationId })
+    .from(members)
+    .where(and(eq(members.userId, userId), eq(members.role, "owner")));
+
+  for (const { orgId } of owned) {
+    const owners = await db
+      .select({ userId: members.userId })
+      .from(members)
+      .where(and(eq(members.organizationId, orgId), eq(members.role, "owner")));
+    if (owners.length === 1) await cancelOrgSubscription(orgId);
+  }
 }
 
 const PRO_LOOKUP_KEY = "flagon_pro_monthly";
@@ -154,6 +213,7 @@ export async function applyProSubscription(
   customerId: string | null,
   subscriptionId: string | null,
   cycle?: { start: Date; end: Date } | null,
+  planVersionId?: string | null,
 ): Promise<void> {
   await db
     .update(organizations)
@@ -164,6 +224,11 @@ export async function applyProSubscription(
       ...(cycle
         ? { currentPeriodStart: cycle.start, currentPeriodEnd: cycle.end }
         : {}),
+      // Pin the version the customer bought so publishing a new price later
+      // doesn't silently move them onto it. Only ever SET, never cleared - which
+      // price they bought is history. Stamped here from the first webhook rather
+      // than waiting for a later subscription.updated to carry the metadata.
+      ...(planVersionId ? { planVersionId } : {}),
       updatedAt: new Date(),
     })
     .where(eq(organizations.id, orgId));
@@ -208,10 +273,24 @@ export async function reconcileCheckoutSession(
   ) {
     return false;
   }
+  const subscriptionId =
+    typeof session.subscription === "string" ? session.subscription : null;
+  // Retrieve the subscription for its cycle AND the version it was sold at, so
+  // the grandfathering pin and the billing window exist from this first landing.
+  let cycle: { start: Date; end: Date } | null = null;
+  let planVersionId: string | null = null;
+  if (subscriptionId) {
+    const subscription =
+      await getStripe().subscriptions.retrieve(subscriptionId);
+    cycle = subscriptionCycle(subscription);
+    planVersionId = subscription.metadata?.flagon_plan_version_id ?? null;
+  }
   await applyProSubscription(
     orgId,
     typeof session.customer === "string" ? session.customer : null,
-    typeof session.subscription === "string" ? session.subscription : null,
+    subscriptionId,
+    cycle,
+    planVersionId,
   );
   return true;
 }
