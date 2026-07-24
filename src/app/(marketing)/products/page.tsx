@@ -1,8 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, BookOpen, Flag, Layers, Rocket } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  Compass,
+  Flag,
+  Layers,
+  Rocket,
+} from "lucide-react";
 import { brand } from "@/lib/brand";
 import { appHref } from "@/lib/urls";
+import { STATUS_META, comingProducts } from "@/lib/roadmap";
 import { BleedBand } from "@/components/bleed-band";
 import { PageHero } from "@/components/page-hero";
 
@@ -122,6 +130,59 @@ export default function ProductsPage() {
               </ul>
             </Link>
           ))}
+        </div>
+      </BleedBand>
+
+      {/* On the roadmap: one band, header and cards together, set off from the
+          live grid by real space above so the two never blur. Everything here
+          is badged "Next"/"Soon" and inert, so what you can use today stays
+          distinct from what is still coming. */}
+      <BleedBand outerClassName="mt-16 sm:mt-24">
+        <div className="flex flex-col gap-5 border-b border-white/10 p-8 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <Compass className="h-5 w-5 text-teal-400" aria-hidden />
+              <h2 className="text-xl font-semibold tracking-tight text-zinc-100">
+                On the roadmap
+              </h2>
+            </div>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-400">
+              Each one attaches to the same catalog and draws on the same pooled
+              credit, so turning it on is a checkbox rather than another vendor.
+              Dates land when they&apos;re real.
+            </p>
+          </div>
+          <Link
+            href="/roadmap"
+            className="group inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-teal-400 transition hover:text-teal-300"
+          >
+            See the full roadmap
+            <ArrowRight
+              className="h-4 w-4 transition group-hover:translate-x-0.5"
+              aria-hidden
+            />
+          </Link>
+        </div>
+        <div className="grid grid-cols-1 divide-y divide-white/10 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          {comingProducts().map(
+            ({ name, icon: Icon, tagline, blurb, status }) => (
+              <div key={name} className="flex flex-col p-8">
+                <div className="flex items-center gap-2.5">
+                  <Icon className="h-5 w-5 text-zinc-500" aria-hidden />
+                  <h3 className="text-base font-semibold text-zinc-300">
+                    {name}
+                  </h3>
+                  <span className="ml-auto rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                    {STATUS_META[status].badge}
+                  </span>
+                </div>
+                <p className="mt-3 text-sm font-medium text-zinc-400">
+                  {tagline}
+                </p>
+                <p className="mt-2 text-sm leading-6 text-zinc-500">{blurb}</p>
+              </div>
+            ),
+          )}
         </div>
       </BleedBand>
 

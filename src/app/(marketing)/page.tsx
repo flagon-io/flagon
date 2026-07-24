@@ -11,6 +11,7 @@ import { brand } from "@/lib/brand";
 import { appHref } from "@/lib/urls";
 import { activeMeters, formatCents, formatMeterRate } from "@/lib/meters";
 import { proHeadline } from "@/lib/plan-catalog.server";
+import { STATUS_META, comingProducts } from "@/lib/roadmap";
 import { BleedBand } from "@/components/bleed-band";
 import { PageHero } from "@/components/page-hero";
 
@@ -200,6 +201,59 @@ export default async function Home() {
           ))}
         </div>
       </div>
+
+      {/* What's coming: one quiet nod, low on the page and after the live
+          products have made their case, so the front door never becomes a list
+          of things that don't exist yet. Reads from the roadmap, not
+          brand.products, so it can only ever show what we've committed to. */}
+      <BleedBand>
+        <div className="grid grid-cols-1 divide-y divide-white/10 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+          <div className="p-8">
+            <h2 className="text-2xl font-semibold tracking-tight text-zinc-100">
+              More products, same catalog
+            </h2>
+            <p className="mt-3 max-w-md text-sm leading-6 text-zinc-400">
+              Turning on the next one never starts another integration, or
+              another invoice. Every product reads from the catalog you already
+              have and spends the same pooled credit.
+            </p>
+            <Link
+              href="/roadmap"
+              className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-teal-400 transition hover:text-teal-300"
+            >
+              See the roadmap <ArrowRight className="h-4 w-4" aria-hidden />
+            </Link>
+          </div>
+          <div className="p-8">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              Coming next
+            </h3>
+            <ul className="mt-4 space-y-4">
+              {comingProducts().map(({ name, icon: Icon, tagline, status }) => (
+                <li key={name} className="flex items-start gap-3">
+                  <Icon
+                    className="mt-0.5 h-4 w-4 shrink-0 text-teal-400/70"
+                    aria-hidden
+                  />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-zinc-200">
+                        {name}
+                      </span>
+                      <span className="rounded-full border border-white/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                        {STATUS_META[status].badge}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-sm leading-6 text-zinc-500">
+                      {tagline}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </BleedBand>
 
       {/* Pricing teaser: rendered from the registry, so it cannot drift from
           the pricing page or the invoice. */}

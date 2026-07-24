@@ -32,6 +32,7 @@ export const brand = {
   /** Header nav. Every entry points somewhere. */
   nav: [
     { label: "Products", href: "/products" },
+    { label: "Roadmap", href: "/roadmap" },
     { label: "Enterprise", href: "/enterprise" },
     { label: "Pricing", href: "/pricing" },
     { label: "Docs", href: "/docs" },

@@ -16,6 +16,7 @@ const groups: FooterGroup[] = [
       { label: "Overview", href: "/products" },
       { label: "Catalog", href: "/products/catalog" },
       { label: "Feature Flags", href: "/products/feature-flags" },
+      { label: "Roadmap", href: "/roadmap" },
       { label: "Pricing", href: "/pricing" },
     ],
   },
