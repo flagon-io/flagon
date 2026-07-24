@@ -34,8 +34,8 @@ if (
   );
   process.exit(1);
 }
-if (!["free", "pro", "enterprise"].includes(plan)) {
-  console.error("Plan must be one of: free, pro, enterprise.");
+if (!["free", "pro"].includes(plan)) {
+  console.error("Plan must be one of: free, pro.");
   process.exit(1);
 }
 

@@ -3,11 +3,9 @@ import {
   EVALUATION_METER,
   allowanceForMeter,
   capForMeter,
-  hasCustomTerms,
   planDefaults,
   rateForMeter,
   resolveEntitlements,
-  type EntitlementOverride,
   type PriceEntitlements,
 } from "./entitlements";
 import { PLANS } from "./plans";
@@ -24,22 +22,8 @@ function price(over: Partial<PriceEntitlements> = {}): PriceEntitlements {
   };
 }
 
-/** An override that inherits everything unless told otherwise. */
-function override(
-  over: Partial<EntitlementOverride> = {},
-): EntitlementOverride {
-  return {
-    includedCreditCents: null,
-    meterAllowances: {},
-    meteredRates: {},
-    hardCaps: null,
-    note: null,
-    ...over,
-  };
-}
-
 describe("resolveEntitlements", () => {
-  it("falls back to the plan when there is no price and no override", () => {
+  it("falls back to the plan when there is no price", () => {
     const resolved = resolveEntitlements({ plan: "pro" });
     expect(resolved.includedCreditCents).toBe(PLANS.pro.includedUsageCents);
     expect(resolved.creditSource).toBe("plan");
@@ -56,51 +40,18 @@ describe("resolveEntitlements", () => {
     expect(resolved.creditSource).toBe("price");
   });
 
-  /**
-   * The bug this whole system exists to fix: a customer negotiated onto $100/mo
-   * Pro used to receive the plan constant's $20, because nothing per-org could
-   * say otherwise.
-   */
-  it("gives a custom-priced org the credit it was actually sold", () => {
-    const resolved = resolveEntitlements({
-      plan: "pro",
-      price: price(),
-      override: override({ includedCreditCents: 10_000 }),
-    });
-    expect(resolved.includedCreditCents).toBe(10_000);
-    expect(resolved.creditSource).toBe("override");
-    expect(hasCustomTerms(resolved)).toBe(true);
-  });
-
-  /**
-   * Zero is a real, sellable configuration ("you pay, and every unit is
-   * billable"). A truthiness check here would silently restore the plan's
-   * credit on exactly the deal that removed it.
-   */
-  it("treats an override credit of 0 as real, not as absent", () => {
-    const resolved = resolveEntitlements({
-      plan: "pro",
-      price: price(),
-      override: override({ includedCreditCents: 0 }),
-    });
-    expect(resolved.includedCreditCents).toBe(0);
-    expect(resolved.creditSource).toBe("override");
-  });
-
-  it("merges allowances per meter so a partial override keeps the rest", () => {
+  it("merges allowances per meter so a partial version keeps the rest", () => {
     const resolved = resolveEntitlements({
       plan: "pro",
       price: price({
         meterAllowances: {
-          [SYNC_METER]: 50_000_000,
+          [SYNC_METER]: 200_000_000,
           [EVALUATION_METER]: 1_000_000,
         },
       }),
-      override: override({ meterAllowances: { [SYNC_METER]: 200_000_000 } }),
     });
     expect(resolved.meterAllowances[SYNC_METER]).toBe(200_000_000);
-    expect(resolved.allowanceSources[SYNC_METER]).toBe("override");
-    // Untouched by the override, so it still resolves from the price.
+    expect(resolved.allowanceSources[SYNC_METER]).toBe("price");
     expect(resolved.meterAllowances[EVALUATION_METER]).toBe(1_000_000);
     expect(resolved.allowanceSources[EVALUATION_METER]).toBe("price");
   });
@@ -113,13 +64,6 @@ describe("resolveEntitlements", () => {
     expect(resolved.meterAllowances[SYNC_METER]).toBe(50_000_000);
     expect(resolved.allowanceSources[SYNC_METER]).toBe("plan");
   });
-
-  it("reports standard terms as not custom", () => {
-    expect(hasCustomTerms(resolveEntitlements({ plan: "pro" }))).toBe(false);
-    expect(
-      hasCustomTerms(resolveEntitlements({ plan: "pro", price: price() })),
-    ).toBe(false);
-  });
 });
 
 describe("caps", () => {
@@ -130,15 +74,12 @@ describe("caps", () => {
     expect(capForMeter(hobby, SYNC_METER)).toBe(5_000_000);
   });
 
-  /**
-   * The derived cap must track what the customer actually bought, not what
-   * their plan's constant says - otherwise a trial given more credit would
-   * still be refused at the list-price ceiling.
-   */
-  it("moves the derived cap with a negotiated credit", () => {
+  it("reads a version's declared evaluation cap", () => {
     const resolved = resolveEntitlements({
       plan: "free",
-      override: override({ includedCreditCents: 5000 }),
+      price: price({
+        hardCaps: { [EVALUATION_METER]: 50_000_000 },
+      }),
     });
     expect(capForMeter(resolved, EVALUATION_METER)).toBe(50_000_000);
   });
@@ -147,30 +88,6 @@ describe("caps", () => {
     const pro = planDefaults("pro");
     expect(capForMeter(pro, EVALUATION_METER)).toBeNull();
     expect(capForMeter(pro, SYNC_METER)).toBeNull();
-    expect(capForMeter(planDefaults("enterprise"), EVALUATION_METER)).toBeNull();
-  });
-
-  /**
-   * An explicit {} means EXPLICITLY UNCAPPED, which is different from null
-   * (inherit). It has to lift the DERIVED evaluation cap too, or "uncap this
-   * trial" would leave the one ceiling that is derived rather than declared
-   * silently in force.
-   */
-  it("lifts every cap, including the derived one, when explicitly uncapped", () => {
-    const resolved = resolveEntitlements({
-      plan: "free",
-      override: override({ hardCaps: {} }),
-    });
-    expect(capForMeter(resolved, SYNC_METER)).toBeNull();
-    expect(capForMeter(resolved, EVALUATION_METER)).toBeNull();
-  });
-
-  it("inherits caps when the override leaves them null", () => {
-    const resolved = resolveEntitlements({
-      plan: "free",
-      override: override({ includedCreditCents: 1000 }),
-    });
-    expect(capForMeter(resolved, SYNC_METER)).toBe(5_000_000);
   });
 });
 
@@ -185,31 +102,15 @@ describe("rates", () => {
     });
   });
 
-  it("honours a negotiated per-unit rate", () => {
-    const resolved = resolveEntitlements({
-      plan: "pro",
-      price: price(),
-      override: override({
-        meteredRates: {
-          [EVALUATION_METER]: { unit_amount_cents: 50, per: 1_000_000 },
-        },
-      }),
-    });
-    expect(rateForMeter(resolved, EVALUATION_METER)?.unitAmountCents).toBe(50);
-    // Untouched meters keep the published rate.
-    expect(rateForMeter(resolved, SYNC_METER)?.unitAmountCents).toBe(75);
-  });
-
   it("returns null for a meter the registry does not know", () => {
     expect(rateForMeter(planDefaults("pro"), "nope.nothing")).toBeNull();
   });
 
   /**
-   * A plan may re-price a meter for everyone on it (drizzle/0037), and a deal
-   * may re-price it again for one customer. The customer's number has to win,
-   * or a negotiated rate would be silently overwritten by the list one.
+   * A version may re-price a meter for everyone on it (drizzle/0037). The
+   * version's number has to win over the published one.
    */
-  it("layers a per-org rate over the plan's own rate", () => {
+  it("layers a version rate over the published rate", () => {
     const resolved = resolveEntitlements({
       plan: "pro",
       price: price({
@@ -219,21 +120,8 @@ describe("rates", () => {
       }),
     });
     expect(rateForMeter(resolved, EVALUATION_METER)?.unitAmountCents).toBe(25);
-
-    const negotiated = resolveEntitlements({
-      plan: "pro",
-      price: price({
-        meterRates: {
-          [EVALUATION_METER]: { unit_amount_cents: 25, per: 1_000_000 },
-        },
-      }),
-      override: override({
-        meteredRates: {
-          [EVALUATION_METER]: { unit_amount_cents: 10, per: 1_000_000 },
-        },
-      }),
-    });
-    expect(rateForMeter(negotiated, EVALUATION_METER)?.unitAmountCents).toBe(10);
+    // Untouched meters keep the published rate.
+    expect(rateForMeter(resolved, SYNC_METER)?.unitAmountCents).toBe(75);
   });
 });
 
@@ -285,7 +173,7 @@ describe("unbilled tiers", () => {
   });
 
   it("falls back to the meter's own included quantity", () => {
-    const resolved = resolveEntitlements({ plan: "enterprise" });
+    const resolved = resolveEntitlements({ plan: "free" });
     expect(allowanceForMeter(resolved, EVALUATION_METER)).toBe(0);
   });
 });

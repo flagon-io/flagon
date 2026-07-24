@@ -899,13 +899,21 @@ export const planVersions = pgTable(
     id: uuid("id")
       .primaryKey()
       .default(sql`uuid_generate_v7()`),
-    /** free | pro | enterprise. The stable plan identity across versions. */
+    /**
+     * free | pro. The stable plan identity across versions.
+     *
+     * This is the BILLING half of a plan, versioned. Marketing copy (name,
+     * tagline, feature bullets) is NOT here - it lives as static content in
+     * flagon's marketing pages (src/lib/marketing-plans.ts). What remains is the
+     * price/entitlement version an org resolves through: the substrate for
+     * grandfathering and scheduled repricing.
+     */
     plan: text("plan").notNull(),
     /** Monotonic within a plan, for ordering and display ("Pro v3"). */
     version: integer("version").notNull().default(1),
     /** active (sellable, one per plan+interval) | legacy (still in force) | draft. */
     status: text("status").notNull().default("draft"),
-    /** Operator-facing label ("Pro 2026"). */
+    /** Operator-facing label ("Pro 2026"). Not customer-facing marketing. */
     label: text("label").notNull(),
 
     /**
@@ -917,7 +925,7 @@ export const planVersions = pgTable(
      * unbilled tier works without special-casing its name.
      */
     billable: boolean("billable").notNull().default(true),
-    /** Null for an unbilled tier, and for enterprise (priced per contract). */
+    /** Null for an unbilled tier. */
     unitAmountCents: integer("unit_amount_cents"),
     currency: text("currency").notNull().default("usd"),
     interval: text("interval").notNull().default("month"),
@@ -925,19 +933,6 @@ export const planVersions = pgTable(
     includedCreditCents: integer("included_credit_cents"),
     stripePriceId: text("stripe_price_id"),
     stripeProductId: text("stripe_product_id"),
-
-    // --- Marketing, on the same row as the numbers it describes -------------
-    displayName: text("display_name").notNull().default(""),
-    tagline: text("tagline").notNull().default(""),
-    /** Bullets, in order. May contain {tokens}; see src/lib/plan-copy.ts. */
-    features: jsonb("features").$type<string[]>().notNull().default([]),
-    /** Shown on the pricing page. */
-    listed: boolean("listed").notNull().default(false),
-    /** The emphasised column ("Popular"). */
-    highlight: boolean("highlight").notNull().default(false),
-    /** Can a customer pick this themselves? Enterprise is contact-only. */
-    selfServe: boolean("self_serve").notNull().default(false),
-    sortOrder: integer("sort_order").notNull().default(0),
 
     // --- Limits: what a plan may CREATE (null = unlimited) ------------------
     maxProjects: integer("max_projects"),
@@ -1004,185 +999,6 @@ export const planVersionMeters = pgTable(
 );
 
 /**
- * Per-organization entitlement overrides (drizzle/0036_org_entitlements.sql):
- * the custom deal, for ANY plan.
- *
- * The missing middle between the PLANS constants (same for everyone on a plan)
- * and org_contracts (structurally enterprise-only). This is what lets a Pro
- * customer paying $100/mo actually RECEIVE $100 of credit instead of the
- * plan constant's $20.
- *
- * Every field means "inherit" when null/empty, and they compose in one
- * direction: PLANS -> plan_prices -> org_entitlements -> org_contracts. See
- * src/lib/entitlements.ts for the resolution.
- */
-export const orgEntitlements = pgTable(
-  "org_entitlements",
-  {
-    id: uuid("id")
-      .primaryKey()
-      .default(sql`uuid_generate_v7()`),
-    organizationId: uuid("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    /**
-     * Null means INHERIT, which is not the same as 0. Zero is a real sellable
-     * configuration ("every unit is billable"), so the two must be distinct.
-     */
-    includedCreditCents: integer("included_credit_cents"),
-    /** Merged OVER the price's allowances per meter, so a partial override is safe. */
-    meterAllowances: jsonb("meter_allowances")
-      .$type<Record<string, number>>()
-      .notNull()
-      .default({}),
-    /** Moves one customer's per-unit price without touching the published rate. */
-    meteredRates: jsonb("metered_rates")
-      .$type<Record<string, { unit_amount_cents: number; per: number }>>()
-      .notNull()
-      .default({}),
-    /**
-     * Null inherits; an explicit {} is EXPLICITLY UNCAPPED - how you lift
-     * Hobby's cap for a trial without moving the org off Hobby.
-     */
-    hardCaps: jsonb("hard_caps").$type<Record<string, number>>(),
-    note: text("note"),
-    /** active (one per org) | void (superseded, kept for history). */
-    status: text("status").notNull().default("active"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [index("org_entitlements_org_idx").on(t.organizationId, t.createdAt)],
-);
-
-/**
- * The negotiated envelope for a contracted organization
- * (drizzle/0030_org_contracts.sql).
- *
- * Enterprise pricing is fixed up front from usage estimates, so metered value
- * is not what the customer owes. This row is what the contracted usage view
- * reads instead of dollars: volume agreed for the whole term, drawn down
- * cumulatively across it, so a heavy summer and a quiet winter net out
- * exactly as the agreement intends.
- *
- * Product data: tenant-scoped RLS, query through withTenant.
- */
-export const orgContracts = pgTable(
-  "org_contracts",
-  {
-    id: uuid("id")
-      .primaryKey()
-      .default(sql`uuid_generate_v7()`),
-    organizationId: uuid("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    /** Inclusive day window, matching the usage_rollups grain. */
-    termStart: date("term_start").notNull(),
-    termEnd: date("term_end").notNull(),
-    /**
-     * Contracted volume per meter for the whole term, keyed by meter id. Same
-     * shape as PLANS[plan].meterAllowances: a contract is a plan instance for
-     * one organization. Quantity, never cents - re-pricing a meter must not
-     * change what the agreement covered.
-     */
-    meterAllowances: jsonb("meter_allowances")
-      .$type<Record<string, number>>()
-      .notNull()
-      .default({}),
-    /**
-     * Per-CYCLE included quantity for METERED meters (drizzle/0032), keyed by
-     * meter id. Resets every billing cycle, unlike the term-wide
-     * meterAllowances. A metered meter absent here uses the meter's own
-     * includedQuantity. This is the GitHub Actions "included minutes" knob.
-     */
-    meteredAllowances: jsonb("metered_allowances")
-      .$type<Record<string, number>>()
-      .notNull()
-      .default({}),
-    /**
-     * Optional negotiated overage rate per metered meter (drizzle/0032). Absent
-     * meter uses the published rate (src/lib/meters.ts). Lets a contract move a
-     * per-unit price without moving the global rate.
-     */
-    meteredRates: jsonb("metered_rates")
-      .$type<Record<string, { unit_amount_cents: number; per: number }>>()
-      .notNull()
-      .default({}),
-    note: text("note"),
-    /** active | expired | void - see the migration. */
-    status: text("status").notNull().default("active"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    index("org_contracts_org_term_idx").on(t.organizationId, t.termStart),
-  ],
-);
-
-/**
- * Enterprise proposals (drizzle/0034_org_proposals.sql): an offer of contract
- * terms + a price sent to a prospect as a signed link they approve or decline.
- *
- * GLOBAL, no RLS - accessed by an unguessable token digest before any org
- * session exists (like an emailed verification link), so it is classified
- * auth-layer and access-checked in application code (proposals.server.ts), NOT
- * by tenant policy. Carries the PRICE that org_contracts does not; on
- * acceptance the operator provisions (price -> Stripe, terms -> org_contracts).
- */
-export const orgProposals = pgTable(
-  "org_proposals",
-  {
-    id: uuid("id")
-      .primaryKey()
-      .default(sql`uuid_generate_v7()`),
-    organizationId: uuid("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    /** SHA-256 hex digest of the link token; the raw token is never stored. */
-    tokenHash: text("token_hash").notNull().unique(),
-    status: text("status").notNull().default("draft"),
-    termStart: date("term_start").notNull(),
-    termEnd: date("term_end").notNull(),
-    meterAllowances: jsonb("meter_allowances")
-      .$type<Record<string, number>>()
-      .notNull()
-      .default({}),
-    meteredAllowances: jsonb("metered_allowances")
-      .$type<Record<string, number>>()
-      .notNull()
-      .default({}),
-    meteredRates: jsonb("metered_rates")
-      .$type<Record<string, { unit_amount_cents: number; per: number }>>()
-      .notNull()
-      .default({}),
-    baseFeeCents: integer("base_fee_cents").notNull().default(0),
-    interval: text("interval").notNull().default("year"),
-    message: text("message"),
-    expiresAt: timestamp("expires_at", { withTimezone: true }),
-    sentAt: timestamp("sent_at", { withTimezone: true }),
-    respondedAt: timestamp("responded_at", { withTimezone: true }),
-    declineReason: text("decline_reason"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    index("org_proposals_org_idx").on(t.organizationId, t.createdAt),
-    index("org_proposals_status_idx").on(t.status),
-  ],
-);
-
-/**
  * All email addresses a user owns (drizzle/0002_user_emails.sql). Source of
  * truth for multi-email; "user".email mirrors the primary row via hooks in
  * src/lib/auth.ts. Global auth table: no RLS, no org scope.
@@ -1234,7 +1050,7 @@ export const leads = pgTable(
   "leads",
   {
     id: uuid("id").primaryKey(),
-    kind: text("kind").notNull().default("enterprise"),
+    kind: text("kind").notNull().default("waitlist"),
     name: text("name").notNull(),
     email: text("email").notNull(),
     company: text("company").notNull(),

@@ -1,9 +1,11 @@
+import { cache } from "react";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { planVersionMeters, planVersions } from "@/db/schema";
 import { PLANS, isPlanId, type PlanId } from "./plans";
 import { getMeter } from "./meters";
 import { resolveStripePriceId } from "./billing";
+import type { ProHeadline } from "./marketing-plans";
 
 /**
  * Reading plans from the database (drizzle/0037).
@@ -22,24 +24,6 @@ import { resolveStripePriceId } from "./billing";
  * coordinated migrate-and-deploy.
  */
 
-/**
- * How long a public page may serve cached plan data.
- *
- * Marketing pages were STATIC, which quietly broke the whole point of putting
- * plans in the database: publishing a price in the operator console changed
- * nothing on the website until the next deploy. Fully dynamic is the other
- * extreme - the pricing page is the most-hit unauthenticated route and does not
- * need a database round trip per visitor.
- *
- * A minute is the compromise: a price change is live before the operator has
- * finished checking it, and the page still serves from cache under load.
- *
- * The operator console cannot call revalidatePath() for these: it is a separate
- * Vercel project with its own cache, so a time-based window is the only
- * mechanism available across that boundary.
- */
-export const PLAN_PAGE_REVALIDATE = 60;
-
 export type PlanMeterTerm = {
   meter: string;
   /**
@@ -56,11 +40,19 @@ export type PlanMeterTerm = {
   hardCap: number | null;
 };
 
+/**
+ * A plan version: the BILLING half of a plan, versioned. Marketing copy
+ * (display name, tagline, feature bullets) is no longer here - it lives as
+ * static content in flagon's marketing pages (src/lib/marketing-plans.ts). This
+ * row is the price/entitlement version an org resolves through, and the thing
+ * that makes grandfathering and scheduled repricing possible.
+ */
 export type PlanVersion = {
   id: string | null;
   plan: PlanId;
   version: number;
   status: "active" | "legacy" | "draft";
+  /** Operator-facing identifier, e.g. "Pro 2026". Not customer marketing. */
   label: string;
   /** False for an unbilled tier: no Stripe price, no invoice, not "$0.00/mo". */
   billable: boolean;
@@ -70,13 +62,6 @@ export type PlanVersion = {
   includedCreditCents: number | null;
   stripePriceId: string | null;
   stripeProductId: string | null;
-  displayName: string;
-  tagline: string;
-  features: string[];
-  listed: boolean;
-  highlight: boolean;
-  selfServe: boolean;
-  sortOrder: number;
   maxProjects: number | null;
   maxMembers: number | null;
   maxFreeOrgs: number | null;
@@ -85,99 +70,12 @@ export type PlanVersion = {
   meters: PlanMeterTerm[];
 };
 
-/**
- * A plan version in the shape the marketing columns render.
- *
- * Kept here rather than in the component so every surface that shows plans -
- * the pricing page, the org-creation flow, the console's preview - maps them
- * identically, and a plan can never look like one thing on the website and
- * another inside the product.
- */
-export function toPlanColumn(version: PlanVersion): {
-  id: string;
-  displayName: string;
-  tagline: string;
-  features: string[];
-  billable: boolean;
-  unitAmountCents: number | null;
-  interval: string;
-  highlight: boolean;
-  selfServe: boolean;
-  plan: PlanId;
-  copy: {
-    includedCreditCents: number | null;
-    unitAmountCents: number | null;
-    interval: string;
-    maxProjects: number | null;
-    maxMembers: number | null;
-    maxFreeOrgs: number | null;
-    meters: {
-      meter: string;
-      mode: "included" | "metered" | "unavailable";
-      includedQuantity: number;
-      hardCap: number | null;
-    }[];
-  };
-} {
-  return {
-    id: version.id ?? version.plan,
-    plan: version.plan,
-    displayName: version.displayName,
-    tagline: version.tagline,
-    features: version.features,
-    billable: version.billable,
-    unitAmountCents: version.unitAmountCents,
-    interval: version.interval,
-    highlight: version.highlight,
-    selfServe: version.selfServe,
-    copy: {
-      includedCreditCents: version.includedCreditCents,
-      unitAmountCents: version.unitAmountCents,
-      interval: version.interval,
-      maxProjects: version.maxProjects,
-      maxMembers: version.maxMembers,
-      maxFreeOrgs: version.maxFreeOrgs,
-      meters: version.meters.map((term) => ({
-        meter: term.meter,
-        mode: term.mode,
-        includedQuantity: term.includedQuantity,
-        hardCap: term.hardCap,
-      })),
-    },
-  };
-}
-
 /** One meter's terms on a version, or null when the plan never mentions it. */
 export function termFor(
   version: PlanVersion,
   meterId: string,
 ): PlanMeterTerm | null {
   return version.meters.find((term) => term.meter === meterId) ?? null;
-}
-
-/**
- * The effective rate for a meter on a plan: the plan's override if it sets one,
- * else the meter's published rate, with the plan's included quantity folded in.
- *
- * Returns null for a meter the plan marks `unavailable` - there is no price for
- * something that is not offered, and pricing it at the published rate would
- * quietly bill for a product the customer was told they do not have.
- */
-export function planRateFor(
-  version: PlanVersion,
-  meterId: string,
-): { unitAmountCents: number; per: number; includedQuantity: number } | null {
-  const meter = getMeter(meterId);
-  if (!meter) return null;
-
-  const term = termFor(version, meterId);
-  if (term?.mode === "unavailable") return null;
-
-  return {
-    unitAmountCents: term?.unitAmountCents ?? meter.unitAmountCents,
-    per: term?.per ?? meter.per,
-    includedQuantity: term?.includedQuantity ?? 0,
-  };
 }
 
 /**
@@ -230,13 +128,6 @@ export function fallbackVersion(plan: PlanId): PlanVersion {
     includedCreditCents: billable ? credit : null,
     stripePriceId: null,
     stripeProductId: null,
-    displayName: constants.name,
-    tagline: constants.tagline,
-    features: [...constants.features],
-    listed: true,
-    highlight: plan === "pro",
-    selfServe: plan !== "enterprise",
-    sortOrder: plan === "free" ? 10 : plan === "pro" ? 20 : 30,
     maxProjects: Number.isFinite(constants.limits.projects)
       ? constants.limits.projects
       : null,
@@ -269,13 +160,6 @@ function toVersion(row: Row, meters: PlanMeterTerm[]): PlanVersion {
     includedCreditCents: row.includedCreditCents,
     stripePriceId: row.stripePriceId,
     stripeProductId: row.stripeProductId,
-    displayName: row.displayName || row.label,
-    tagline: row.tagline,
-    features: Array.isArray(row.features) ? row.features : [],
-    listed: row.listed,
-    highlight: row.highlight,
-    selfServe: row.selfServe,
-    sortOrder: row.sortOrder,
     maxProjects: row.maxProjects,
     maxMembers: row.maxMembers,
     maxFreeOrgs: row.maxFreeOrgs,
@@ -347,6 +231,31 @@ export async function activePlanVersion(plan: PlanId): Promise<PlanVersion> {
 }
 
 /**
+ * The live Pro headline for the STATIC marketing pages: the price and included
+ * credit the active Pro version actually sells at.
+ *
+ * The marketing copy is static (src/lib/marketing-plans.ts); this is the one
+ * number that must track billing, so the public price can never disagree with
+ * what a new signup is charged. Everything else on those pages is code. Falls
+ * back to the PLANS constants through activePlanVersion, so it is safe on a
+ * self-host with no rows and in tests.
+ *
+ * React-cached so the three marketing surfaces that call it in one render share
+ * a single query.
+ */
+export const proHeadline = cache(async (): Promise<ProHeadline> => {
+  const version = await activePlanVersion("pro").catch(() =>
+    fallbackVersion("pro"),
+  );
+  return {
+    priceCents: version.unitAmountCents ?? PLANS.pro.priceMonthly * 100,
+    interval: version.interval,
+    includedCreditCents:
+      version.includedCreditCents ?? PLANS.pro.includedUsageCents,
+  };
+});
+
+/**
  * The version an org is on: its pinned one, else its plan's active one.
  *
  * The pin is what makes grandfathering automatic - publishing a new version
@@ -371,16 +280,11 @@ export async function allPlanVersions(): Promise<PlanVersion[]> {
   const rows = await db
     .select()
     .from(planVersions)
-    .orderBy(asc(planVersions.sortOrder), asc(planVersions.plan));
+    .orderBy(asc(planVersions.plan));
   const meters = await metersFor(rows.map((row) => row.id));
   return rows
     .map((row) => toVersion(row, meters.get(row.id) ?? []))
-    .sort(
-      (a, b) =>
-        a.sortOrder - b.sortOrder ||
-        a.plan.localeCompare(b.plan) ||
-        b.version - a.version,
-    );
+    .sort((a, b) => a.plan.localeCompare(b.plan) || b.version - a.version);
 }
 
 /**
@@ -418,27 +322,3 @@ export async function stripePriceForCheckout(
   return null;
 }
 
-/**
- * The versions the pricing page shows: listed, active, in display order.
- *
- * Falls back to the constants when the database has none, so the marketing site
- * never renders an empty pricing page because of a migration or an outage.
- */
-export async function listedPlanVersions(): Promise<PlanVersion[]> {
-  try {
-    const rows = await db
-      .select()
-      .from(planVersions)
-      .where(and(eq(planVersions.status, "active"), eq(planVersions.listed, true)))
-      .orderBy(asc(planVersions.sortOrder));
-
-    if (rows.length) {
-      const meters = await metersFor(rows.map((row) => row.id));
-      return rows.map((row) => toVersion(row, meters.get(row.id) ?? []));
-    }
-  } catch {
-    // Fall through: a pricing page that 500s is worse than one a migration
-    // behind.
-  }
-  return [fallbackVersion("free"), fallbackVersion("pro"), fallbackVersion("enterprise")];
-}

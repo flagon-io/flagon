@@ -31,13 +31,14 @@ import {
 import { isPlanId, type PlanId } from "./plans";
 import { rateForMeter, type Entitlements } from "./entitlements";
 import { orgEntitlementContext } from "./entitlements.server";
-import {
-  meterBillingMode,
-  meteredRate,
-  type BillingMode,
-  type ContractBilling,
-} from "./contracts";
-import { activeContract } from "./contracts.server";
+
+/**
+ * How a meter was billed on a frozen line. New periods only ever write
+ * `"priced"`; `"covered"`/`"metered"` survive only as HISTORICAL values on
+ * periods closed under the old enterprise-contract billing, which the readers
+ * below must keep rendering.
+ */
+export type BillingMode = "priced" | "covered" | "metered";
 
 /**
  * Closed billing periods: the frozen record.
@@ -68,10 +69,9 @@ export async function orgBillingContext(orgId: string): Promise<{
   plan: PlanId;
   includedCreditCents: number;
   /**
-   * The org's fully resolved terms (plan -> price version -> negotiated
-   * override). Carried so callers that need per-meter allowances or caps do not
-   * re-resolve them, and so a custom-priced org's numbers are consistent across
-   * every surface that starts here.
+   * The org's fully resolved terms (plan -> price version). Carried so callers
+   * that need per-meter allowances or caps do not re-resolve them, and so an
+   * org's numbers are consistent across every surface that starts here.
    */
   entitlements: Entitlements;
   current: PeriodWindow;
@@ -87,8 +87,8 @@ export async function orgBillingContext(orgId: string): Promise<{
     .limit(1);
 
   const plan: PlanId = org && isPlanId(org.plan) ? org.plan : "free";
-  // Resolved rather than read from PLANS: an org negotiated onto $100/mo Pro
-  // gets the credit it paid for, not the plan constant's $20.
+  // Resolved through the org's plan version rather than read from PLANS: an org
+  // on a bespoke Pro version gets the credit that version sells.
   const { entitlements } = await orgEntitlementContext(orgId);
   return {
     plan,
@@ -183,8 +183,6 @@ export type FrozenLine = {
 async function freezeLines(
   orgId: string,
   window: PeriodWindow,
-  plan: PlanId,
-  contract: ContractBilling | null,
   entitlements: Entitlements,
 ): Promise<FrozenLine[]> {
   const rows = await withTenant(orgId, (tx) =>
@@ -247,30 +245,12 @@ async function freezeLines(
     // option: guessing a rate would invent a charge.
     if (!meter) continue;
 
-    // How this meter bills decides both the rate that gets frozen and whether
-    // any cost is frozen at all:
-    //
-    //   priced  (pro/free)   the org's RESOLVED rate: the plan's published rate
-    //                        unless a price version or a negotiated override
-    //                        moved the allowance or the per-unit price.
-    //   covered (enterprise) in the contract's term envelope: recorded as
-    //                        volume, cost 0, coordinated at renewal not billed.
-    //   metered (enterprise) billed on top: the contract's per-cycle rate and
-    //                        included, so cost is the overage past the cycle's
-    //                        included amount.
-    //
-    // Whichever rate wins is FROZEN onto the line, so a renegotiation later
-    // can never re-price a period that has already been billed.
-    const mode = meterBillingMode(plan, meterId, contract);
-    const rate =
-      mode === "metered"
-        ? (meteredRate(meterId, contract) ?? meterRate(meter))
-        : mode === "covered"
-          ? meterRate(meter)
-          : (rateForMeter(entitlements, meterId) ?? meterRate(meter));
+    // The org's RESOLVED rate: the plan's published rate unless its price
+    // version moved the allowance or the per-unit price. Frozen onto the line,
+    // so a re-price later can never re-price a period that has already billed.
+    const rate = rateForMeter(entitlements, meterId) ?? meterRate(meter);
     const total = entries.reduce((sum, entry) => sum + entry.quantity, 0);
-    // Covered meters are never billed; freeze cost 0 across their lines.
-    const lineCost = mode === "covered" ? 0 : rateCostCents(rate, total);
+    const lineCost = rateCostCents(rate, total);
     const shares = allocateProRata(
       lineCost,
       entries.map((entry) => entry.quantity),
@@ -286,7 +266,7 @@ async function freezeLines(
         quantity: entry.quantity,
         rate,
         costCents: shares[index],
-        billingMode: mode,
+        billingMode: "priced",
       });
     }
   }
@@ -317,18 +297,7 @@ export async function closePeriod(input: {
   const { entitlements } = await orgEntitlementContext(input.orgId);
   const includedCreditCents = entitlements.includedCreditCents;
 
-  // The contract decides per-meter billing for an enterprise org (covered vs
-  // metered). Loaded once and frozen into each line's mode + rate, so a later
-  // contract change never re-prices a closed period.
-  const contract =
-    planId === "enterprise" ? await activeContract(input.orgId) : null;
-  const lines = await freezeLines(
-    input.orgId,
-    input.window,
-    planId,
-    contract,
-    entitlements,
-  );
+  const lines = await freezeLines(input.orgId, input.window, entitlements);
   const usageCents = lines.reduce((total, line) => total + line.costCents, 0);
   const creditAppliedCents = Math.min(usageCents, includedCreditCents);
   const overageCents = usageCents - creditAppliedCents;

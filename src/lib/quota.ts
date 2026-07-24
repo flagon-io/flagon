@@ -14,19 +14,16 @@ import { allowanceFrom } from "./entitlements";
  * PURE DATA MATH, importable from client components, so the pricing page, the
  * usage page, and the enforcement path all quote the same number.
  *
- * Only Hobby is capped. Pro and Enterprise are usage-based by design: going
- * over produces a bill, never a refusal. Cutting off a paying customer
- * mid-incident to protect a $20 credit would be a far worse outcome than the
- * overage it prevents, and Enterprise contracts explicitly promise no hard
- * caps.
+ * Only Hobby is capped. Pro is usage-based by design: going over produces a
+ * bill, never a refusal. Cutting off a paying customer mid-incident to protect
+ * a $20 credit would be a far worse outcome than the overage it prevents.
  *
  * THESE ARE THE PLAN'S PUBLISHED DEFAULTS, not any particular org's terms.
- * Since drizzle/0035+0036 an organization can sit on a specific PRICE VERSION
- * and carry a negotiated OVERRIDE, so what a given customer is entitled to is
- * resolved in src/lib/entitlements.ts and every org-aware caller goes through
- * that. What remains here is the plan layer those overrides are layered onto -
- * still the right answer for the pricing page, which advertises the plan rather
- * than any one customer's deal.
+ * Since drizzle/0037 an organization can sit on a specific PRICE VERSION, so
+ * what a given customer is entitled to is resolved in src/lib/entitlements.ts
+ * and every org-aware caller goes through that. What remains here is the plan
+ * layer the version is layered onto - still the right answer for the pricing
+ * page, which advertises the plan rather than any one customer's deal.
  */
 
 /** The meter the evaluation cap is expressed against. */
@@ -49,8 +46,8 @@ export const SYNC_METER = "flags.syncs";
  *   rather than something the credit buys. Deriving it from credit would make
  *   the ceiling move when we re-priced evaluations, which is unrelated.
  *
- * Only Hobby is capped either way. Pro and Enterprise bill past their
- * allowance; they never refuse.
+ * Only Hobby is capped either way. Pro bills past its allowance; it never
+ * refuses.
  */
 export function hardCap(plan: PlanId, meterId: string): number | null {
   if (meterId === EVALUATION_METER) return evaluationAllowance(plan);

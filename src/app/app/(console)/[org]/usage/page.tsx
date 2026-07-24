@@ -8,8 +8,6 @@ import { organizations } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { billingEnabled, getBillingSummary } from "@/lib/billing";
 import { formatPeriod, isoDay } from "@/lib/billing-period";
-import { contractConsumption, meteredUsage } from "@/lib/contracts.server";
-import { PACE_COPY, formatTerm } from "@/lib/contracts";
 import { coversUsage, discountedTotal } from "@/lib/discounts";
 import {
   breakdownFromSnapshot,
@@ -28,7 +26,6 @@ import {
   formatMeterRate,
   formatQuantity,
   getMeter,
-  type UsageLine,
 } from "@/lib/meters";
 import { PLANS, usageDisplay } from "@/lib/plans";
 import { appPath } from "@/lib/urls";
@@ -217,37 +214,10 @@ export default async function UsagePage({
     })),
   );
 
-  // How this plan's usage should be FRAMED: priced, capped, or contracted.
+  // How this plan's usage should be FRAMED: priced (Pro) or capped (Hobby).
   // Read from the plan the period was billed on, not today's, so looking back
   // at a period from before an upgrade still renders the way it was billed.
   const display = usageDisplay(planId as Parameters<typeof usageDisplay>[0]);
-
-  // Contracted orgs measure against the agreement, and the agreement covers
-  // the whole TERM, not this period: consumption is drawn down cumulatively so
-  // a busy summer and a quiet winter net out (see src/lib/contracts.ts).
-  const contracted =
-    display === "contracted"
-      ? await contractConsumption({ orgId: org.id })
-      : null;
-
-  // The other half of a contracted org's usage: METERED meters, billed on top
-  // of the base contract. A closed period reads its frozen metered lines; the
-  // open one prices them live for the current cycle. This is the "clearly
-  // separated overage outside your base bill" the model requires.
-  const meteredLines: UsageLine[] =
-    display === "contracted"
-      ? isFrozen && snapshot
-        ? totals.lines.filter((line) => line.billingMode === "metered")
-        : await meteredUsage({
-            orgId: org.id,
-            window,
-            contract: contracted?.contract ?? null,
-          })
-      : [];
-  const meteredTotalCents = meteredLines.reduce(
-    (sum, line) => sum + line.costCents,
-    0,
-  );
 
   // The discount in force, so "Total this period" cannot claim a customer on
   // three free months owes $20. Only meaningful where money is shown at all,
@@ -274,11 +244,7 @@ export default async function UsagePage({
         Math.round((totals.creditAppliedCents / includedCreditCents) * 100),
       )
     : 0;
-  // priceMonthly is null on contract pricing, and `?? 0` turned that into a
-  // confident "$0.00 subscription" line on the bill of the one customer type
-  // paying the most. Only a plan that actually HAS a price contributes one.
-  const subscriptionCents =
-    billing && plan.priceMonthly !== null ? plan.priceMonthly * 100 : 0;
+  const subscriptionCents = billing ? plan.priceMonthly * 100 : 0;
   const { discountCents, totalCents } = discountedTotal(
     { subscriptionCents, usageCents: totals.overageCents },
     discount,
@@ -360,12 +326,7 @@ export default async function UsagePage({
         />
       </div>
 
-      {/* What this period means, framed three different ways.
-
-          Contracted: consumption against the negotiated envelope, in units,
-          with no money anywhere. The fee was agreed up front from usage
-          estimates, so metered value is not a bill and rendering it as one
-          quotes a charge that will never arrive.
+      {/* What this period means, framed two different ways.
 
           Hobby: a percentage. Its allowance is a CAP, not money: it is never
           invoiced, so "included credit" spent against "billed on top" describes
@@ -373,15 +334,9 @@ export default async function UsagePage({
           invites comparison with Pro's credit, which is real.
 
           Pro: dollars, because dollars are the answer. */}
-      {display === "contracted" ? (
-        <>
-          <ContractPanel contracted={contracted} />
-          <MeteredPanel lines={meteredLines} totalCents={meteredTotalCents} />
-        </>
-      ) : (
-        <div className="mt-6 border border-white/10 bg-white/2 p-6">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            {display === "capped" ? (
+      <div className="mt-6 border border-white/10 bg-white/2 p-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          {display === "capped" ? (
               <>
                 <div>
                   <div className="text-sm text-zinc-400">Allowance used</div>
@@ -435,8 +390,7 @@ export default async function UsagePage({
               style={{ width: `${creditPercent}%` }}
             />
           </div>
-        </div>
-      )}
+      </div>
 
       {/* Consumption over the period */}
       <div className="mt-6 border border-white/10 bg-white/2 p-6">
@@ -448,9 +402,7 @@ export default async function UsagePage({
             <p className="mt-1 text-xs text-zinc-500">
               {query.cumulative
                 ? "Running total across the period"
-                : display === "contracted"
-                  ? "Consumption per bucket"
-                  : "Cost per bucket, allowance drawn down in order"}
+                : "Cost per bucket, allowance drawn down in order"}
             </p>
           </div>
           <ChartControls
@@ -464,7 +416,7 @@ export default async function UsagePage({
             series={folded.series}
             colors={colors}
             cumulative={query.cumulative}
-            unit={display === "contracted" ? "quantity" : "cents"}
+            unit="cents"
           />
         </div>
       </div>
@@ -480,12 +432,7 @@ export default async function UsagePage({
                 : "Product"}
           </div>
           <div className="w-40 text-right">Usage</div>
-          {/* Dropped, not zeroed, on a contracted plan: a "Charge" column full
-              of dollar figures nobody will be invoiced for is worse than no
-              column, and $0.00 would be an outright lie. */}
-          {display === "contracted" ? null : (
-            <div className="w-24 text-right">Charge</div>
-          )}
+          <div className="w-24 text-right">Charge</div>
         </div>
 
         {rows.length ? (
@@ -507,11 +454,9 @@ export default async function UsagePage({
               <div className="w-40 text-right text-sm tabular-nums text-zinc-300">
                 {formatQuantity(row.quantity)}
               </div>
-              {display === "contracted" ? null : (
-                <div className="w-24 text-right text-sm font-medium tabular-nums text-zinc-100">
-                  {formatCents(row.costCents)}
-                </div>
-              )}
+              <div className="w-24 text-right text-sm font-medium tabular-nums text-zinc-100">
+                {formatCents(row.costCents)}
+              </div>
             </div>
           ))
         ) : (
@@ -527,9 +472,7 @@ export default async function UsagePage({
         <div className="flex items-center gap-4 border-b border-white/10 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
           <div className="min-w-0 flex-1">Meter</div>
           <div className="w-40 text-right">Usage</div>
-          {display === "contracted" ? null : (
-            <div className="w-24 text-right">Charge</div>
-          )}
+          <div className="w-24 text-right">Charge</div>
         </div>
         {meters.map((meter) => {
           const line = usedMeters.get(meter.id);
@@ -547,13 +490,7 @@ export default async function UsagePage({
                 <div className="text-sm text-zinc-100">{meter.label}</div>
                 <div className="mt-0.5 text-xs text-zinc-500">
                   {PRODUCTS[meter.product].label}
-                  {/* The published rate is not what a contracted customer
-                      pays - their price was negotiated - so quoting it here
-                      would invite them to multiply it out and arrive at a
-                      number that is not their bill. */}
-                  {display === "contracted"
-                    ? ` · ${meter.unit}`
-                    : ` · ${formatMeterRate(meter)}`}
+                  {` · ${formatMeterRate(meter)}`}
                 </div>
               </div>
               <div className="w-40 text-right text-sm tabular-nums text-zinc-300">
@@ -571,35 +508,27 @@ export default async function UsagePage({
                     <span className="text-zinc-600">{meter.unit}</span>
                   </>
                 )}
-                {billable > 0 && display !== "contracted" ? (
+                {billable > 0 ? (
                   <div className="mt-0.5 text-[11px] text-amber-300/80">
                     {formatQuantity(billable)} billable
                   </div>
                 ) : null}
               </div>
-              {display === "contracted" ? null : (
-                <div
-                  className={`w-24 text-right text-sm tabular-nums ${
-                    line?.costCents
-                      ? "font-medium text-zinc-100"
-                      : "text-zinc-600"
-                  }`}
-                >
-                  {formatCents(line?.costCents ?? 0)}
-                </div>
-              )}
+              <div
+                className={`w-24 text-right text-sm tabular-nums ${
+                  line?.costCents
+                    ? "font-medium text-zinc-100"
+                    : "text-zinc-600"
+                }`}
+              >
+                {formatCents(line?.costCents ?? 0)}
+              </div>
             </div>
           );
         })}
 
-        {/* Where the money goes, in the order it's charged.
-
-            Absent entirely on a contracted plan. Every line in it - a
-            subscription price that is not their price, a credit that is not
-            their credit, a total nobody will invoice - would be wrong, and
-            zeroing them would be wrong more confidently. */}
-        {display === "contracted" ? null : (
-          <dl className="space-y-2 px-4 py-5 text-sm">
+        {/* Where the money goes, in the order it's charged. */}
+        <dl className="space-y-2 px-4 py-5 text-sm">
             {billing ? (
               <div className="flex justify-between">
                 <dt className="text-zinc-400">Subscription ({plan.name})</dt>
@@ -655,34 +584,17 @@ export default async function UsagePage({
               </dd>
             </div>
           </dl>
-        )}
       </div>
 
       {isFiltered ? (
         <p className="mt-4 text-xs text-zinc-500">
           The totals above cover the whole period. Filters narrow the chart and
-          the breakdown, not what{" "}
-          {display === "contracted"
-            ? "counts toward the agreement"
-            : "gets billed"}
-          .
+          the breakdown, not what gets billed.
         </p>
       ) : null}
 
       <p className="mt-4 text-sm leading-6 text-zinc-500">
-        {display === "contracted" ? (
-          <>
-            {/* No dollar figure anywhere for a contracted organization. The
-                fee was agreed up front from usage estimates, so a metered
-                total is not a bill and showing one as if it were invites
-                someone to budget against a number we will never send. */}
-            Your plan is priced by agreement, so nothing here is charged
-            automatically. Usage is tracked against the volumes in your
-            contract, measured across the whole term rather than month by month,
-            and we will reach out to coordinate before anything exceeds what was
-            agreed.
-          </>
-        ) : planId === "pro" ? (
+        {planId === "pro" ? (
           <>
             Pro includes {formatCents(includedCreditCents)} of usage each
             period: your subscription comes back as credit, and only what
@@ -712,211 +624,6 @@ export default async function UsagePage({
           </>
         )}
       </p>
-    </div>
-  );
-}
-
-const PACE_TONE: Record<string, string> = {
-  under: "border-white/10 text-zinc-400",
-  on: "border-teal-500/40 text-teal-300",
-  // Amber, not red: consuming ahead of estimate is a conversation to have, not
-  // a failure. Nothing is refused and nothing is auto-charged.
-  over: "border-amber-500/40 text-amber-300",
-};
-
-/**
- * Consumption against the negotiated agreement. The contracted plan's answer
- * to "what did this cost me?", which is: that is not the question your plan
- * asks. No money appears here at any point.
- *
- * The envelope is TERM-WIDE and drawn down cumulatively, so the headline pair
- * is consumption against elapsed term. That is what makes a seasonal customer
- * legible: 58% of the volume against 61% of the year is exactly on plan, and a
- * monthly frame would have called the same customer a problem in July.
- */
-/**
- * The metered half of a contracted org's usage: what is billed ON TOP of the
- * base contract, kept in its own clearly-labelled panel so a customer is never
- * confused about which usage the negotiated fee covers and which is charged
- * automatically. Renders nothing when there is no metered usage - the common
- * case for an org whose whole footprint is covered.
- */
-function MeteredPanel({
-  lines,
-  totalCents,
-}: {
-  lines: UsageLine[];
-  totalCents: number;
-}) {
-  if (!lines.length) return null;
-  return (
-    <div className="mt-6 border border-amber-500/20 bg-amber-500/2 p-6">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <div>
-          <h2 className="text-sm font-semibold text-zinc-100">
-            Billed outside your contract
-          </h2>
-          <p className="mt-1 text-xs text-zinc-500">
-            Usage on products your agreement doesn&apos;t cover, charged
-            automatically this billing period.
-          </p>
-        </div>
-        <div className="text-right">
-          <div className="text-xs text-zinc-500">This period</div>
-          <div className="mt-0.5 text-2xl font-semibold tracking-tight tabular-nums text-zinc-100">
-            {formatCents(totalCents)}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-5 divide-y divide-white/5 border-t border-white/10">
-        {lines.map((line) => (
-          <div
-            key={line.meterId}
-            className="flex items-center gap-4 py-3 first:pt-4"
-          >
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-zinc-100">{line.label}</div>
-              <div className="mt-0.5 text-xs text-zinc-500">
-                {formatCents(line.rate.unitAmountCents)} per{" "}
-                {formatQuantity(line.rate.per)} {line.unit}
-                {line.rate.includedQuantity ? (
-                  <>
-                    {" · "}
-                    {formatQuantity(line.rate.includedQuantity)} included /
-                    cycle
-                  </>
-                ) : null}
-              </div>
-            </div>
-            <div className="w-32 text-right text-sm tabular-nums text-zinc-300">
-              {formatQuantity(line.quantity)} {line.unit}
-              {billableQuantity(line.rate, line.quantity) > 0 ? (
-                <div className="mt-0.5 text-[11px] text-amber-300/80">
-                  {formatQuantity(billableQuantity(line.rate, line.quantity))}{" "}
-                  billable
-                </div>
-              ) : null}
-            </div>
-            <div className="w-24 text-right text-sm font-medium tabular-nums text-zinc-100">
-              {formatCents(line.costCents)}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ContractPanel({
-  contracted,
-}: {
-  contracted: Awaited<ReturnType<typeof contractConsumption>>;
-}) {
-  // No agreement on file is an ordinary state - paperwork not entered yet, or
-  // an org between terms - so it says so plainly instead of erroring or, worse,
-  // falling back to the priced view this plan must never see.
-  if (!contracted) {
-    return (
-      <div className="mt-6 border border-white/10 bg-white/2 p-6">
-        <div className="text-sm text-zinc-400">Contracted plan</div>
-        <p className="mt-2 text-sm leading-6 text-zinc-500">
-          Usage is tracked against your agreement. The contracted volumes
-          aren&apos;t recorded here yet, so this page shows consumption on its
-          own for now.
-        </p>
-      </div>
-    );
-  }
-
-  const { status } = contracted;
-  const elapsed = Math.round(status.elapsedPercent);
-
-  return (
-    <div className="mt-6 border border-white/10 bg-white/2 p-6">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <div className="text-sm text-zinc-400">Contract usage</div>
-        <div className="text-xs text-zinc-500">
-          {formatTerm(status.term)} · {elapsed}% of term elapsed
-        </div>
-      </div>
-
-      <div className="mt-5 space-y-5">
-        {status.envelopes.map((envelope) => {
-          const used = Math.round(envelope.usedPercent ?? 0);
-          return (
-            <div key={envelope.meter}>
-              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                <div className="text-sm text-zinc-300">{envelope.label}</div>
-                <div className="text-sm tabular-nums text-zinc-100">
-                  {formatQuantity(envelope.used)}
-                  {envelope.contracted !== null ? (
-                    <span className="text-zinc-500">
-                      {" / "}
-                      {formatQuantity(envelope.contracted)} {envelope.unit}
-                    </span>
-                  ) : (
-                    <span className="text-zinc-500"> {envelope.unit}</span>
-                  )}
-                </div>
-              </div>
-
-              {envelope.contracted !== null ? (
-                <>
-                  <div className="relative mt-2 h-2 w-full overflow-hidden rounded-full bg-white/5">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        used > 100 ? "bg-amber-400" : "bg-teal-500"
-                      }`}
-                      style={{ width: `${Math.min(used, 100)}%` }}
-                    />
-                    {/* Where the term is. A bar read without it says nothing:
-                        70% consumed is reassuring in November and alarming in
-                        February, and only the marker tells them apart. */}
-                    <div
-                      aria-hidden
-                      className="absolute inset-y-0 w-px bg-white/50"
-                      style={{ left: `${Math.min(elapsed, 100)}%` }}
-                    />
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
-                    <span>{used}% of contract</span>
-                    {envelope.pace ? (
-                      <span
-                        className={`rounded-full border px-2 py-0.5 ${
-                          PACE_TONE[envelope.pace] ?? PACE_TONE.on
-                        }`}
-                      >
-                        {PACE_COPY[envelope.pace]}
-                      </span>
-                    ) : null}
-                    {envelope.projected !== null ? (
-                      // Explicitly hedged. A linear projection is the wrong
-                      // lens on seasonal traffic, which is the traffic this
-                      // whole model exists to absorb, so it never leads.
-                      <span>
-                        {formatQuantity(envelope.projected)} by term end at the
-                        current pace
-                      </span>
-                    ) : null}
-                  </div>
-                </>
-              ) : (
-                <p className="mt-1.5 text-xs text-zinc-500">
-                  Not covered by a contracted volume. Recorded here so it can be
-                  reviewed at renewal.
-                </p>
-              )}
-            </div>
-          );
-        })}
-
-        {status.envelopes.length ? null : (
-          <p className="text-sm text-zinc-500">
-            No usage recorded against this agreement yet.
-          </p>
-        )}
-      </div>
     </div>
   );
 }

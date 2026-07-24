@@ -76,11 +76,7 @@ describe.skipIf(!canRun)("plan catalog", () => {
       expect(row.n, `plan "${row.plan}" has ${row.n} active versions`).toBe(1);
     }
     // Every plan a customer can be on must have somewhere to resolve from.
-    expect(rows.map((row) => row.plan).sort()).toEqual([
-      "enterprise",
-      "free",
-      "pro",
-    ]);
+    expect(rows.map((row) => row.plan).sort()).toEqual(["free", "pro"]);
   });
 
   /**

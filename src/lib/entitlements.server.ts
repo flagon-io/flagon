@@ -1,11 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { orgEntitlements, organizations } from "@/db/schema";
+import { organizations } from "@/db/schema";
 import {
   resolveEntitlements,
-  sanitizeAllowances,
-  sanitizeRates,
-  type EntitlementOverride,
   type Entitlements,
   type PriceEntitlements,
 } from "./entitlements";
@@ -19,14 +16,13 @@ import { isPlanId, type PlanId } from "./plans";
  * Reading an organization's entitlements out of the database.
  *
  * The pure layering lives in entitlements.ts; this file's only job is to fetch
- * the two override rows and hand them over. Both are optional and both are
- * usually absent, so the common path is one query for the org and, when it
- * points at a price, one more.
+ * the org's plan version and hand it over: one query for the org, one for the
+ * version it points at.
  *
- * Everything here degrades to the plan constants. A missing price row, a voided
- * override, a database that has not run 0035 yet - all resolve to exactly the
- * behaviour that existed before this system, which is what makes it safe to
- * deploy ahead of the operator console that writes into it.
+ * Everything here degrades to the plan constants. A missing price row, or a
+ * database that has not run 0037 yet, resolves to exactly the behaviour that
+ * existed before this system, which is what makes it safe to deploy ahead of
+ * the operator console that writes into it.
  */
 
 export type OrgEntitlementContext = {
@@ -96,47 +92,7 @@ export function versionEntitlements(
 }
 
 /**
- * The org's active entitlement override, or null.
- *
- * A voided row is history, not terms, so only 'active' is read. The partial
- * unique index allows one, but the ordering makes the read deterministic if a
- * backfill ever lands two before the index is applied.
- */
-export async function activeOverride(
-  orgId: string,
-): Promise<EntitlementOverride | null> {
-  const [row] = await db
-    .select({
-      includedCreditCents: orgEntitlements.includedCreditCents,
-      meterAllowances: orgEntitlements.meterAllowances,
-      meteredRates: orgEntitlements.meteredRates,
-      hardCaps: orgEntitlements.hardCaps,
-      note: orgEntitlements.note,
-    })
-    .from(orgEntitlements)
-    .where(
-      and(
-        eq(orgEntitlements.organizationId, orgId),
-        eq(orgEntitlements.status, "active"),
-      ),
-    )
-    .orderBy(desc(orgEntitlements.createdAt))
-    .limit(1);
-
-  if (!row) return null;
-  return {
-    includedCreditCents: row.includedCreditCents,
-    meterAllowances: sanitizeAllowances(row.meterAllowances),
-    meteredRates: sanitizeRates(row.meteredRates),
-    // Null and {} mean different things here (inherit vs explicitly uncapped),
-    // so this must not sanitize a null into an empty object.
-    hardCaps: row.hardCaps == null ? null : sanitizeAllowances(row.hardCaps),
-    note: row.note,
-  };
-}
-
-/**
- * Everything an org is entitled to, resolved through all four layers.
+ * Everything an org is entitled to, resolved through the plan + its version.
  *
  * The one function every billing surface should call. Callers that already hold
  * the org's plan can pass it to skip a lookup, but the plan is re-read by
@@ -158,10 +114,10 @@ export async function orgEntitlementContext(
   // granted Pro's uncapped terms on the strength of a failed lookup.
   const plan: PlanId = org && isPlanId(org.plan) ? org.plan : "free";
 
-  const [version, override] = await Promise.all([
-    versionForOrg({ plan, planVersionId: org?.planVersionId ?? null }),
-    activeOverride(orgId),
-  ]);
+  const version = await versionForOrg({
+    plan,
+    planVersionId: org?.planVersionId ?? null,
+  });
 
   return {
     plan,
@@ -169,7 +125,6 @@ export async function orgEntitlementContext(
     entitlements: resolveEntitlements({
       plan,
       price: versionEntitlements(version),
-      override,
     }),
     price: {
       id: version.id,

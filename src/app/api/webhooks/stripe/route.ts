@@ -30,8 +30,7 @@ import { clearPlanCache } from "@/lib/usage-events.server";
 /**
  * Stripe webhook: the single source of plan transitions, and where a period's
  * usage becomes invoice lines. Checkout completion flips an org to Pro; a
- * subscription update carries the org onto the plan its metadata declares
- * (Pro by default, or enterprise for a contract subscription); cancellation or
+ * subscription update keeps the org on Pro and syncs its cycle; cancellation or
  * expiry drops it back to free; a newly opened invoice gets the usage for the
  * cycle that just ENDED. Signature-verified
  * with STRIPE_WEBHOOK_SECRET (from `stripe listen` locally, or the dashboard
@@ -102,11 +101,7 @@ export async function POST(request: Request) {
           subscription.status,
         );
         const cycle = active ? subscriptionCycle(subscription) : null;
-        // An active subscription may declare a non-self-serve plan (enterprise)
-        // through its metadata; a self-serve Pro sub carries no marker and
-        // resolves to pro. This is what keeps a contract subscription from
-        // being flipped to Pro on every renewal, and it syncs the enterprise
-        // cycle the same way it does Pro's.
+        // Any active subscription resolves to Pro (the one billable plan).
         // The price VERSION this subscription was sold at, declared by whoever
         // created it (Checkout, or the operator console). Only ever SET, never
         // cleared on cancellation: which price a customer bought is history,
@@ -182,9 +177,9 @@ export async function POST(request: Request) {
       const planId = isPlanId(period.plan) ? period.plan : "free";
 
       /**
-       * Hobby is never invoiced. Pro and Enterprise are - the period stays
-       * CLOSED regardless (the frozen snapshot is what a contract review and any
-       * true-up read), but only Pro/Enterprise get lines attached here.
+       * Hobby is never invoiced. Pro is - the period stays CLOSED regardless
+       * (the frozen snapshot is what any true-up reads), but only Pro gets
+       * lines attached here.
        */
       if (!planAutoInvoicesAnything(planId)) break;
 
@@ -194,25 +189,8 @@ export async function POST(request: Request) {
       });
       if (!snapshot) break;
 
-      const totals = totalsFromSnapshot(snapshot.period, snapshot.lines);
-      /**
-       * Which lines actually bill:
-       *
-       *   Pro          everything - the whole period, pooled credit applied.
-       *   Enterprise   METERED lines only, and only where there is overage.
-       *                Covered lines are part of the negotiated base bill and
-       *                are coordinated at renewal, never auto-charged, so they
-       *                are excluded here even though they are frozen for records.
-       */
-      const billable =
-        planId === "enterprise"
-          ? {
-              ...totals,
-              lines: totals.lines.filter(
-                (line) => line.billingMode === "metered" && line.costCents > 0,
-              ),
-            }
-          : totals;
+      // Pro bills the whole period, pooled credit applied.
+      const billable = totalsFromSnapshot(snapshot.period, snapshot.lines);
       const lines = buildUsageInvoiceLines(billable, {
         planName: PLANS[planId].name,
         period: { from: period.periodStart, to: period.periodEnd },

@@ -36,12 +36,9 @@ const AUTH_LAYER_TABLES = new Set([
   "invitations",
   "teams",
   "team_members",
-  // Sales-lead intake; internal tooling, not tenant data.
+  // Sales-lead intake (and the Enterprise "coming soon" waitlist); internal
+  // tooling, not tenant data.
   "leads",
-  // Enterprise proposals: reached by an unguessable token digest before an org
-  // RLS context exists (signed-link approval, like a verification link), so
-  // access is a digest match in application code, not a tenant policy.
-  "org_proposals",
   // Token hashes span user- and organization-owned credentials and must be
   // discoverable before an org RLS context exists. Every lookup is a digest
   // match and scope/subject checks happen in access-tokens.server.ts.
@@ -53,14 +50,6 @@ const AUTH_LAYER_TABLES = new Set([
   "plan_versions",
   "plan_version_meters",
   "meters",
-  // Per-org entitlement overrides (drizzle/0036). Classified with
-  // `organizations` and for the same reason: it is an extension of the org's
-  // own billing configuration, and it is read on paths that deliberately run
-  // OUTSIDE a tenant context - the quota check on the evaluation hot path and
-  // closePeriod, neither of which is inside withTenant. Every read is by an
-  // organization_id resolved from the session, never from user input, and the
-  // app role holds SELECT only.
-  "org_entitlements",
 ]);
 
 /** Tables the app role must have NO access to at all. */

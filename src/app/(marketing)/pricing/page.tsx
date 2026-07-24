@@ -8,39 +8,37 @@ import {
   formatCents,
   formatMeterRate,
   formatQuantity,
+  getMeter,
 } from "@/lib/meters";
-import {
-  listedPlanVersions,
-  planRateFor,
-  toPlanColumn,
-} from "@/lib/plan-catalog.server";
+import { proHeadline } from "@/lib/plan-catalog.server";
+import { marketingColumns } from "@/lib/marketing-plans";
 import { BleedBand } from "@/components/bleed-band";
 import { PageHero } from "@/components/page-hero";
 import { PlanColumns } from "@/components/plan-columns";
 
 /**
- * Revalidated rather than prerendered at build.
+ * Static marketing, one live number.
  *
- * This page was static, which meant plans living in the database bought
- * nothing: publishing a price changed the console and left the public page
- * quoting whatever was true at the last deploy.
+ * The plan columns are static copy (src/lib/marketing-plans.ts), so this page
+ * does not depend on the billing catalog to render the right set of plans. The
+ * only thing read from the database is the active Pro price/credit
+ * (proHeadline), so the public number can never disagree with what a signup is
+ * charged. Revalidated hourly: a price change is picked up without a deploy, and
+ * the page still serves from cache under load. The operator console is a
+ * separate Vercel project and cannot revalidatePath() across that boundary, so a
+ * time window is the mechanism.
  *
- * The literal is inlined because Next statically analyses segment config - an
- * imported constant is not analysable and fails the build. Keep the three
- * marketing pages (here, /, /terms) on the same number.
+ * The literal is inlined because Next statically analyses segment config. Keep
+ * the three marketing pages (here, /, /terms) on the same number.
  */
-export const revalidate = 60;
+export const revalidate = 3600;
 
 export async function generateMetadata(): Promise<Metadata> {
-  const plans = await listedPlanVersions();
-  const headline = plans.find((plan) => plan.highlight && plan.billable);
-  const price =
-    headline?.unitAmountCents != null
-      ? `${headline.displayName} at ${formatCents(headline.unitAmountCents).replace(/\.00$/, "")}/${headline.interval}`
-      : "usage-based plans";
+  const pro = await proHeadline();
+  const price = `Pro at ${formatCents(pro.priceCents).replace(/\.00$/, "")}/${pro.interval}`;
   return {
     title: `Pricing · ${brand.name}`,
-    description: `Simple, usage-based pricing. Free to start, ${price} with usage credit included, and fixed-price Enterprise contracts. No seat-based pricing, ever.`,
+    description: `Simple, usage-based pricing. Free to start, ${price} with usage credit included, and Enterprise coming soon. No seat-based pricing, ever.`,
   };
 }
 
@@ -64,6 +62,8 @@ const included = [
     icon: Server,
     title: "Run it yourself",
     body: "Source-available under the FSL. Deploy the whole platform on your own infrastructure, for your own use, with no license fee.",
+    href: "/docs/self-hosting",
+    linkText: "Read the self-hosting guide",
   },
 ] as const;
 
@@ -72,45 +72,38 @@ const included = [
  * on /app/new with the plan preselected (price first, org details second).
  */
 export default async function PricingPage() {
-  const versions = await listedPlanVersions();
-  const columns = versions.map(toPlanColumn);
+  const pro = await proHeadline();
+  const columns = marketingColumns(pro);
 
   // CTAs are per-plan: a self-serve plan links into creation with itself
-  // preselected, and a contact-only one links to sales. Derived from the row's
-  // `selfServe` rather than from its name, so a new plan gets the right call to
-  // action without this page learning about it.
+  // preselected; the coming-soon column links to its waitlist instead. Derived
+  // from `comingSoon`/`billable`, not the plan name.
   const ctas = Object.fromEntries(
     columns.map((plan) => [
       plan.id,
-      plan.selfServe ? (
+      plan.comingSoon ? (
+        <Link href="/enterprise" className={outlineCta}>
+          Get notified
+        </Link>
+      ) : (
         <Link
           href={appHref(`/new?plan=${plan.plan}`)}
           className={plan.highlight ? primaryCta : outlineCta}
         >
           {plan.billable ? `Get started with ${plan.displayName}` : "Start for free"}
         </Link>
-      ) : (
-        <Link href="/enterprise/contact" className={outlineCta}>
-          Contact sales
-        </Link>
       ),
     ]),
   );
 
-  // What the headline plan's credit buys, computed at ITS rate rather than the
-  // published one - a plan that re-prices evaluations must quote its own maths.
-  const headline = columns.find((plan) => plan.highlight) ?? columns[0];
-  const headlineVersion = versions.find(
-    (version) => (version.id ?? version.plan) === headline?.id,
-  );
-  const headlineRate = headlineVersion
-    ? planRateFor(headlineVersion, "flags.evaluations")
-    : null;
-  const headlineCredit = headlineVersion?.includedCreditCents ?? null;
+  // What Pro's credit buys, at the published evaluation rate from the meter
+  // registry (Pro does not re-price evaluations, so this matches the invoice).
+  const evalMeter = getMeter("flags.evaluations");
+  const headlineCredit = pro.includedCreditCents;
   const creditBuys =
-    headlineRate && headlineCredit && headlineRate.unitAmountCents > 0
-      ? headlineRate.includedQuantity +
-        (headlineCredit / headlineRate.unitAmountCents) * headlineRate.per
+    evalMeter && evalMeter.unitAmountCents > 0
+      ? evalMeter.includedQuantity +
+        (headlineCredit / evalMeter.unitAmountCents) * evalMeter.per
       : null;
 
   return (
@@ -167,12 +160,12 @@ export default async function PricingPage() {
               </div>
             ))}
           </dl>
-          {creditBuys && headlineCredit ? (
+          {creditBuys ? (
             <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
               Your included usage is a{" "}
               <strong className="text-zinc-300">pooled credit</strong>, not a
               per-product allowance: spend it on whichever products you actually
-              use. {headline?.displayName}&apos;s{" "}
+              use. Pro&apos;s{" "}
               {formatCents(headlineCredit).replace(/\.00$/, "")} covers roughly{" "}
               {formatQuantity(creditBuys)} flag evaluations if that is all you
               run, or any mix across products adding up to the same money.
@@ -183,7 +176,7 @@ export default async function PricingPage() {
                 never produce an invoice, and saying so by name would go stale
                 the moment the tiers change. */}
             {columns
-              .filter((plan) => !plan.billable)
+              .filter((plan) => !plan.billable && !plan.comingSoon)
               .map((plan) => plan.displayName)
               .join(" and ") || "Unbilled tiers are"}{" "}
             capped rather than billed, so they can never produce an invoice.
@@ -197,20 +190,35 @@ export default async function PricingPage() {
             band reads as one block instead of a row of tiles. */}
         <BleedBand outerClassName="mt-24">
           <div className="grid grid-cols-1 divide-y divide-white/10 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            {included.map(({ icon: Icon, title, body }) => (
-              <div key={title} className="p-8">
-                <span
-                  aria-hidden
-                  className="flex h-10 w-10 items-center justify-center border border-teal-500/20 bg-teal-500/10 text-teal-300"
-                >
-                  <Icon className="h-5 w-5" />
-                </span>
-                <h3 className="mt-4 text-sm font-semibold text-zinc-100">
-                  {title}
-                </h3>
-                <p className="mt-1.5 text-sm leading-6 text-zinc-400">{body}</p>
-              </div>
-            ))}
+            {included.map((item) => {
+              const { icon: Icon, title, body } = item;
+              const href = "href" in item ? item.href : null;
+              const linkText = "linkText" in item ? item.linkText : null;
+              return (
+                <div key={title} className="p-8">
+                  <span
+                    aria-hidden
+                    className="flex h-10 w-10 items-center justify-center border border-teal-500/20 bg-teal-500/10 text-teal-300"
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <h3 className="mt-4 text-sm font-semibold text-zinc-100">
+                    {title}
+                  </h3>
+                  <p className="mt-1.5 text-sm leading-6 text-zinc-400">
+                    {body}
+                  </p>
+                  {href && linkText ? (
+                    <Link
+                      href={href}
+                      className="mt-2 inline-block text-sm font-medium text-teal-400 transition hover:text-teal-300"
+                    >
+                      {linkText} &rarr;
+                    </Link>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         </BleedBand>
 
@@ -237,10 +245,10 @@ export default async function PricingPage() {
                 Start for free
               </Link>
               <Link
-                href="/enterprise/contact"
+                href="/enterprise"
                 className="rounded-md border border-white/10 px-6 py-2.5 text-sm font-semibold text-zinc-300 transition hover:border-white/20 hover:text-zinc-100"
               >
-                Talk to sales
+                Enterprise, coming soon
               </Link>
             </div>
           </div>

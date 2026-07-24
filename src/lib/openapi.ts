@@ -114,7 +114,7 @@ export const openApiSpec = {
     {
       name: "Usage",
       description:
-        "What an organization has used this period, priced per meter. Pro's subscription comes back as included usage credit; only what exceeds it is billed on top, and the invoice carries the same lines.\n\nOrganizations on contract pricing are reported in volume rather than money: the fee is negotiated up front from usage estimates, so a period's metered value is not what they owe. See `usage_display` on the usage response.",
+        "What an organization has used this period, priced per meter. Pro's subscription comes back as included usage credit; only what exceeds it is billed on top, and the invoice carries the same lines. Hobby is never billed; usage is refused at the cap rather than charged. See `usage_display` on the usage response.",
     },
     {
       name: "Teams",
@@ -1181,7 +1181,7 @@ export const openApiSpec = {
         tags: ["Usage"],
         summary: "Get usage",
         description:
-          "Usage for a billing period, priced by meter, with the plan's included credit applied. Amounts are in cents.\n\nDefaults to the organization's current billing period, which follows its own subscription cycle rather than the calendar. Pass `period` (a `period_start` from `/usage/periods`) to look back. A period that has already been billed is served from its frozen snapshot, so historical responses report the rates that were actually charged.\n\nOrganizations on contract pricing get `usage_display: \"contracted\"`: every `*_cents` field is null and the `contract` object reports consumption against the negotiated envelope, measured across the whole agreement term rather than per period. Quantities are populated in every mode, so a client that charts volume needs no special case.\n\nFilters and grouping are the same ones the console uses; its URL is this query string.",
+          "Usage for a billing period, priced by meter, with the plan's included credit applied. Amounts are in cents.\n\nDefaults to the organization's current billing period, which follows its own subscription cycle rather than the calendar. Pass `period` (a `period_start` from `/usage/periods`) to look back. A period that has already been billed is served from its frozen snapshot, so historical responses report the rates that were actually charged.\n\n`usage_display` says which mode the organization is in: `priced` (Pro) or `capped` (Hobby, never invoiced).\n\nFilters and grouping are the same ones the console uses; its URL is this query string.",
         security: [{ bearerToken: [] }, { sessionCookie: [] }],
         parameters: [
           {
@@ -1288,7 +1288,7 @@ export const openApiSpec = {
         tags: ["Usage"],
         summary: "Get usage counters",
         description:
-          "Live consumption counters for the period the organization is currently accruing into: flag evaluations and configuration syncs.\n\nThese are the counters ENFORCEMENT reads, so they carry no compaction lag and are the numbers a 429 from the OFREP evaluation endpoints is derived from. GET /v1/orgs/{slug}/usage answers a different question (what the period will cost) from the compacted rollups, and can trail these by a compaction cycle.\n\nHobby is hard-capped on both meters. Pro and Enterprise are usage-based and are never cut off, so they report `limit` and `remaining` as null rather than as a very large number; their allowance appears as `included` instead, which is billed past rather than refused.",
+          "Live consumption counters for the period the organization is currently accruing into: flag evaluations and configuration syncs.\n\nThese are the counters ENFORCEMENT reads, so they carry no compaction lag and are the numbers a 429 from the OFREP evaluation endpoints is derived from. GET /v1/orgs/{slug}/usage answers a different question (what the period will cost) from the compacted rollups, and can trail these by a compaction cycle.\n\nHobby is hard-capped on both meters. Pro is usage-based and is never cut off, so it reports `limit` and `remaining` as null rather than as a very large number; its allowance appears as `included` instead, which is billed past rather than refused.",
         security: [{ bearerToken: [] }, { sessionCookie: [] }],
         parameters: [
           {
@@ -2944,7 +2944,7 @@ export const openApiSpec = {
           logo: { type: "string", nullable: true, example: null },
           plan: {
             type: "string",
-            enum: ["free", "pro", "enterprise"],
+            enum: ["free", "pro"],
             example: "free",
           },
           created_at: { type: "string", format: "date-time" },
@@ -3138,7 +3138,7 @@ export const openApiSpec = {
       Usage: {
         type: "object",
         description:
-          "A period's usage, priced per meter, with the plan's included credit applied. All amounts in cents.\n\nOn a contracted plan (`usage_display: \"contracted\"`) every `*_cents` field is **null** and the `contract` object carries consumption against the negotiated envelope instead. Contract pricing is agreed up front from usage estimates, so a period's metered value is not what the organization owes and is deliberately not served as though it were. Quantities are always populated, whatever the mode.",
+          "A period's usage, priced per meter, with the plan's included credit applied. All amounts in cents.",
         required: [
           "period_start",
           "period_end",
@@ -3164,122 +3164,39 @@ export const openApiSpec = {
               "Open periods are priced live; anything else is served from the snapshot frozen when it was billed.",
           },
           stripe_invoice_id: { type: "string", nullable: true },
-          plan: { type: "string", enum: ["free", "pro", "enterprise"] },
+          plan: { type: "string", enum: ["free", "pro"] },
           usage_display: {
             type: "string",
-            enum: ["priced", "capped", "contracted"],
+            enum: ["priced", "capped"],
             description:
-              "Which fields carry meaning for this organization.\n\n- `priced` - every `*_cents` field is populated and `contract` is null.\n- `capped` - the same, but the plan is never invoiced; usage is refused at the cap rather than charged.\n- `contracted` - every `*_cents` field is null; read `contract` instead.\n\nProvided so a client never has to infer presentation from the plan id.",
+              "Which fields carry meaning for this organization.\n\n- `priced` - every `*_cents` field is populated (Pro).\n- `capped` - the same, but the plan is never invoiced; usage is refused at the cap rather than charged (Hobby).\n\nProvided so a client never has to infer presentation from the plan id.",
           },
           included_credit_cents: {
             type: "integer",
-            nullable: true,
             example: 2000,
-            description: "Null on contract pricing.",
           },
           credit_applied_cents: {
             type: "integer",
-            nullable: true,
             example: 1700,
-            description: "Null on contract pricing.",
           },
           credit_remaining_cents: {
             type: "integer",
-            nullable: true,
             example: 300,
-            description: "Null on contract pricing.",
           },
           usage_cents: {
             type: "integer",
-            nullable: true,
             example: 1700,
-            description:
-              "On contract pricing this is the metered overage (usage billed OUTSIDE the base contract); the base contract's pooled figures stay null.",
           },
           overage_cents: {
             type: "integer",
-            nullable: true,
             example: 0,
-            description:
-              "Billed on top of the plan's base price. On contract pricing this equals the metered overage.",
-          },
-          metered_overage_cents: {
-            type: "integer",
-            nullable: true,
-            example: 750,
-            description:
-              "What's billed automatically OUTSIDE the base contract this period (metered meters). Null when not on contract pricing. Covered meters are coordinated at renewal and never appear here.",
+            description: "Billed on top of the plan's base price.",
           },
           subscription_cents: {
             type: "integer",
             nullable: true,
             example: 2000,
-            description:
-              "The plan's base price for the period. Null on contract pricing (the negotiated fee lives in Stripe).",
-          },
-          contract: {
-            type: "object",
-            nullable: true,
-            description:
-              "Consumption against the negotiated agreement. Present only on contract pricing, and null when no agreement is on file.\n\nThe envelope covers the WHOLE TERM and is drawn down cumulatively across it, not reset per period. A contract negotiated from annual estimates makes no promise about any particular month, so a seasonal organization that consumes 40% of its volume in one quarter and almost nothing in the next is exactly on plan. Compare `used_quantity` against `elapsed_percent` to judge that; per-period figures cannot answer it.",
-            required: ["term_start", "term_end", "meters"],
-            properties: {
-              term_start: { type: "string", format: "date" },
-              term_end: { type: "string", format: "date" },
-              days_total: { type: "integer", example: 365 },
-              days_elapsed: { type: "integer", example: 223 },
-              elapsed_percent: { type: "number", example: 61.1 },
-              meters: {
-                type: "array",
-                description:
-                  "One entry per meter that has either a contracted volume or recorded usage. Usage on a meter the agreement never mentioned is included deliberately: it is exactly what a renewal review needs to see.",
-                items: {
-                  type: "object",
-                  required: ["meter", "used_quantity"],
-                  properties: {
-                    meter: { type: "string", example: "flags.evaluations" },
-                    label: { type: "string", example: "Flag evaluations" },
-                    unit: { type: "string", example: "evaluations" },
-                    contracted_quantity: {
-                      type: "integer",
-                      nullable: true,
-                      example: 750000000,
-                      description:
-                        "Volume agreed for the whole term. Null when the agreement is silent about this meter, which is not the same as zero.",
-                    },
-                    used_quantity: { type: "integer", example: 412000000 },
-                    remaining_quantity: {
-                      type: "integer",
-                      nullable: true,
-                      example: 338000000,
-                      description:
-                        "Floored at zero; consumption is never cut off.",
-                    },
-                    used_percent: {
-                      type: "number",
-                      nullable: true,
-                      example: 54.9,
-                      description:
-                        "Uncapped: passing 100 is a true-up to coordinate, not a limit that was hit.",
-                    },
-                    projected_quantity: {
-                      type: "integer",
-                      nullable: true,
-                      example: 674000000,
-                      description:
-                        "Term total at the current average rate. Informational only, and null early in a term: linear extrapolation is a poor lens on seasonal traffic and should never lead.",
-                    },
-                    pace: {
-                      type: "string",
-                      nullable: true,
-                      enum: ["under", "on", "over"],
-                      description:
-                        "Projected term total against the contracted volume, within a 10% tolerance. Null when too little of the term has elapsed to judge.",
-                    },
-                  },
-                },
-              },
-            },
+            description: "The plan's base price for the period.",
           },
           group_by: { type: "string", enum: ["product", "project", "meter"] },
           granularity: { type: "string", enum: ["daily", "weekly", "monthly"] },
@@ -3300,28 +3217,20 @@ export const openApiSpec = {
                   type: "string",
                   enum: ["priced", "covered", "metered"],
                   description:
-                    "How this meter bills. `priced` (Pro/Hobby). On contract pricing: `covered` (in the base contract's term envelope - volume, cost null, coordinated at renewal) or `metered` (billed automatically on top - cost populated).",
+                    "How this meter bills. Always `priced` on current periods; `covered`/`metered` appear only on historical periods closed under legacy contract billing.",
                 },
                 unit_amount_cents: {
                   type: "integer",
-                  nullable: true,
                   example: 5,
-                  description:
-                    "Populated for priced and metered meters; null for covered meters, where the published rate is not what the customer pays.",
                 },
                 per: { type: "integer", example: 1000000 },
                 included_quantity: {
                   type: "integer",
                   example: 1000000,
-                  description:
-                    "For a metered meter this is the PER-CYCLE included allowance, which resets each billing period.",
                 },
                 cost_cents: {
                   type: "integer",
-                  nullable: true,
                   example: 17,
-                  description:
-                    "Populated for priced and metered meters; null for covered meters (not billed).",
                 },
               },
             },
@@ -3344,9 +3253,7 @@ export const openApiSpec = {
                 quantity: { type: "integer", example: 3400000 },
                 cost_cents: {
                   type: "integer",
-                  nullable: true,
                   example: 17,
-                  description: "Null on contract pricing.",
                 },
               },
             },
@@ -3354,7 +3261,7 @@ export const openApiSpec = {
           series: {
             type: "array",
             description:
-              "Chronological buckets for charting. The included allowance is drawn down in time order, so buckets sum to exactly `usage_cents`.\n\nEvery bucket carries quantity alongside cost, so a contracted organization still gets a chartable series with the cost fields nulled out. Quantity is never allocated pro rata the way cost is, so it is exact.",
+              "Chronological buckets for charting. The included allowance is drawn down in time order, so buckets sum to exactly `usage_cents`.\n\nEvery bucket carries quantity alongside cost. Quantity is never allocated pro rata the way cost is, so it is exact.",
             items: {
               type: "object",
               required: ["start", "end", "quantity", "by_group_quantity"],
@@ -3367,15 +3274,12 @@ export const openApiSpec = {
                 end: { type: "string", format: "date", example: "2026-07-19" },
                 cost_cents: {
                   type: "integer",
-                  nullable: true,
                   example: 4,
-                  description: "Null on contract pricing.",
                 },
                 by_group: {
                   type: "object",
                   additionalProperties: { type: "integer" },
-                  description:
-                    "Cost in cents per group key. Empty on contract pricing.",
+                  description: "Cost in cents per group key.",
                 },
                 quantity: { type: "integer", example: 120000 },
                 by_group_quantity: {
@@ -3428,7 +3332,7 @@ export const openApiSpec = {
             enum: ["open", "closed", "invoiced", "void"],
           },
           is_current: { type: "boolean" },
-          plan: { type: "string", enum: ["free", "pro", "enterprise"] },
+          plan: { type: "string", enum: ["free", "pro"] },
           usage_cents: { type: "integer", nullable: true, example: 2512 },
           credit_applied_cents: {
             type: "integer",
@@ -3515,7 +3419,7 @@ export const openApiSpec = {
               "First day of the window these counters cover. The organization's OWN billing window, not the calendar month, so a cap counts the same period the invoice does. An organization without a subscription has no cycle, so this is the first of the calendar month.",
             example: "2026-07-19",
           },
-          plan: { type: "string", enum: ["free", "pro", "enterprise"] },
+          plan: { type: "string", enum: ["free", "pro"] },
           counters: {
             type: "array",
             items: { $ref: "#/components/schemas/UsageCounter" },
@@ -3555,7 +3459,7 @@ export const openApiSpec = {
           hard_capped: {
             type: "boolean",
             description:
-              "Whether exceeding `limit` refuses requests (Hobby) rather than billing for them (Pro, Enterprise).",
+              "Whether exceeding `limit` refuses requests (Hobby) rather than billing for them (Pro).",
           },
           included: {
             type: "integer",

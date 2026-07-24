@@ -21,10 +21,7 @@ const groups: FooterGroup[] = [
   },
   {
     title: "Company",
-    links: [
-      { label: "Enterprise", href: "/enterprise" },
-      { label: "Contact sales", href: "/enterprise/contact" },
-    ],
+    links: [{ label: "Enterprise", href: "/enterprise" }],
   },
   {
     title: "Resources",

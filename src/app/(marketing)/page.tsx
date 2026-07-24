@@ -10,7 +10,7 @@ import {
 import { brand } from "@/lib/brand";
 import { appHref } from "@/lib/urls";
 import { activeMeters, formatCents, formatMeterRate } from "@/lib/meters";
-import { listedPlanVersions } from "@/lib/plan-catalog.server";
+import { proHeadline } from "@/lib/plan-catalog.server";
 import { BleedBand } from "@/components/bleed-band";
 import { PageHero } from "@/components/page-hero";
 
@@ -75,19 +75,15 @@ const steps = [
 ] as const;
 
 /**
- * See /pricing: revalidated so a published price shows up here too. Inlined
+ * See /pricing: revalidated so a published Pro price shows up here too. Inlined
  * because Next statically analyses segment config.
  */
-export const revalidate = 60;
+export const revalidate = 3600;
 
 export default async function Home() {
-  const plans = await listedPlanVersions();
-  // The emphasised paid plan drives the teaser; the unbilled tier names itself.
-  const headline =
-    plans.find((plan) => plan.highlight && plan.billable) ??
-    plans.find((plan) => plan.billable) ??
-    null;
-  const freeTier = plans.find((plan) => !plan.billable) ?? null;
+  // Static copy, one live number: only the Pro price/credit is read from the
+  // billing catalog so the teaser can never quote a stale price.
+  const pro = await proHeadline();
 
   return (
     <main className="relative flex w-full flex-1 flex-col text-zinc-100">
@@ -214,33 +210,13 @@ export default async function Home() {
               Priced so it stays boring
             </h2>
             <p className="mt-3 max-w-md text-sm leading-6 text-zinc-400">
-              {/*
-                Read from the plan rows, not from constants. The teaser quotes
-                two numbers that move whenever pricing does, and a homepage
-                advertising last quarter's price is worse than one that says
-                nothing.
-              */}
-              {freeTier ? `${freeTier.displayName} is free and capped, so it can never produce an invoice. ` : null}
-              {headline?.unitAmountCents != null ? (
-                <>
-                  {headline.displayName} is{" "}
-                  {formatCents(headline.unitAmountCents).replace(/\.00$/, "")} a{" "}
-                  {headline.interval}
-                  {headline.includedCreditCents != null ? (
-                    <>
-                      {" "}
-                      and returns as{" "}
-                      {formatCents(headline.includedCreditCents).replace(
-                        /\.00$/,
-                        "",
-                      )}{" "}
-                      of pooled usage across every product
-                    </>
-                  ) : null}
-                  .{" "}
-                </>
-              ) : null}
-              No seats, ever.
+              {/* Copy is static; only the Pro price/credit is read live, so it
+                  can never advertise a price we no longer charge. */}
+              Hobby is free and capped, so it can never produce an invoice. Pro
+              is {formatCents(pro.priceCents).replace(/\.00$/, "")} a{" "}
+              {pro.interval} and returns as{" "}
+              {formatCents(pro.includedCreditCents).replace(/\.00$/, "")} of
+              pooled usage across every product. No seats, ever.
             </p>
             <Link
               href="/pricing"
@@ -284,10 +260,10 @@ export default async function Home() {
             Start for free
           </Link>
           <Link
-            href="/enterprise/contact"
+            href="/pricing"
             className="rounded-md border border-white/10 px-5 py-2.5 text-sm font-semibold text-zinc-300 transition hover:border-white/20 hover:text-zinc-100"
           >
-            Talk to sales
+            See pricing
           </Link>
         </div>
       </div>

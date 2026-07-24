@@ -8,6 +8,7 @@ import { brand } from "@/lib/brand";
 import { appPath, marketingHref } from "@/lib/urls";
 import { ORG_SLUG_HINT, suggestOrgSlug, validateOrgSlug } from "@/lib/org-slug";
 import { PLANS, type PlanId } from "@/lib/plans";
+import { formatCents } from "@/lib/meters";
 import { PlanColumns, type PlanColumn } from "@/components/plan-columns";
 import { Notice, buttonClass, hintClass } from "@/components/form-ui";
 import { Input, Label } from "@/ui";
@@ -46,6 +47,12 @@ export function NewOrgForm({
     !(preselectedPlan === "free" && ownsFreeOrg)
       ? preselectedPlan
       : null;
+
+  // The column for the preselected plan, so the summary badge quotes the live
+  // price the columns carry rather than a hardcoded constant.
+  const preselectedColumn = preselected
+    ? (plans.find((column) => column.plan === preselected) ?? null)
+    : null;
 
   function handleNameChange(value: string) {
     setName(value);
@@ -151,12 +158,12 @@ export function NewOrgForm({
             <div className="flex items-center justify-between rounded-lg border border-teal-500/30 bg-teal-500/5 px-4 py-3">
               <div>
                 <span className="text-sm font-semibold text-zinc-100">
-                  {PLANS[preselected].name}
+                  {preselectedColumn?.displayName ?? PLANS[preselected].name}
                 </span>
                 <span className="ml-2 text-sm text-zinc-400">
-                  {preselected === "free"
+                  {preselected === "free" || preselectedColumn?.unitAmountCents == null
                     ? "$0 forever"
-                    : `$${PLANS.pro.priceMonthly}/month`}
+                    : `${formatCents(preselectedColumn.unitAmountCents).replace(/\.00$/, "")}/${preselectedColumn.interval}`}
                 </span>
               </div>
               <Link
@@ -225,10 +232,10 @@ export function NewOrgForm({
                       plan.id,
                       <Link
                         key={plan.id}
-                        href={marketingHref("/enterprise/contact")}
+                        href={marketingHref("/enterprise")}
                         className="inline-block rounded-full border border-white/15 px-5 py-2 text-sm font-semibold text-zinc-200 transition hover:border-white/30 hover:text-white"
                       >
-                        Contact sales
+                        Get notified
                       </Link>,
                     ];
                   }

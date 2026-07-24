@@ -40,10 +40,8 @@ describe("evaluation allowance", () => {
   });
 
   it("leaves paid plans uncapped", () => {
-    // Going over produces a bill, never a refusal - and Enterprise contracts
-    // promise no hard caps in writing.
+    // Going over produces a bill, never a refusal.
     expect(evaluationAllowance("pro")).toBeNull();
-    expect(evaluationAllowance("enterprise")).toBeNull();
   });
 
   it("fails toward the cap when a rate is missing or malformed", () => {
@@ -89,13 +87,12 @@ describe("allowance boundary", () => {
 });
 
 describe("sync guardrail", () => {
-  it("hard-caps Hobby but never Pro or Enterprise", () => {
+  it("hard-caps Hobby but never Pro", () => {
     // The guardrail exists because config syncs are real bandwidth and scale
     // with SDK instance count, so a polling fleet costs us money while
     // generating no evaluations at all.
     expect(hardCap("free", SYNC_METER)).toBe(5_000_000);
     expect(hardCap("pro", SYNC_METER)).toBeNull();
-    expect(hardCap("enterprise", SYNC_METER)).toBeNull();
   });
 
   it("gives Pro the 50M allowance the pricing page promises", () => {

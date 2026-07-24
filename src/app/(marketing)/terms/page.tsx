@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { brand } from "@/lib/brand";
 import { formatCents } from "@/lib/meters";
-import { listedPlanVersions } from "@/lib/plan-catalog.server";
+import { proHeadline } from "@/lib/plan-catalog.server";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
@@ -10,33 +10,19 @@ export const metadata: Metadata = {
 };
 
 /**
- * The billing sections describe the mechanics this repository implements:
- * a usage credit per paid plan, overage billed in arrears on the following
- * invoice, hard caps only on unbilled tiers, and contract plans priced by
- * agreement. Every clause is generated from the plan rows, so the terms and the
- * pricing page cannot drift apart - a number typed here by hand would
- * eventually contradict the one a customer is actually charged.
- *
- * These are the terms a customer agrees to, so a stale price here is not a
- * cosmetic problem - it is a legal document describing a fee we no longer
- * charge. Deriving the clauses from the same rows that bill people is what
- * makes that impossible rather than merely unlikely.
+ * The billing sections describe the mechanics this repository implements: a
+ * usage credit on Pro, overage billed in arrears on the following invoice, and
+ * hard caps only on Hobby. The clauses are static copy, but the one number a
+ * customer is charged - the Pro price/credit - is read live from the active
+ * plan version (proHeadline), so this legal document can never quote a fee we
+ * no longer charge.
  *
  * Inlined because Next statically analyses segment config.
  */
-export const revalidate = 60;
+export const revalidate = 3600;
 
 export default async function TermsPage() {
-  const plans = await listedPlanVersions();
-  const unbilled = plans.filter((plan) => !plan.billable);
-  // A listed plan with an amount is sold at that amount; one without is priced
-  // by agreement (enterprise), which is a different clause entirely.
-  const priced = plans.filter(
-    (plan) => plan.billable && plan.unitAmountCents != null,
-  );
-  const contracted = plans.filter(
-    (plan) => plan.billable && plan.unitAmountCents == null,
-  );
+  const pro = await proHeadline();
 
   return (
     <LegalPage
@@ -120,38 +106,21 @@ export default async function TermsPage() {
 
       <LegalSection n={5} title="Plans, fees, and usage">
         <ul>
-          {unbilled.map((plan) => (
-            <li key={plan.id ?? plan.plan}>
-              <strong className="text-zinc-300">{plan.displayName}</strong> is
-              free, hard-capped, and never generates a bill. When it reaches its
-              ceiling, requests are refused rather than charged.
-            </li>
-          ))}
-          {priced.map((plan) => (
-            <li key={plan.id ?? plan.plan}>
-              <strong className="text-zinc-300">{plan.displayName}</strong> is{" "}
-              {formatCents(plan.unitAmountCents as number)} per {plan.interval},
-              billed in advance
-              {plan.includedCreditCents ? (
-                <>
-                  , and includes {formatCents(plan.includedCreditCents)} of
-                  usage each period
-                </>
-              ) : null}
-              . Usage beyond that credit is billed{" "}
-              <strong className="text-zinc-300">in arrears</strong>, appearing
-              on the following period&apos;s invoice at the rates published on
-              our pricing page. {plan.displayName} is not hard-capped: it keeps
-              serving and bills the overage.
-            </li>
-          ))}
-          {contracted.map((plan) => (
-            <li key={plan.id ?? plan.plan}>
-              <strong className="text-zinc-300">{plan.displayName}</strong> is
-              priced by agreement. Where a signed agreement and these terms
-              conflict, that agreement wins.
-            </li>
-          ))}
+          <li>
+            <strong className="text-zinc-300">Hobby</strong> is free,
+            hard-capped, and never generates a bill. When it reaches its
+            ceiling, requests are refused rather than charged.
+          </li>
+          <li>
+            <strong className="text-zinc-300">Pro</strong> is{" "}
+            {formatCents(pro.priceCents)} per {pro.interval}, billed in advance,
+            and includes {formatCents(pro.includedCreditCents)} of usage each
+            period. Usage beyond that credit is billed{" "}
+            <strong className="text-zinc-300">in arrears</strong>, appearing on
+            the following period&apos;s invoice at the rates published on our
+            pricing page. Pro is not hard-capped: it keeps serving and bills the
+            overage.
+          </li>
         </ul>
         <p>
           Fees exclude taxes, which we add where required. Payments are handled
@@ -177,12 +146,8 @@ export default async function TermsPage() {
       <LegalSection n={7} title="Availability and support">
         <p>
           We work to keep {brand.name} available and fast, but the hosted
-          service is provided without an uptime commitment unless you have an
-          Enterprise agreement that includes one. Support for{" "}
-          {unbilled.map((plan) => plan.displayName).join(", ") || "free plans"}{" "}
-          is community-based;{" "}
-          {priced.map((plan) => plan.displayName).join(", ") || "paid plans"}{" "}
-          include standard support; Enterprise support is set by agreement.
+          service is provided without an uptime commitment. Support for Hobby is
+          community-based; Pro includes standard support.
         </p>
         <p>
           Flag evaluation is designed to fail safe on your side: SDKs cache and

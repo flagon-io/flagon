@@ -7,30 +7,24 @@ import { leads } from "@/db/schema";
 import { uuidv7 } from "@/lib/uuidv7";
 
 /**
- * Contact-sales lead capture. Writes to the leads table (drizzle/0010);
- * follow-up happens in internal tooling, deliberately not email.
+ * Enterprise "coming soon" waitlist capture. Writes to the leads table
+ * (drizzle/0010) with kind "waitlist"; follow-up happens in the operator
+ * console, deliberately not email.
  */
-export type LeadResult = { ok: boolean; message: string };
+export type WaitlistResult = { ok: boolean; message: string };
 
 const SUBMISSIONS_PER_IP_PER_HOUR = 3;
 
-export async function submitLead(input: {
-  name: string;
+export async function joinWaitlist(input: {
   email: string;
-  company: string;
-  companySize?: string;
-  message?: string;
+  company?: string;
   source?: string;
-}): Promise<LeadResult> {
-  const name = input.name?.trim() ?? "";
+}): Promise<WaitlistResult> {
   const email = input.email?.trim().toLowerCase() ?? "";
-  const company = input.company?.trim() ?? "";
+  const company = input.company?.trim() || null;
 
-  if (!name || !company) {
-    return { ok: false, message: "Name and company are required." };
-  }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return { ok: false, message: "Enter a valid work email." };
+    return { ok: false, message: "Enter a valid email." };
   }
 
   const requestHeaders = await headers();
@@ -58,18 +52,18 @@ export async function submitLead(input: {
 
   await db.insert(leads).values({
     id: uuidv7(),
-    kind: "enterprise",
-    name,
+    kind: "waitlist",
+    // The leads table requires a name/company; the waitlist only asks for an
+    // email, so we fall back to it rather than add columns for a coming-soon list.
+    name: email,
     email,
-    company,
-    companySize: input.companySize?.trim() || null,
-    message: input.message?.trim().slice(0, 4000) || null,
+    company: company ?? "",
     source: input.source?.trim() || null,
     ip,
   });
 
   return {
     ok: true,
-    message: "Thanks! Our team will reach out shortly.",
+    message: "You're on the list. We'll be in touch when Enterprise is ready.",
   };
 }

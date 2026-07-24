@@ -29,6 +29,8 @@ export type PlanColumn = {
   unitAmountCents: number | null;
   interval: string;
   highlight: boolean;
+  /** A not-yet-launched plan: renders "Coming soon" instead of a price. */
+  comingSoon?: boolean;
   /** Context for {token} substitution in the bullets. */
   copy: PlanCopyContext;
 };
@@ -36,12 +38,13 @@ export type PlanColumn = {
 /**
  * How a plan's price reads at the top of its column.
  *
- * Three genuinely different answers, and collapsing any two of them misleads:
- * an unbilled tier is Free (not $0, which implies an invoice for nothing), a
- * contract plan is Custom (there is no list price to quote), and a real
+ * Genuinely different answers, and collapsing any two of them misleads: a
+ * not-yet-launched plan is Coming soon (no price to quote yet), an unbilled
+ * tier is Free (not $0, which implies an invoice for nothing), and a real
  * subscription is its amount.
  */
 function priceLabel(plan: PlanColumn): { price: string; period?: string } {
+  if (plan.comingSoon) return { price: "Coming soon" };
   if (!plan.billable) return { price: "Free" };
   if (plan.unitAmountCents == null) return { price: "Custom" };
   return {

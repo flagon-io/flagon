@@ -2,9 +2,8 @@
 // the billing model can take, plus usage to price them against.
 //
 // WHY THIS EXISTS. The interesting states in this system are combinations -
-// an unbilled tier at its ceiling, a custom-priced Pro whose credit differs
-// from its fee, an enterprise org whose contract covers one meter and meters
-// another, an org grandfathered on a superseded plan version. Reaching any of
+// an unbilled tier at its ceiling, a Pro org inside its credit, a Pro org in
+// overage, an org grandfathered on a superseded plan version. Reaching any of
 // them by clicking takes several minutes and reaching all of them takes an
 // afternoon, so nobody does, and the console's edge cases go unlooked at.
 //
@@ -88,34 +87,6 @@ const ORGS = [
     subscription: true,
     // Well past the credit. The row margin actually cares about.
     usage: { "flags.evaluations": 140_000_000, "flags.syncs": 80_000_000 },
-  },
-  {
-    slug: "dev-pro-custom",
-    name: "Pro Custom Price",
-    plan: "pro",
-    subscription: true,
-    // THE CASE THAT MOTIVATED ALL OF THIS: pays $100/mo, and must receive $100
-    // of credit rather than the plan's list $20.
-    override: {
-      includedCreditCents: 10_000,
-      meterAllowances: { "flags.syncs": 200_000_000 },
-      note: "Negotiated: $100/mo with credit and syncs to match.",
-    },
-    usage: { "flags.evaluations": 90_000_000, "flags.syncs": 150_000_000 },
-  },
-  {
-    slug: "dev-enterprise",
-    name: "Enterprise Contracted",
-    plan: "enterprise",
-    subscription: true,
-    // Covered on evaluations (term envelope, never billed), metered on syncs.
-    contract: {
-      meterAllowances: { "flags.evaluations": 5_000_000_000 },
-      meteredAllowances: { "flags.syncs": 100_000_000 },
-      meteredRates: { "flags.syncs": { unit_amount_cents: 50, per: 1_000_000 } },
-      note: "Seeded fixture: covered evaluations, metered syncs.",
-    },
-    usage: { "flags.evaluations": 800_000_000, "flags.syncs": 260_000_000 },
   },
   {
     slug: "dev-legacy",
@@ -247,40 +218,6 @@ try {
         updated_at = now()
       RETURNING id
     `;
-
-    if (fixture.override) {
-      await sql`
-        INSERT INTO org_entitlements (
-          organization_id, included_credit_cents, meter_allowances, note, status
-        ) VALUES (
-          ${org.id}::uuid,
-          ${fixture.override.includedCreditCents},
-          ${sql.json(fixture.override.meterAllowances)},
-          ${fixture.override.note},
-          'active'
-        )
-        ON CONFLICT DO NOTHING
-      `;
-    }
-
-    if (fixture.contract) {
-      await sql`
-        INSERT INTO org_contracts (
-          organization_id, term_start, term_end,
-          meter_allowances, metered_allowances, metered_rates, note, status
-        ) VALUES (
-          ${org.id}::uuid,
-          date_trunc('year', now())::date,
-          (date_trunc('year', now()) + interval '1 year - 1 day')::date,
-          ${sql.json(fixture.contract.meterAllowances)},
-          ${sql.json(fixture.contract.meteredAllowances)},
-          ${sql.json(fixture.contract.meteredRates)},
-          ${fixture.contract.note},
-          'active'
-        )
-        ON CONFLICT DO NOTHING
-      `;
-    }
 
     await seedUsage(org.id, fixture.usage);
     created.push(fixture.slug);

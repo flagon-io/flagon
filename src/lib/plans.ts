@@ -8,33 +8,24 @@
  * Free is a usage-boxed trial / hobby tier, deliberately not sized for real
  * projects: one free org per account, solo, few projects. Pro is the
  * preferred plan: $20/mo which returns as $20 of usage credit, with overage
- * billed at the same rates. Enterprise is contract-only (no self-serve).
- * When billing is disabled (self-host), none of these limits apply.
+ * billed at the same rates. When billing is disabled (self-host), none of
+ * these limits apply.
  */
-export const PLAN_IDS = ["free", "pro", "enterprise"] as const;
+export const PLAN_IDS = ["free", "pro"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
 /**
  * Could a period's usage produce ANY automatic invoice line on this plan? A
- * coarse gate for the webhook; the per-meter decision is meterAutoInvoiced in
- * src/lib/contracts.ts.
+ * coarse gate for the webhook.
  *
- * Pro auto-invoices everything. Enterprise auto-invoices its METERED meters
- * (overage on products outside the base contract), so it qualifies too - the
- * covered meters are coordinated at renewal and excluded per-meter downstream.
- * Hobby is never invoiced.
- *
- * This used to be "Pro only" (`usageIsAutoInvoiced`), when enterprise was billed
- * entirely by agreement. Enterprise now carries a real subscription with
- * automated overage on the parts the contract does not cover, so the gate had to
- * widen and the real decision moved to the meter level.
+ * Pro auto-invoices everything past its credit. Hobby is never invoiced.
  */
 export function planAutoInvoicesAnything(plan: PlanId): boolean {
-  return plan === "pro" || plan === "enterprise";
+  return plan === "pro";
 }
 
 /**
- * How a plan's usage should be PRESENTED. Three modes, because three plans
+ * How a plan's usage should be PRESENTED. Two modes, because the two plans
  * answer "what did this cost me?" in genuinely different ways:
  *
  *   priced      Dollars are the answer. Usage is priced, credit is applied,
@@ -43,28 +34,11 @@ export function planAutoInvoicesAnything(plan: PlanId): boolean {
  *   capped      There is no bill and there never will be, so the honest frame
  *               is headroom: a percentage of the allowance, and a cap that
  *               refuses rather than charges. Only Hobby.
- *
- *   contracted  The fee was negotiated up front from usage estimates, so a
- *               period's metered value is NOT what the customer owes. Showing
- *               it as money quotes a bill that will never arrive. The honest
- *               frame is consumption against the agreed envelope.
- *
- * The distinction is easy to lose because Enterprise's includedUsageCents is
- * 0, which means "no self-serve credit", NOT "every unit is billable". Priced
- * rendering on a contracted plan therefore produces the worst possible page:
- * a $0.00 subscription line, the full metered value as a subtotal, no credit
- * against it, and a total the customer has never been asked to pay.
- *
- * Cost is still COMPUTED for contracted orgs and frozen into the period
- * snapshot (billing-periods.server.ts) - a renewal true-up and any internal
- * margin review read exactly that. It is the DISPLAY that is withheld.
  */
-export type UsageDisplay = "priced" | "capped" | "contracted";
+export type UsageDisplay = "priced" | "capped";
 
 export function usageDisplay(plan: PlanId): UsageDisplay {
-  if (plan === "pro") return "priced";
-  if (plan === "enterprise") return "contracted";
-  return "capped";
+  return plan === "pro" ? "priced" : "capped";
 }
 
 export const PLANS = {
@@ -126,6 +100,7 @@ export const PLANS = {
       "Unlimited flags",
       "$10 of included usage a month, pooled across products",
       "Never generates a bill",
+      "Or self-host the open-source version, free forever",
       "Community support",
     ],
   },
@@ -160,34 +135,9 @@ export const PLANS = {
       "Standard support",
     ],
   },
-  enterprise: {
-    id: "enterprise",
-    name: "Enterprise",
-    /** Custom pricing: fixed from usage estimates, negotiated. No anchor. */
-    priceMonthly: null,
-    /** Contracted per agreement; usage is reviewed, never cut off. */
-    includedUsageCents: 0,
-    /** Contracted per agreement rather than declared here. */
-    meterAllowances: {},
-    hardCaps: {},
-    tagline:
-      "Critical scale, security, and support, priced from your usage estimates.",
-    limits: {
-      freeOrgsPerUser: Infinity,
-      projects: Infinity,
-      members: Infinity,
-    },
-    features: [
-      "Fixed pricing from usage estimates",
-      "No hard caps, ever",
-      "Uptime SLA",
-      "Priority support and onboarding",
-      "Invoicing and procurement-friendly terms",
-    ],
-  },
 } as const;
 
-/** Plans a user can pick at creation; enterprise is contact-only. */
+/** Plans a user can pick at creation. Both self-serve. */
 export const SELF_SERVE_PLANS: PlanId[] = ["free", "pro"];
 
 export function isPlanId(value: string): value is PlanId {
@@ -197,22 +147,13 @@ export function isPlanId(value: string): value is PlanId {
 /**
  * The plan an ACTIVE Stripe subscription puts its organization on.
  *
- * A subscription can DECLARE its plan through `metadata.flagon_plan`. This is
- * how a non-self-serve plan gets onto an org whose subscription was created
- * outside Checkout - an enterprise contract set up by hand in the Stripe
- * dashboard, by a provisioning script, or by an operator tool. The marker is
- * flagon's own billing convention; nothing outside this repo is required to
- * read or honor it.
- *
- * Self-serve Pro subscriptions come through Checkout and carry no marker, so
- * the default is `pro`. An absent, unrecognized, or `free` marker also resolves
- * to `pro` rather than trusting an arbitrary string as a plan or subscribing an
- * org onto the un-billable free tier - a subscription that is active is, by
- * definition, at least Pro.
+ * There is exactly one billable plan (Pro), so any active subscription resolves
+ * to `pro`. The signature still takes the subscription metadata so callers do
+ * not have to special-case it, and so a future billable plan can reintroduce a
+ * `metadata.flagon_plan` marker here without touching the webhook.
  */
 export function subscriptionPlan(
-  metadata: { flagon_plan?: string | null } | null | undefined,
+  _metadata?: { flagon_plan?: string | null } | null,
 ): PlanId {
-  const declared = metadata?.flagon_plan;
-  return declared && isPlanId(declared) && declared !== "free" ? declared : "pro";
+  return "pro";
 }

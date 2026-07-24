@@ -4,17 +4,18 @@ import { BadgeCheck, FileText, Gauge, Headset } from "lucide-react";
 import { brand } from "@/lib/brand";
 import { BleedBand } from "@/components/bleed-band";
 import { PageHero } from "@/components/page-hero";
+import { WaitlistForm } from "./waitlist-form";
 
 export const metadata: Metadata = {
   title: `Enterprise · ${brand.name}`,
-  description: `${brand.name} Enterprise: fixed pricing from your usage estimates, no hard caps, priority support, and procurement-friendly terms.`,
+  description: `${brand.name} Enterprise is coming soon: fixed pricing from your usage estimates, no hard caps, priority support, and procurement-friendly terms. Join the waitlist.`,
 };
 
 const pillars = [
   {
     icon: Gauge,
     title: "Fixed, predictable pricing",
-    body: "Your contract is priced from your usage estimates: one number your finance team can plan around, reviewed together as you grow.",
+    body: "A contract priced from your usage estimates: one number your finance team can plan around, reviewed together as you grow.",
   },
   {
     icon: BadgeCheck,
@@ -34,15 +35,23 @@ const pillars = [
 ] as const;
 
 /**
- * Enterprise landing (`/enterprise`): the marketing blurb. Deliberately
- * lean until there are customers and numbers to show; the real action is
- * the contact flow at /enterprise/contact.
+ * Enterprise landing (`/enterprise`): a coming-soon page while we focus the
+ * alpha on Hobby and Pro. The pillars describe where Enterprise is headed; the
+ * only action is joining the waitlist. When Enterprise ships, this page grows a
+ * real contact flow again.
  */
 export default function EnterprisePage() {
   return (
     <div className="relative">
       <PageHero
-        eyebrow="Enterprise"
+        eyebrow={
+          <span className="inline-flex items-center gap-2">
+            Enterprise
+            <span className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-300">
+              Coming soon
+            </span>
+          </span>
+        }
         title={
           <>
             The whole platform,
@@ -53,18 +62,18 @@ export default function EnterprisePage() {
         lede={
           <>
             Everything in Pro, with fixed pricing from your usage estimates, no
-            hard caps, and support that answers. Built for teams where the
-            platform going down is not an option.
+            hard caps, and support that answers. We&apos;re finishing it now —
+            leave your email and we&apos;ll tell you the moment it&apos;s ready.
           </>
         }
         actions={
           <>
-            <Link
-              href="/enterprise/contact"
+            <a
+              href="#waitlist"
               className="inline-block rounded-full bg-teal-500 px-6 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
             >
-              Contact sales
-            </Link>
+              Get notified
+            </a>
             <Link
               href="/pricing"
               className="inline-block rounded-full border border-white/15 px-6 py-2.5 text-sm font-semibold text-zinc-200 transition hover:border-white/30 hover:text-white"
@@ -102,8 +111,11 @@ export default function EnterprisePage() {
       </BleedBand>
 
       <div className="relative mx-auto w-full max-w-7xl px-6 pb-24 sm:px-12 lg:px-20">
-        {/* Closing CTA */}
-        <div className="relative mt-20 overflow-hidden border border-white/10 px-6 py-16 text-center">
+        {/* Waitlist */}
+        <div
+          id="waitlist"
+          className="relative mt-20 overflow-hidden border border-white/10 px-6 py-16"
+        >
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0"
@@ -112,21 +124,17 @@ export default function EnterprisePage() {
                 "radial-gradient(70% 100% at 50% 100%, rgba(13,148,136,0.25) 0%, rgba(13,148,136,0.08) 50%, transparent 100%)",
             }}
           />
-          <div className="relative">
+          <div className="relative mx-auto max-w-lg text-center">
             <h2 className="text-3xl font-semibold tracking-tight text-zinc-100">
-              Let&apos;s shape your contract.
+              Enterprise is coming soon.
             </h2>
             <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-zinc-400">
-              Tell us what you&apos;re running and we&apos;ll come back with a
-              number, not a call tree.
+              Running Flagon at scale and want a fixed price with an SLA? Join
+              the waitlist and we&apos;ll reach out as soon as it&apos;s ready.
+              In the meantime, Pro has no hard caps and no seat pricing.
             </p>
-            <div className="mt-8">
-              <Link
-                href="/enterprise/contact"
-                className="inline-block rounded-full bg-teal-500 px-6 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-teal-400"
-              >
-                Contact sales
-              </Link>
+            <div className="mt-8 text-left">
+              <WaitlistForm />
             </div>
           </div>
         </div>
