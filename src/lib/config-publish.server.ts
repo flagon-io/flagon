@@ -117,11 +117,14 @@ export async function reconcileDirtyConfigs(options?: {
 export async function countDirtyConfigs(
   staleAfterMs = 5 * 60_000,
 ): Promise<{ total: number; stale: number }> {
-  const cutoff = new Date(Date.now() - staleAfterMs);
+  // Compute the cutoff in SQL (now() minus an interval built from a numeric
+  // param) rather than binding a JS Date: postgres-js cannot serialize a Date
+  // passed as a raw sql() parameter, and a numeric second-count is unambiguous.
+  const seconds = Math.max(0, Math.round(staleAfterMs / 1000));
   const [totals] = await db
     .select({
       total: sql<number>`count(*)::int`,
-      stale: sql<number>`count(*) FILTER (WHERE ${organizations.configPendingAt} < ${cutoff})::int`,
+      stale: sql<number>`count(*) FILTER (WHERE ${organizations.configPendingAt} < now() - make_interval(secs => ${seconds}))::int`,
     })
     .from(organizations)
     .where(isNotNull(organizations.configPendingAt));
