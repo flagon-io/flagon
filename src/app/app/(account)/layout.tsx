@@ -1,8 +1,6 @@
 import { appPath, marketingHref } from "@/lib/urls";
 import Link from "next/link";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards.server";
 import { brand } from "@/lib/brand";
 import { FlagonMark } from "@/lib/logo";
 import { headerPillClass } from "@/components/form-ui";
@@ -22,8 +20,7 @@ export default async function AccountLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect(appPath("/signin"));
+  const session = await requireSession();
 
   // Unverified primary email: keep the user signed in (no lockouts) but nag
   // persistently until the address is proven.

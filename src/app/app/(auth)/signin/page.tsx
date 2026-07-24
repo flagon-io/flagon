@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { brand } from "@/lib/brand";
-import { redirectIfAuthenticated } from "../session";
+import { redirectIfAuthenticated } from "@/lib/auth-guards.server";
 import { SignInForm } from "./signin-form";
 
 export const metadata: Metadata = {
@@ -10,9 +10,10 @@ export const metadata: Metadata = {
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reset?: string }>;
+  searchParams: Promise<{ reset?: string; next?: string }>;
 }) {
-  await redirectIfAuthenticated();
-  const { reset } = await searchParams;
-  return <SignInForm passwordWasReset={reset === "1"} />;
+  const { reset, next } = await searchParams;
+  // Already signed in? Honor `next` so a shared link lands where it points.
+  await redirectIfAuthenticated(next);
+  return <SignInForm passwordWasReset={reset === "1"} next={next} />;
 }

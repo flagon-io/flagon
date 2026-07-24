@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { brand } from "@/lib/brand";
+import { resolveNext } from "@/lib/urls";
 import { signInAction } from "../actions";
 import {
   AuthAltCard,
@@ -19,11 +20,20 @@ import {
 
 export function SignInForm({
   passwordWasReset,
+  next,
 }: {
   passwordWasReset: boolean;
+  next?: string;
 }) {
   const router = useRouter();
   const base = useAuthBase();
+  // Where a gated visit was headed, if valid; otherwise the console root. On a
+  // dedicated app origin `base` is "", so `|| "/"` (not `??`) is what keeps the
+  // fallback a real path instead of an empty push.
+  const destination = resolveNext(next) ?? (base || "/");
+  const signUpHref = next
+    ? `${base}/signup?next=${encodeURIComponent(next)}`
+    : `${base}/signup`;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -46,7 +56,7 @@ export function SignInForm({
       return;
     }
 
-    router.push(base || "/");
+    router.push(destination);
     router.refresh();
   }
 
@@ -111,7 +121,7 @@ export function SignInForm({
 
       <AuthAltCard>
         New to {brand.name}?{" "}
-        <Link href={`${base}/signup`} className={linkClass}>
+        <Link href={signUpHref} className={linkClass}>
           Create an account
         </Link>
         .

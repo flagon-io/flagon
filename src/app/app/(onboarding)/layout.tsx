@@ -1,9 +1,7 @@
 import { appPath, marketingHref } from "@/lib/urls";
 import Link from "next/link";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { ArrowUpRight } from "lucide-react";
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards.server";
 import { brand } from "@/lib/brand";
 import { FlagonMark } from "@/lib/logo";
 import { headerPillClass } from "@/components/form-ui";
@@ -28,8 +26,7 @@ export default async function OnboardingLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect(appPath("/signin"));
+  await requireSession();
 
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-[#09090b]">

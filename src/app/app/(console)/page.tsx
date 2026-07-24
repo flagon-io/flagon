@@ -2,6 +2,7 @@ import { appPath } from "@/lib/urls";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards.server";
 
 /**
  * App root - `app.flagon.io/` (locally `/app`). Pure router: new users land
@@ -11,8 +12,7 @@ import { auth } from "@/lib/auth";
  */
 export default async function AppIndexPage() {
   const requestHeaders = await headers();
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect(appPath("/signin"));
+  const session = await requireSession();
 
   const orgs = await auth.api.listOrganizations({ headers: requestHeaders });
   if (orgs.length === 0) redirect(appPath("/new"));

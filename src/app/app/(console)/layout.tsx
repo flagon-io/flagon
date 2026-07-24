@@ -1,8 +1,8 @@
-import { appPath, marketingHref } from "@/lib/urls";
+import { marketingHref } from "@/lib/urls";
 import Link from "next/link";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards.server";
 import { headerPillClass } from "@/components/form-ui";
 import { UserMenu } from "@/components/user-menu";
 import { listEmails } from "@/lib/user-emails";
@@ -24,8 +24,7 @@ export default async function ConsoleLayout({
   children: React.ReactNode;
 }) {
   const requestHeaders = await headers();
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect(appPath("/signin"));
+  const session = await requireSession();
 
   const orgs = await auth.api.listOrganizations({ headers: requestHeaders });
   const switcherOrgs: SwitcherOrg[] = orgs.map((org) => ({

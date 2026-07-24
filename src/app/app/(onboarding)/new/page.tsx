@@ -1,8 +1,5 @@
-import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards.server";
 import { billingEnabled } from "@/lib/billing";
 import { isPlanId, SELF_SERVE_PLANS, type PlanId } from "@/lib/plans";
 import { userOwnsFreeOrg } from "@/lib/plans.server";
@@ -23,8 +20,7 @@ export default async function NewOrganizationPage({
 }: {
   searchParams: Promise<{ plan?: string }>;
 }) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect(appPath("/signin"));
+  const session = await requireSession();
 
   const { plan } = await searchParams;
   const billing = billingEnabled();

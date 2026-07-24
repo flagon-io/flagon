@@ -28,13 +28,23 @@ function subdomainOf(host: string): string | null {
 export function proxy(request: NextRequest) {
   const host = request.headers.get("host") ?? "";
   const sub = subdomainOf(host);
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
+
+  // Expose the browser-facing path to server components. A server component
+  // cannot read its own URL, but a gated page needs it to remember where an
+  // anonymous visitor was headed and return them there after sign-in (see
+  // requireSession). We stamp the ORIGINAL path, before any /app rewrite below,
+  // so it matches what the browser shows in every environment.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-app-pathname", pathname);
+  requestHeaders.set("x-app-search", search);
+  const forward = { request: { headers: requestHeaders } };
 
   // api.flagon.io/... -> /api/...
   if (sub === "api" && !pathname.startsWith("/api")) {
     const url = request.nextUrl.clone();
     url.pathname = pathname === "/" ? "/api" : `/api${pathname}`;
-    return NextResponse.rewrite(url);
+    return NextResponse.rewrite(url, forward);
   }
 
   // app.flagon.io: the app is served at the subdomain ROOT. A /app prefix
@@ -53,10 +63,10 @@ export function proxy(request: NextRequest) {
   if (sub === "app" && !pathname.startsWith("/api")) {
     const url = request.nextUrl.clone();
     url.pathname = pathname === "/" ? "/app" : `/app${pathname}`;
-    return NextResponse.rewrite(url);
+    return NextResponse.rewrite(url, forward);
   }
 
-  return NextResponse.next();
+  return NextResponse.next(forward);
 }
 
 export const config = {

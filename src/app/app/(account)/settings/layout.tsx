@@ -1,8 +1,5 @@
-import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards.server";
 import { SettingsNav } from "./settings-nav";
 
 export const metadata: Metadata = {
@@ -18,8 +15,7 @@ export default async function SettingsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect(appPath("/signin"));
+  const session = await requireSession();
 
   const { user } = session;
   const displayName = user.displayUsername ?? user.username ?? user.name;

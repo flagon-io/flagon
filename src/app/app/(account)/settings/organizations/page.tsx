@@ -2,8 +2,8 @@ import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { Building2, Plus } from "lucide-react";
+import { requireSession } from "@/lib/auth-guards.server";
 import { auth } from "@/lib/auth";
 import { PLANS, isPlanId } from "@/lib/plans";
 import { buttonClass } from "@/components/form-ui";
@@ -15,8 +15,7 @@ export const metadata: Metadata = {
 /** Settings > Organizations: every org you belong to, with its plan. */
 export default async function OrganizationsSettingsPage() {
   const requestHeaders = await headers();
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect(appPath("/signin"));
+  await requireSession();
 
   const orgs = await auth.api.listOrganizations({ headers: requestHeaders });
 

@@ -64,3 +64,36 @@ describe("proxy host routing", () => {
     }
   });
 });
+
+/**
+ * Stamped request path. Gated server components read x-app-pathname to remember
+ * where an anonymous visitor was headed. The value must be the BROWSER path in
+ * both environments, so the header has to be set BEFORE the /app rewrite - and
+ * on the app subdomain, where the browser path carries no /app at all. (A
+ * separate middleware scoped to /app would miss the subdomain case entirely.)
+ */
+function stampedPath(res: { headers: Headers }) {
+  return res.headers.get("x-middleware-request-x-app-pathname");
+}
+
+describe("proxy stamps the requested path for gated pages", () => {
+  it("stamps the /app-prefixed path locally", () => {
+    const res = proxy(request("http://localhost:3000/app/settings/tokens"));
+    expect(stampedPath(res)).toBe("/app/settings/tokens");
+  });
+
+  it("stamps the bare browser path on the app subdomain (pre-rewrite)", () => {
+    const res = proxy(request("https://app.flagon.io/settings/tokens"));
+    // Not /app/settings/tokens: the value must match what the browser shows so
+    // the post-login `next` round-trips correctly in production.
+    expect(stampedPath(res)).toBe("/settings/tokens");
+  });
+
+  it("stamps the query string alongside the path", () => {
+    const res = proxy(request("https://app.flagon.io/acme/flags?tab=on"));
+    expect(stampedPath(res)).toBe("/acme/flags");
+    expect(res.headers.get("x-middleware-request-x-app-search")).toBe(
+      "?tab=on",
+    );
+  });
+});

@@ -1,8 +1,5 @@
-import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards.server";
 import { DangerZone, PasswordForm, UsernameForm } from "./account-forms";
 
 export const metadata: Metadata = {
@@ -10,8 +7,7 @@ export const metadata: Metadata = {
 };
 
 export default async function AccountSettingsPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect(appPath("/signin"));
+  const session = await requireSession();
 
   const { user } = session;
   const username = user.displayUsername ?? user.username ?? "";

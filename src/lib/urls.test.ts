@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { marketingHref, appHref, apiHref, appPath } from "./urls";
+import {
+  marketingHref,
+  appHref,
+  apiHref,
+  appPath,
+  stripAppPrefix,
+  resolveNext,
+} from "./urls";
 
 describe("cross-surface url helpers", () => {
   it("falls back to path-based routing when no base url is configured", () => {
@@ -28,6 +35,36 @@ describe("cross-surface url helpers", () => {
       expect(appPath("")).toBe("/app");
     });
   });
+
+  describe("stripAppPrefix", () => {
+    it("removes the /app route prefix", () => {
+      expect(stripAppPrefix("/app/settings/tokens")).toBe("/settings/tokens");
+      expect(stripAppPrefix("/app")).toBe("/");
+    });
+    it("leaves an already app-relative path untouched", () => {
+      expect(stripAppPrefix("/settings/tokens")).toBe("/settings/tokens");
+      expect(stripAppPrefix("/app-like-slug")).toBe("/app-like-slug");
+      expect(stripAppPrefix("")).toBe("/");
+    });
+  });
+
+  describe("resolveNext (path-mounted app)", () => {
+    it("expands a safe app-relative path back to a browser path", () => {
+      expect(resolveNext("/settings/tokens")).toBe("/app/settings/tokens");
+      expect(resolveNext("/acme/flags?tab=on")).toBe("/app/acme/flags?tab=on");
+    });
+    it("normalizes a value that still carries the /app prefix", () => {
+      expect(resolveNext("/app/settings/tokens")).toBe("/app/settings/tokens");
+    });
+    it("refuses anything that could leave the origin", () => {
+      expect(resolveNext(undefined)).toBeNull();
+      expect(resolveNext("")).toBeNull();
+      expect(resolveNext("//evil.com")).toBeNull();
+      expect(resolveNext("https://evil.com")).toBeNull();
+      expect(resolveNext("/\\evil.com")).toBeNull();
+      expect(resolveNext("relative/path")).toBeNull();
+    });
+  });
 });
 
 /**
@@ -46,6 +83,9 @@ describe("appPath on a dedicated app origin", () => {
     expect(urls.appPath("/")).toBe("/");
     // Cross-surface links stay absolute.
     expect(urls.appHref("/acme")).toBe("https://app.flagon.io/acme");
+    // next resolution emits prefix-free paths here too.
+    expect(urls.resolveNext("/settings/tokens")).toBe("/settings/tokens");
+    expect(urls.resolveNext("https://evil.com")).toBeNull();
     delete process.env.NEXT_PUBLIC_APP_URL;
     vi.resetModules();
   });

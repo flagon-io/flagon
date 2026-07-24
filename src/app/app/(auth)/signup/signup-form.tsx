@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { brand } from "@/lib/brand";
-import { marketingHref } from "@/lib/urls";
+import { marketingHref, resolveNext } from "@/lib/urls";
 import {
   isValidUsername,
   USERNAME_HINT,
@@ -26,9 +26,15 @@ import {
 
 const hintClass = "mt-1.5 text-xs leading-5 text-zinc-500";
 
-export function SignUpForm() {
+export function SignUpForm({ next }: { next?: string }) {
   const router = useRouter();
   const base = useAuthBase();
+  // `base` is "" on a dedicated app origin, so fall back with `|| "/"` (not
+  // `??`) to avoid a push to the empty string.
+  const destination = resolveNext(next) ?? (base || "/");
+  const signInHref = next
+    ? `${base}/signin?next=${encodeURIComponent(next)}`
+    : `${base}/signin`;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -70,8 +76,8 @@ export function SignUpForm() {
       return;
     }
 
-    // signUp auto-signs-in, straight to the console.
-    router.push(base || "/");
+    // signUp auto-signs-in; return to where they were headed, else the console.
+    router.push(destination);
     router.refresh();
   }
 
@@ -156,7 +162,7 @@ export function SignUpForm() {
 
       <AuthAltCard>
         Already have an account?{" "}
-        <Link href={`${base}/signin`} className={linkClass}>
+        <Link href={signInHref} className={linkClass}>
           Sign in
         </Link>
         .

@@ -1,8 +1,7 @@
-import { appPath } from "@/lib/urls";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards.server";
 import { SessionsList } from "./sessions-list";
 
 export const metadata: Metadata = {
@@ -11,8 +10,7 @@ export const metadata: Metadata = {
 
 export default async function SessionsSettingsPage() {
   const requestHeaders = await headers();
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect(appPath("/signin"));
+  const session = await requireSession();
 
   const sessions = await auth.api.listSessions({ headers: requestHeaders });
 
