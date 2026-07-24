@@ -13,6 +13,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: "/products/feature-flags", priority: 0.8 },
     { path: "/pricing", priority: 0.9 },
     { path: "/enterprise", priority: 0.8 },
+    { path: "/roadmap", priority: 0.7 },
     { path: "/docs", priority: 0.8 },
     { path: "/docs/getting-started", priority: 0.8 },
     { path: "/docs/catalog", priority: 0.7 },
