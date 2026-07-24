@@ -48,10 +48,17 @@ export function markConfigDirty(tx: Tx, orgId: string) {
 export async function publishConfig(
   orgId: string,
 ): Promise<PublishResult | null> {
-  // Capture the marker before reading, so the clear below is conditional on
-  // "nothing changed while we published".
+  // Capture the marker as TEXT, before reading, so the clear below is
+  // conditional on "nothing changed while we published". Text, not the Date
+  // itself, for two reasons: postgres-js cannot serialize a JS Date passed back
+  // into a raw sql() template (it throws ERR_INVALID_ARG_TYPE), and a
+  // millisecond-precision JS Date would never equal the microsecond value
+  // now() stored, so the marker would never clear. The rendered timestamptz
+  // preserves full precision and binds as a plain string.
   const [row] = await db
-    .select({ pendingAt: organizations.configPendingAt })
+    .select({
+      pendingAt: sql<string | null>`${organizations.configPendingAt}::text`,
+    })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
@@ -65,9 +72,12 @@ export async function publishConfig(
     .set({
       configVersion: result.version,
       configChecksum: result.checksum,
-      configPublishedAt: new Date(),
+      configPublishedAt: sql`now()`,
+      // Clear the marker only if it has not advanced since we captured it (a
+      // newer change is left for the next publish/sweep, so a concurrent
+      // mutation is never dropped). Compared as text for full precision.
       configPendingAt: sql`CASE
-        WHEN ${organizations.configPendingAt} IS NOT DISTINCT FROM ${capturedPendingAt}
+        WHEN ${organizations.configPendingAt}::text IS NOT DISTINCT FROM ${capturedPendingAt}
         THEN NULL ELSE ${organizations.configPendingAt} END`,
     })
     .where(eq(organizations.id, orgId));
