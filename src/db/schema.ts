@@ -79,6 +79,17 @@ export const organizations = pgTable("organizations", {
   configVersion: text("config_version"),
   configChecksum: text("config_checksum"),
   configPublishedAt: timestamp("config_published_at", { withTimezone: true }),
+  /**
+   * Set when the FINAL overage invoice for a cancelled subscription could not
+   * be cut (drizzle/0042). The customer.subscription.deleted handler bills the
+   * last cycle best-effort - a billing hiccup must never strand the org on the
+   * wrong plan - so a real failure would otherwise be lost to a log line. This
+   * records it; sudo surfaces it for manual follow-up. Cleared when a later
+   * cancel succeeds or the org re-subscribes.
+   */
+  finalInvoiceFailedAt: timestamp("final_invoice_failed_at", {
+    withTimezone: true,
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

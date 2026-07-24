@@ -229,6 +229,10 @@ export async function applyProSubscription(
       // price they bought is history. Stamped here from the first webhook rather
       // than waiting for a later subscription.updated to carry the metadata.
       ...(planVersionId ? { planVersionId } : {}),
+      // Re-subscribing clears any stale "final invoice failed" flag from a
+      // previous cancellation: the org is billed again, so the operator signal
+      // has served its purpose and should not haunt a now-active customer.
+      finalInvoiceFailedAt: null,
       updatedAt: new Date(),
     })
     .where(eq(organizations.id, orgId));

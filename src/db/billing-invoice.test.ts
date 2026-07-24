@@ -1,5 +1,11 @@
-import { describe, it, expect, afterAll, beforeAll } from "vitest";
+import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
+import * as Sentry from "@sentry/nextjs";
 import postgres from "postgres";
+
+// The final-cycle handler reports a failed invoice to Sentry; stub the module
+// so the "on failure" test can assert the call without a real DSN round trip.
+// The happy paths never call it, so the stub is inert for them.
+vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn() }));
 
 /**
  * The money path, end to end, against a real Stripe test clock.
@@ -50,7 +56,6 @@ describe.skipIf(!enabled)("invoice.created, on a test clock", () => {
   let clockId = "";
   let customerId = "";
   let orgId = "";
-  let subscriptionId = "";
   let cycleOneStart = 0;
   let cycleOneEnd = 0;
 
@@ -181,7 +186,6 @@ describe.skipIf(!enabled)("invoice.created, on a test clock", () => {
       items: [{ price: await ensureProPriceId() }],
       collection_method: "charge_automatically",
     });
-    subscriptionId = subscription.id;
     const item = subscription.items.data[0];
     cycleOneStart = item.current_period_start;
     cycleOneEnd = item.current_period_end;
@@ -422,6 +426,267 @@ describe.skipIf(!enabled)("invoice.created, on a test clock", () => {
       });
       expect(after.data.filter((inv) => inv.metadata?.flagon_final_cycle).length).toBe(1);
     } finally {
+      if (localClockId)
+        await stripe.testHelpers.testClocks.del(localClockId).catch(() => {});
+      if (localOrgId)
+        await owner`DELETE FROM organizations WHERE id = ${localOrgId}`.catch(
+          () => {},
+        );
+    }
+  }, 300_000);
+
+  /**
+   * A cancelled customer with NO usable card must still be billable: the final
+   * invoice falls back to send_invoice (an emailed invoice they can pay) rather
+   * than a charge_automatically invoice that would finalize `open` and sit
+   * uncollected forever. Models a customer who removed their card before
+   * cancelling by clearing the default payment method first.
+   */
+  it("falls back to send_invoice for a cardless final invoice", async () => {
+    const { ensureProPriceId } = await import("@/lib/billing");
+    ({ closePool } = await import("@/db/client"));
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+
+    const localStamp = Date.now();
+    const localSlug = `rehearsal-cardless-${localStamp}`;
+    let localClockId = "";
+    let localCustomerId = "";
+    let localOrgId = "";
+
+    try {
+      const clock = await stripe.testHelpers.testClocks.create({
+        frozen_time: Math.floor(Date.UTC(2026, 7, 15) / 1000),
+        name: `flagon cardless ${localStamp}`,
+      });
+      localClockId = clock.id;
+
+      const customer = await stripe.customers.create({
+        name: `Flagon cardless ${localStamp}`,
+        // send_invoice needs a deliverable address; a cancelled customer still
+        // has their email on file.
+        email: `cardless-${localStamp}@example.com`,
+        test_clock: localClockId,
+        metadata: { flagon_test: "1" },
+      });
+      localCustomerId = customer.id;
+
+      // Start WITH a card so the subscription provisions cleanly, then remove
+      // it — the state a customer who deleted their card before cancelling is in.
+      const pm = await stripe.paymentMethods.create({
+        type: "card",
+        card: { token: "tok_visa" },
+      });
+      await stripe.paymentMethods.attach(pm.id, { customer: localCustomerId });
+      await stripe.customers.update(localCustomerId, {
+        invoice_settings: { default_payment_method: pm.id },
+      });
+
+      const [org] = await owner`
+        INSERT INTO organizations (slug, name, plan, stripe_customer_id)
+        VALUES (${localSlug}, 'Cardless rehearsal', 'pro', ${localCustomerId})
+        RETURNING id`;
+      localOrgId = org.id;
+
+      const subscription = await stripe.subscriptions.create({
+        customer: localCustomerId,
+        items: [{ price: await ensureProPriceId() }],
+        collection_method: "charge_automatically",
+        metadata: { organization_id: localOrgId, flagon_plan: "pro" },
+      });
+      await owner`
+        UPDATE organizations SET stripe_subscription_id = ${subscription.id}
+        WHERE id = ${localOrgId}`;
+      const item = subscription.items.data[0];
+      const cStart = item.current_period_start;
+
+      const usageDay = new Date((cStart + 86_400) * 1000)
+        .toISOString()
+        .slice(0, 10);
+      const EVALUATIONS = 60_000_000;
+      await owner`
+        INSERT INTO usage_rollups (organization_id, project_id, meter, day, quantity)
+        VALUES (${localOrgId}, NULL, 'flags.evaluations', ${usageDay}, ${EVALUATIONS})`;
+
+      const { applyIncludedCredit, getMeter, lineFromMeter } =
+        await import("@/lib/meters");
+      const { PLANS } = await import("@/lib/plans");
+      const expected = applyIncludedCredit(
+        [lineFromMeter(getMeter("flags.evaluations")!, EVALUATIONS)],
+        PLANS.pro.includedUsageCents,
+      );
+      expect(expected.overageCents).toBeGreaterThan(0);
+
+      // Detach the card and clear the default: now there is no way to charge
+      // automatically, which is the whole point of this test.
+      await stripe.paymentMethods.detach(pm.id);
+      await stripe.customers.update(localCustomerId, {
+        invoice_settings: { default_payment_method: "" },
+      });
+
+      const canceled = await stripe.subscriptions.cancel(subscription.id);
+      expect(canceled.status).toBe("canceled");
+
+      const payload = JSON.stringify({
+        id: `evt_cardless_${Date.now()}`,
+        object: "event",
+        type: "customer.subscription.deleted",
+        api_version: null,
+        created: Math.floor(Date.now() / 1000),
+        data: { object: canceled },
+      });
+      const signature = stripe.webhooks.generateTestHeaderString({
+        payload,
+        secret: WEBHOOK_SECRET,
+      });
+      const res = await POST(
+        new Request("https://api.flagon.io/webhooks/stripe", {
+          method: "POST",
+          headers: { "stripe-signature": signature },
+          body: payload,
+        }),
+      );
+      expect(res.status).toBe(200);
+
+      // One finalized final invoice, collected by send_invoice, for the overage.
+      const invoices = await stripe.invoices.list({
+        customer: localCustomerId,
+        limit: 20,
+      });
+      const finals = invoices.data.filter(
+        (inv) => inv.metadata?.flagon_final_cycle,
+      );
+      expect(finals.length).toBe(1);
+      expect(finals[0].collection_method).toBe("send_invoice");
+      expect(finals[0].status).not.toBe("draft");
+      expect(finals[0].total).toBe(expected.overageCents);
+
+      // Org dropped to free, and the clean path left NO failure flag.
+      const [orgRow] = await owner`
+        SELECT plan, final_invoice_failed_at FROM organizations WHERE id = ${localOrgId}`;
+      expect(orgRow.plan).toBe("free");
+      expect(orgRow.final_invoice_failed_at).toBeNull();
+    } finally {
+      if (localClockId)
+        await stripe.testHelpers.testClocks.del(localClockId).catch(() => {});
+      if (localOrgId)
+        await owner`DELETE FROM organizations WHERE id = ${localOrgId}`.catch(
+          () => {},
+        );
+    }
+  }, 300_000);
+
+  /**
+   * When the final invoice genuinely fails, the org must STILL drop to free (it
+   * is never stranded on Pro), but the failure must not vanish: it is reported
+   * to Sentry and recorded on the org as final_invoice_failed_at, which sudo
+   * surfaces. A forced finalize rejection stands in for a real Stripe hiccup.
+   */
+  it("captures to Sentry and flags the org when the final invoice fails", async () => {
+    const { ensureProPriceId } = await import("@/lib/billing");
+    ({ closePool } = await import("@/db/client"));
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+
+    const captureException = vi.mocked(Sentry.captureException);
+    captureException.mockClear();
+
+    const localStamp = Date.now();
+    const localSlug = `rehearsal-fail-${localStamp}`;
+    let localClockId = "";
+    let localCustomerId = "";
+    let localOrgId = "";
+    let finalizeSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+    try {
+      const clock = await stripe.testHelpers.testClocks.create({
+        frozen_time: Math.floor(Date.UTC(2026, 8, 15) / 1000),
+        name: `flagon fail ${localStamp}`,
+      });
+      localClockId = clock.id;
+
+      const customer = await stripe.customers.create({
+        name: `Flagon fail ${localStamp}`,
+        email: `fail-${localStamp}@example.com`,
+        test_clock: localClockId,
+        metadata: { flagon_test: "1" },
+      });
+      localCustomerId = customer.id;
+
+      const pm = await stripe.paymentMethods.create({
+        type: "card",
+        card: { token: "tok_visa" },
+      });
+      await stripe.paymentMethods.attach(pm.id, { customer: localCustomerId });
+      await stripe.customers.update(localCustomerId, {
+        invoice_settings: { default_payment_method: pm.id },
+      });
+
+      const [org] = await owner`
+        INSERT INTO organizations (slug, name, plan, stripe_customer_id)
+        VALUES (${localSlug}, 'Fail rehearsal', 'pro', ${localCustomerId})
+        RETURNING id`;
+      localOrgId = org.id;
+
+      const subscription = await stripe.subscriptions.create({
+        customer: localCustomerId,
+        items: [{ price: await ensureProPriceId() }],
+        collection_method: "charge_automatically",
+        metadata: { organization_id: localOrgId, flagon_plan: "pro" },
+      });
+      await owner`
+        UPDATE organizations SET stripe_subscription_id = ${subscription.id}
+        WHERE id = ${localOrgId}`;
+      const item = subscription.items.data[0];
+      const cStart = item.current_period_start;
+
+      const usageDay = new Date((cStart + 86_400) * 1000)
+        .toISOString()
+        .slice(0, 10);
+      const EVALUATIONS = 60_000_000;
+      await owner`
+        INSERT INTO usage_rollups (organization_id, project_id, meter, day, quantity)
+        VALUES (${localOrgId}, NULL, 'flags.evaluations', ${usageDay}, ${EVALUATIONS})`;
+
+      const canceled = await stripe.subscriptions.cancel(subscription.id);
+      expect(canceled.status).toBe("canceled");
+
+      // Force the invoice to fail at finalize. getStripe() is a cached
+      // singleton, so the route hits this same spy.
+      finalizeSpy = vi
+        .spyOn(stripe.invoices, "finalizeInvoice")
+        .mockRejectedValueOnce(new Error("sandbox: forced finalize failure"));
+
+      const payload = JSON.stringify({
+        id: `evt_fail_${Date.now()}`,
+        object: "event",
+        type: "customer.subscription.deleted",
+        api_version: null,
+        created: Math.floor(Date.now() / 1000),
+        data: { object: canceled },
+      });
+      const signature = stripe.webhooks.generateTestHeaderString({
+        payload,
+        secret: WEBHOOK_SECRET,
+      });
+      const res = await POST(
+        new Request("https://api.flagon.io/webhooks/stripe", {
+          method: "POST",
+          headers: { "stripe-signature": signature },
+          body: payload,
+        }),
+      );
+      // The webhook still returns 200 — best-effort must not 500 and trigger a
+      // Stripe redelivery storm — but the failure was surfaced.
+      expect(res.status).toBe(200);
+      expect(captureException).toHaveBeenCalledTimes(1);
+
+      // Org still dropped to free (never stranded on Pro), and the failure is
+      // recorded for the operator.
+      const [orgRow] = await owner`
+        SELECT plan, final_invoice_failed_at FROM organizations WHERE id = ${localOrgId}`;
+      expect(orgRow.plan).toBe("free");
+      expect(orgRow.final_invoice_failed_at).not.toBeNull();
+    } finally {
+      finalizeSpy?.mockRestore();
       if (localClockId)
         await stripe.testHelpers.testClocks.del(localClockId).catch(() => {});
       if (localOrgId)

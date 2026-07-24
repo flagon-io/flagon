@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import * as Sentry from "@sentry/nextjs";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { organizations } from "@/db/schema";
@@ -269,10 +270,22 @@ export async function POST(request: Request) {
       // subscription gets no renewal invoice, so this event is the only chance
       // to charge the last cycle's overage. Best-effort - a billing hiccup must
       // not strand the org on the wrong plan.
+      let finalInvoiceFailed = false;
       try {
         await invoiceFinalCycle(org, subscription);
       } catch (error) {
-        console.error("[stripe webhook] final-cycle invoicing failed", error);
+        // Surfaced, not swallowed: the org still drops to free (below) so it is
+        // never stranded, but a failed final invoice is real money that needs a
+        // human. Sentry raises it, and finalInvoiceFailedAt flags it in sudo.
+        finalInvoiceFailed = true;
+        Sentry.captureException(error, {
+          tags: { area: "billing", flow: "final_cycle_invoice" },
+          extra: {
+            organizationId: org.id,
+            stripeCustomerId: org.stripeCustomerId,
+            subscriptionId: subscription.id,
+          },
+        });
       }
 
       await db
@@ -282,6 +295,10 @@ export async function POST(request: Request) {
           stripeSubscriptionId: null,
           currentPeriodStart: null,
           currentPeriodEnd: null,
+          // Operator signal for a failed final invoice; cleared on the clean
+          // path so a later successful cancel (or a redelivery that finds the
+          // period already invoiced) does not leave a stale flag.
+          finalInvoiceFailedAt: finalInvoiceFailed ? new Date() : null,
           updatedAt: new Date(),
         })
         .where(eq(organizations.id, orgId));
@@ -306,6 +323,20 @@ export async function POST(request: Request) {
  *
  * Exactly-once against a redelivered event: the closed period's status and the
  * invoice claim are the same guards the normal invoice.created path uses.
+ *
+ * COLLECTION. The one-off invoice must actually be collectable, and a cancelled
+ * customer may no longer have a usable card. So the method is resolved from the
+ * customer's state rather than blindly inherited:
+ *   - a subscription already on send_invoice stays send_invoice;
+ *   - otherwise, a customer WITH a usable default card is charged automatically;
+ *   - a customer with NO card falls back to send_invoice, so Stripe emails an
+ *     invoice they can pay instead of finalizing a charge_automatically invoice
+ *     that just sits `open`, uncollected, forever.
+ * auto_advance is on so Stripe runs collection (charges the card, or sends the
+ * invoice) - a finalized-but-idle invoice would be another thing to chase by
+ * hand. If send_invoice can't finalize (e.g. no email on file), the create/
+ * finalize throws and the caller records it (Sentry + finalInvoiceFailedAt)
+ * rather than dropping the org with money silently uncollected.
  */
 async function invoiceFinalCycle(
   org: { id: string; plan: string; stripeCustomerId: string | null },
@@ -342,15 +373,23 @@ async function invoiceFinalCycle(
   });
   if (!lines.length) return;
 
-  const collection =
+  // send_invoice unless the customer can actually be charged automatically:
+  // a card-collected invoice with no card on file finalizes to a permanently
+  // `open` invoice nobody pays. Only pay the round trip to check when the sub
+  // wasn't already emailing invoices.
+  const collection: Stripe.InvoiceCreateParams.CollectionMethod =
     subscription.collection_method === "send_invoice"
       ? "send_invoice"
-      : "charge_automatically";
+      : (await customerCanCharge(customerId))
+        ? "charge_automatically"
+        : "send_invoice";
   const draft = await getStripe().invoices.create({
     customer: customerId,
     collection_method: collection,
     ...(collection === "send_invoice" ? { days_until_due: 30 } : {}),
-    auto_advance: false,
+    // On so Stripe collects (charges the card) or sends (emails the invoice)
+    // instead of leaving a finalized invoice idle for someone to chase.
+    auto_advance: true,
     description: `Final usage (${period.periodStart} → ${period.periodEnd})`,
     metadata: {
       organization_id: org.id,
@@ -372,4 +411,22 @@ async function invoiceFinalCycle(
       });
     },
   );
+}
+
+/**
+ * Whether Stripe can charge this customer automatically: does it have a usable
+ * default payment method? Decides charge_automatically vs. send_invoice for the
+ * final invoice. Any lookup failure returns false, so the safe path (an emailed
+ * invoice) is preferred over minting a card-collected invoice that can't be paid.
+ */
+async function customerCanCharge(customerId: string): Promise<boolean> {
+  try {
+    const customer = await getStripe().customers.retrieve(customerId, {
+      expand: ["invoice_settings.default_payment_method"],
+    });
+    if ("deleted" in customer && customer.deleted) return false;
+    return Boolean(customer.invoice_settings?.default_payment_method);
+  } catch {
+    return false;
+  }
 }
