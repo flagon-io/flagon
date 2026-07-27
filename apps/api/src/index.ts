@@ -1,5 +1,7 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { logger } from "hono/logger";
+import { brandMarkSvg } from "./lib/brand-mark.js";
 import { openCors } from "./lib/cors.js";
 import { baseUrl, jsonError } from "./lib/http.js";
 import { buildOpenApiDocument, buildRootIndex } from "./openapi/registry.js";
@@ -23,6 +25,17 @@ app.get("/", (c) => c.json(buildRootIndex(baseUrl(c))));
 
 // The always-published OpenAPI 3.1 document, generated from the same registry.
 app.get("/openapi.json", (c) => c.json(buildOpenApiDocument(baseUrl(c))));
+
+// The API renders no HTML, but a browser opening it still asks for a favicon,
+// and the root index is meant to be looked at. Serve the same Flagon mark the
+// other surfaces use so the tab icon matches everywhere.
+const serveBrandMark = (c: Context) =>
+  c.body(brandMarkSvg, 200, {
+    "Content-Type": "image/svg+xml; charset=utf-8",
+    "Cache-Control": "public, max-age=31536000, immutable",
+  });
+app.get("/favicon.ico", serveBrandMark);
+app.get("/icon.svg", serveBrandMark);
 
 app.route("/v1", v1);
 

@@ -1,0 +1,28 @@
+/**
+ * The Flagon tankard mark, as a standalone SVG document.
+ *
+ * The API renders no HTML, but a browser opening the API in a tab still asks
+ * for /favicon.ico, and the root hypermedia index is meant to be looked at. So
+ * the same mark the marketing site shows (apps/web/src/app/icon.svg, drawn from
+ * @flagon/design logo-geometry.json) is served here too — kept byte-identical
+ * on purpose so the logo can never be subtly different depending on where you
+ * look at it.
+ */
+export const brandMarkSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- The Flagon tankard mark. Geometry mirrors @flagon/design logo-geometry.json. -->
+  <defs>
+    <linearGradient id="flagon-stroke" x1="15" y1="15" x2="49" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2dd4bf" />
+      <stop offset="1" stop-color="#0d9488" />
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#flagon-stroke)" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
+    <!-- body -->
+    <path d="M18 22 L36 22 L39 50 L15 50 Z" />
+    <!-- lid -->
+    <path d="M19 22 L21 15 L33 15 L35 22 Z" />
+    <!-- handle -->
+    <path d="M37 28 L46 29 L49 34 L49 39 L46 44 L38 43" />
+  </g>
+</svg>
+`;
