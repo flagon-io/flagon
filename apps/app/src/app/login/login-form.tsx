@@ -15,12 +15,16 @@ import { Field, submitButtonClass } from "@/components/field";
  * the real call and the markup doesn't change.
  */
 export function LoginForm() {
+  const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    // TODO(auth): replace with the real sign-in call.
+    setPending(true);
+    // TODO(auth): await the real sign-in call here. `pending` already drives the
+    // button's disabled state and label, so wiring it is a one-line swap.
     setSubmitted(true);
+    setPending(false);
   }
 
   return (
@@ -52,12 +56,15 @@ export function LoginForm() {
         }
       />
 
-      <button type="submit" className={submitButtonClass}>
-        Sign in
+      <button type="submit" className={submitButtonClass} disabled={pending}>
+        {pending ? "Signing in…" : "Sign in"}
       </button>
 
       {submitted ? (
-        <p className="rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2.5 text-xs leading-5 text-amber-300">
+        <p
+          role="status"
+          className="rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2.5 text-xs leading-5 text-amber-300"
+        >
           {`Sign-in isn't live yet. ${brand.launch.label}.`}
         </p>
       ) : null}
