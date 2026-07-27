@@ -8,10 +8,15 @@
   "exports": {
     ".": "./src/index.ts",
     "./styles.css": "./src/styles.css",
-    "./brand": "./src/brand.ts"
+    "./brand": "./src/brand.ts",
+    "./plans": "./src/plans.ts"
   },
   "peerDependencies": {
     "react": "^19",
     "react-dom": "^19"
+  },
+  "dependencies": {
+    "lucide-react": "^1.27.0",
+    "radix-ui": "^1.6.7"
   }
 }

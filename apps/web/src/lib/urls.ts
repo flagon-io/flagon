@@ -9,5 +9,8 @@
 export const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001";
 
-/** Sign-in on the app. No sign-up link exists on purpose: access is invite-only. */
+/** Sign-in on the app. */
 export const SIGN_IN_URL = `${APP_URL}/login`;
+
+/** Sign-up on the app (the pricing page's "create a free organization" CTA). */
+export const SIGN_UP_URL = `${APP_URL}/signup`;

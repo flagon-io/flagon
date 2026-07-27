@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { brand } from "@flagon/design";
 import { AuthShell } from "@/components/auth-shell";
+import { getSession } from "@/lib/auth";
+import { configuredOAuthProviders } from "@/lib/oauth";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = {
@@ -9,7 +13,11 @@ export const metadata: Metadata = {
   description: `Sign in to ${brand.name}.`,
 };
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  // Authoritative check: genuinely-signed-in visitors skip the form. A stale or
+  // invalid cookie returns null here, so the page just renders (no loop).
+  if (await getSession()) redirect("/");
+
   return (
     <AuthShell
       title={`Sign in to ${brand.name}`}
@@ -26,7 +34,9 @@ export default function LoginPage() {
         </>
       }
     >
-      <LoginForm />
+      <Suspense>
+        <LoginForm providers={configuredOAuthProviders()} />
+      </Suspense>
     </AuthShell>
   );
 }

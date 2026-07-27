@@ -1,0 +1,101 @@
+import type { Metadata } from "next";
+import { brand } from "@flagon/design";
+import { LegalShell } from "@/components/legal-shell";
+
+export const metadata: Metadata = {
+  title: `Terms of Service (Draft) — ${brand.name}`,
+  description: `Draft terms that will govern your use of ${brand.name}.`,
+};
+
+export default function TermsPage() {
+  return (
+    <LegalShell
+      title="Terms of Service"
+      updated="July 27, 2026"
+      draft
+      intro={`These terms govern your use of ${brand.name}, operated by ${brand.legalName} ("we", "us"). By creating an account or using the service, you agree to them.`}
+    >
+      <h2>1. The service</h2>
+      <p>
+        {brand.name} is a developer platform. During the current alpha it is
+        offered as-is while we build it in the open. Features may change,
+        break, or be removed, and availability is not guaranteed.
+      </p>
+
+      <h2>2. Your account</h2>
+      <p>
+        You are responsible for your account, for keeping your credentials and
+        access tokens secure, and for all activity that happens under it. You
+        must be able to form a binding contract to use the service, and you must
+        provide accurate account information.
+      </p>
+
+      <h2>3. Acceptable use</h2>
+      <p>You agree not to:</p>
+      <ul>
+        <li>break the law or infringe anyone&apos;s rights;</li>
+        <li>
+          disrupt the service, probe or bypass its security, or access it other
+          than through the interfaces we provide;
+        </li>
+        <li>
+          resell or abuse the service, or use it to store or transmit malware or
+          unlawful content.
+        </li>
+      </ul>
+
+      <h2>4. Your content</h2>
+      <p>
+        You keep ownership of the content and data you put into {brand.name}. You
+        grant us the limited rights needed to operate the service for you, such
+        as storing, processing, and displaying that data back to you and your
+        organization. You are responsible for having the rights to the data you
+        upload.
+      </p>
+
+      <h2>5. Organizations</h2>
+      <p>
+        Content and settings inside an organization are controlled by that
+        organization&apos;s owners and admins, who may manage members, roles, and
+        access. If you join an organization, its administrators may see and manage
+        your activity within it.
+      </p>
+
+      <h2>6. Fees</h2>
+      <p>
+        Paid plans and billing are not enabled during the alpha; usage is
+        currently provided at no charge. When billing is introduced, prices and
+        terms will be presented before they apply to you.
+      </p>
+
+      <h2>7. Termination</h2>
+      <p>
+        You may stop using the service and delete your account at any time. We
+        may suspend or terminate access if these terms are breached or to protect
+        the service or its users.
+      </p>
+
+      <h2>8. Disclaimers and liability</h2>
+      <p>
+        The service is provided <strong>&ldquo;as is&rdquo;</strong> without
+        warranties of any kind. To the fullest extent permitted by law, we are
+        not liable for indirect or consequential damages, and our total liability
+        is limited to the amount you paid us (if any) in the twelve months before
+        the claim.
+      </p>
+
+      <h2>9. Changes</h2>
+      <p>
+        We may update these terms. If we make material changes we will take
+        reasonable steps to let you know. Continuing to use the service after a
+        change means you accept the updated terms.
+      </p>
+
+      <h2>10. Contact</h2>
+      <p>
+        Questions about these terms? Email{" "}
+        <a href="mailto:legal@flagon.io">legal@flagon.io</a>.
+      </p>
+    </LegalShell>
+  );
+}

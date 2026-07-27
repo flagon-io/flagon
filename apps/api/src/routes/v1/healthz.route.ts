@@ -5,7 +5,6 @@ import { registerRoute } from "../../openapi/registry.js";
 
 const healthResponse = z.object({
   status: z.literal("ok"),
-  service: z.string(),
   version: z.string(),
   time: z.string().describe("ISO-8601 server time."),
 });
@@ -15,7 +14,7 @@ registerRoute({
   path: "/v1/healthz",
   summary: "Health check",
   description:
-    "Liveness probe. Returns service identity and the current server time; never touches the database.",
+    "Liveness probe. Returns the current server time; never touches the database.",
   tags: ["Meta"],
   responses: {
     200: { description: "The service is up.", schema: healthResponse },

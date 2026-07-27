@@ -1,18 +1,28 @@
 import { cors } from "hono/cors";
 
 /**
- * Open CORS, on purpose.
+ * CORS for a token-authenticated control plane that ALSO accepts the Flagon
+ * session cookie from its sibling surfaces.
  *
- * The API is a public, token-authenticated control plane, so — like a public
- * REST API — it serves browsers from any origin. Auth travels in the
- * `Authorization` header, which a browser never attaches automatically, so
- * there is nothing for a hostile origin to ride on: the combination that is
- * actually dangerous is `Access-Control-Allow-Origin: *` TOGETHER WITH
- * credentials, and we deliberately do not allow credentials. No cookie is ever
- * part of a cross-origin call here.
+ * Token auth travels in the `Authorization` header, which browsers never attach
+ * automatically, so the API stays open to any origin for that path: there is
+ * nothing a hostile origin can ride on. The one exception is the cookie path
+ * ("browse the API while signed in"), which IS credentialed and therefore must
+ * name specific origins: the console and marketing site. For those trusted
+ * origins we echo the origin and allow credentials; every other origin gets a
+ * plain wildcard (fine for header-token requests, and browsers correctly refuse
+ * to send cookies to a wildcard origin).
  */
+const trusted = new Set(
+  [
+    process.env.APP_URL ?? "http://localhost:3001",
+    process.env.WEB_URL ?? "http://localhost:3000",
+  ].filter(Boolean),
+);
+
 export const openCors = cors({
-  origin: "*",
+  origin: (origin) => (origin && trusted.has(origin) ? origin : "*"),
+  credentials: true,
   allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowHeaders: ["Content-Type", "Authorization"],
   exposeHeaders: ["Content-Length"],

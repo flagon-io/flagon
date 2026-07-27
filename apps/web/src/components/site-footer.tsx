@@ -1,23 +1,38 @@
+import Link from "next/link";
 import { brand, FlagonMark, IconGitHub } from "@flagon/design";
 
 /**
- * The one footer bar. Mark and copyright centred, source link on the right.
- * Kept to what is true today: there are no Terms or Privacy pages yet, so it
- * does not pretend to link to them.
+ * The one footer bar: mark and copyright, the policy links, and the source link.
  */
+const LEGAL_LINKS = [
+  { href: "/terms", label: "Terms" },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/security", label: "Security" },
+] as const;
+
 export function SiteFooter() {
   const year = new Date().getFullYear();
 
   return (
     <footer className="relative z-10 w-full border-t border-white/5">
       <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-4 px-6 py-6 text-sm text-zinc-500 sm:grid-cols-[1fr_auto_1fr]">
-        <div className="hidden sm:block" />
-        <p className="flex items-center justify-center gap-2">
+        <p className="flex items-center justify-center gap-2 sm:justify-start">
           <FlagonMark className="h-4 w-4 shrink-0" />
           <span>
             © {year} {brand.legalName}
           </span>
         </p>
+        <nav className="flex items-center justify-center gap-5">
+          {LEGAL_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="transition-colors hover:text-zinc-200"
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
         <div className="flex items-center justify-center gap-4 sm:justify-end">
           <a
             href={brand.repo}

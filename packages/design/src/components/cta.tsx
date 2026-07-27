@@ -15,7 +15,7 @@ import type { AnchorHTMLAttributes, ReactNode } from "react";
  */
 
 type CtaVariant = "primary" | "secondary";
-type CtaSize = "md" | "lg";
+type CtaSize = "sm" | "md" | "lg";
 type CtaShape = "square" | "pill";
 
 const base =
@@ -23,11 +23,14 @@ const base =
 
 const VARIANT: Record<CtaVariant, string> = {
   primary: "bg-teal-500 text-zinc-950 hover:bg-teal-400",
+  // Vercel-style dark button: a defined border over a subtle fill (not a ghost
+  // link), with the border brightening toward white on hover.
   secondary:
-    "border border-white/10 text-zinc-300 hover:border-white/20 hover:text-zinc-100",
+    "border border-white/20 bg-white/4 text-zinc-100 hover:border-white/40 hover:bg-white/8",
 };
 
 const SIZE: Record<CtaSize, string> = {
+  sm: "px-4 py-2 text-sm",
   md: "px-5 py-2.5 text-sm",
   lg: "px-6 py-3 text-sm",
 };

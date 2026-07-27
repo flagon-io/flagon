@@ -1,1 +1,3 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3002";
+// Re-exported for the existing call sites; the canonical definition (alongside
+// the other cross-surface origins) now lives in ./urls.
+export { API_URL } from "./urls";

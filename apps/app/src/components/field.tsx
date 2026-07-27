@@ -16,10 +16,12 @@ type FieldProps = InputHTMLAttributes<HTMLInputElement> & {
   label: string;
   /** Optional content aligned to the right of the label, e.g. a "Forgot password?" link. */
   aside?: ReactNode;
+  /** Optional helper text below the input, GitHub-style (the field's rules). */
+  hint?: ReactNode;
 };
 
 /** A labeled text input. `id` doubles as the label target and the input id. */
-export function Field({ id, label, aside, ...props }: FieldProps) {
+export function Field({ id, label, aside, hint, ...props }: FieldProps) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">
@@ -29,6 +31,7 @@ export function Field({ id, label, aside, ...props }: FieldProps) {
         {aside}
       </div>
       <input id={id} className={inputClass} {...props} />
+      {hint ? <p className="text-xs leading-5 text-zinc-500">{hint}</p> : null}
     </div>
   );
 }

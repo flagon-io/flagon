@@ -37,7 +37,7 @@ export default function NotFound() {
           </Link>
           <Link
             href="/#waitlist"
-            className="rounded-md border border-white/10 px-5 py-2.5 text-sm font-semibold text-zinc-300 transition-colors hover:border-white/20 hover:text-zinc-100"
+            className="rounded-md border border-white/20 bg-white/4 px-5 py-2.5 text-sm font-semibold text-zinc-100 transition-colors hover:border-white/40 hover:bg-white/8"
           >
             Get early access
           </Link>
