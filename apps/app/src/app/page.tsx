@@ -1,11 +1,19 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { brand, FlagonMark, GridBackdrop } from "@flagon/design";
 import { API_URL } from "@/lib/api";
 import { WEB_URL } from "@/lib/urls";
+import { getSession } from "@/lib/auth";
 
 async function getApiStatus() {
   try {
-    const res = await fetch(`${API_URL}/v1/health`, { cache: "no-store" });
+    // Bound the wait: this is a best-effort status badge, so a slow or
+    // unreachable API must degrade to "unreachable" rather than hang the whole
+    // page's render.
+    const res = await fetch(`${API_URL}/v1/healthz`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(3000),
+    });
     if (!res.ok) return "unreachable";
     const data = (await res.json()) as { status?: string };
     return data.status ?? "unknown";
@@ -15,6 +23,14 @@ async function getApiStatus() {
 }
 
 export default async function Home() {
+  // The console is for signed-in users. Until auth lands getSession() always
+  // returns null, so every visitor is sent to sign in rather than shown this
+  // placeholder. redirect() throws, so it stays outside any try/catch.
+  const session = await getSession();
+  if (!session) {
+    redirect("/login");
+  }
+
   const apiStatus = await getApiStatus();
 
   return (

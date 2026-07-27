@@ -12,7 +12,7 @@ const healthResponse = z.object({
 
 registerRoute({
   method: "get",
-  path: "/v1/health",
+  path: "/v1/healthz",
   summary: "Health check",
   description:
     "Liveness probe. Returns service identity and the current server time; never touches the database.",
@@ -22,9 +22,9 @@ registerRoute({
   },
 });
 
-export const health = new Hono();
+export const healthz = new Hono();
 
-health.get("/", (c) =>
+healthz.get("/", (c) =>
   c.json({
     status: "ok",
     service: META.service,
