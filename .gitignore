@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# builds
+.next/
+dist/
+out/
+.turbo/
+
+# vercel
+.vercel
+
+# env
+.env
+.env*.local
+!.env.example
+
+# misc
+.DS_Store
+*.log
+npm-debug.log*
+
+# editor
+.vscode/*
+!.vscode/extensions.json

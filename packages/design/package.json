@@ -1,0 +1,17 @@
+{
+  "name": "@flagon/design",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Flagon's shared design system: brand tokens, the logo mark, and the marketing/UI primitives every surface is built from.",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles.css",
+    "./brand": "./src/brand.ts"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  }
+}

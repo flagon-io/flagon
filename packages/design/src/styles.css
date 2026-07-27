@@ -1,0 +1,99 @@
+/*
+ * Flagon design-system stylesheet.
+ *
+ * The pieces of the look that are plain CSS rather than Tailwind utilities:
+ * the base document register (dark, sensible cursors, a stable scrollbar
+ * gutter) and the hero lattice animation that HexField drives with the
+ * .hex-cell / .hex-node classes.
+ *
+ * Imported once by each app's globals.css, AFTER `@import "tailwindcss"`, so
+ * these rules layer on top of the reset. The Tailwind theme tokens (colors,
+ * fonts) stay in the app: they belong to `@theme`, which has to sit in the
+ * file Tailwind compiles.
+ */
+
+html {
+  color-scheme: dark;
+
+  /*
+   * A full-bleed band escapes its centred parent with `w-screen`, and `100vw`
+   * INCLUDES the scrollbar, so such a band overhangs the content area by half
+   * a scrollbar on each side. `clip` trims that overhang without turning the
+   * root into a scroll container the way `hidden` would (which silently breaks
+   * `position: sticky`).
+   */
+  overflow-x: clip;
+
+  /*
+   * Reserve the gutter whether or not the page scrolls, so a short page and a
+   * long one lay out identically instead of shifting by a scrollbar's width
+   * when you navigate between them.
+   */
+  scrollbar-gutter: stable;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+/*
+ * Hero backdrop (HexField).
+ *
+ * The lattice never moves. What moves is light travelling through it: each
+ * cell brightens briefly on a staggered delay derived from its position, so
+ * the pulse crosses the mesh diagonally. Sliding the whole field instead is
+ * the effect that reads as a screensaver.
+ *
+ * Long cycles on purpose. A backdrop you notice is one you get sick of on the
+ * second visit.
+ */
+@keyframes flagon-hex-cell {
+  0%,
+  88%,
+  100% {
+    stroke-opacity: 0.1;
+  }
+  92% {
+    stroke-opacity: 0.34;
+  }
+}
+
+@keyframes flagon-hex-node {
+  0%,
+  100% {
+    stroke-opacity: 0.24;
+    fill-opacity: 0.04;
+  }
+  50% {
+    stroke-opacity: 0.55;
+    fill-opacity: 0.12;
+  }
+}
+
+/*
+ * Motion only where there is a machine to spare for it. Phones and tablets get
+ * the lattice, still: the shape is the theme, the pulse is a bonus, and
+ * animating hundreds of nodes is not what a phone should spend its frame
+ * budget on while someone is trying to read.
+ */
+@media (min-width: 1024px) {
+  .hex-cell {
+    animation: flagon-hex-cell 7s linear infinite;
+  }
+  .hex-node {
+    animation: flagon-hex-node 6s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hex-cell,
+  .hex-node {
+    animation: none;
+  }
+}
