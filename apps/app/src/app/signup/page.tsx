@@ -2,31 +2,31 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { brand } from "@flagon/design";
 import { AuthShell } from "@/components/auth-shell";
-import { LoginForm } from "./login-form";
+import { SignupForm } from "./signup-form";
 
 export const metadata: Metadata = {
-  title: "Sign in",
-  description: `Sign in to ${brand.name}.`,
+  title: "Create your account",
+  description: `Create your ${brand.name} account.`,
 };
 
-export default function LoginPage() {
+export default function SignupPage() {
   return (
     <AuthShell
-      title={`Sign in to ${brand.name}`}
-      subtitle="Welcome back. Sign in to your workspace."
+      title={`Create your ${brand.name} account`}
+      subtitle="One account for your projects, environments, and teams."
       footer={
         <>
-          {`New to ${brand.name}? `}
+          {"Already have an account? "}
           <Link
-            href="/signup"
+            href="/login"
             className="text-teal-400 transition-colors hover:text-teal-300"
           >
-            Create an account
+            Sign in
           </Link>
         </>
       }
     >
-      <LoginForm />
+      <SignupForm />
     </AuthShell>
   );
 }

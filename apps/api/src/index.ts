@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { logger } from "hono/logger";
 import { brandMarkSvg } from "./lib/brand-mark.js";
 import { openCors } from "./lib/cors.js";
+import { healthBody } from "./lib/health.js";
 import { baseUrl, jsonError } from "./lib/http.js";
 import { buildOpenApiDocument, buildRootIndex } from "./openapi/registry.js";
 import { v1 } from "./routes/v1/index.js";
@@ -25,6 +26,12 @@ app.get("/", (c) => c.json(buildRootIndex(baseUrl(c))));
 
 // The always-published OpenAPI 3.1 document, generated from the same registry.
 app.get("/openapi.json", (c) => c.json(buildOpenApiDocument(baseUrl(c))));
+
+// Top-level liveness probe, deliberately unversioned: load balancers and
+// uptime checks want one stable URL that keeps meaning "is the service up"
+// even after /v2 ships. The versioned /v{n}/healthz probes are part of each
+// version's documented API contract; this one is operational, like GET /.
+app.get("/healthz", (c) => c.json(healthBody()));
 
 // The API renders no HTML, but a browser opening it still asks for a favicon,
 // and the root index is meant to be looked at. Serve the same Flagon mark the

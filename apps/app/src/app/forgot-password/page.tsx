@@ -2,31 +2,31 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { brand } from "@flagon/design";
 import { AuthShell } from "@/components/auth-shell";
-import { LoginForm } from "./login-form";
+import { ForgotPasswordForm } from "./forgot-password-form";
 
 export const metadata: Metadata = {
-  title: "Sign in",
-  description: `Sign in to ${brand.name}.`,
+  title: "Reset your password",
+  description: `Reset your ${brand.name} password.`,
 };
 
-export default function LoginPage() {
+export default function ForgotPasswordPage() {
   return (
     <AuthShell
-      title={`Sign in to ${brand.name}`}
-      subtitle="Welcome back. Sign in to your workspace."
+      title="Reset your password"
+      subtitle="Enter your email and we'll send you a link to get back in."
       footer={
         <>
-          {`New to ${brand.name}? `}
+          {"Remembered it? "}
           <Link
-            href="/signup"
+            href="/login"
             className="text-teal-400 transition-colors hover:text-teal-300"
           >
-            Create an account
+            Back to sign in
           </Link>
         </>
       }
     >
-      <LoginForm />
+      <ForgotPasswordForm />
     </AuthShell>
   );
 }

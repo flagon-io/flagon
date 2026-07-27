@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { META } from "../../meta.js";
+import { healthBody } from "../../lib/health.js";
 import { registerRoute } from "../../openapi/registry.js";
 
 const healthResponse = z.object({
@@ -24,11 +24,4 @@ registerRoute({
 
 export const healthz = new Hono();
 
-healthz.get("/", (c) =>
-  c.json({
-    status: "ok",
-    service: META.service,
-    version: "v1",
-    time: new Date().toISOString(),
-  }),
-);
+healthz.get("/", (c) => c.json(healthBody({ version: "v1" })));
