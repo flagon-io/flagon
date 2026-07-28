@@ -2,6 +2,7 @@ import Link from "next/link";
 import { brand, Cta, FlagonMark } from "@flagon/design";
 import { APP_URL, SIGN_IN_URL } from "@/lib/urls";
 import { getMarketingSession } from "@/lib/session";
+import { AccountMenu } from "@/components/account-menu";
 
 /**
  * The top-level sections the marketing site will grow into. Items without an
@@ -60,12 +61,10 @@ export async function SiteHeader() {
         <div className="flex items-center gap-3">
           {user ? (
             <>
-              <span className="hidden text-sm text-zinc-500 sm:inline">
-                {user.username ? `@${user.username}` : user.email}
-              </span>
               <Cta variant="primary" size="sm" href={APP_URL}>
                 Open app
               </Cta>
+              <AccountMenu user={user} />
             </>
           ) : (
             <>

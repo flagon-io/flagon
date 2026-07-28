@@ -12,7 +12,18 @@ import { DropdownMenu as DM } from "radix-ui";
  * Use `asChild` on MenuTrigger/MenuItem to render a custom element (e.g. a
  * button trigger, or a Next <Link> item).
  */
-export const Menu = DM.Root;
+/**
+ * Non-modal by default (unlike Radix's `modal: true` default for DropdownMenu).
+ * Modal menus lock body scroll and pad the body to compensate for the removed
+ * scrollbar, which visibly shifts sticky/full-width headers when the menu opens.
+ * A dropdown does not need that trap; callers can still pass `modal` to opt in.
+ */
+export function Menu({
+  modal = false,
+  ...props
+}: ComponentPropsWithoutRef<typeof DM.Root>) {
+  return <DM.Root modal={modal} {...props} />;
+}
 export const MenuTrigger = DM.Trigger;
 
 function cn(...parts: (string | undefined)[]) {

@@ -1,8 +1,9 @@
 import "server-only";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { accessTokens } from "@/db/schema";
+import { hashToken } from "@/lib/token-hash";
 
 /**
  * Access-token minting and management (console side). One generic table backs
@@ -21,9 +22,9 @@ const PREFIXES: Record<TokenType, string> = {
   organization: "flagon_oat",
 };
 
-export function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
+// Re-exported so existing imports from this module keep working; the hashing
+// itself lives in the pure, DB-free, unit-tested token-hash module.
+export { hashToken };
 
 function generate(type: TokenType) {
   const secret = randomBytes(24).toString("base64url");

@@ -17,19 +17,36 @@ import { fileURLToPath } from "node:url";
  * so a release applies its migrations before it serves traffic. With no
  * connection string configured yet it skips rather than failing the build.
  */
+/** A real production release, where skipping migrations is never acceptable. */
+function isProductionDeploy(): boolean {
+  return (
+    process.env.VERCEL_ENV === "production" ||
+    process.env.NODE_ENV === "production"
+  );
+}
+
 async function main() {
   const url =
     process.env.MIGRATE_DATABASE_URL ??
     process.env.DATABASE_URL_UNPOOLED ??
     process.env.DATABASE_URL;
   if (!url) {
-    // Skip rather than fail. This runs in the deploy build, and the project is
-    // set up in stages: the database is often added AFTER the project exists,
-    // so a first build with no DB yet should go green and simply migrate on
-    // the next deploy once the connection string is present. A prod instance
-    // that truly has no database still fails loudly at runtime (see client.ts).
+    // In PRODUCTION a missing connection string is a hard failure: a production
+    // release must migrate before it serves traffic, so we must never let a
+    // transiently-unset URL produce a green build that quietly skipped
+    // migrations. Fail the build instead, loudly.
+    if (isProductionDeploy()) {
+      console.error(
+        "[migrate] no connection string (MIGRATE_DATABASE_URL / DATABASE_URL_UNPOOLED / DATABASE_URL) in a PRODUCTION build. Refusing to continue: a production deploy must apply its migrations before serving. Set the migration connection string and redeploy.",
+      );
+      process.exit(1);
+    }
+    // Outside production, skip rather than fail: a project is set up in stages
+    // and the database is often added after the project exists, so a first
+    // preview/local build with no DB yet should go green and migrate on the
+    // next run once the string is present.
     console.warn(
-      "[migrate] no connection string (MIGRATE_DATABASE_URL / DATABASE_URL_UNPOOLED / DATABASE_URL); skipping. Add the database, then redeploy to apply migrations.",
+      "[migrate] no connection string (MIGRATE_DATABASE_URL / DATABASE_URL_UNPOOLED / DATABASE_URL); skipping (non-production). Add the database, then redeploy to apply migrations.",
     );
     return;
   }

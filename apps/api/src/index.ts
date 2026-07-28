@@ -1,10 +1,20 @@
+// MUST be first: initialize Sentry before anything it auto-instruments loads.
+import { sentryEnabled } from "./instrument.js";
+// Validate the environment at boot: fail fast and loud on a misconfigured
+// deploy rather than on the first request.
+import "./env.js";
+import * as Sentry from "@sentry/node";
+import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { logger } from "hono/logger";
-import { brandMarkSvg } from "./lib/brand-mark.js";
+import { logger as httpLogger } from "hono/logger";
+import { secureHeaders } from "hono/secure-headers";
+import { db } from "./db/client.js";
+import { brandMarkPng, brandMarkSvg } from "./lib/brand-mark.js";
 import { openCors } from "./lib/cors.js";
 import { healthBody } from "./lib/health.js";
 import { baseUrl, jsonError } from "./lib/http.js";
+import { logger } from "./lib/logger.js";
 import { buildOpenApiDocument, buildRootIndex } from "./openapi/registry.js";
 import { v1 } from "./routes/v1/index.js";
 
@@ -16,7 +26,12 @@ import { v1 } from "./routes/v1/index.js";
 // the OpenAPI registry that GET / and GET /openapi.json read.
 const app = new Hono();
 
-app.use("*", logger());
+app.use("*", httpLogger());
+// Security headers on every response. The defaults are right for a JSON API:
+// nosniff, frame denial, HSTS, referrer + cross-origin policies. Content-Security
+// -Policy is deliberately left off (no default) — this API renders no HTML, so a
+// CSP would only add risk without protecting anything.
+app.use("*", secureHeaders());
 app.use("*", openCors);
 
 // Root index: a generated, self-maintaining hypermedia map of the registered
@@ -33,6 +48,24 @@ app.get("/openapi.json", (c) => c.json(buildOpenApiDocument(baseUrl(c))));
 // version's documented API contract; this one is operational, like GET /.
 app.get("/healthz", (c) => c.json(healthBody()));
 
+// Readiness probe: liveness answers "is the process up", this answers "can it
+// actually serve", which for this API means the database is reachable. A deploy
+// with a broken connection string is LIVE but not READY, and this is the one
+// endpoint that tells them apart — so it deliberately runs a query. Bounded by a
+// timeout so a hung database returns 503 promptly instead of hanging the probe.
+app.get("/readyz", async (c) => {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("readiness check timed out")), 5000),
+  );
+  try {
+    await Promise.race([db.execute(sql`select 1`), timeout]);
+    return c.json({ status: "ready", time: new Date().toISOString() });
+  } catch (err) {
+    logger.error("readiness check failed", { err });
+    return c.json({ status: "unready", time: new Date().toISOString() }, 503);
+  }
+});
+
 // The API renders no HTML, but a browser opening it still asks for a favicon,
 // and the root index is meant to be looked at. Serve the same Flagon mark the
 // other surfaces use so the tab icon matches everywhere.
@@ -43,6 +76,12 @@ const serveBrandMark = (c: Context) =>
   });
 app.get("/favicon.ico", serveBrandMark);
 app.get("/icon.svg", serveBrandMark);
+app.get("/favicon.png", (c) =>
+  c.body(brandMarkPng, 200, {
+    "Content-Type": "image/png",
+    "Cache-Control": "public, max-age=31536000, immutable",
+  }),
+);
 
 app.route("/v1", v1);
 
@@ -50,8 +89,20 @@ app.route("/v1", v1);
 // error exactly the way it parses a success.
 app.notFound((c) => jsonError(c, 404, "Not Found"));
 
-app.onError((err, c) => {
-  console.error(err);
+app.onError(async (err, c) => {
+  // One structured line to the logs, always. The response stays generic so no
+  // internal detail (stack, SQL, env) ever reaches the client.
+  logger.error("unhandled request error", {
+    err,
+    method: c.req.method,
+    path: c.req.path,
+  });
+  if (sentryEnabled) {
+    Sentry.captureException(err);
+    // Serverless functions freeze the moment we return, so drain the queue
+    // first (bounded so a slow Sentry never holds the response hostage).
+    await Sentry.flush(2000);
+  }
   return jsonError(c, 500, "Server Error");
 });
 

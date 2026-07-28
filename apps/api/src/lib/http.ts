@@ -28,6 +28,18 @@ export function baseUrl(c: Context): string {
   return `${proto}://${host}`;
 }
 
+/**
+ * The caller's best-known IP, for abuse triage and rate-limit keying. Behind
+ * Vercel the real client is the first hop of `x-forwarded-for`; `x-real-ip` is
+ * the fallback. Never trust this for authorization — it is client-influenced —
+ * but it is the right coarse key for "slow this source down".
+ */
+export function clientIp(c: Context): string {
+  const forwarded = c.req.header("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0]!.trim();
+  return c.req.header("x-real-ip") ?? "unknown";
+}
+
 export function jsonError(
   c: Context,
   status: ContentfulStatusCode,

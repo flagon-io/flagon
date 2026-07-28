@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../../db/client.js";
 import { leads } from "../../db/schema.js";
-import { validationError } from "../../lib/http.js";
+import { clientIp, validationError } from "../../lib/http.js";
+import { rateLimit, tooManyRequests } from "../../lib/rate-limit.js";
 import { registerRoute } from "../../openapi/registry.js";
 
 export const waitlist = new Hono();
@@ -26,23 +27,27 @@ registerRoute({
   responses: {
     200: { description: "The address is on the list.", schema: waitlistResponse },
     422: { description: "The submitted data failed validation." },
+    429: { description: "Too many submissions from this source; retry later." },
   },
 });
 
 waitlist.post("/", async (c) => {
+  // This is a public, unauthenticated write, so throttle by source first —
+  // before parsing — so a flood of junk bodies is turned away just the same.
+  const ip = clientIp(c);
+  const limit = await rateLimit({
+    key: `waitlist:${ip}`,
+    limit: 10,
+    windowSeconds: 600,
+  });
+  if (!limit.ok) return tooManyRequests(c, limit);
+
   const body = await c.req.json().catch(() => null);
   const parsed = waitlistRequest.safeParse(body);
 
   if (!parsed.success) {
     return validationError(c, parsed.error);
   }
-
-  // Best-effort client IP for abuse triage. Behind a proxy the real client is
-  // the first entry of x-forwarded-for; fall back to x-real-ip.
-  const ip =
-    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
-    c.req.header("x-real-ip") ||
-    null;
 
   // Re-submitting the same email is a no-op success: the unique (kind, email)
   // index turns a duplicate into "do nothing" rather than an error or a dupe
@@ -54,7 +59,7 @@ waitlist.post("/", async (c) => {
       kind: "waitlist",
       email: parsed.data.email,
       source: "waitlist-form",
-      ip,
+      ip: ip === "unknown" ? null : ip,
     })
     .onConflictDoNothing({ target: [leads.kind, leads.email] });
 

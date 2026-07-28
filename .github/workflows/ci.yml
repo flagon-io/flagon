@@ -1,0 +1,36 @@
+name: CI
+
+# Gate every push to main and every PR on the checks that need no infrastructure:
+# type-checking (the API's `lint` is `tsc --noEmit`), ESLint, and the Vitest unit
+# suite. The full production build stays with Vercel, which already runs it on
+# deploy and owns the environment/secrets a Next build needs.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch/PR cancels the older, still-running job.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, typecheck & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint & typecheck
+        run: npm run lint
+
+      - name: Test
+        run: npm test

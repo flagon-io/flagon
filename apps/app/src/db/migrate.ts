@@ -16,14 +16,31 @@ import { fileURLToPath } from "node:url";
  * the same database; without distinct tracking tables their journals would
  * interleave by timestamp and silently skip each other's migrations.
  */
+/** A real production release, where skipping migrations is never acceptable. */
+function isProductionDeploy(): boolean {
+  return (
+    process.env.VERCEL_ENV === "production" ||
+    process.env.NODE_ENV === "production"
+  );
+}
+
 async function main() {
   const url =
     process.env.MIGRATE_DATABASE_URL ??
     process.env.DATABASE_URL_UNPOOLED ??
     process.env.DATABASE_URL;
   if (!url) {
+    // In production, refuse to continue: a release must migrate before serving,
+    // so a transiently-unset URL must fail the build rather than silently
+    // produce a green deploy that skipped its migrations.
+    if (isProductionDeploy()) {
+      console.error(
+        "[migrate:auth] no connection string (MIGRATE_DATABASE_URL / DATABASE_URL_UNPOOLED / DATABASE_URL) in a PRODUCTION build. Refusing to continue: a production deploy must apply its migrations before serving. Set the migration connection string and redeploy.",
+      );
+      process.exit(1);
+    }
     console.warn(
-      "[migrate:auth] no connection string (MIGRATE_DATABASE_URL / DATABASE_URL_UNPOOLED / DATABASE_URL); skipping. Add the database, then redeploy to apply migrations.",
+      "[migrate:auth] no connection string (MIGRATE_DATABASE_URL / DATABASE_URL_UNPOOLED / DATABASE_URL); skipping (non-production). Add the database, then redeploy to apply migrations.",
     );
     return;
   }

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   index,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -56,8 +57,28 @@ export const leads = pgTable(
 export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
 
+/**
+ * Rate-limit counters: a fixed-window request limiter keyed by an opaque string
+ * (e.g. `waitlist:<ip>`, `auth-fail:<ip>`). One row per key; each check is a
+ * single atomic upsert that resets the window when it has elapsed and otherwise
+ * increments the count (see lib/rate-limit.ts).
+ *
+ * Like `leads`, this is a global OPERATIONAL table, not tenant data, so it
+ * carries no RLS; the migration grants the app role the read/write it needs.
+ * `window_start` marks the START of the current window.
+ */
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(0),
+  windowStart: timestamp("window_start", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type RateLimitRow = typeof rateLimits.$inferSelect;
+
 /** Everything the migrator and query layer should know about. */
-export const schema = { leads };
+export const schema = { leads, rateLimits };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm
 // directly; keeps the db surface in one place.

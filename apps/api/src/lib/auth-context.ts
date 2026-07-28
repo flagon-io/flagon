@@ -1,8 +1,10 @@
 import type { Context, MiddlewareHandler } from "hono";
-import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { accessTokens, organizations, users } from "../db/auth-tables.js";
+import { clientIp } from "./http.js";
+import { rateLimit, tooManyRequests } from "./rate-limit.js";
+import { hashToken } from "./token-hash.js";
 
 /**
  * Request authentication for the API.
@@ -40,10 +42,6 @@ declare module "hono" {
   interface ContextVariableMap {
     auth: AuthIdentity;
   }
-}
-
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
 }
 
 async function fromToken(token: string): Promise<AuthIdentity> {
@@ -128,6 +126,15 @@ async function fromCookie(c: Context): Promise<AuthIdentity> {
   }
 }
 
+/** Whether the caller presented a Flagon bearer token (valid or not). */
+function presentedBearerToken(c: Context): boolean {
+  const authorization = c.req.header("authorization");
+  return (
+    authorization?.startsWith("Bearer ") === true &&
+    authorization.slice(7).trim().startsWith("flagon_")
+  );
+}
+
 /** Resolve the caller's identity from a Bearer token or the session cookie. */
 export async function resolveIdentity(c: Context): Promise<AuthIdentity> {
   const authorization = c.req.header("authorization");
@@ -140,7 +147,23 @@ export async function resolveIdentity(c: Context): Promise<AuthIdentity> {
 
 /** Populate c.get("auth"). Apply to any route group that needs identity. */
 export const authContext: MiddlewareHandler = async (c, next) => {
-  c.set("auth", await resolveIdentity(c));
+  const identity = await resolveIdentity(c);
+
+  // Brute-force backstop: throttle a source that keeps presenting bearer tokens
+  // that DON'T resolve. Valid tokens and plain unauthenticated requests never
+  // touch the limiter, so ordinary traffic — including high-volume authenticated
+  // traffic — is never slowed. Tokens are 24 random bytes, so this is defense in
+  // depth (and a DoS backstop) rather than the primary guard.
+  if (!identity && presentedBearerToken(c)) {
+    const limit = await rateLimit({
+      key: `auth-fail:${clientIp(c)}`,
+      limit: 20,
+      windowSeconds: 300,
+    });
+    if (!limit.ok) return tooManyRequests(c, limit);
+  }
+
+  c.set("auth", identity);
   await next();
 };
 

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   Archive,
+  BellRing,
   Boxes,
   ChevronLeft,
   ChevronRight,
@@ -21,8 +22,10 @@ import {
   Plug,
   Rocket,
   Settings,
+  Signal,
   SlidersHorizontal,
   Split,
+  Terminal,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -78,12 +81,14 @@ function buildNav(base: string): {
     groups: [
       { items: [{ label: "Overview", icon: Gauge, href: `${base}/flags` }] },
       {
+        // The flag-tied surfaces (flags, plus the segments and experiments built
+        // on them) and Entities, the subjects they evaluate against.
         heading: "Manage",
         items: [
           { label: "Flags", icon: Flag, soon: true },
           { label: "Segments", icon: Split, soon: true },
           { label: "Experiments", icon: FlaskConical, soon: true },
-          { label: "Audiences", icon: Users, soon: true },
+          { label: "Entities", icon: Users, soon: true },
         ],
       },
       {
@@ -125,6 +130,14 @@ function buildNav(base: string): {
         { kind: "area", area: flags },
         { kind: "soon", label: "Teams", icon: Users },
         { kind: "soon", label: "Integrations", icon: Plug },
+      ],
+      // Reliability suite (Better Stack-style, but Flagon's own product): status
+      // pages, on-call/incidents, and runbook automation. Flagon-native labels,
+      // not the third-party tools these riff on.
+      [
+        { kind: "soon", label: "Status Page", icon: Signal },
+        { kind: "soon", label: "On-call", icon: BellRing },
+        { kind: "soon", label: "Runbooks", icon: Terminal },
       ],
       [
         { kind: "soon", label: "Usage", icon: Activity },

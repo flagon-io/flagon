@@ -8,6 +8,7 @@ import { APIError } from "better-auth/api";
 import { db } from "@/db/client";
 import { members, organizations, schema, userEmails } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
+import { env } from "@/env";
 import { createEmailSender } from "@/lib/email/sender";
 import {
   invitationTemplate,
@@ -45,7 +46,9 @@ const cookieDomain = process.env.AUTH_COOKIE_DOMAIN;
 
 export const auth = betterAuth({
   appName: "Flagon",
-  secret: process.env.BETTER_AUTH_SECRET,
+  // Validated at boot (see @/env): guaranteed present, long enough, and never
+  // the dev placeholder in production.
+  secret: env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL ?? APP_URL,
 
   database: drizzleAdapter(db, { provider: "pg", schema }),
@@ -79,6 +82,29 @@ export const auth = betterAuth({
     // optimistic signed-in/out decision without a database round-trip; the page
     // still does the authoritative check.
     cookieCache: { enabled: true, maxAge: 5 * 60 },
+  },
+
+  // Brute-force protection on the auth endpoints. Enabled in production (the
+  // library default); the generous global window covers everything, and the
+  // credential-sensitive routes get strict per-IP windows on top. Normal
+  // session traffic (e.g. get-session) keeps the generous default, so real
+  // users are never throttled.
+  //
+  // Storage is in-memory, i.e. per serverless instance. That raises the bar
+  // against naive brute-force with no new shared-database table (the API owns
+  // the only `rate_limits` table today; a second one here would collide). For
+  // distributed-strength limiting, add a secondary store (e.g. Redis) or
+  // better-auth "database" storage with its own table later.
+  rateLimit: {
+    window: 10,
+    max: 100,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 10 },
+      "/sign-in/username": { window: 60, max: 10 },
+      "/sign-up/email": { window: 3600, max: 10 },
+      "/request-password-reset": { window: 3600, max: 5 },
+      "/reset-password": { window: 3600, max: 5 },
+    },
   },
 
   plugins: [
