@@ -235,6 +235,12 @@ export const auth = betterAuth({
     // All identifiers are UUIDv7 (time-ordered). BetterAuth calls this for every
     // model's id; our own tables default them via drizzle `$defaultFn`.
     database: { generateId: () => uuidv7() },
+    // Our own cookie namespace, off BetterAuth's default `better-auth`. This
+    // makes every pre-existing `better-auth.session_token` cookie — on ANY domain
+    // — instantly unrecognized, so the move to apex-scoped `.flagon.io` cookies
+    // starts from a clean slate and no stale host-scoped copy can shadow the new
+    // one. `proxy.ts` reads this same prefix; the two MUST stay in sync.
+    cookiePrefix: "flagon",
     ...(cookieDomain
       ? { crossSubDomainCookies: { enabled: true, domain: cookieDomain } }
       : {}),

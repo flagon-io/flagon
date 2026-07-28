@@ -44,7 +44,9 @@ export function proxy(request: NextRequest) {
   // preserve the deep link so we can return them after. (A present-but-invalid
   // cookie passes here; the page's real getSession() then redirects to /login,
   // which this proxy leaves alone, so there is no loop.)
-  if (!getSessionCookie(request)) {
+  // `cookiePrefix` MUST match advanced.cookiePrefix in lib/auth.ts, or this
+  // optimistic check looks for the wrong cookie and redirects signed-in users.
+  if (!getSessionCookie(request, { cookiePrefix: "flagon" })) {
     const url = new URL("/login", request.url);
     if (pathname !== "/") url.searchParams.set("redirect", pathname);
     return NextResponse.redirect(url);
