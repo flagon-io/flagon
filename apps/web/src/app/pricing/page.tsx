@@ -70,19 +70,6 @@ export default function PricingPage() {
 
 /** The pricing-page CTA for each plan (distinct from in-app plan selection). */
 function ctaFor(plan: Plan): ReactNode {
-  if (plan.id === "hobby") {
-    return (
-      <Cta
-        variant="primary"
-        size="md"
-        shape="pill"
-        href={SIGN_UP_URL}
-        className="w-full"
-      >
-        {plan.ctaLabel}
-      </Cta>
-    );
-  }
   if (plan.id === "enterprise") {
     return (
       <Cta
@@ -96,7 +83,22 @@ function ctaFor(plan: Plan): ReactNode {
       </Cta>
     );
   }
-  // Pro (and any other not-yet-available plan): a disabled, non-link CTA.
+  // Any available plan (Hobby, and Pro during the alpha) goes to sign-up, where
+  // the plan is actually chosen on the create-organization step.
+  if (plan.available) {
+    return (
+      <Cta
+        variant={plan.popular ? "primary" : "secondary"}
+        size="md"
+        shape="pill"
+        href={SIGN_UP_URL}
+        className="w-full"
+      >
+        {plan.ctaLabel}
+      </Cta>
+    );
+  }
+  // Not yet available: a disabled, non-link CTA.
   return (
     <span
       aria-disabled="true"

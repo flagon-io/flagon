@@ -151,7 +151,7 @@ export function NewOrgForm({ hasHobby }: { hasHobby: boolean }) {
                 disabledLabel={hobbyBlocked ? "One per account" : undefined}
                 disabledNote={
                   hobbyBlocked
-                    ? "You already have a Hobby organization. Upgrade to Pro (coming soon) to create more, or self-host with no limit."
+                    ? "You already have a Hobby organization. Choose Pro to create more, or self-host with no limit."
                     : undefined
                 }
               />
@@ -160,8 +160,8 @@ export function NewOrgForm({ hasHobby }: { hasHobby: boolean }) {
         </div>
         <p className="text-xs text-zinc-500">
           {hasHobby
-            ? "Paid plans, which lift the one-organization limit, are coming soon."
-            : "Hobby is free, unmetered during the alpha, and limited to one user. Paid plans are coming soon."}{" "}
+            ? "You already have a Hobby organization (limited to one). Pro is free during the alpha and lifts that limit."
+            : "Hobby is free and limited to one user. Pro is free during the alpha, with team members and no org limit."}{" "}
           {SELF_HOST_NOTE}
         </p>
       </fieldset>
