@@ -15,22 +15,16 @@ type MarketingUser = { name: string; email: string; username: string | null };
  * The account menu for the marketing header, mirroring the console's: an avatar
  * button (the user's initial) with a dropdown to account settings and sign out.
  *
- * The marketing site does not run BetterAuth, so sign-out is a credentialed POST
- * to the console's auth endpoint (a trusted origin), which clears the shared
- * `.flagon.io` session cookie; we then reload as a signed-out visitor.
+ * The marketing site does not run BetterAuth, and a cross-origin POST to its
+ * sign-out needs CORS the console doesn't grant on its auth routes. So we sign
+ * out the way cross-domain logout is meant to work: a top-level navigation to
+ * the console's own /sign-out (same-origin there, no CORS), which clears the
+ * shared session cookie and redirects us back here as a signed-out visitor.
  */
 export function AccountMenu({ user }: { user: MarketingUser }) {
-  async function signOut() {
-    try {
-      await fetch(`${APP_URL}/api/auth/sign-out`, {
-        method: "POST",
-        credentials: "include",
-      });
-    } catch {
-      // Even if the call fails, fall through to a reload: the header re-resolves
-      // the session server-side, so the UI stays honest.
-    }
-    window.location.assign("/");
+  function signOut() {
+    const returnTo = encodeURIComponent(window.location.href);
+    window.location.assign(`${APP_URL}/sign-out?returnTo=${returnTo}`);
   }
 
   return (

@@ -25,8 +25,10 @@ const AUTH_PAGES = new Set([
   "/reset-password",
 ]);
 
-// Prefixes that are always reachable, signed in or out.
-const PUBLIC_PREFIXES = ["/invite"];
+// Prefixes that are always reachable, signed in or out. `/sign-out` must work
+// whether or not a (valid) cookie is present — it ends the session and redirects
+// back, so it can never be gated behind having one.
+const PUBLIC_PREFIXES = ["/invite", "/sign-out"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
