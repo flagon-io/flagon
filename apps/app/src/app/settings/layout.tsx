@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { FlagonMark } from "@flagon/design";
 import { getSession } from "@/lib/auth";
 import { SettingsNav } from "@/components/settings/settings-nav";
-import { SignOutButton } from "@/components/sign-out-button";
+import { AccountMenu } from "@/components/workspace/account-menu";
 
 const ITEMS = [
   { href: "/settings", label: "Profile" },
@@ -36,11 +36,17 @@ export default async function SettingsLayout({
           <span className="text-white/15">/</span>
           <span className="text-sm font-medium text-zinc-200">Settings</span>
         </div>
-        <div className="flex items-center gap-4 text-xs text-zinc-500">
-          <Link href="/" className="hover:text-zinc-300">
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-xs text-zinc-500 hover:text-zinc-300">
             Back to app
           </Link>
-          <SignOutButton />
+          <AccountMenu
+            user={{
+              name: session.user.name,
+              email: session.user.email,
+              username: session.user.username ?? null,
+            }}
+          />
         </div>
       </header>
 
