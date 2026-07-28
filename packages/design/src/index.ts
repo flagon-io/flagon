@@ -19,6 +19,20 @@ export { PageHero } from "./components/page-hero";
 export { PlanCard } from "./components/plan-card";
 export { Select, type SelectOption } from "./components/select";
 export {
+  SegmentedControl,
+  type SegmentedOption,
+} from "./components/segmented-control";
+export { Input, Textarea } from "./components/input";
+export { Field } from "./components/field";
+export { Button, type ButtonVariant } from "./components/button";
+export { Switch } from "./components/switch";
+export {
+  Modal,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+} from "./components/modal";
+export {
   Menu,
   MenuTrigger,
   MenuContent,

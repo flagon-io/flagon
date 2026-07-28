@@ -16,6 +16,7 @@ import { healthBody } from "./lib/health.js";
 import { baseUrl, jsonError } from "./lib/http.js";
 import { logger } from "./lib/logger.js";
 import { buildOpenApiDocument, buildRootIndex } from "./openapi/registry.js";
+import { ofrep } from "./routes/ofrep/index.js";
 import { v1 } from "./routes/v1/index.js";
 
 // The API is the control plane: everything that matters (today: the waitlist;
@@ -84,6 +85,10 @@ app.get("/favicon.png", (c) =>
 );
 
 app.route("/v1", v1);
+
+// OFREP: the OpenFeature Remote Evaluation Protocol. The flag-evaluation hot
+// path, authenticated by SDK key rather than the control-plane token/cookie.
+app.route("/ofrep", ofrep);
 
 // Everything this API returns is JSON, failures included: a client parses an
 // error exactly the way it parses a success.

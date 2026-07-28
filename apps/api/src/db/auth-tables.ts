@@ -31,6 +31,13 @@ export const organizations = pgTable("organizations", {
   plan: text("plan").notNull().default("hobby"),
 });
 
+export const members = pgTable("members", {
+  id: uuid("id").primaryKey(),
+  organizationId: uuid("organization_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  role: text("role").notNull().default("member"),
+});
+
 export const accessTokens = pgTable("access_tokens", {
   id: uuid("id").primaryKey(),
   type: text("type").notNull(),

@@ -4,7 +4,7 @@ The self-hostable developer platform.
 
 ```
 apps/
-  web/   Next.js marketing site      → flagon.io        ("coming soon" launch page)
+  web/   Next.js marketing site       → flagon.io        ("coming soon" launch page)
   app/   Next.js product app          → app.flagon.io    (invite-only for now)
   api/   Hono API, the control plane  → api.flagon.io/v1/...
 ```

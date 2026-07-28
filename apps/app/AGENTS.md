@@ -6,6 +6,30 @@ This version has breaking changes — APIs, conventions, and file structure may 
 Notably: `middleware.ts` is gone, replaced by `proxy.ts` (see `src/proxy.ts`). `searchParams`/`params` in pages are Promises and must be awaited. `useSearchParams` needs a `<Suspense>` boundary.
 <!-- END:nextjs-agent-rules -->
 
+# Design system (@flagon/design)
+
+The shared design system lives in `packages/design` and is imported as
+`@flagon/design`. **Use it. Do not hand-roll UI primitives with raw Tailwind.**
+
+- **Before building any UI**, check what `@flagon/design` already exports (see
+  `packages/design/src/index.ts`): `Button` (variants + standardized sizing —
+  its default height matches the form fields), `Input`, `Textarea`, `Select`,
+  `SegmentedControl`, `Field`, `Modal` + `ModalHeader`/`ModalBody`/`ModalFooter`
+  (header & footer divided from the body by full-width borders — the house modal
+  shape), `Menu`, `Popover`, plus brand/layout pieces.
+- **If a primitive is missing, ADD it to the design system** rather than styling
+  a one-off in the app. The goal is a fully-featured system that covers our use
+  cases, so every surface stays consistent. New primitives go in
+  `packages/design/src/components/` and are re-exported from `index.ts`.
+- **Sizing is standardized.** Controls share the same height (`py-2.5`) so a row
+  of mixed inputs/selects/buttons lines up. Reach for `size="sm"` only in
+  genuinely dense, inline contexts — not by default.
+- Native form controls (`<select>`, unstyled `<input>`, ad-hoc `<button>`) are a
+  smell: replace them with the design-system component.
+- Don't reach for a toggle/SegmentedControl just because a choice is binary —
+  match the interaction to the task (e.g. targeting is an IF-criteria builder,
+  not a toggle). Look at how the reference UI does it first.
+
 # Authentication
 
 This console owns auth for all of Flagon (BetterAuth, pinned 1.6.x). Verify every

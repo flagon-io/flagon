@@ -31,7 +31,7 @@ export function Select({
       <S.Trigger
         aria-label={ariaLabel}
         className={[
-          "flex items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none transition-colors",
+          "flex h-10 items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 px-3 text-sm text-zinc-100 outline-none transition-colors",
           "focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20",
           "disabled:cursor-not-allowed disabled:opacity-60 data-[placeholder]:text-zinc-500",
           className ?? "",

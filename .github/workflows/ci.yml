@@ -18,6 +18,27 @@ jobs:
   verify:
     name: Lint, typecheck & test
     runs-on: ubuntu-latest
+
+    # A throwaway Postgres so the tenancy audit (and any future DB-backed test)
+    # can run against a real, migrated database. Matches the local compose image.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: flagon
+          POSTGRES_PASSWORD: flagon
+          POSTGRES_DB: flagon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flagon"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://flagon:flagon@localhost:5432/flagon
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +52,13 @@ jobs:
 
       - name: Lint & typecheck
         run: npm run lint
+
+      # Apply both pipelines' migrations to the throwaway DB so the tenancy audit
+      # inspects the real, current schema (RLS policies included).
+      - name: Apply migrations
+        run: |
+          npm run db:migrate -w @flagon/api
+          npm run db:migrate -w @flagon/app
 
       - name: Test
         run: npm test

@@ -15,6 +15,34 @@
       "when": 1785198672333,
       "tag": "0001_rate_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785202755599,
+      "tag": "0002_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785219026669,
+      "tag": "0003_flag_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785224105837,
+      "tag": "0004_flag_eval_rollups",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785226685383,
+      "tag": "0005_flag_revision_snapshot",
+      "breakpoints": true
     }
   ]
 }

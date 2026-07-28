@@ -12,9 +12,9 @@ import {
   ChevronRight,
   Flag,
   FlaskConical,
-  Gauge,
   KeyRound,
   LifeBuoy,
+  Logs,
   Mail,
   Package,
   PanelLeftClose,
@@ -79,23 +79,21 @@ function buildNav(base: string): {
     icon: Flag,
     href: `${base}/flags`,
     groups: [
-      { items: [{ label: "Overview", icon: Gauge, href: `${base}/flags` }] },
       {
         // The flag-tied surfaces (flags, plus the segments and experiments built
         // on them) and Entities, the subjects they evaluate against.
-        heading: "Manage",
         items: [
-          { label: "Flags", icon: Flag, soon: true },
-          { label: "Segments", icon: Split, soon: true },
+          { label: "Flags", icon: Flag, href: `${base}/flags` },
+          { label: "Segments", icon: Split, href: `${base}/flags/segments` },
           { label: "Experiments", icon: FlaskConical, soon: true },
-          { label: "Entities", icon: Users, soon: true },
+          { label: "Entities", icon: Users, href: `${base}/flags/entities` },
         ],
       },
       {
         heading: "Connect",
         items: [
-          { label: "SDK Keys", icon: KeyRound, soon: true },
-          { label: "Archive", icon: Archive, soon: true },
+          { label: "SDK Keys", icon: KeyRound, href: `${base}/flags/keys` },
+          { label: "Archive", icon: Archive, href: `${base}/flags/archive` },
         ],
       },
     ],
@@ -125,6 +123,7 @@ function buildNav(base: string): {
         { kind: "link", label: "Projects", icon: Boxes, href: base },
         { kind: "soon", label: "Packages", icon: Package },
         { kind: "soon", label: "Deployments", icon: Rocket },
+        { kind: "soon", label: "Logs", icon: Logs },
       ],
       [
         { kind: "area", area: flags },

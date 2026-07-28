@@ -1,7 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
+  date,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -77,8 +80,372 @@ export const rateLimits = pgTable("rate_limits", {
 
 export type RateLimitRow = typeof rateLimits.$inferSelect;
 
+/**
+ * =============================================================================
+ * FEATURE FLAGS
+ * =============================================================================
+ * The flags product. EVERY table here is TENANT-scoped: it carries
+ * `organization_id` and is guarded by the same Postgres row-level security
+ * policy (see the migration's `flagon_apply_tenant_rls` helper and the withOrg()
+ * client in db/tenant.ts). Flags are ORG-global — there is no project dimension;
+ * an org's flags are shared across all of its usage.
+ *
+ * The shape mirrors a Vercel/LaunchDarkly-grade model:
+ *   flags ─┬─ flag_variants          (the values a flag can resolve to)
+ *          ├─ flag_environments ──── flag_rules   (per-env config + targeting)
+ *          └─ flag_revisions         (audit log)
+ *   environments ── sdk_keys         (per-env client credentials)
+ *   entities ── entity_attributes    (the targeting-context schema)
+ *   segments                          (reusable targeting condition groups)
+ */
+
+/** Shared timestamp columns. */
+const timestamps = {
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+};
+
+/**
+ * Deployment environments (Production / Preview / Development, seeded per org,
+ * extensible). Every per-environment concept — flag config, targeting, SDK keys
+ * — hangs off one of these.
+ */
+export const environments = pgTable(
+  "environments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("environments_org_key_key").on(t.organizationId, t.key),
+    index("environments_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * A flag. `type` is the value shape: boolean, string, number, or json. On/off
+ * lives per-environment (flag_environments), not here. `permanent` marks a flag
+ * that is not expected to be cleaned up (a kill switch), `archived_at` powers
+ * the Archive view.
+ */
+export const flags = pgTable(
+  "flags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    type: text("type").notNull().default("boolean"),
+    permanent: boolean("permanent").notNull().default(false),
+    tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
+    createdByUserId: uuid("created_by_user_id"),
+    maintainerUserId: uuid("maintainer_user_id"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("flags_org_key_key").on(t.organizationId, t.key),
+    index("flags_org_idx").on(t.organizationId),
+    index("flags_org_archived_idx").on(t.organizationId, t.archivedAt),
+  ],
+);
+
+/**
+ * The values a flag can resolve to. A boolean flag has exactly two (true/false),
+ * seeded on creation; multivariate flags have any number, each with a jsonb
+ * `value` and an optional human `label`.
+ */
+export const flagVariants = pgTable(
+  "flag_variants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    flagId: uuid("flag_id")
+      .notNull()
+      .references(() => flags.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: jsonb("value").notNull(),
+    label: text("label"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("flag_variants_flag_key_key").on(t.flagId, t.key),
+    index("flag_variants_flag_idx").on(t.flagId),
+    index("flag_variants_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * A flag's configuration in one environment: whether it's enabled, which variant
+ * it serves by default (when enabled and no rule matches) and when off. Targeting
+ * rules attach here.
+ */
+export const flagEnvironments = pgTable(
+  "flag_environments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    flagId: uuid("flag_id")
+      .notNull()
+      .references(() => flags.id, { onDelete: "cascade" }),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environments.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    defaultVariantId: uuid("default_variant_id").references(
+      () => flagVariants.id,
+      { onDelete: "set null" },
+    ),
+    offVariantId: uuid("off_variant_id").references(() => flagVariants.id, {
+      onDelete: "set null",
+    }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("flag_environments_flag_env_key").on(
+      t.flagId,
+      t.environmentId,
+    ),
+    index("flag_environments_org_idx").on(t.organizationId),
+    index("flag_environments_env_idx").on(t.environmentId),
+  ],
+);
+
+/**
+ * The targeting-context schema: the kinds of subject a flag can be evaluated for
+ * (user, team, ...) and their typed attributes. Rules and segments reference
+ * these; an SDK sends a matching evaluation context.
+ */
+export const entities = pgTable(
+  "entities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("entities_org_key_key").on(t.organizationId, t.key),
+    index("entities_org_idx").on(t.organizationId),
+  ],
+);
+
+export const entityAttributes = pgTable(
+  "entity_attributes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    entityId: uuid("entity_id")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    dataType: text("data_type").notNull().default("string"),
+    /** Optional enum labels for the attribute's known values. */
+    labels: jsonb("labels"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("entity_attributes_entity_key_key").on(t.entityId, t.key),
+    index("entity_attributes_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * Reusable targeting condition groups. A rule can reference a segment instead of
+ * inlining conditions, so "beta users" is defined once and reused across flags.
+ * `conditions` is a jsonb predicate tree over entity attributes.
+ */
+export const segments = pgTable(
+  "segments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    conditions: jsonb("conditions").notNull().default(sql`'[]'::jsonb`),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("segments_org_key_key").on(t.organizationId, t.key),
+    index("segments_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * A targeting rule within a flag's environment. Rules are evaluated in
+ * `priority` order; the first whose `conditions` match serves `serve` — either a
+ * single variant (`{ variantId }`) or a weighted rollout
+ * (`{ rollout: [{ variantId, weight }], bucketBy }`), bucketed deterministically
+ * by a key from the evaluation context.
+ */
+export const flagRules = pgTable(
+  "flag_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    flagEnvironmentId: uuid("flag_environment_id")
+      .notNull()
+      .references(() => flagEnvironments.id, { onDelete: "cascade" }),
+    priority: integer("priority").notNull().default(0),
+    description: text("description"),
+    conditions: jsonb("conditions").notNull().default(sql`'[]'::jsonb`),
+    serve: jsonb("serve").notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    index("flag_rules_env_priority_idx").on(
+      t.flagEnvironmentId,
+      t.priority,
+    ),
+    index("flag_rules_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * Client SDK credentials, scoped to a single environment. Only the SHA-256 hash
+ * is stored; the plaintext is shown once at creation (same discipline as
+ * access_tokens). The API authenticates OFREP calls by hashing the presented key
+ * and looking it up.
+ */
+export const sdkKeys = pgTable(
+  "sdk_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environments.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    keyHash: text("key_hash").notNull().unique(),
+    prefix: text("prefix").notNull(),
+    lastFour: text("last_four").notNull(),
+    createdByUserId: uuid("created_by_user_id"),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("sdk_keys_org_idx").on(t.organizationId),
+    index("sdk_keys_env_idx").on(t.environmentId),
+  ],
+);
+
+/**
+ * Per-flag audit log. Every mutation (create, toggle, variant change, rule edit)
+ * appends a revision so the flag's history is reconstructable — the "Recent
+ * Revisions" panel and full change history.
+ */
+export const flagRevisions = pgTable(
+  "flag_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    flagId: uuid("flag_id")
+      .notNull()
+      .references(() => flags.id, { onDelete: "cascade" }),
+    userId: uuid("user_id"),
+    action: text("action").notNull(),
+    summary: text("summary"),
+    diff: jsonb("diff"),
+    /**
+     * Full point-in-time config of the flag AFTER this revision (variants + every
+     * environment's enabled/default/off + ordered rules). Captured on every
+     * mutation so the history is a complete, replayable audit trail — this is
+     * what powers "view config at revision N" and rollback, and it can NEVER be
+     * reconstructed after the fact, so it is recorded from day one.
+     */
+    snapshot: jsonb("snapshot"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("flag_revisions_flag_idx").on(t.flagId, t.createdAt),
+    index("flag_revisions_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * Per-day evaluation counts, bucketed by (flag, environment, served variant,
+ * reason). The OFREP endpoints upsert into this at eval time so the console can
+ * show how each flag is actually being used. Tenant data (org-scoped, RLS).
+ * `variant_key` is "" (not null) for error results, so the unique bucket key
+ * works with ON CONFLICT (nulls would be treated as distinct).
+ */
+export const flagEvalRollups = pgTable(
+  "flag_eval_rollups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    flagId: uuid("flag_id")
+      .notNull()
+      .references(() => flags.id, { onDelete: "cascade" }),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environments.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    variantKey: text("variant_key").notNull().default(""),
+    reason: text("reason").notNull(),
+    count: integer("count").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("flag_eval_rollups_bucket_key").on(
+      t.flagId,
+      t.environmentId,
+      t.day,
+      t.variantKey,
+      t.reason,
+    ),
+    index("flag_eval_rollups_flag_idx").on(t.flagId, t.environmentId),
+    index("flag_eval_rollups_org_idx").on(t.organizationId),
+  ],
+);
+
+export type Flag = typeof flags.$inferSelect;
+export type NewFlag = typeof flags.$inferInsert;
+export type Environment = typeof environments.$inferSelect;
+export type FlagVariant = typeof flagVariants.$inferSelect;
+export type FlagEnvironment = typeof flagEnvironments.$inferSelect;
+export type Entity = typeof entities.$inferSelect;
+export type EntityAttribute = typeof entityAttributes.$inferSelect;
+export type Segment = typeof segments.$inferSelect;
+export type FlagRule = typeof flagRules.$inferSelect;
+export type SdkKey = typeof sdkKeys.$inferSelect;
+export type FlagRevision = typeof flagRevisions.$inferSelect;
+
 /** Everything the migrator and query layer should know about. */
-export const schema = { leads, rateLimits };
+export const schema = {
+  leads,
+  rateLimits,
+  flags,
+  environments,
+  flagVariants,
+  flagEnvironments,
+  entities,
+  entityAttributes,
+  segments,
+  flagRules,
+  sdkKeys,
+  flagRevisions,
+};
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm
 // directly; keeps the db surface in one place.
