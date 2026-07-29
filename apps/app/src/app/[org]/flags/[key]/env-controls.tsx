@@ -511,6 +511,16 @@ function RulesEditor({
         />
       ))}
 
+      {/* Add rule — bordered, and ABOVE the Else so it's clear a new rule slots
+          between the rules and the fallback (or becomes the first rule). */}
+      <button
+        type="button"
+        onClick={addRule}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/15 px-3 py-2.5 text-sm text-zinc-400 transition-colors hover:border-white/30 hover:bg-white/2 hover:text-zinc-200"
+      >
+        <Plus className="h-4 w-4" /> Add rule
+      </button>
+
       {/* Default — always last, always the fallback, and itself editable. */}
       <div className="rounded-lg border border-dashed border-white/12 bg-black/20 p-3">
         <div className="mb-2 flex items-center gap-2">
@@ -531,25 +541,16 @@ function RulesEditor({
         </div>
       </div>
 
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={addRule}
-          className="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200"
-        >
-          <Plus className="h-4 w-4" /> Add rule
-        </button>
-        {dirty ? (
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={discard} disabled={pending}>
-              Discard
-            </Button>
-            <Button variant="primary" size="sm" onClick={save} disabled={pending}>
-              {pending ? "Saving…" : "Save changes"}
-            </Button>
-          </div>
-        ) : null}
-      </div>
+      {dirty ? (
+        <div className="mt-1 flex items-center justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={discard} disabled={pending}>
+            Discard
+          </Button>
+          <Button variant="primary" size="sm" onClick={save} disabled={pending}>
+            {pending ? "Saving…" : "Save changes"}
+          </Button>
+        </div>
+      ) : null}
 
       {error ? <p className="text-xs text-red-400">{error}</p> : null}
     </div>

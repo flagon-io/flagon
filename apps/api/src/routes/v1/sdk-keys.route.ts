@@ -132,7 +132,7 @@ registerComponentSchema(
     }),
   }),
 );
-registerComponentSchema("SdkKeyListResponse", z.object({ keys: z.array(sdkKeySchema) }));
+registerComponentSchema("SdkKeyListResponse", z.array(sdkKeySchema));
 
 // --- Create ------------------------------------------------------------------
 sdkKeys_.post("/", async (c) => {
@@ -192,9 +192,9 @@ sdkKeys_.get("/", async (c) => {
     .where(eq(sdkKeys.organizationId, ctx.orgId))
     .orderBy(desc(sdkKeys.createdAt));
 
-  return c.json({
-    keys: rows.map((k) => serializeKey(k, envKeyById.get(k.environmentId) ?? null)),
-  });
+  return c.json(
+    rows.map((k) => serializeKey(k, envKeyById.get(k.environmentId) ?? null)),
+  );
 });
 
 // --- Revoke ------------------------------------------------------------------

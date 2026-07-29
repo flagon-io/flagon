@@ -49,7 +49,7 @@ export function SdkKeysManager({
       {canManage ? (
         <div className="flex justify-end">
           <Button variant="secondary" onClick={() => setModalEnv(environments[0]?.key ?? "")}>
-            <Plus className="h-4 w-4" /> Create SDK Key
+            <Plus className="h-4 w-4" /> Create Client Key
           </Button>
         </div>
       ) : null}
@@ -62,10 +62,10 @@ export function SdkKeysManager({
             <div className="overflow-hidden rounded-xl border border-white/8 bg-white/2">
               {envKeys.length === 0 ? (
                 <div className="flex items-center justify-between px-4 py-4">
-                  <span className="text-sm text-zinc-500">No SDK keys for {env.name}</span>
+                  <span className="text-sm text-zinc-500">No client keys for {env.name}</span>
                   {canManage ? (
                     <Button variant="secondary" size="sm" onClick={() => setModalEnv(env.key)}>
-                      <Plus className="h-3.5 w-3.5" /> Create SDK Key
+                      <Plus className="h-3.5 w-3.5" /> Create Client Key
                     </Button>
                   ) : null}
                 </div>
@@ -103,7 +103,7 @@ export function SdkKeysManager({
                   {canManage ? (
                     <div className="border-t border-white/6 px-2.5 py-2">
                       <Button variant="ghost" size="sm" onClick={() => setModalEnv(env.key)}>
-                        <Plus className="h-3.5 w-3.5" /> Create SDK Key
+                        <Plus className="h-3.5 w-3.5" /> Create Client Key
                       </Button>
                     </div>
                   ) : null}
@@ -115,7 +115,7 @@ export function SdkKeysManager({
       })}
 
       <p className="rounded-lg border border-white/8 bg-white/2 px-4 py-3 text-xs leading-relaxed text-zinc-500">
-        SDK keys are shown once, right after you create them. Use a key with the
+        Client keys are shown once, right after you create them. Use a key with the
         OpenFeature OFREP provider (or a plain POST to{" "}
         <code className="font-mono text-zinc-400">/ofrep/v1/evaluate/flags</code>) to
         evaluate flags in that environment.
@@ -156,7 +156,7 @@ function CreateKeyModal({
 
   function create() {
     setError(null);
-    const envName = environments.find((e) => e.key === environment)?.name ?? "SDK";
+    const envName = environments.find((e) => e.key === environment)?.name ?? "Client";
     start(async () => {
       const res = await createSdkKeyAction(slug, label.trim() || `${envName} key`, environment);
       if (res.error) return setError(res.error);
@@ -167,8 +167,8 @@ function CreateKeyModal({
   return (
     <Modal onClose={onClose} size="md">
       <ModalHeader
-        title="Create SDK Key"
-        description="Use SDK keys to evaluate flags from your application."
+        title="Create Client Key"
+        description="Use client keys to evaluate flags from your application."
         onClose={onClose}
       />
       {token === null ? (

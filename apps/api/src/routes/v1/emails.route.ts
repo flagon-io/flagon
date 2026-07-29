@@ -40,16 +40,14 @@ const SELF_URL =
 
 registerComponentSchema(
   "EmailListResponse",
-  z.object({
-    emails: z.array(
-      z.object({
-        email: z.string(),
-        verified: z.boolean(),
-        isPrimary: z.boolean(),
-        createdAt: z.string(),
-      }),
-    ),
-  }),
+  z.array(
+    z.object({
+      email: z.string(),
+      verified: z.boolean(),
+      isPrimary: z.boolean(),
+      createdAt: z.string(),
+    }),
+  ),
 );
 const ackParams = {};
 registerRoute({
@@ -101,14 +99,14 @@ meEmails_.get("/", async (c) => {
   const userId = requireUserId(c);
   if (userId instanceof Response) return userId;
   const rows = await listUserEmails(userId);
-  return c.json({
-    emails: rows.map((e) => ({
+  return c.json(
+    rows.map((e) => ({
       email: e.email,
       verified: e.verified,
       isPrimary: e.isPrimary,
       createdAt: e.createdAt.toISOString(),
     })),
-  });
+  );
 });
 
 meEmails_.post("/", async (c) => {

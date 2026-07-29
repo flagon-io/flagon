@@ -25,7 +25,7 @@ const memberSchema = z.object({
   role: z.string(),
 });
 registerComponentSchema("Member", memberSchema);
-registerComponentSchema("MemberListResponse", z.object({ members: z.array(memberSchema) }));
+registerComponentSchema("MemberListResponse", z.array(memberSchema));
 
 registerRoute({
   method: "get",
@@ -55,5 +55,5 @@ members_.get("/", async (c) => {
     .innerJoin(users, eq(users.id, members.userId))
     .where(eq(members.organizationId, ctx.orgId));
 
-  return c.json({ members: rows });
+  return c.json(rows);
 });

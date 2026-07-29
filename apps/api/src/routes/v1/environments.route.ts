@@ -33,7 +33,7 @@ const environmentSchema = z.object({
 registerComponentSchema("Environment", environmentSchema);
 registerComponentSchema(
   "EnvironmentListResponse",
-  z.object({ environments: z.array(environmentSchema) }),
+  z.array(environmentSchema),
 );
 
 // --- OpenAPI registration ----------------------------------------------------
@@ -55,5 +55,5 @@ environments_.get("/", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
   const rows = await withOrg(ctx.orgId, (tx) => ensureEnvironments(tx, ctx.orgId));
-  return c.json({ environments: rows.map(serialize) });
+  return c.json(rows.map(serialize));
 });

@@ -358,16 +358,14 @@ const flagUsageSummarySchema = z.object({
 // and a usage summary alongside the base flag fields.
 registerComponentSchema(
   "FlagListResponse",
-  z.object({
-    flags: z.array(
-      flagSchema.extend({
-        value: z.unknown(),
-        createdByName: z.string().nullable(),
-        maintainerName: z.string().nullable(),
-        usage: flagUsageSummarySchema.nullable(),
-      }),
-    ),
-  }),
+  z.array(
+    flagSchema.extend({
+      value: z.unknown(),
+      createdByName: z.string().nullable(),
+      maintainerName: z.string().nullable(),
+      usage: flagUsageSummarySchema.nullable(),
+    }),
+  ),
 );
 
 // The detail view returns the flag (with resolved people names) plus its recent
@@ -664,15 +662,15 @@ flags_.get("/", async (c) => {
   const nameById = new Map(people.map((u) => [u.id, u.name]));
   const nameOf = (id: string | null) => (id ? (nameById.get(id) ?? null) : null);
 
-  return c.json({
-    flags: data.rows.map((f) => ({
+  return c.json(
+    data.rows.map((f) => ({
       ...serializeFlag(f),
       value: data.values.get(f.id) ?? null,
       createdByName: nameOf(f.createdByUserId),
       maintainerName: nameOf(f.maintainerUserId),
       usage: data.usage.get(f.id) ?? null,
     })),
-  });
+  );
 });
 
 // --- Detail (flag + variants + per-env config + rules) -----------------------

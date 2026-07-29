@@ -41,7 +41,7 @@ registerComponentSchema(
   "AccessTokenCreatedResponse",
   z.object({ token: tokenSchema.extend({ token: z.string().describe("The plaintext token, returned once.") }) }),
 );
-registerComponentSchema("AccessTokenListResponse", z.object({ tokens: z.array(tokenSchema) }));
+registerComponentSchema("AccessTokenListResponse", z.array(tokenSchema));
 
 registerRoute({
   method: "post",
@@ -88,7 +88,7 @@ orgTokens_.get("/", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
   const rows = await listOrgTokens(ctx.orgId);
-  return c.json({ tokens: rows.map(serializeToken) });
+  return c.json(rows.map(serializeToken));
 });
 
 orgTokens_.post("/", async (c) => {

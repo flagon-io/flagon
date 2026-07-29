@@ -300,7 +300,7 @@ const ruleSchema = z.object({
 });
 registerComponentSchema("Rule", ruleSchema);
 registerComponentSchema("RuleResponse", z.object({ rule: ruleSchema }));
-registerComponentSchema("RuleListResponse", z.object({ rules: z.array(ruleSchema) }));
+registerComponentSchema("RuleListResponse", z.array(ruleSchema));
 
 /** Map a non-ok resolution to a 404 response. */
 function resolveError(c: Context, kind: "no-flag" | "no-env"): Response {
@@ -448,7 +448,7 @@ rules_.put("/", async (c) => {
   if (outcome.kind === "bad-ref") return jsonError(c, 422, outcome.message);
   if (outcome.kind === "archived") return jsonError(c, 409, ARCHIVED_MESSAGE);
   if (outcome.kind !== "ok") return resolveError(c, outcome.kind);
-  return c.json({ rules: outcome.rows.map(serialize) });
+  return c.json(outcome.rows.map(serialize));
 });
 
 // --- List --------------------------------------------------------------------
@@ -469,7 +469,7 @@ rules_.get("/", async (c) => {
   });
 
   if (outcome.kind !== "ok") return resolveError(c, outcome.kind);
-  return c.json({ rules: outcome.rows.map(serialize) });
+  return c.json(outcome.rows.map(serialize));
 });
 
 // --- Update ------------------------------------------------------------------

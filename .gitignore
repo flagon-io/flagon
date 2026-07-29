@@ -26,3 +26,6 @@ npm-debug.log*
 
 # local working notes (not for the repo)
 .notes/
+
+# Local demo script (holds a production SDK key)
+demo.sh

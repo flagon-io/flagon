@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { invitations, members, organizations, users } from "@/db/schema";
@@ -23,10 +24,13 @@ export type OrgMembership = {
   subscriptionStatus: string | null;
 };
 
-/** Every organization the user belongs to, oldest first. */
-export async function getUserOrganizations(
+/**
+ * Every organization the user belongs to, oldest first. Deduped per request
+ * (React cache): the layout and pages both read it, but the DB is hit once.
+ */
+export const getUserOrganizations = cache(async (
   userId: string,
-): Promise<OrgMembership[]> {
+): Promise<OrgMembership[]> => {
   return db
     .select({
       id: organizations.id,
@@ -42,13 +46,17 @@ export async function getUserOrganizations(
     .innerJoin(organizations, eq(members.organizationId, organizations.id))
     .where(eq(members.userId, userId))
     .orderBy(organizations.createdAt);
-}
+});
 
-/** The user's membership of a single org by slug, or null if not a member. */
-export async function getMembershipBySlug(
+/**
+ * The user's membership of a single org by slug, or null. Deduped per request
+ * (React cache): the layout guard and each page both call it with the same args,
+ * so it runs one query.
+ */
+export const getMembershipBySlug = cache(async (
   userId: string,
   slug: string,
-): Promise<OrgMembership | null> {
+): Promise<OrgMembership | null> => {
   const rows = await db
     .select({
       id: organizations.id,
@@ -65,7 +73,7 @@ export async function getMembershipBySlug(
     .where(and(eq(members.userId, userId), eq(organizations.slug, slug)))
     .limit(1);
   return rows[0] ?? null;
-}
+});
 
 const MANAGER_ROLES = new Set(["owner", "admin"]);
 export function canManageOrg(role: string): boolean {

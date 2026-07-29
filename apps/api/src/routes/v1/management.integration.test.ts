@@ -105,7 +105,7 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
 
   it("lists flags and returns detail with 3 environments", async () => {
     const list = await (await app.request(`${base}/flags`, { headers: auth() })).json();
-    expect(list.flags.map((f: { key: string }) => f.key).sort()).toEqual(["checkout", "color"]);
+    expect(list.map((f: { key: string }) => f.key).sort()).toEqual(["checkout", "color"]);
 
     const detail = await (await app.request(`${base}/flags/checkout`, { headers: auth() })).json();
     expect(detail.environments.map((e: { key: string }) => e.key)).toEqual([
@@ -136,7 +136,7 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
     });
     expect(keyRes.status).toBe(201);
     const { key } = await keyRes.json();
-    expect(key.token).toMatch(/^flagon_sdk_/);
+    expect(key.token).toMatch(/^flagon_client_/);
 
     const evalRes = await app.request(`/ofrep/v1/evaluate/flags/checkout`, {
       method: "POST",
@@ -177,8 +177,8 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
     const etag = bulk.headers.get("etag");
     expect(etag).toBeTruthy();
     const body = await bulk.json();
-    expect(Array.isArray(body.flags)).toBe(true);
-    expect(body.flags.find((f: { key: string }) => f.key === "checkout")).toMatchObject({
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.find((f: { key: string }) => f.key === "checkout")).toMatchObject({
       value: true,
     });
 
@@ -361,13 +361,13 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
 
     // The flag list carries tags too.
     const list = await (await app.request(`${base}/flags`, { headers: auth() })).json();
-    const meta = list.flags.find((f: { key: string }) => f.key === "meta");
+    const meta = list.find((f: { key: string }) => f.key === "meta");
     expect(meta.tags).toEqual(["alpha", "beta"]);
 
     // Members endpoint responds (empty is fine for this seeded org).
     const members = await app.request(`${base}/members`, { headers: auth() });
     expect(members.status).toBe(200);
-    expect(Array.isArray((await members.json()).members)).toBe(true);
+    expect(Array.isArray(await members.json())).toBe(true);
   });
 
   it("archives, restores, and permanently deletes a flag", async () => {

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { brand, Cta, FlagonMark } from "@flagon/design";
-import { APP_URL, SIGN_IN_URL } from "@/lib/urls";
+import { APP_URL, SIGN_IN_URL, SIGN_UP_URL } from "@/lib/urls";
 import { getMarketingSession } from "@/lib/session";
 import { AccountMenu } from "@/components/account-menu";
 
@@ -83,8 +83,8 @@ export async function SiteHeader() {
               <Cta variant="secondary" size="sm" href={SIGN_IN_URL}>
                 Sign in
               </Cta>
-              <Cta variant="primary" size="sm" href="#waitlist">
-                Get early access
+              <Cta variant="primary" size="sm" href={SIGN_UP_URL}>
+                Get started
               </Cta>
             </>
           )}

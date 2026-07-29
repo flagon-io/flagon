@@ -93,7 +93,7 @@ function buildNav(base: string): {
       {
         heading: "Connect",
         items: [
-          { label: "SDK Keys", icon: KeyRound, href: `${base}/flags/keys` },
+          { label: "Client Keys", icon: KeyRound, href: `${base}/flags/keys` },
           { label: "Archive", icon: Archive, href: `${base}/flags/archive` },
         ],
       },

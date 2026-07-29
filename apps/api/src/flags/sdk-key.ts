@@ -13,7 +13,11 @@ import { hashToken } from "../lib/token-hash.js";
  * the same shape as access-token auth. Only the SHA-256 hash is stored; the
  * plaintext is returned once, at creation.
  */
-const SDK_KEY_PREFIX = "flagon_sdk";
+// Client keys (renamed from "SDK keys"). New keys mint with the client prefix;
+// keys minted before the rename keep the legacy prefix and still evaluate (both
+// are accepted in looksLikeSdkKey; resolveSdkKey matches by hash regardless).
+const CLIENT_KEY_PREFIX = "flagon_client";
+const LEGACY_SDK_PREFIX = "flagon_sdk";
 
 export type SdkKeyIdentity = {
   keyId: string;
@@ -24,11 +28,11 @@ export type SdkKeyIdentity = {
 /** Mint a new SDK key: returns the one-time plaintext plus the columns to store. */
 export function generateSdkKey() {
   const secret = randomBytes(24).toString("base64url");
-  const token = `${SDK_KEY_PREFIX}_${secret}`;
+  const token = `${CLIENT_KEY_PREFIX}_${secret}`;
   return {
     token,
     keyHash: hashToken(token),
-    prefix: SDK_KEY_PREFIX,
+    prefix: CLIENT_KEY_PREFIX,
     lastFour: token.slice(-4),
   };
 }
@@ -67,7 +71,11 @@ export async function resolveSdkKey(
   };
 }
 
-/** Whether a bearer value looks like an SDK key (cheap pre-check). */
+/** Whether a bearer value looks like a client key (cheap pre-check). Accepts the
+ * legacy `flagon_sdk_` prefix too so keys minted before the rename still work. */
 export function looksLikeSdkKey(token: string): boolean {
-  return token.startsWith(`${SDK_KEY_PREFIX}_`);
+  return (
+    token.startsWith(`${CLIENT_KEY_PREFIX}_`) ||
+    token.startsWith(`${LEGACY_SDK_PREFIX}_`)
+  );
 }

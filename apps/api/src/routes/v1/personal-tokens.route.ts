@@ -76,7 +76,7 @@ personalTokens_.get("/", async (c) => {
   const userId = requireUserId(c);
   if (userId instanceof Response) return userId;
   const rows = await listPersonalTokens(userId);
-  return c.json({ tokens: rows.map(serializeToken) });
+  return c.json(rows.map(serializeToken));
 });
 
 personalTokens_.post("/", async (c) => {

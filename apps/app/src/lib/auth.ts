@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { headers } from "next/headers";
 import { API_URL } from "@/lib/urls";
 
@@ -57,12 +58,12 @@ async function authFetch(path: string, init?: RequestInit): Promise<Response | n
  * the API's get-session with the forwarded cookie. This is the seam the whole
  * console gates on (pages, layouts, server actions).
  */
-export async function getSession(): Promise<SessionResult> {
+export const getSession = cache(async (): Promise<SessionResult> => {
   const res = await authFetch("/api/auth/get-session");
   if (!res || !res.ok) return null;
   const data = (await res.json()) as SessionResult;
   return data && data.user ? data : null;
-}
+});
 
 /**
  * The current user, or throw. For server actions behind the auth gate, where a

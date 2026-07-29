@@ -11,8 +11,7 @@ import {
 } from "@flagon/design";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
-import { WaitlistForm } from "@/components/waitlist-form";
-import { LaunchCountdown } from "@/components/launch-countdown";
+import { SIGN_UP_URL } from "@/lib/urls";
 
 const pillars = [
   {
@@ -68,26 +67,18 @@ export default function Home() {
               {brand.description}
             </p>
 
-            {/* Launch marker + countdown, grouped so the date reads as a label
-                on the clock rather than floating up by the eyebrow. */}
-            <div className="mt-14">
-              <span className="inline-flex items-center gap-2.5 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 font-mono text-xs uppercase tracking-[0.18em] text-zinc-300">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-teal-400" />
-                </span>
-                {brand.launch.label}
-              </span>
-              <div className="mt-6">
-                <LaunchCountdown iso={brand.launch.iso} />
-              </div>
-            </div>
-
-            <div id="waitlist" className="mt-10 scroll-mt-24">
-              <WaitlistForm />
-              <p className="mt-4 font-mono text-xs text-zinc-500">
-                One email when your invite is ready, nothing else.
-              </p>
+            <div className="mt-12 flex flex-wrap items-center gap-4">
+              <Cta
+                href={SIGN_UP_URL}
+                variant="primary"
+                size="lg"
+                iconRight={<IconArrowRight className="h-4 w-4" />}
+              >
+                Get started
+              </Cta>
+              <Cta href="/docs" variant="secondary" size="lg">
+                Read the docs
+              </Cta>
             </div>
           </div>
         </section>
@@ -115,8 +106,8 @@ export default function Home() {
             </h2>
             <p className="mt-3 text-sm leading-6 text-zinc-400">
               Flagon is source-available. Read every line, run the whole
-              platform on your own infrastructure, and follow along as we build
-              toward launch. No cut-down community edition, no bait and switch.
+              platform on your own infrastructure, and shape where it goes. No
+              cut-down community edition, no bait and switch.
             </p>
           </div>
           <Cta

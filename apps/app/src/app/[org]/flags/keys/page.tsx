@@ -32,7 +32,7 @@ export default async function SdkKeysPage({
         <ArrowLeft className="h-4 w-4" /> Flags
       </Link>
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">SDK Keys</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Client Keys</h1>
         <p className="mt-1 text-sm text-zinc-500">
           Per-environment credentials for evaluating flags with the OpenFeature OFREP provider.
         </p>

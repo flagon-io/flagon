@@ -2,6 +2,7 @@ import Link from "next/link";
 import { GridBackdrop } from "@flagon/design";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { SIGN_UP_URL } from "@/lib/urls";
 
 /**
  * Branded 404 for the marketing site. The root not-found also catches any URL
@@ -36,10 +37,10 @@ export default function NotFound() {
             Back to home
           </Link>
           <Link
-            href="/#waitlist"
+            href={SIGN_UP_URL}
             className="rounded-md border border-white/20 bg-white/4 px-5 py-2.5 text-sm font-semibold text-zinc-100 transition-colors hover:border-white/40 hover:bg-white/8"
           >
-            Get early access
+            Get started
           </Link>
         </div>
       </main>

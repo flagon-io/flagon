@@ -25,17 +25,6 @@ export const brand = {
   description:
     "One hub for your projects, environments, and teams, with the products you'd otherwise buy or build stitched right in. One catalog, one login, one bill, everything on the same foundation.",
 
-  /**
-   * The public launch. The coming-soon page reads `label` for the eyebrow and
-   * `iso` for the countdown, so moving the date is one edit here. `iso` is a
-   * fixed instant (not "now + N days") so the countdown is identical on the
-   * server and the client and never flashes on hydration.
-   */
-  launch: {
-    label: "Launching July 29, 2026",
-    iso: "2026-07-29T16:00:00.000Z",
-  },
-
   colors: {
     bg: "#09090b",
     surface: "#0b0f10",

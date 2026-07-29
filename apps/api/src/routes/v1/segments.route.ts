@@ -155,7 +155,7 @@ const segmentSchema = z.object({
 });
 registerComponentSchema("Segment", segmentSchema);
 registerComponentSchema("SegmentResponse", z.object({ segment: segmentSchema }));
-registerComponentSchema("SegmentListResponse", z.object({ segments: z.array(segmentSchema) }));
+registerComponentSchema("SegmentListResponse", z.array(segmentSchema));
 
 segments_.post("/", async (c) => {
   const ctx = await resolveOrg(c);
@@ -192,7 +192,7 @@ segments_.get("/", async (c) => {
   const rows = await withOrg(ctx.orgId, (tx) =>
     tx.select().from(segments).orderBy(desc(segments.createdAt)),
   );
-  return c.json({ segments: rows.map(serialize) });
+  return c.json(rows.map(serialize));
 });
 
 segments_.get("/:key", async (c) => {

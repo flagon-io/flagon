@@ -126,7 +126,7 @@ export async function listFlags(
     opts?.archived === "only" ? "?archived=only" : opts?.archived ? "?archived=true" : "";
   const res = await apiFetch(`/v1/orgs/${slug}/flags${q}`);
   if (!res.ok) return [];
-  return (await res.json()).flags as FlagSummary[];
+  return (await res.json()) as FlagSummary[];
 }
 
 export async function getFlag(
@@ -165,7 +165,7 @@ export async function getFlagUsage(
 export async function listSdkKeys(slug: string): Promise<SdkKey[]> {
   const res = await apiFetch(`/v1/orgs/${slug}/sdk-keys`);
   if (!res.ok) return [];
-  return (await res.json()).keys as SdkKey[];
+  return (await res.json()) as SdkKey[];
 }
 
 export type Environment = { key: string; name: string };
@@ -256,7 +256,7 @@ export async function updateFlagMeta(
 export async function listMembers(slug: string): Promise<Member[]> {
   const res = await apiFetch(`/v1/orgs/${slug}/members`);
   if (!res.ok) return [];
-  return (await res.json()).members as Member[];
+  return (await res.json()) as Member[];
 }
 
 export async function createSdkKey(
@@ -313,7 +313,7 @@ export async function renameOrg(slug: string, body: { name: string; slug: string
 export async function listOrgApiTokens(slug: string): Promise<ApiToken[]> {
   const res = await apiFetch(`/v1/orgs/${slug}/tokens`);
   if (!res.ok) return [];
-  return (await res.json()).tokens as ApiToken[];
+  return (await res.json()) as ApiToken[];
 }
 export async function createOrgApiToken(slug: string, body: { name: string; expiresAt?: string }) {
   return unwrap<{ token: ApiToken & { token: string } }>(
@@ -329,7 +329,7 @@ export async function revokeOrgApiToken(slug: string, id: string) {
 export async function listPersonalApiTokens(): Promise<ApiToken[]> {
   const res = await apiFetch(`/v1/me/tokens`);
   if (!res.ok) return [];
-  return (await res.json()).tokens as ApiToken[];
+  return (await res.json()) as ApiToken[];
 }
 export async function createPersonalApiToken(body: { name: string; expiresAt?: string }) {
   return unwrap<{ token: ApiToken & { token: string } }>(
@@ -346,7 +346,7 @@ export type ApiEmail = { email: string; verified: boolean; isPrimary: boolean; c
 export async function listEmailsApi(): Promise<ApiEmail[]> {
   const res = await apiFetch(`/v1/me/emails`);
   if (!res.ok) return [];
-  return (await res.json()).emails as ApiEmail[];
+  return (await res.json()) as ApiEmail[];
 }
 export async function addEmailApi(email: string) {
   return unwrap<{ ok: true; message: string }>(
@@ -393,7 +393,7 @@ export type Segment = {
 export async function listSegments(slug: string): Promise<Segment[]> {
   const res = await apiFetch(`/v1/orgs/${slug}/segments`);
   if (!res.ok) return [];
-  return (await res.json()).segments as Segment[];
+  return (await res.json()) as Segment[];
 }
 
 export async function createSegment(
@@ -447,7 +447,7 @@ export type Entity = {
 export async function listEntities(slug: string): Promise<Entity[]> {
   const res = await apiFetch(`/v1/orgs/${slug}/entities`);
   if (!res.ok) return [];
-  return (await res.json()).entities as Entity[];
+  return (await res.json()) as Entity[];
 }
 
 /**

@@ -30,12 +30,16 @@ export default async function OrgLayout({
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const membership = await getMembershipBySlug(session.user.id, slug);
+  // membership + orgs both depend only on the user id — run them in parallel
+  // (and they're React-cached, so a page re-reading them hits no DB again).
+  const [membership, orgs, cookieStore] = await Promise.all([
+    getMembershipBySlug(session.user.id, slug),
+    getUserOrganizations(session.user.id),
+    cookies(),
+  ]);
   if (!membership) notFound();
 
-  const orgs = await getUserOrganizations(session.user.id);
-  const initialCollapsed =
-    (await cookies()).get(SIDEBAR_COOKIE)?.value === "1";
+  const initialCollapsed = cookieStore.get(SIDEBAR_COOKIE)?.value === "1";
 
   const user = {
     name: session.user.name,

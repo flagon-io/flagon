@@ -149,7 +149,7 @@ const entitySchema = z.object({
 });
 registerComponentSchema("Entity", entitySchema);
 registerComponentSchema("EntityResponse", z.object({ entity: entitySchema }));
-registerComponentSchema("EntityListResponse", z.object({ entities: z.array(entitySchema) }));
+registerComponentSchema("EntityListResponse", z.array(entitySchema));
 
 async function writeAttributes(
   tx: Parameters<Parameters<typeof withOrg>[1]>[0],
@@ -212,14 +212,14 @@ entities_.get("/", async (c) => {
     return { rows, attrs };
   });
 
-  return c.json({
-    entities: data.rows.map((e) =>
+  return c.json(
+    data.rows.map((e) =>
       serialize(
         e,
         data.attrs.filter((a) => a.entityId === e.id),
       ),
     ),
-  });
+  );
 });
 
 entities_.patch("/:key", async (c) => {
