@@ -1,5 +1,4 @@
-import { auth } from "@/lib/auth";
-import { APP_URL, WEB_URL } from "@/lib/urls";
+import { API_URL, APP_URL, WEB_URL } from "@/lib/urls";
 
 /**
  * Cross-surface sign-out.
@@ -45,18 +44,30 @@ function hostScopedClear(setCookie: string): string | null {
 export async function GET(request: Request) {
   const returnTo = safeReturn(new URL(request.url).searchParams.get("returnTo"));
 
-  // Ask BetterAuth to end the session; asResponse gives us the Set-Cookie(s) that
-  // expire the session cookie(s), which we carry onto the redirect.
-  const signedOut = await auth.api.signOut({
-    headers: request.headers,
-    asResponse: true,
-  });
-
+  // Auth is hosted by the API now. Ask IT to end the session (POST /sign-out) and
+  // carry the Set-Cookie(s) it returns onto our redirect. The Origin header names
+  // this console (a trusted origin) so BetterAuth's CSRF check passes for this
+  // server-to-server call.
   const redirect = new Response(null, { status: 303, headers: { Location: returnTo } });
-  for (const cookie of signedOut.headers.getSetCookie()) {
-    redirect.headers.append("set-cookie", cookie); // clears the configured-domain cookie
-    const hostClear = hostScopedClear(cookie); // also clear a stale host-scoped copy
-    if (hostClear) redirect.headers.append("set-cookie", hostClear);
+  try {
+    const signedOut = await fetch(`${API_URL}/api/auth/sign-out`, {
+      method: "POST",
+      headers: {
+        // BetterAuth's POST endpoints require a JSON content-type + a parseable
+        // body (a bare POST 415s; an empty body 400s), so send "{}".
+        "content-type": "application/json",
+        cookie: request.headers.get("cookie") ?? "",
+        origin: APP_URL,
+      },
+      body: "{}",
+    });
+    for (const cookie of signedOut.headers.getSetCookie()) {
+      redirect.headers.append("set-cookie", cookie); // clears the configured-domain cookie
+      const hostClear = hostScopedClear(cookie); // also clear a stale host-scoped copy
+      if (hostClear) redirect.headers.append("set-cookie", hostClear);
+    }
+  } catch {
+    // Network hiccup reaching the API: still redirect; the user can retry.
   }
   return redirect;
 }

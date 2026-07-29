@@ -18,5 +18,34 @@ services:
       timeout: 5s
       retries: 10
 
+  # Stripe CLI webhook listener for local dev: forwards Stripe events to the API
+  # webhook (running on the HOST via `npm run dev`, hence host.docker.internal)
+  # so you never run `stripe listen` by hand. It reads STRIPE_SECRET_KEY from
+  # apps/api/.env; if that is unset (or the file is absent, e.g. a fresh clone or
+  # CI) it idles instead of crashing, so `docker compose up` always works.
+  #
+  # On first run, grab the printed signing secret and put it in apps/api/.env as
+  # STRIPE_WEBHOOK_SECRET (it is stable per account):
+  #   docker compose logs -f stripe   # look for: whsec_...
+  stripe:
+    image: stripe/stripe-cli:latest
+    restart: unless-stopped
+    env_file:
+      - path: ./apps/api/.env
+        required: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        if [ -z "$$STRIPE_SECRET_KEY" ]; then
+          echo "[stripe] STRIPE_SECRET_KEY not set in apps/api/.env; listener idle";
+          sleep infinity;
+        else
+          exec stripe listen
+            --api-key "$$STRIPE_SECRET_KEY"
+            --forward-to host.docker.internal:3002/webhooks/stripe;
+        fi
+
 volumes:
   flagon-postgres:

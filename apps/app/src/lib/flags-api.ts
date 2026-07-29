@@ -277,6 +277,98 @@ export async function revokeSdkKey(slug: string, id: string) {
   );
 }
 
+// --- Billing (Stripe lives in the API; the console just calls it) -----------
+/** Start Pro checkout (or portal, if already subscribed). Returns a Stripe URL. */
+export async function startBillingCheckout(slug: string) {
+  return unwrap<{ url: string }>(
+    await apiFetch(`/v1/orgs/${slug}/billing/checkout`, { method: "POST" }),
+  );
+}
+
+/** Open the Stripe billing portal. Returns a Stripe URL. */
+export async function openBillingPortal(slug: string) {
+  return unwrap<{ url: string }>(
+    await apiFetch(`/v1/orgs/${slug}/billing/portal`, { method: "POST" }),
+  );
+}
+
+// --- Identity writes (the API owns these; the console calls them) -----------
+export type ApiToken = {
+  id: string;
+  name: string;
+  prefix: string;
+  lastFour: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+};
+
+/** Rename an organization (name + slug). Owner/admin. */
+export async function renameOrg(slug: string, body: { name: string; slug: string }) {
+  return unwrap<{ org: { id: string; name: string; slug: string; plan: string } }>(
+    await apiFetch(`/v1/orgs/${slug}`, { method: "PATCH", body: JSON.stringify(body) }),
+  );
+}
+
+export async function listOrgApiTokens(slug: string): Promise<ApiToken[]> {
+  const res = await apiFetch(`/v1/orgs/${slug}/tokens`);
+  if (!res.ok) return [];
+  return (await res.json()).tokens as ApiToken[];
+}
+export async function createOrgApiToken(slug: string, body: { name: string; expiresAt?: string }) {
+  return unwrap<{ token: ApiToken & { token: string } }>(
+    await apiFetch(`/v1/orgs/${slug}/tokens`, { method: "POST", body: JSON.stringify(body) }),
+  );
+}
+export async function revokeOrgApiToken(slug: string, id: string) {
+  return unwrap<{ ok: true }>(
+    await apiFetch(`/v1/orgs/${slug}/tokens/${id}/revoke`, { method: "POST" }),
+  );
+}
+
+export async function listPersonalApiTokens(): Promise<ApiToken[]> {
+  const res = await apiFetch(`/v1/me/tokens`);
+  if (!res.ok) return [];
+  return (await res.json()).tokens as ApiToken[];
+}
+export async function createPersonalApiToken(body: { name: string; expiresAt?: string }) {
+  return unwrap<{ token: ApiToken & { token: string } }>(
+    await apiFetch(`/v1/me/tokens`, { method: "POST", body: JSON.stringify(body) }),
+  );
+}
+export async function revokePersonalApiToken(id: string) {
+  return unwrap<{ ok: true }>(
+    await apiFetch(`/v1/me/tokens/${id}/revoke`, { method: "POST" }),
+  );
+}
+
+export type ApiEmail = { email: string; verified: boolean; isPrimary: boolean; createdAt: string };
+export async function listEmailsApi(): Promise<ApiEmail[]> {
+  const res = await apiFetch(`/v1/me/emails`);
+  if (!res.ok) return [];
+  return (await res.json()).emails as ApiEmail[];
+}
+export async function addEmailApi(email: string) {
+  return unwrap<{ ok: true; message: string }>(
+    await apiFetch(`/v1/me/emails`, { method: "POST", body: JSON.stringify({ email }) }),
+  );
+}
+export async function resendEmailApi(email: string) {
+  return unwrap<{ ok: true; message: string }>(
+    await apiFetch(`/v1/me/emails/resend`, { method: "POST", body: JSON.stringify({ email }) }),
+  );
+}
+export async function setPrimaryEmailApi(email: string) {
+  return unwrap<{ ok: true; message: string }>(
+    await apiFetch(`/v1/me/emails/primary`, { method: "POST", body: JSON.stringify({ email }) }),
+  );
+}
+export async function removeEmailApi(email: string) {
+  return unwrap<{ ok: true; message: string }>(
+    await apiFetch(`/v1/me/emails?email=${encodeURIComponent(email)}`, { method: "DELETE" }),
+  );
+}
+
 // --- Targeting rules + segments ---------------------------------------------
 export type Predicate =
   | { attribute: string; op: string; values?: unknown[] }

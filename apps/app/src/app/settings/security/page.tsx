@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth, getSession } from "@/lib/auth";
+import { getSession, getSessions } from "@/lib/auth";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { ChangePasswordForm } from "./change-password-form";
 import { SessionsList } from "./sessions-list";
@@ -12,7 +11,7 @@ export default async function SecuritySettingsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const sessions = await auth.api.listSessions({ headers: await headers() });
+  const sessions = await getSessions();
 
   return (
     <div className="flex flex-col gap-6">
@@ -33,20 +32,13 @@ export default async function SecuritySettingsPage() {
         description="Devices currently signed in. Revoke any you do not recognize."
       >
         <SessionsList
-          sessions={sessions.map(
-            (s: {
-              token: string;
-              createdAt: Date;
-              userAgent?: string | null;
-              ipAddress?: string | null;
-            }) => ({
-              token: s.token,
-              createdAt: s.createdAt.toISOString(),
-              userAgent: s.userAgent ?? null,
-              ipAddress: s.ipAddress ?? null,
-              current: s.token === session.session.token,
-            }),
-          )}
+          sessions={sessions.map((s) => ({
+            token: s.token,
+            createdAt: s.createdAt,
+            userAgent: s.userAgent ?? null,
+            ipAddress: s.ipAddress ?? null,
+            current: s.token === session.session.token,
+          }))}
         />
       </SettingsSection>
     </div>

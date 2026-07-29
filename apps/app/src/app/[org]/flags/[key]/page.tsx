@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getSession } from "@/lib/auth";
-import { getMembershipBySlug } from "@/lib/org";
+import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import {
   entityAttributeNames,
   getFlag,
@@ -82,6 +82,7 @@ export default async function FlagDetail({
             flagKey={detail.flag.key}
             archived={Boolean(detail.flag.archivedAt)}
             revisions={detail.revisions ?? []}
+            canManage={canManageOrg(membership.role)}
           />
         </div>
       </div>

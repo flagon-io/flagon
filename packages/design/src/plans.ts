@@ -3,12 +3,10 @@
  * marketing pricing page and the in-app create-organization picker so the two
  * can never drift.
  *
- * Alpha state: Hobby AND Pro are `available` and FREE while we are in alpha —
- * there is no billing yet, so choosing Pro costs nothing right now. Pro's future
- * price ($20/mo, flat, usage-based, never per-seat) is shown with a "free during
- * the alpha" note so expectations are set; we reconcile anyone sitting on Pro
- * once real billing exists (they are just `organizations.plan = 'pro'`).
- * Enterprise stays defined-but-unavailable (Contact Sales), never self-serve.
+ * Hobby is free (one per account). Pro is a paid, Stripe-backed plan ($20/mo,
+ * flat) — creating a Pro org routes through Checkout and the org is locked
+ * until the subscription is active. Enterprise stays defined-but-unavailable
+ * (Contact Sales), never self-serve.
  */
 export type PlanId = "hobby" | "pro" | "enterprise";
 
@@ -57,7 +55,7 @@ export const PLANS: Plan[] = [
     name: "Pro",
     description: "Everything you need to build and scale with a team.",
     price: { amount: "$20", suffix: "/mo" },
-    note: "Free during the alpha, then $20/mo",
+    note: "Billed monthly. Cancel anytime.",
     featuresLead: "All Hobby features, plus:",
     features: [
       "Unlimited team members and roles",

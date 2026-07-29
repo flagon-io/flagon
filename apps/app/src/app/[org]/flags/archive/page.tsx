@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { getMembershipBySlug } from "@/lib/org";
+import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { listFlags } from "@/lib/flags-api";
 import { ArchiveList } from "./archive-list";
 
@@ -33,7 +33,11 @@ export default async function ArchivedFlagsPage({
           stop evaluation for good.
         </p>
       </div>
-      <ArchiveList slug={slug} flags={flags} />
+      <ArchiveList
+        slug={slug}
+        flags={flags}
+        canManage={canManageOrg(membership.role)}
+      />
     </div>
   );
 }

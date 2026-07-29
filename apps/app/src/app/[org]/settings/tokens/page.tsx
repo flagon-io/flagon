@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
-import { listOrgTokens } from "@/lib/access-token";
+import { listOrgApiTokens } from "@/lib/flags-api";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { TokensManager } from "@/components/settings/tokens-manager";
 import { createOrgTokenAction, revokeOrgTokenAction } from "./actions";
@@ -39,7 +39,7 @@ export default async function OrgTokensPage({
     );
   }
 
-  const tokens = await listOrgTokens(membership.id);
+  const tokens = await listOrgApiTokens(slug);
 
   return (
     <div>
@@ -52,15 +52,7 @@ export default async function OrgTokensPage({
         description="Anyone with a token can act as the organization. Rotate and revoke them regularly."
       >
         <TokensManager
-          tokens={tokens.map((t) => ({
-            id: t.id,
-            name: t.name,
-            prefix: t.prefix,
-            lastFour: t.lastFour,
-            createdAt: t.createdAt.toISOString(),
-            lastUsedAt: t.lastUsedAt ? t.lastUsedAt.toISOString() : null,
-            expiresAt: t.expiresAt ? t.expiresAt.toISOString() : null,
-          }))}
+          tokens={tokens}
           createAction={createOrgTokenAction.bind(null, slug)}
           revokeAction={revokeOrgTokenAction.bind(null, slug)}
           scopeNote="Organization tokens act as the organization, independent of any single member."

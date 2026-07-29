@@ -29,7 +29,15 @@ function relativeTime(iso: string | null): string {
   return `${Math.floor(mo / 12)}y ago`;
 }
 
-export function ArchiveList({ slug, flags }: { slug: string; flags: FlagSummary[] }) {
+export function ArchiveList({
+  slug,
+  flags,
+  canManage,
+}: {
+  slug: string;
+  flags: FlagSummary[];
+  canManage: boolean;
+}) {
   const [q, setQ] = useState("");
 
   const filtered = flags.filter(
@@ -105,6 +113,7 @@ export function ArchiveList({ slug, flags }: { slug: string; flags: FlagSummary[
                   flagKey={flag.key}
                   archived
                   afterDeleteHref={`/${slug}/flags/archive`}
+                  canManage={canManage}
                 />
               </div>
             );

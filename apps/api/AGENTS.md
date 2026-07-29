@@ -2,6 +2,19 @@
 
 Model the HTTP surface on GitHub's REST API.
 
+## The API is the control plane
+
+Every capability lives here, as a `/v1` (or `/api/auth`, `/ofrep`) endpoint —
+so every client behaves the same: the Next console, and future mobile/desktop
+apps, are all just clients of this API. Auth (BetterAuth is hosted here, mounted
+at `/api/auth/*`), org/member/invite management, access tokens, billing, and the
+flags product are all API-owned. **Never add a capability that only the console
+can do via a direct DB write** — if the console needs to change data, it does so
+through an endpoint here, so any client can too. The console MAY still read the
+shared DB for rendering convenience, but writes and business rules belong to the
+API. When you add a mutation, add its `/v1` endpoint + OpenAPI registration in
+the same change.
+
 ## Response bodies
 
 - **Return the resource as-is.** A single resource is a JSON object; a collection

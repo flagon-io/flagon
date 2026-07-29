@@ -2,13 +2,15 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { getMembershipBySlug, getUserOrganizations } from "@/lib/org";
+import { canManageOrg, getMembershipBySlug, getUserOrganizations } from "@/lib/org";
+import { isOrgLocked } from "@/lib/billing";
 import {
   WorkspaceSidebar,
   SIDEBAR_COOKIE,
 } from "@/components/workspace/workspace-sidebar";
 import { WorkspaceTopbar } from "@/components/workspace/workspace-topbar";
 import { VerifyEmailBanner } from "@/components/workspace/verify-email-banner";
+import { OrgLocked } from "@/components/workspace/org-locked";
 
 /**
  * The workspace app shell for an organization: a fixed left sidebar (org
@@ -55,7 +57,17 @@ export default async function OrgLayout({
         ) : null}
         <div className="flex-1 overflow-y-auto">
           <main className="px-6 py-8">
-            <div className="mx-auto w-full max-w-5xl">{children}</div>
+            <div className="mx-auto w-full max-w-5xl">
+              {isOrgLocked(membership) ? (
+                <OrgLocked
+                  slug={slug}
+                  canManage={canManageOrg(membership.role)}
+                  status={membership.subscriptionStatus}
+                />
+              ) : (
+                children
+              )}
+            </div>
           </main>
         </div>
       </div>

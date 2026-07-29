@@ -26,9 +26,12 @@ function summarize(conditions: Predicate[]): string {
 export function SegmentsManager({
   slug,
   segments,
+  canManage,
 }: {
   slug: string;
   segments: Segment[];
+  /** Only owners/admins may delete a segment (matches the API gate). */
+  canManage: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -103,15 +106,17 @@ export function SegmentsManager({
                 </div>
                 <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-zinc-600" />
               </Link>
-              <button
-                type="button"
-                onClick={() => remove(s.key)}
-                disabled={pending}
-                title="Delete segment"
-                className="mr-2 grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {canManage ? (
+                <button
+                  type="button"
+                  onClick={() => remove(s.key)}
+                  disabled={pending}
+                  title="Delete segment"
+                  className="mr-2 grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              ) : null}
             </div>
           ))}
         </div>

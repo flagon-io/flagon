@@ -8,6 +8,10 @@ import { segments_ } from "./segments.route.js";
 import { entities_ } from "./entities.route.js";
 import { environments_ } from "./environments.route.js";
 import { members_ } from "./members.route.js";
+import { billing_ } from "./billing.route.js";
+import { org_ } from "./org.route.js";
+import { orgTokens_ } from "./tokens.route.js";
+import { emailVerify_ } from "./emails.route.js";
 import { managementWriteLimit } from "../../lib/management-rate-limit.js";
 
 export const v1 = new Hono();
@@ -15,6 +19,8 @@ export const v1 = new Hono();
 v1.route("/healthz", healthz);
 v1.route("/waitlist", waitlist);
 v1.route("/me", me);
+// Public (token-authed) secondary-email confirmation link target.
+v1.route("/email/verify", emailVerify_);
 
 // Org-scoped management surface: /v1/orgs/:org/*. The console and org-token API
 // consumers manage the flags product here; each handler authorizes the org and
@@ -29,4 +35,9 @@ orgs.route("/:org/segments", segments_);
 orgs.route("/:org/entities", entities_);
 orgs.route("/:org/environments", environments_);
 orgs.route("/:org/members", members_);
+orgs.route("/:org/billing", billing_);
+orgs.route("/:org/tokens", orgTokens_);
+// The org resource itself (PATCH /:org rename). Registered last so the more
+// specific sub-resource routes above take precedence.
+orgs.route("/:org", org_);
 v1.route("/orgs", orgs);

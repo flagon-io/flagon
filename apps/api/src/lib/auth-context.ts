@@ -2,6 +2,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { accessTokens, organizations, users } from "../db/auth-tables.js";
+import { auth } from "./auth.js";
 import { clientIp } from "./http.js";
 import { rateLimit, tooManyRequests } from "./rate-limit.js";
 import { hashToken } from "./token-hash.js";
@@ -94,40 +95,26 @@ async function fromToken(token: string): Promise<AuthIdentity> {
 
 async function fromCookie(c: Context): Promise<AuthIdentity> {
   const cookie = c.req.header("cookie");
-  // Cheap pre-filter before we bother calling get-session: does the header even
-  // carry a session cookie? The console sets a CUSTOM cookie prefix ("flagon",
-  // see auth.ts advanced.cookiePrefix), so we must NOT look for BetterAuth's
-  // default "better-auth" name. Match the stable session-cookie base name, which
-  // is prefix-independent and survives the "__Secure-" variant in production.
+  // Cheap pre-filter before touching BetterAuth: does the header even carry a
+  // session cookie? The custom cookie prefix ("flagon", see lib/auth.ts) means we
+  // must NOT look for BetterAuth's default "better-auth" name — match the stable
+  // session-cookie base name (prefix-independent, survives the "__Secure-" variant).
   if (!cookie || !cookie.includes("session_token")) return null;
 
-  const appUrl = process.env.APP_URL ?? "http://localhost:3001";
   try {
-    // Bounded: this cross-service call sits in front of every cookie-authed API
-    // request, so a slow/hung console must not hang the API. Timeout fails
-    // closed (the catch returns null -> 401), never open.
-    const res = await fetch(`${appUrl}/api/auth/get-session`, {
-      headers: { cookie },
-      signal: AbortSignal.timeout(2000),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      user?: {
-        id: string;
-        name: string;
-        email: string;
-        username?: string | null;
-      };
-    } | null;
-    if (!data?.user) return null;
+    // The API HOSTS BetterAuth now, so validate the signed cookie IN-PROCESS —
+    // no cross-service hop to the console (which the API used to fetch). Fails
+    // closed: any error -> null -> 401.
+    const result = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!result?.user) return null;
     return {
       kind: "user",
       via: "cookie",
       user: {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        username: data.user.username ?? null,
+        id: result.user.id,
+        name: result.user.name,
+        email: result.user.email,
+        username: result.user.username ?? null,
       },
     };
   } catch {

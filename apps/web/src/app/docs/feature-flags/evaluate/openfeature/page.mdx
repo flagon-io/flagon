@@ -22,7 +22,8 @@ Add the OpenFeature SDK and the OFREP provider for your language.
   python: { code: `pip install openfeature-sdk openfeature-provider-ofrep` },
   typescript: { code: `npm install @openfeature/server-sdk @openfeature/ofrep-provider` },
   go: { code: `go get github.com/open-feature/go-sdk github.com/open-feature/go-sdk-contrib/providers/ofrep` },
-  php: { code: `# PHP has no first-party OFREP provider yet. Use any HTTP client.
+  php: { code: `# OpenFeature has a PHP SDK, but no OFREP provider for it yet,
+# so call OFREP directly over HTTP with any client.
 composer require guzzlehttp/guzzle` },
 }} />
 
@@ -90,7 +91,7 @@ showCheckout, _ := client.BooleanValue(
     openfeature.NewEvaluationContext("user-123", map[string]interface{}{"plan": "pro"}),
 )` },
   php: { code: `<?php
-// No first-party OFREP provider for PHP yet. Call the protocol directly.
+// OpenFeature has a PHP SDK, but no OFREP provider for it yet, so call OFREP directly.
 $client = new GuzzleHttp\\Client();
 
 $res = $client->post("https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout", [
@@ -158,12 +159,14 @@ scoped to a low-risk environment.
 
 ## Other languages
 
-OpenFeature also has SDKs for .NET, Ruby, Rust, and more. Where a first-party
-OFREP provider exists, the shape is the same: construct it with Flagon's base URL
-and an `Authorization: Bearer` header, register it, then evaluate. Where one
-doesn't exist yet (as with PHP above), call the protocol directly over REST. See
-the [OpenFeature SDK list](https://openfeature.dev/docs/reference/technologies/)
-and the [REST reference](/docs/feature-flags/evaluate/rest).
+OpenFeature also has SDKs for PHP, .NET, Ruby, Rust, and more. Having an SDK for
+your language and having an OFREP provider for it are two different things: where
+an OFREP provider exists, the shape is the same (construct it with Flagon's base
+URL and an `Authorization: Bearer` header, register it, then evaluate); where one
+doesn't yet (as with PHP, whose SDK exists but has no OFREP provider), call the
+protocol directly over REST. See the
+[OpenFeature SDK list](https://openfeature.dev/docs/reference/technologies/) and
+the [REST reference](/docs/feature-flags/evaluate/rest).
 
 ## Next
 

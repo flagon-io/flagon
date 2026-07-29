@@ -39,6 +39,9 @@ jobs:
 
     env:
       DATABASE_URL: postgres://flagon:flagon@localhost:5432/flagon
+      # The API hosts BetterAuth and validates this at boot; the integration
+      # suite imports the app, so it must be present (any long non-prod value).
+      BETTER_AUTH_SECRET: ci-test-secret-not-a-real-secret-0123456789
 
     steps:
       - uses: actions/checkout@v4

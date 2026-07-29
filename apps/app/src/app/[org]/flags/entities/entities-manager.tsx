@@ -25,9 +25,12 @@ const DATA_TYPES = [
 export function EntitiesManager({
   slug,
   entities,
+  canManage,
 }: {
   slug: string;
   entities: Entity[];
+  /** Only owners/admins may delete an entity (matches the API gate). */
+  canManage: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -72,15 +75,17 @@ export function EntitiesManager({
                   <span className="text-sm font-medium text-zinc-100">{e.label}</span>
                   <span className="font-mono text-xs text-zinc-600">{e.key}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => remove(e.key)}
-                  disabled={pending}
-                  title="Delete entity"
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                {canManage ? (
+                  <button
+                    type="button"
+                    onClick={() => remove(e.key)}
+                    disabled={pending}
+                    title="Delete entity"
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                ) : null}
               </div>
               {e.attributes.length === 0 ? (
                 <p className="px-4 py-3 text-sm text-zinc-500">No attributes.</p>

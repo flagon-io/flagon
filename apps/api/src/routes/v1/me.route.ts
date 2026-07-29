@@ -3,6 +3,8 @@ import { z } from "zod";
 import { authContext, getAuth } from "../../lib/auth-context.js";
 import { jsonError } from "../../lib/http.js";
 import { registerRoute } from "../../openapi/registry.js";
+import { personalTokens_ } from "./personal-tokens.route.js";
+import { meEmails_ } from "./emails.route.js";
 
 export const me = new Hono();
 
@@ -44,6 +46,10 @@ registerRoute({
 });
 
 me.use("*", authContext);
+
+// Personal access tokens + email management (inherit authContext from above).
+me.route("/tokens", personalTokens_);
+me.route("/emails", meEmails_);
 
 me.get("/", (c) => {
   const auth = getAuth(c);

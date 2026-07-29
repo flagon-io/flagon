@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getSession } from "@/lib/auth";
-import { getMembershipBySlug } from "@/lib/org";
+import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { FLAG_ENVIRONMENTS, listSdkKeys } from "@/lib/flags-api";
 import { SdkKeysManager } from "./sdk-keys-manager";
 
@@ -37,7 +37,12 @@ export default async function SdkKeysPage({
           Per-environment credentials for evaluating flags with the OpenFeature OFREP provider.
         </p>
       </div>
-      <SdkKeysManager slug={slug} environments={FLAG_ENVIRONMENTS} keys={keys} />
+      <SdkKeysManager
+        slug={slug}
+        environments={FLAG_ENVIRONMENTS}
+        keys={keys}
+        canManage={canManageOrg(membership.role)}
+      />
     </div>
   );
 }

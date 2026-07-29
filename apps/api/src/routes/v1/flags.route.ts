@@ -16,7 +16,7 @@ import {
 import { users } from "../../db/auth-tables.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
-import { resolveOrg } from "../../lib/org-context.js";
+import { resolveOrg, requireManager } from "../../lib/org-context.js";
 import { invalidateEvalCacheOnWrite } from "../../lib/eval-invalidate.js";
 import { ensureEnvironments } from "../../flags/environments.js";
 import { recordRevision } from "../../flags/revisions.js";
@@ -880,6 +880,8 @@ flags_.post("/:key/restore", archiveRoute("restore"));
 flags_.delete("/:key", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
   const key = c.req.param("key") ?? "";
   const deleted = await withOrg(ctx.orgId, (tx) =>
     tx.delete(flags).where(eq(flags.key, key)).returning({ id: flags.id }),

@@ -1,59 +1,39 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/auth";
-import { canManageOrg, getMembershipBySlug } from "@/lib/org";
-import {
-  createAccessToken,
-  revokeOrgToken,
-} from "@/lib/access-token";
+import { createOrgApiToken, revokeOrgApiToken } from "@/lib/flags-api";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Organization token actions. The org slug is bound in the page
- * (`action.bind(null, slug)`), and the caller's owner/admin role is re-checked
- * here on every call.
+ * Organization token actions. Thin wrappers over the API, which owns token
+ * minting/revoking and authorizes the caller (owner/admin, cookie-forwarded).
  */
 export async function createOrgTokenAction(
   slug: string,
   formData: FormData,
 ): Promise<{ token?: string; error?: string }> {
-  const user = await requireUser();
-  const membership = await getMembershipBySlug(user.id, slug);
-  if (!membership || !canManageOrg(membership.role))
-    return { error: "You do not have permission to create tokens." };
-
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { error: "Give your token a name." };
 
   const days = Number(formData.get("expiresInDays") ?? "");
   const expiresAt =
     Number.isFinite(days) && days > 0
-      ? new Date(Date.now() + days * DAY_MS)
-      : null;
+      ? new Date(Date.now() + days * DAY_MS).toISOString()
+      : undefined;
 
-  const { token } = await createAccessToken({
-    type: "organization",
-    name,
-    ownerId: membership.id,
-    createdByUserId: user.id,
-    expiresAt,
-  });
+  const { data, error } = await createOrgApiToken(slug, { name, expiresAt });
+  if (error) return { error };
   revalidatePath(`/${slug}/settings/tokens`);
-  return { token };
+  return { token: data?.token.token };
 }
 
 export async function revokeOrgTokenAction(
   slug: string,
   formData: FormData,
 ): Promise<{ error?: string }> {
-  const user = await requireUser();
-  const membership = await getMembershipBySlug(user.id, slug);
-  if (!membership || !canManageOrg(membership.role))
-    return { error: "You do not have permission." };
-
-  await revokeOrgToken(membership.id, String(formData.get("id") ?? ""));
+  const { error } = await revokeOrgApiToken(slug, String(formData.get("id") ?? ""));
+  if (error) return { error };
   revalidatePath(`/${slug}/settings/tokens`);
   return {};
 }

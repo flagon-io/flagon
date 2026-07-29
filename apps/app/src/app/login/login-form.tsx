@@ -7,14 +7,15 @@ import { Field, submitButtonClass } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
 import { SocialButtons } from "@/components/social-buttons";
 import type { OAuthProviders } from "@/lib/oauth";
-import { signInAction } from "./actions";
+import { authClient } from "@/lib/auth-client";
 
 /**
  * The sign-in form, modeled on GitHub: one identifier (email OR username) plus
  * a password, with "Forgot password?" on the password label. The identifier is
  * routed to the right BetterAuth method by looking for an "@": addresses go
- * through email sign-in (which accepts any verified address), everything else
- * through username sign-in.
+ * through email sign-in (any verified alias is resolved to the primary by the
+ * API's sign-in hook), everything else through username sign-in. Auth is hosted
+ * by the API, so these calls go to it via authClient.
  */
 export function LoginForm({ providers }: { providers: OAuthProviders }) {
   const router = useRouter();
@@ -38,10 +39,15 @@ export function LoginForm({ providers }: { providers: OAuthProviders }) {
     const identifier = String(form.get("identifier") ?? "").trim();
     const password = String(form.get("password") ?? "");
 
-    const { error } = await signInAction({ identifier, password });
+    const { error } = identifier.includes("@")
+      ? await authClient.signIn.email({ email: identifier, password })
+      : await authClient.signIn.username({ username: identifier, password });
 
     if (error) {
-      setError(error);
+      setError(
+        error.message ??
+          "We could not sign you in. Check your details and try again.",
+      );
       setPending(false);
       return;
     }

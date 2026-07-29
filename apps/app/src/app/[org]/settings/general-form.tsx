@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useTransition, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Select } from "@flagon/design";
 import { Field, submitButtonClass } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
-import { PLANS, SELECTABLE_PLANS } from "@/lib/plans";
+import { planName } from "@/lib/plans";
 import { slugify } from "@/lib/slug";
 import { updateOrgAction } from "./actions";
 
@@ -23,7 +23,6 @@ export function OrgGeneralForm({
   const router = useRouter();
   const [name, setName] = useState(initialName);
   const [slug, setSlug] = useState(currentSlug);
-  const [plan, setPlan] = useState(initialPlan);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -36,7 +35,6 @@ export function OrgGeneralForm({
     fd.set("currentSlug", currentSlug);
     fd.set("name", name.trim());
     fd.set("slug", slug.trim());
-    fd.set("plan", plan);
     startTransition(async () => {
       const result = await updateOrgAction(fd);
       if (result.error) {
@@ -83,31 +81,20 @@ export function OrgGeneralForm({
         </div>
       </div>
 
+      {/* Plan is read-only here: it is a billing concern, changed only through
+          Stripe on the Billing page. This block used to be a free-for-all Select
+          that self-granted Pro. */}
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="org-plan" className="text-xs font-medium text-zinc-400">
-          Plan
-        </label>
-        {/* Only choosable plans (Enterprise is not available in the alpha). If
-            this org somehow already sits on an unavailable plan, keep it listed
-            so it stays selected rather than silently changing. */}
-        <Select
-          ariaLabel="Plan"
-          value={plan}
-          onValueChange={setPlan}
-          disabled={!canManage}
-          className="w-full"
-          options={(SELECTABLE_PLANS.some((p) => p.id === initialPlan)
-            ? SELECTABLE_PLANS
-            : [...SELECTABLE_PLANS, ...PLANS.filter((p) => p.id === initialPlan)]
-          ).map((p) => ({
-            value: p.id,
-            label: `${p.name} — ${p.price.amount}${p.price.suffix ?? ""}`,
-          }))}
-        />
-        <p className="text-xs text-zinc-500">
-          Hobby is free and unmetered during the alpha. Paid plans are coming
-          soon.
-        </p>
+        <span className="text-xs font-medium text-zinc-400">Plan</span>
+        <div className="flex items-center justify-between rounded-md border border-white/10 bg-white/5 px-3 py-2.5">
+          <span className="text-sm text-zinc-100">{planName(initialPlan)}</span>
+          <Link
+            href={`/${currentSlug}/settings/billing`}
+            className="text-xs font-medium text-teal-400 hover:text-teal-300"
+          >
+            Manage billing
+          </Link>
+        </div>
       </div>
 
       {error ? <FormError>{error}</FormError> : null}

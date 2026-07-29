@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { getMembershipBySlug } from "@/lib/org";
+import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { listEntities } from "@/lib/flags-api";
 import { EntitiesManager } from "./entities-manager";
 
@@ -29,7 +29,11 @@ export default async function EntitiesPage({
           The subjects you target, and the attributes your SDK sends about them.
         </p>
       </div>
-      <EntitiesManager slug={slug} entities={entities} />
+      <EntitiesManager
+        slug={slug}
+        entities={entities}
+        canManage={canManageOrg(membership.role)}
+      />
     </div>
   );
 }

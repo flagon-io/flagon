@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { listPersonalTokens } from "@/lib/access-token";
+import { listPersonalApiTokens } from "@/lib/flags-api";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { TokensManager } from "@/components/settings/tokens-manager";
 import {
@@ -15,7 +15,7 @@ export default async function TokensSettingsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const tokens = await listPersonalTokens(session.user.id);
+  const tokens = await listPersonalApiTokens();
 
   return (
     <div>
@@ -28,15 +28,7 @@ export default async function TokensSettingsPage() {
         description="Each token acts as you across your organizations."
       >
         <TokensManager
-          tokens={tokens.map((t) => ({
-            id: t.id,
-            name: t.name,
-            prefix: t.prefix,
-            lastFour: t.lastFour,
-            createdAt: t.createdAt.toISOString(),
-            lastUsedAt: t.lastUsedAt ? t.lastUsedAt.toISOString() : null,
-            expiresAt: t.expiresAt ? t.expiresAt.toISOString() : null,
-          }))}
+          tokens={tokens}
           createAction={createPersonalTokenAction}
           revokeAction={revokePersonalTokenAction}
           scopeNote="Personal tokens act on your behalf across every organization you belong to."

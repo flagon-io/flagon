@@ -51,6 +51,7 @@ export function FlagActions({
   archived,
   revisions = [],
   afterDeleteHref,
+  canManage = true,
 }: {
   slug: string;
   flagKey: string;
@@ -58,6 +59,8 @@ export function FlagActions({
   revisions?: FlagRevision[];
   /** Where to go after a permanent delete. Defaults to the active flags list. */
   afterDeleteHref?: string;
+  /** Only owners/admins may permanently delete a flag (matches the API gate). */
+  canManage?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -101,13 +104,17 @@ export function FlagActions({
               </>
             )}
           </MenuItem>
-          <MenuSeparator />
-          <MenuItem
-            onSelect={() => setConfirmDelete(true)}
-            className="text-red-400 data-[highlighted]:text-red-300"
-          >
-            <Trash2 className="h-4 w-4" /> Delete flag
-          </MenuItem>
+          {canManage ? (
+            <>
+              <MenuSeparator />
+              <MenuItem
+                onSelect={() => setConfirmDelete(true)}
+                className="text-red-400 data-[highlighted]:text-red-300"
+              >
+                <Trash2 className="h-4 w-4" /> Delete flag
+              </MenuItem>
+            </>
+          ) : null}
         </MenuContent>
       </Menu>
 

@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { members, organizations } from "../db/auth-tables.js";
 import { getAuth } from "./auth-context.js";
+import { isOrgLocked } from "./entitlement.js";
 import { jsonError } from "./http.js";
 
 /**
@@ -44,7 +45,37 @@ export async function orgIdBySlug(slug: string): Promise<string | null> {
   return row?.id ?? null;
 }
 
-export async function resolveOrg(c: Context): Promise<OrgContext | Response> {
+const MANAGER_ROLES = new Set(["owner", "admin"]);
+
+/** Whether a role may perform privileged actions (credentials, destructive deletes). */
+export function isManagerRole(role: string): boolean {
+  return MANAGER_ROLES.has(role);
+}
+
+/**
+ * Gate a privileged mutation to owners/admins. Returns a 403 Response to
+ * short-circuit when the caller's role is insufficient, or null to proceed.
+ * Org tokens resolve to "owner" (see resolveOrg), so they always pass — a shared
+ * org credential is minted by a manager and acts with the org's full authority.
+ *
+ * Apply AFTER resolveOrg to the handful of endpoints that mint/revoke SDK keys
+ * or hard-delete a resource; ordinary member reads/writes stay ungated.
+ */
+export function requireManager(c: Context, ctx: OrgContext): Response | null {
+  if (!isManagerRole(ctx.role)) {
+    return jsonError(
+      c,
+      403,
+      "This action requires an owner or admin role in this organization.",
+    );
+  }
+  return null;
+}
+
+export async function resolveOrg(
+  c: Context,
+  opts: { allowLocked?: boolean } = {},
+): Promise<OrgContext | Response> {
   const slug = c.req.param("org");
   if (!slug) return jsonError(c, 400, "Missing organization in the path.");
 
@@ -59,12 +90,30 @@ export async function resolveOrg(c: Context): Promise<OrgContext | Response> {
 
   const org = (
     await db
-      .select({ id: organizations.id, slug: organizations.slug })
+      .select({
+        id: organizations.id,
+        slug: organizations.slug,
+        plan: organizations.plan,
+        subscriptionStatus: organizations.subscriptionStatus,
+      })
       .from(organizations)
       .where(eq(organizations.slug, slug))
       .limit(1)
   )[0];
   if (!org) return jsonError(c, 404, "Organization not found.");
+
+  // A locked (lapsed/unpaid) Pro org is refused the whole management surface —
+  // for org tokens and members alike — so the lock cannot be bypassed via the
+  // API. `allowLocked` is the single exception, for the billing endpoints: a
+  // locked org must still be able to reactivate. The SDK/OFREP path is
+  // unaffected (a locked org that never paid was never issued an SDK key).
+  if (!opts.allowLocked && isOrgLocked(org)) {
+    return jsonError(
+      c,
+      403,
+      "This organization's subscription is inactive. Reactivate it in the console to continue.",
+    );
+  }
 
   if (auth.kind === "organization") {
     if (auth.organization.id !== org.id) {

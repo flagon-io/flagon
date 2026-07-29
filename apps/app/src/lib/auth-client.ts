@@ -3,15 +3,21 @@ import {
   organizationClient,
   usernameClient,
 } from "better-auth/client/plugins";
-import { APP_URL } from "@/lib/urls";
+import { API_URL } from "@/lib/urls";
 
 /**
  * The browser-side auth client. Client components import from here (never from
  * `@/lib/auth`, which is server-only). Plugins must mirror the server config:
  * username + organization.
+ *
+ * BetterAuth is hosted by the API now, so this points at API_URL (the browser
+ * calls api.flagon.io / :3002 directly). `credentials: "include"` is required so
+ * the session cookie is sent and stored on these cross-origin requests; the API's
+ * credentialed CORS trusts this origin.
  */
 export const authClient = createAuthClient({
-  baseURL: APP_URL,
+  baseURL: API_URL,
+  fetchOptions: { credentials: "include" },
   plugins: [usernameClient(), organizationClient()],
 });
 

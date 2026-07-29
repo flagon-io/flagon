@@ -40,12 +40,38 @@ const schema = z
     // for bulk-import workloads.
     MGMT_WRITE_RATE_LIMIT: z.coerce.number().int().positive().default(120),
     MGMT_WRITE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+    // Billing (Stripe) is OPTIONAL: the API boots and serves without it. When
+    // present the values are shape-checked so a paste error fails fast at boot
+    // rather than as a confusing Stripe 401 mid-checkout. The Pro price is
+    // resolved from a lookup key at runtime, so there is no price id to set.
+    STRIPE_SECRET_KEY: z.string().startsWith("sk_").optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().startsWith("whsec_").optional(),
+    // Auth (BetterAuth is hosted here now). The secret signs every session cookie
+    // and token; it is REQUIRED and must equal the console's value byte-for-byte
+    // (a mismatch invalidates every existing session cookie). BETTER_AUTH_URL is
+    // this API's own origin (defaults to the local port). AUTH_COOKIE_DOMAIN is
+    // ".flagon.io" in prod (shared apex cookie), unset locally.
+    BETTER_AUTH_SECRET: z.string().min(32),
+    BETTER_AUTH_URL: z.string().url().optional(),
+    AUTH_COOKIE_DOMAIN: z.string().optional(),
+    // Email (verification / reset / invites now send from the API).
+    RESEND_API_KEY: z.string().optional(),
+    EMAIL_FROM: z.string().optional(),
   })
   .refine((e) => Boolean(e.DATABASE_URL || e.APP_DATABASE_URL), {
     message:
       "A database connection string is required: set APP_DATABASE_URL (or DATABASE_URL for local dev).",
     path: ["APP_DATABASE_URL"],
-  });
+  })
+  .refine(
+    (e) =>
+      !(e.NODE_ENV === "production" && e.BETTER_AUTH_SECRET === "dev-secret-change-me"),
+    {
+      message:
+        "BETTER_AUTH_SECRET is still the dev placeholder in production. Generate a real secret.",
+      path: ["BETTER_AUTH_SECRET"],
+    },
+  );
 
 function load() {
   const parsed = schema.safeParse(process.env);

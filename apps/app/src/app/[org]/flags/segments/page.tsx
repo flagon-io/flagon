@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { getMembershipBySlug } from "@/lib/org";
+import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { listSegments } from "@/lib/flags-api";
 import { SegmentsManager } from "./segments-manager";
 
@@ -29,7 +29,11 @@ export default async function SegmentsPage({
           Reusable groups of users. Define one here, then target it from any flag.
         </p>
       </div>
-      <SegmentsManager slug={slug} segments={segments} />
+      <SegmentsManager
+        slug={slug}
+        segments={segments}
+        canManage={canManageOrg(membership.role)}
+      />
     </div>
   );
 }

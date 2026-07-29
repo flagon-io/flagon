@@ -17,6 +17,10 @@ export type OrgMembership = {
   plan: string;
   role: string;
   logo: string | null;
+  // Billing state, so the workspace can lock a lapsed Pro org. See
+  // `isOrgLocked` in @/lib/billing.
+  stripeCustomerId: string | null;
+  subscriptionStatus: string | null;
 };
 
 /** Every organization the user belongs to, oldest first. */
@@ -31,6 +35,8 @@ export async function getUserOrganizations(
       plan: organizations.plan,
       role: members.role,
       logo: organizations.logo,
+      stripeCustomerId: organizations.stripeCustomerId,
+      subscriptionStatus: organizations.subscriptionStatus,
     })
     .from(members)
     .innerJoin(organizations, eq(members.organizationId, organizations.id))
@@ -51,6 +57,8 @@ export async function getMembershipBySlug(
       plan: organizations.plan,
       role: members.role,
       logo: organizations.logo,
+      stripeCustomerId: organizations.stripeCustomerId,
+      subscriptionStatus: organizations.subscriptionStatus,
     })
     .from(members)
     .innerJoin(organizations, eq(members.organizationId, organizations.id))

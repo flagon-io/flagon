@@ -136,16 +136,28 @@ export const organizations = pgTable("organizations", {
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   logo: text("logo"),
-  // Our additional field: the subscription tier. No billing is wired during
-  // the alpha, so this is just a stored marker (hobby | pro | enterprise) and
-  // everything is unlimited regardless.
+  // Our additional field: the subscription tier (hobby | pro | enterprise).
+  // Pro is now a paid, Stripe-backed plan; this column is set by the billing
+  // webhook, not by users. It stays the fast, local read every gate consults.
   plan: text("plan").notNull().default("hobby"),
+  // Stripe mapping for flat $20/mo Pro. `stripe_customer_id` is the org's
+  // Stripe Customer (one per org, unique); `stripe_subscription_id` its active
+  // Pro subscription; `subscription_status` mirrors the Stripe subscription
+  // status. All three are written by the webhook / billing actions, never by
+  // the general settings form. See src/lib/billing.ts.
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  subscriptionStatus: text("subscription_status"),
   // BetterAuth stores arbitrary org metadata as a JSON string here.
   metadata: text("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  // The webhook resolves an org from a Stripe customer id; enforce one org per
+  // customer. NULLs are distinct in Postgres, so unlinked orgs coexist.
+  uniqueIndex("organizations_stripe_customer_id_key").on(t.stripeCustomerId),
+]);
 
 export const members = pgTable(
   "members",

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { listUserEmails } from "@/lib/user-emails";
+import { listEmailsApi } from "@/lib/flags-api";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { EmailsManager } from "./emails-manager";
 
@@ -16,7 +16,7 @@ export default async function EmailsSettingsPage({
   if (!session) redirect("/login");
   const { verified, error } = await searchParams;
 
-  const emails = await listUserEmails(session.user.id);
+  const emails = await listEmailsApi();
 
   return (
     <div>

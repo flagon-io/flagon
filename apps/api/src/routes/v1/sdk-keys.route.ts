@@ -6,7 +6,7 @@ import { withOrg } from "../../db/tenant.js";
 import { environments, sdkKeys } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
-import { resolveOrg } from "../../lib/org-context.js";
+import { resolveOrg, requireManager } from "../../lib/org-context.js";
 import { ensureEnvironments } from "../../flags/environments.js";
 import { generateSdkKey } from "../../flags/sdk-key.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
@@ -138,6 +138,8 @@ registerComponentSchema("SdkKeyListResponse", z.object({ keys: z.array(sdkKeySch
 sdkKeys_.post("/", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
 
   const parsed = createKey.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
@@ -199,6 +201,8 @@ sdkKeys_.get("/", async (c) => {
 sdkKeys_.post("/:id/revoke", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
 
   const id = c.req.param("id");
   const [row] = await db

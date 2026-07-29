@@ -102,7 +102,8 @@ showCheckout, _ := client.BooleanValue(
 )
 fmt.Println(showCheckout) // false: the flag is off by default` },
   php: { code: `<?php
-// composer require guzzlehttp/guzzle. PHP calls OFREP directly.
+// OpenFeature has a PHP SDK, but no OFREP provider yet, so call OFREP directly.
+// composer require guzzlehttp/guzzle
 $client = new GuzzleHttp\\Client();
 $res = $client->post("https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout", [
     "headers" => ["Authorization" => "Bearer " . getenv("FLAGON_SDK_KEY")],

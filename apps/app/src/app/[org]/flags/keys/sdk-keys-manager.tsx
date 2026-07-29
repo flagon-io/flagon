@@ -25,10 +25,13 @@ export function SdkKeysManager({
   slug,
   environments,
   keys,
+  canManage,
 }: {
   slug: string;
   environments: Environment[];
   keys: SdkKey[];
+  /** Owners/admins mint and revoke keys; members get a read-only view. */
+  canManage: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -43,11 +46,13 @@ export function SdkKeysManager({
 
   return (
     <div className="flex flex-col gap-7">
-      <div className="flex justify-end">
-        <Button variant="secondary" onClick={() => setModalEnv(environments[0]?.key ?? "")}>
-          <Plus className="h-4 w-4" /> Create SDK Key
-        </Button>
-      </div>
+      {canManage ? (
+        <div className="flex justify-end">
+          <Button variant="secondary" onClick={() => setModalEnv(environments[0]?.key ?? "")}>
+            <Plus className="h-4 w-4" /> Create SDK Key
+          </Button>
+        </div>
+      ) : null}
 
       {environments.map((env) => {
         const envKeys = keys.filter((k) => k.environmentKey === env.key && !k.revokedAt);
@@ -58,9 +63,11 @@ export function SdkKeysManager({
               {envKeys.length === 0 ? (
                 <div className="flex items-center justify-between px-4 py-4">
                   <span className="text-sm text-zinc-500">No SDK keys for {env.name}</span>
-                  <Button variant="secondary" size="sm" onClick={() => setModalEnv(env.key)}>
-                    <Plus className="h-3.5 w-3.5" /> Create SDK Key
-                  </Button>
+                  {canManage ? (
+                    <Button variant="secondary" size="sm" onClick={() => setModalEnv(env.key)}>
+                      <Plus className="h-3.5 w-3.5" /> Create SDK Key
+                    </Button>
+                  ) : null}
                 </div>
               ) : (
                 <>
@@ -80,22 +87,26 @@ export function SdkKeysManager({
                             : " · never used"}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => revoke(k.id)}
-                        disabled={pending}
-                        title="Revoke"
-                        className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {canManage ? (
+                        <button
+                          type="button"
+                          onClick={() => revoke(k.id)}
+                          disabled={pending}
+                          title="Revoke"
+                          className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      ) : null}
                     </div>
                   ))}
-                  <div className="border-t border-white/6 px-2.5 py-2">
-                    <Button variant="ghost" size="sm" onClick={() => setModalEnv(env.key)}>
-                      <Plus className="h-3.5 w-3.5" /> Create SDK Key
-                    </Button>
-                  </div>
+                  {canManage ? (
+                    <div className="border-t border-white/6 px-2.5 py-2">
+                      <Button variant="ghost" size="sm" onClick={() => setModalEnv(env.key)}>
+                        <Plus className="h-3.5 w-3.5" /> Create SDK Key
+                      </Button>
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>

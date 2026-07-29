@@ -5,7 +5,7 @@ import { withOrg } from "../../db/tenant.js";
 import { entities, entityAttributes } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
-import { resolveOrg } from "../../lib/org-context.js";
+import { resolveOrg, requireManager } from "../../lib/org-context.js";
 import type { JsonValue } from "../../flags/types.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
@@ -255,6 +255,8 @@ entities_.patch("/:key", async (c) => {
 entities_.delete("/:key", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
   const key = c.req.param("key") ?? "";
   const deleted = await withOrg(ctx.orgId, (tx) =>
     tx.delete(entities).where(eq(entities.key, key)).returning({ id: entities.id }),

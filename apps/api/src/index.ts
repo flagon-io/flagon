@@ -18,6 +18,8 @@ import { logger } from "./lib/logger.js";
 import { buildOpenApiDocument, buildRootIndex } from "./openapi/registry.js";
 import { ofrep } from "./routes/ofrep/index.js";
 import { v1 } from "./routes/v1/index.js";
+import { stripeWebhook } from "./routes/webhooks/stripe.route.js";
+import { auth } from "./lib/auth.js";
 
 // The API is the control plane: everything that matters (today: the waitlist;
 // soon: projects, flags, auth) lives behind /v1/* and both Next.js apps talk
@@ -89,6 +91,17 @@ app.route("/v1", v1);
 // OFREP: the OpenFeature Remote Evaluation Protocol. The flag-evaluation hot
 // path, authenticated by SDK key rather than the control-plane token/cookie.
 app.route("/ofrep", ofrep);
+
+// Stripe webhook: authenticated by request signature, not a token/cookie, so it
+// sits outside /v1 and the management middleware. See the route for details.
+app.route("/webhooks/stripe", stripeWebhook);
+
+// Authentication: the API hosts BetterAuth. Its generic handler is a Web
+// Request -> Response, which Hono provides via c.req.raw and returns verbatim
+// (Set-Cookie included). Global openCors already grants credentialed CORS to the
+// console + marketing origins, which is what the browser auth calls need. See
+// lib/auth.ts.
+app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
 // Everything this API returns is JSON, failures included: a client parses an
 // error exactly the way it parses a success.

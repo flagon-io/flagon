@@ -5,7 +5,7 @@ import { withOrg } from "../../db/tenant.js";
 import { segments } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
-import { resolveOrg } from "../../lib/org-context.js";
+import { resolveOrg, requireManager } from "../../lib/org-context.js";
 import { invalidateEvalCacheOnWrite } from "../../lib/eval-invalidate.js";
 import { conditionsSchema } from "../../flags/schemas.js";
 import type { JsonValue } from "../../flags/types.js";
@@ -241,6 +241,8 @@ segments_.patch("/:key", async (c) => {
 segments_.delete("/:key", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
   const key = c.req.param("key") ?? "";
   const deleted = await withOrg(ctx.orgId, (tx) =>
     tx.delete(segments).where(eq(segments.key, key)).returning({ id: segments.id }),
