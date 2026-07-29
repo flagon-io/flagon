@@ -64,6 +64,9 @@ export type FlagEnvConfig = {
   name: string;
   enabled: boolean;
   defaultVariantKey: string | null;
+  /** The default serve when enabled and no rule matches: a rollout when set,
+   * else the single defaultVariantKey. */
+  defaultServe: Serve | null;
   offVariantKey: string | null;
   rules: {
     id: string;
@@ -200,7 +203,12 @@ export async function setFlagEnvironment(
   slug: string,
   key: string,
   envKey: string,
-  body: { enabled?: boolean; defaultVariantKey?: string; offVariantKey?: string },
+  body: {
+    enabled?: boolean;
+    defaultVariantKey?: string;
+    offVariantKey?: string;
+    defaultServe?: Serve;
+  },
 ) {
   return unwrap<{ ok: true }>(
     await apiFetch(`/v1/orgs/${slug}/flags/${key}/environments/${envKey}`, {
@@ -276,7 +284,9 @@ export type Predicate =
   | { all: Predicate[] }
   | { any: Predicate[] };
 
-export type Serve = { variant: string } | { rollout: { variant: string; weight: number }[] };
+export type Serve =
+  | { variant: string }
+  | { rollout: { variant: string; weight: number }[]; bucketBy?: string };
 
 export type Segment = {
   id: string;
@@ -346,6 +356,19 @@ export async function listEntities(slug: string): Promise<Entity[]> {
   const res = await apiFetch(`/v1/orgs/${slug}/entities`);
   if (!res.ok) return [];
   return (await res.json()).entities as Entity[];
+}
+
+/**
+ * Distinct attribute names across an org's entities, sorted, for autocompleting
+ * the targeting-rule attribute field. This is what makes Entities pay off: the
+ * attributes you define show up as suggestions when you build rules.
+ */
+export function entityAttributeNames(entities: Entity[]): string[] {
+  const names = new Set<string>();
+  for (const entity of entities) {
+    for (const attr of entity.attributes) names.add(attr.key);
+  }
+  return [...names].sort();
 }
 
 export async function createEntity(

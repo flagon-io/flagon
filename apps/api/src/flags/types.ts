@@ -100,7 +100,14 @@ export type FlagConfig = {
   type: FlagType;
   variants: VariantConfig[];
   enabled: boolean;
+  /**
+   * The default served when enabled and no rule matches. When `defaultServe` is
+   * set it wins (letting the default itself be a rollout); otherwise the single
+   * `defaultVariantKey` is served. `defaultVariantKey` also remains the ultimate
+   * fallback if a default rollout is degenerate.
+   */
   defaultVariantKey: string | null;
+  defaultServe: Serve | null;
   offVariantKey: string | null;
   rules: RuleConfig[];
 };

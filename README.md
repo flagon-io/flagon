@@ -4,15 +4,14 @@ The self-hostable developer platform.
 
 ```
 apps/
-  web/   Next.js marketing site       → flagon.io        ("coming soon" launch page)
-  app/   Next.js product app          → app.flagon.io    (invite-only for now)
-  api/   Hono API, the control plane  → api.flagon.io/v1/...
-  docs/  Next.js documentation site   → docs.flagon.io   (guides + API reference)
+  web/   Next.js marketing site + docs → flagon.io, flagon.io/docs
+  app/   Next.js product app           → app.flagon.io    (invite-only for now)
+  api/   Hono API, the control plane   → api.flagon.io/v1/...
 ```
 
 The Next.js apps are plain visual layers — they render screens and call the
-API under `/v1/*`. Nothing else talks to a database directly. The docs site is
-static content (MDX) built on the same design system. See
+API under `/v1/*`. Nothing else talks to a database directly. The documentation
+lives inside the marketing site at `/docs` (MDX on the same design system). See
 [docs/architecture.md](docs/architecture.md) for more.
 
 Task running is orchestrated with [Turborepo](https://turbo.build/), and

@@ -47,6 +47,17 @@ export function evaluate(
     return { key: flag.key, value: variant.value, variant: variant.key, reason };
   };
 
+  // Resolve a Serve (variant or rollout) to a result, or null if a rollout is
+  // degenerate (no positive weight) so the caller can fall through.
+  const applyServe = (
+    serve: Serve,
+    variantReason: EvaluationReason,
+  ): EvaluationResult | null => {
+    if ("variant" in serve) return serveVariant(serve.variant, variantReason);
+    const chosen = pickRollout(serve, flag.key, context);
+    return chosen ? serveVariant(chosen, "SPLIT") : null;
+  };
+
   // 1. Off in this environment.
   if (!flag.enabled) return serveVariant(flag.offVariantKey, "DISABLED");
 
@@ -54,20 +65,21 @@ export function evaluate(
   const rules = [...flag.rules].sort((a, b) => a.priority - b.priority);
   for (const rule of rules) {
     if (!matchConditions(rule.conditions, context, segments)) continue;
-
-    if ("variant" in rule.serve) {
-      return serveVariant(rule.serve.variant, "TARGETING_MATCH");
-    }
-    const chosen = pickRollout(rule.serve, flag.key, context);
-    if (chosen) return serveVariant(chosen, "SPLIT");
+    const result = applyServe(rule.serve, "TARGETING_MATCH");
+    if (result) return result;
     // A misconfigured rollout (no weight) falls through to the default.
   }
 
-  // 3. Default. STATIC when there was no targeting at all, else DEFAULT.
-  return serveVariant(
-    flag.defaultVariantKey,
-    flag.rules.length === 0 ? "STATIC" : "DEFAULT",
-  );
+  // 3. Default. STATIC when there was no targeting at all, else DEFAULT — and the
+  // default may itself be a rollout (SPLIT). A degenerate default rollout falls
+  // back to the single default variant.
+  const variantReason: EvaluationReason =
+    flag.rules.length === 0 ? "STATIC" : "DEFAULT";
+  if (flag.defaultServe) {
+    const result = applyServe(flag.defaultServe, variantReason);
+    if (result) return result;
+  }
+  return serveVariant(flag.defaultVariantKey, variantReason);
 }
 
 /** Choose a variant from a weighted rollout, deterministically by identity. */

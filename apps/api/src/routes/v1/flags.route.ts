@@ -23,6 +23,8 @@ import { recordRevision } from "../../flags/revisions.js";
 import { flagUsage, flagUsageSummaries, type FlagUsageSummary } from "../../flags/usage.js";
 import { planVariants } from "../../flags/seed.js";
 import type { JsonValue } from "../../flags/types.js";
+import { serveSchema, variantKeysInServe } from "../../flags/schemas.js";
+import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 import { rules_ } from "./rules.route.js";
 import { variants_ } from "./variants.route.js";
 
@@ -93,8 +95,191 @@ const envConfig = z
     enabled: z.boolean().optional(),
     defaultVariantKey: z.string().optional(),
     offVariantKey: z.string().optional(),
+    // The default "serve" when enabled and no rule matches: a single variant or a
+    // percentage rollout. A single-variant serve is mirrored to defaultVariantId
+    // and clears the rollout; a rollout is stored as default_serve.
+    defaultServe: serveSchema.optional(),
   })
   .strict();
+
+// --- OpenAPI registration ----------------------------------------------------
+// Every handler below is also declared here so it appears in GET /openapi.json
+// and the root index. Path params are derived from the path; request bodies
+// reuse the same zod schemas the handlers validate against.
+const FLAGS_TAG = "Flags";
+const flagParams = {
+  org: "The organization slug.",
+  key: "The flag key.",
+  envKey: "The environment key (e.g. production, preview, development).",
+};
+const WRITE_429 = {
+  description: "Too many management writes; retry after the Retry-After delay.",
+};
+
+// A representative create response body, shown inline by API viewers.
+const FLAG_CREATE_EXAMPLE = {
+  flag: {
+    id: "b3f1c2e4-5a6b-4c8d-9e0f-1a2b3c4d5e6f",
+    key: "new-checkout",
+    name: "new-checkout",
+    description: "Roll out the redesigned checkout flow.",
+    type: "boolean",
+    permanent: false,
+    tags: ["checkout", "growth"],
+    maintainerUserId: null,
+    createdByUserId: "a1b2c3d4-e5f6-4a8b-9c0d-1e2f3a4b5c6d",
+    archivedAt: null,
+    createdAt: "2026-07-29T12:00:00.000Z",
+    updatedAt: "2026-07-29T12:00:00.000Z",
+  },
+};
+
+registerRoute({
+  method: "post",
+  path: "/v1/orgs/{org}/flags",
+  summary: "Create a flag",
+  description:
+    "Create a flag. Flags are created disabled in every environment; enable them per environment afterwards.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: flagParams,
+  request: { body: createFlag },
+  responses: {
+    201: {
+      description: "The flag was created.",
+      schemaName: "FlagResponse",
+      example: FLAG_CREATE_EXAMPLE,
+    },
+    409: { description: "A flag with that key already exists." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/flags",
+  summary: "List flags",
+  description: "List every flag in the organization with its per-environment configuration.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: flagParams,
+  responses: {
+    200: { description: "The organization's flags.", schemaName: "FlagListResponse" },
+  },
+});
+
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/flags/{key}",
+  summary: "Get a flag",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: flagParams,
+  responses: {
+    200: {
+      description: "The flag and its configuration.",
+      schemaName: "FlagDetailResponse",
+    },
+    404: { description: "No flag with that key." },
+  },
+});
+
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/flags/{key}/usage",
+  summary: "Get flag usage",
+  description: "Evaluation counts and recency for the flag, per environment.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: flagParams,
+  responses: {
+    200: { description: "Usage summary for the flag.", schemaName: "FlagUsageResponse" },
+    404: { description: "No flag with that key." },
+  },
+});
+
+registerRoute({
+  method: "patch",
+  path: "/v1/orgs/{org}/flags/{key}",
+  summary: "Update a flag",
+  description: "Edit flag metadata: name, description, maintainer, permanence, and tags.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: flagParams,
+  request: { body: updateFlag },
+  responses: {
+    200: { description: "The updated flag.", schemaName: "FlagResponse" },
+    404: { description: "No flag with that key." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "post",
+  path: "/v1/orgs/{org}/flags/{key}/archive",
+  summary: "Archive a flag",
+  description:
+    "Retire a flag. It disappears from the active list but keeps evaluating, so existing clients never break.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: flagParams,
+  responses: {
+    200: { description: "The flag was archived.", schemaName: "FlagResponse" },
+    404: { description: "No flag with that key." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "post",
+  path: "/v1/orgs/{org}/flags/{key}/restore",
+  summary: "Restore a flag",
+  description: "Return an archived flag to the active list so its configuration can be edited again.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: flagParams,
+  responses: {
+    200: { description: "The flag was restored.", schemaName: "FlagResponse" },
+    404: { description: "No flag with that key." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "delete",
+  path: "/v1/orgs/{org}/flags/{key}",
+  summary: "Delete a flag",
+  description: "Permanently delete a flag. Evaluation of the key stops, so remove all references first.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: flagParams,
+  responses: {
+    200: { description: "The flag was deleted.", schemaName: "DeleteAck" },
+    404: { description: "No flag with that key." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "patch",
+  path: "/v1/orgs/{org}/flags/{key}/environments/{envKey}",
+  summary: "Configure a flag in an environment",
+  description:
+    "Set the on/off state, the default variant or rollout, and the off variant for a flag in one environment.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: flagParams,
+  request: { body: envConfig },
+  responses: {
+    200: { description: "The updated environment configuration.", schemaName: "DeleteAck" },
+    404: { description: "No such flag or environment." },
+    409: { description: "The flag is archived; restore it before editing." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
+  },
+});
 
 /** Reject variant values that don't match the flag's declared type. */
 function variantTypeError(
@@ -133,6 +318,128 @@ function serializeFlag(f: typeof flags.$inferSelect) {
     updatedAt: f.updatedAt.toISOString(),
   };
 }
+
+// --- Response component schemas ----------------------------------------------
+// Registered success shapes for the routes above, mirroring serializeFlag and
+// the exact enveloped bodies each handler returns.
+const flagSchema = registerComponentSchema(
+  "Flag",
+  z.object({
+    id: z.string(),
+    key: z.string(),
+    name: z.string(),
+    description: z.string().nullable(),
+    type: flagType,
+    permanent: z.boolean(),
+    tags: z.array(z.string()),
+    maintainerUserId: z.string().nullable(),
+    createdByUserId: z.string().nullable(),
+    archivedAt: z.string().nullable().describe("ISO 8601 timestamp"),
+    createdAt: z.string().describe("ISO 8601 timestamp"),
+    updatedAt: z.string().describe("ISO 8601 timestamp"),
+  }),
+);
+
+registerComponentSchema("FlagResponse", z.object({ flag: flagSchema }));
+
+// The one shared "{ ok: true }" acknowledgement returned by deletes and other
+// content-free mutations. Registered here and referenced by name elsewhere.
+registerComponentSchema("DeleteAck", z.object({ ok: z.boolean() }));
+
+// The compact per-flag usage rollup embedded in the list (see FlagUsageSummary).
+const flagUsageSummarySchema = z.object({
+  total: z.number(),
+  checksPerHour: z.number(),
+  lastSeenAt: z.string().nullable().describe("ISO 8601 timestamp"),
+  series: z.array(z.number()),
+});
+
+// The list embeds each flag's current Production value, resolved people names,
+// and a usage summary alongside the base flag fields.
+registerComponentSchema(
+  "FlagListResponse",
+  z.object({
+    flags: z.array(
+      flagSchema.extend({
+        value: z.unknown(),
+        createdByName: z.string().nullable(),
+        maintainerName: z.string().nullable(),
+        usage: flagUsageSummarySchema.nullable(),
+      }),
+    ),
+  }),
+);
+
+// The detail view returns the flag (with resolved people names) plus its recent
+// revisions, variants, and per-environment configuration with targeting rules.
+registerComponentSchema(
+  "FlagDetailResponse",
+  z.object({
+    flag: flagSchema.extend({
+      createdByName: z.string().nullable(),
+      maintainerName: z.string().nullable(),
+    }),
+    revisions: z.array(
+      z.object({
+        id: z.string(),
+        action: z.string(),
+        summary: z.string().nullable(),
+        changes: z.array(z.string()),
+        userName: z.string().nullable(),
+        createdAt: z.string().describe("ISO 8601 timestamp"),
+      }),
+    ),
+    variants: z.array(
+      z.object({
+        id: z.string(),
+        key: z.string(),
+        value: z.unknown(),
+        label: z.string().nullable(),
+        sortOrder: z.number(),
+      }),
+    ),
+    environments: z.array(
+      z.object({
+        key: z.string(),
+        name: z.string(),
+        enabled: z.boolean(),
+        defaultVariantKey: z.string().nullable(),
+        defaultServe: z.unknown(),
+        offVariantKey: z.string().nullable(),
+        rules: z.array(
+          z.object({
+            id: z.string(),
+            priority: z.number(),
+            description: z.string().nullable(),
+            conditions: z.unknown(),
+            serve: z.unknown(),
+          }),
+        ),
+      }),
+    ),
+  }),
+);
+
+// Per-environment evaluation usage (see FlagUsage / flagUsage()).
+registerComponentSchema(
+  "FlagUsageResponse",
+  z.object({
+    usage: z.object({
+      total: z.number(),
+      lastSeenAt: z.string().nullable().describe("ISO 8601 timestamp"),
+      environments: z.array(
+        z.object({
+          key: z.string(),
+          name: z.string(),
+          total: z.number(),
+          lastSeenAt: z.string().nullable().describe("ISO 8601 timestamp"),
+          variants: z.array(z.object({ key: z.string(), count: z.number() })),
+          series: z.array(z.object({ day: z.string(), count: z.number() })),
+        }),
+      ),
+    }),
+  }),
+);
 
 async function loadFlag(tx: TenantTx, key: string) {
   return (
@@ -463,6 +770,9 @@ flags_.get("/:key", async (c) => {
         name: env.name,
         enabled: fe?.enabled ?? false,
         defaultVariantKey: keyOf(fe?.defaultVariantId ?? null),
+        // The default serve: a rollout when default_serve is set, else the single
+        // default variant. The console renders its default ServePicker from this.
+        defaultServe: fe?.defaultServe ?? null,
         offVariantKey: keyOf(fe?.offVariantId ?? null),
         rules: rules.map((r) => ({
           id: r.id,
@@ -633,6 +943,22 @@ flags_.patch("/:key/environments/:envKey", async (c) => {
       if (!id) return "bad-variant" as const;
       patch.offVariantId = id;
     }
+    if (parsed.data.defaultServe !== undefined) {
+      const serve = parsed.data.defaultServe;
+      // Every variant the serve references must exist on the flag.
+      if (variantKeysInServe(serve).some((k) => !idByKey.has(k))) {
+        return "bad-variant" as const;
+      }
+      if ("variant" in serve) {
+        // A single-variant default lives in the FK column; clear any rollout.
+        patch.defaultVariantId = idByKey.get(serve.variant)!;
+        patch.defaultServe = null;
+      } else {
+        // A rollout default lives in default_serve; defaultVariantId stays as the
+        // fallback if the rollout is ever made degenerate.
+        patch.defaultServe = serve as JsonValue;
+      }
+    }
 
     const [row] = await tx
       .update(flagEnvironments)
@@ -669,6 +995,12 @@ flags_.patch("/:key/environments/:envKey", async (c) => {
       changes.push(
         `Off variant: ${variantName(oldFe.offVariantId)} → ${variantName(patch.offVariantId)}`,
       );
+    }
+    if (
+      parsed.data.defaultServe !== undefined &&
+      !("variant" in parsed.data.defaultServe)
+    ) {
+      changes.push("Default: percentage rollout");
     }
 
     await recordRevision(tx, {

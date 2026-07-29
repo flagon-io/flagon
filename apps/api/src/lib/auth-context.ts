@@ -94,7 +94,12 @@ async function fromToken(token: string): Promise<AuthIdentity> {
 
 async function fromCookie(c: Context): Promise<AuthIdentity> {
   const cookie = c.req.header("cookie");
-  if (!cookie || !cookie.includes("better-auth")) return null;
+  // Cheap pre-filter before we bother calling get-session: does the header even
+  // carry a session cookie? The console sets a CUSTOM cookie prefix ("flagon",
+  // see auth.ts advanced.cookiePrefix), so we must NOT look for BetterAuth's
+  // default "better-auth" name. Match the stable session-cookie base name, which
+  // is prefix-independent and survives the "__Secure-" variant in production.
+  if (!cookie || !cookie.includes("session_token")) return null;
 
   const appUrl = process.env.APP_URL ?? "http://localhost:3001";
   try {

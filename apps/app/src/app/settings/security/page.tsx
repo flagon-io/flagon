@@ -33,13 +33,20 @@ export default async function SecuritySettingsPage() {
         description="Devices currently signed in. Revoke any you do not recognize."
       >
         <SessionsList
-          sessions={sessions.map((s) => ({
-            token: s.token,
-            createdAt: s.createdAt.toISOString(),
-            userAgent: s.userAgent ?? null,
-            ipAddress: s.ipAddress ?? null,
-            current: s.token === session.session.token,
-          }))}
+          sessions={sessions.map(
+            (s: {
+              token: string;
+              createdAt: Date;
+              userAgent?: string | null;
+              ipAddress?: string | null;
+            }) => ({
+              token: s.token,
+              createdAt: s.createdAt.toISOString(),
+              userAgent: s.userAgent ?? null,
+              ipAddress: s.ipAddress ?? null,
+              current: s.token === session.session.token,
+            }),
+          )}
         />
       </SettingsSection>
     </div>

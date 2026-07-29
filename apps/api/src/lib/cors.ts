@@ -32,8 +32,20 @@ const trusted = new Set(
 
 const shared = {
   allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowHeaders: ["Content-Type", "Authorization"],
-  exposeHeaders: ["Content-Length"],
+  // If-None-Match lets browser OFREP providers make conditional bulk-eval
+  // requests; without it the cross-origin preflight rejects the header and the
+  // 304 caching path is dead from the browser.
+  allowHeaders: ["Content-Type", "Authorization", "If-None-Match"],
+  // ETag is required for the conditional-request/304 loop; Retry-After and the
+  // RateLimit-* family let SDKs read throttling signals off a 429.
+  exposeHeaders: [
+    "Content-Length",
+    "ETag",
+    "Retry-After",
+    "RateLimit-Limit",
+    "RateLimit-Remaining",
+    "RateLimit-Reset",
+  ],
   maxAge: 86400,
 };
 

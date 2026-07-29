@@ -1,0 +1,76 @@
+export const metadata = {
+  title: "What is Flagon",
+  description:
+    "Flagon is a self-hostable developer platform. Understand the foundation every product is built on: organizations, projects, environments, and teams.",
+};
+
+# What is Flagon
+
+Flagon is a self-hostable developer platform. Instead of stitching together a
+separate vendor for every capability, each with its own login, billing, and
+model of your world, Flagon puts the products you'd otherwise buy or build on one
+foundation: one organization, one login, one set of environments and teams.
+
+The **[Catalog](/docs/catalog)** is the centerpiece the platform is built around:
+a live map of your services, their owners, and the products attached to them.
+**Feature Flags** is available on the foundation today, with more products
+shipping shortly. Because they share the platform, a concept you learn once, like
+an environment or a team role, carries across everything you add.
+
+## The foundation
+
+Every product is built on the same handful of primitives. Learn these and you
+understand how the whole platform fits together.
+
+<CardGrid cols={2}>
+  <Card href="/docs/platform/organizations" title="Organizations & teams">
+    An organization is your workspace: its members, their roles, and the billing
+    boundary. People you invite become members with a role.
+  </Card>
+  <Card href="/docs/platform/projects" title="Projects (coming soon)">
+    Will group the work for one system or team, so a large organization isn't one
+    flat list of every resource. Not available yet: flags are org-global today.
+  </Card>
+  <Card href="/docs/platform/environments" title="Environments">
+    Production, Preview, and Development keep your stages separate. Configuration
+    is set per environment, so nothing leaks between them.
+  </Card>
+  <Card href="/docs/platform/authentication" title="Authentication & tokens">
+    Sign in to the console, and authenticate automation with access tokens.
+    Products issue their own scoped credentials, like SDK keys for evaluation.
+  </Card>
+  <Card href="/docs/platform/api" title="The Flagon API">
+    One REST API under `/v1`, organization-scoped, documented with OpenAPI.
+    Everything the console does, you can script.
+  </Card>
+  <Card href="/docs/catalog" title="Catalog" cta="See the vision">
+    The centerpiece the platform is built around, bringing services, ownership,
+    and products together. Coming soon.
+  </Card>
+</CardGrid>
+
+## Principles
+
+Three commitments shape how Flagon is built, and they're worth knowing because
+they show up everywhere in these docs.
+
+- **Standards, not lock-in.** Where an open standard exists, Flagon speaks it.
+  Feature-flag evaluation is [OpenFeature](https://openfeature.dev) over its
+  remote protocol (OFREP), so you use standard SDKs and could point them
+  elsewhere. You're never trapped.
+- **Usage, never seats.** Pricing is about what you use, not how many teammates
+  you add, so inviting your whole team is free.
+- **Always self-hostable.** Flagon is source-available and runs entirely on your
+  own infrastructure. See [Run Flagon](/docs/self-hosting).
+
+## Where to go next
+
+<CardGrid>
+  <Card href="/docs/feature-flags/quickstart" title="Quickstart" cta="Build something">
+    The fastest path to a working flag: create it, key it, evaluate it.
+  </Card>
+  <Card href="/docs/feature-flags" title="Feature Flags" cta="Explore the product">
+    A product available on the platform today, and what most people come to
+    Flagon for right now.
+  </Card>
+</CardGrid>

@@ -1,0 +1,64 @@
+export const metadata = {
+  title: "Feature Flags",
+  description:
+    "Change what your application does without shipping a new build. Target with rules and segments, evaluate over OpenFeature in any language.",
+};
+
+# Feature Flags
+
+Feature Flags let you change what your application does without shipping a new
+build. Define a flag once, decide who sees which value with targeting rules, and
+read the result from your code through [OpenFeature](https://openfeature.dev),
+the vendor-neutral flag standard.
+
+Because evaluation speaks OpenFeature's remote protocol (OFREP), there's no
+Flagon-specific client to adopt: any OpenFeature SDK with an OFREP provider
+works, in any language, pointed at Flagon by URL.
+
+<CardGrid>
+  <Card href="/docs/feature-flags/quickstart" eyebrow="Start here" title="Quickstart" cta="Ship your first flag">
+    Create a flag, mint an SDK key, and evaluate it in about five minutes.
+  </Card>
+  <Card href="/docs/feature-flags/evaluate/openfeature" eyebrow="Integrate" title="Evaluate with OpenFeature" cta="Wire it into your app">
+    The recommended path: the standard SDK plus the OFREP provider.
+  </Card>
+</CardGrid>
+
+## How it fits together
+
+- **[Flags and variants](/docs/feature-flags/flags)** are what you toggle. A boolean
+  flag serves `true`/`false`; a multivariate flag serves one of several named
+  values (string, number, or JSON).
+- **[Environments](/docs/platform/environments)** keep Production, Preview, and
+  Development separate. The same flag can be on in one and off in another.
+- **[Targeting and segments](/docs/feature-flags/targeting)** decide which variant a
+  given user or request receives, from the context your app supplies.
+- **[SDK keys](/docs/feature-flags/sdk-keys)** authenticate evaluation, scoped to one
+  environment.
+
+## Evaluate
+
+<CardGrid>
+  <Card href="/docs/feature-flags/evaluate/openfeature" title="OpenFeature SDK">
+    Server and browser, with per-language examples.
+  </Card>
+  <Card href="/docs/feature-flags/evaluate/rest" title="REST (OFREP)">
+    Plain HTTP: the exact request, response, and error shapes.
+  </Card>
+</CardGrid>
+
+## Manage and operate
+
+<CardGrid>
+  <Card href="/docs/feature-flags/management-api" title="Management API">
+    Create and configure flags, rules, segments, and keys programmatically.
+  </Card>
+  <Card href="/docs/feature-flags/troubleshooting" title="Troubleshooting">
+    Fix the common issues: auth errors, missing flags, values that won't change.
+  </Card>
+</CardGrid>
+
+<Callout tone="tip" title="New to Flagon?">
+Read [What is Flagon](/docs/platform) first for the platform concepts (organizations,
+environments, teams) that Feature Flags builds on.
+</Callout>

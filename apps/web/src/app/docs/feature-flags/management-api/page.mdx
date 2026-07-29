@@ -1,0 +1,101 @@
+export const metadata = {
+  title: "Management API",
+  description:
+    "Create and configure flags, environments, variants, rules, segments, and SDK keys programmatically.",
+};
+
+# Management API
+
+Everything you do in the console is an API call. The management API is what the
+console itself drives, so anything you can click, you can script: create flags,
+change targeting, mint SDK keys.
+
+This is separate from [evaluation](/docs/feature-flags/evaluate/rest). Evaluation is authenticated
+by an SDK key and is read-only; management is authenticated by an **access
+token** (or a signed-in session) and can write.
+
+## Authentication
+
+Create an access token in the console, then send it as a bearer token:
+
+```http
+Authorization: Bearer flagon_oat_...
+```
+
+An organization token acts within one organization. All management routes are
+scoped under that organization's slug:
+
+```http
+https://api.flagon.io/v1/orgs/{org}/...
+```
+
+<Callout tone="warning" title="Access tokens are powerful">
+An access token can change flag configuration. Keep it server-side and out of
+source control. SDK keys and access tokens are different credentials: never use
+an access token to evaluate, or an SDK key to manage.
+</Callout>
+
+## Flags
+
+| Method | Path (under `/v1/orgs/{org}`) | Purpose |
+| --- | --- | --- |
+| `POST` | `/flags` | Create a flag (with variants). |
+| `GET` | `/flags` | List flags. |
+| `GET` | `/flags/{key}` | Flag detail, per environment. |
+| `PATCH` | `/flags/{key}` | Edit name, description, tags. |
+| `POST` | `/flags/{key}/archive` · `/restore` | Retire or bring back a flag. |
+| `DELETE` | `/flags/{key}` | Permanently delete (stops evaluation). |
+| `PATCH` | `/flags/{key}/environments/{env}` | Enable/disable; set default and off variants. |
+
+Create a boolean flag:
+
+```bash
+curl -X POST "https://api.flagon.io/v1/orgs/acme/flags" \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"new-checkout","type":"boolean","description":"New checkout flow"}'
+```
+
+Turn it on in Production and serve the `on` variant by default:
+
+```bash
+curl -X PATCH \
+  "https://api.flagon.io/v1/orgs/acme/flags/new-checkout/environments/production" \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true,"defaultVariantKey":"on"}'
+```
+
+## Variants, rules, and segments
+
+| Method | Path (under `/v1/orgs/{org}`) | Purpose |
+| --- | --- | --- |
+| `POST` `PATCH` `DELETE` | `/flags/{key}/variants[/{variant}]` | Manage a multivariate flag's variants. |
+| `GET` `PUT` | `/flags/{key}/environments/{env}/rules` | Read or replace a flag's targeting rules. |
+| `PATCH` `DELETE` `POST` | `.../rules/{id}` · `.../reorder` | Edit, remove, or reorder rules. |
+| `POST` `GET` `PATCH` `DELETE` | `/segments[/{key}]` | Manage reusable [segments](/docs/feature-flags/targeting#segments). |
+
+The `PUT .../rules` endpoint replaces the whole ordered rule set atomically,
+which is the safe way to reconcile targeting from source control: send the
+complete desired state, not a diff.
+
+## SDK keys
+
+| Method | Path (under `/v1/orgs/{org}`) | Purpose |
+| --- | --- | --- |
+| `POST` | `/sdk-keys` | Create a key for an environment (plaintext returned once). |
+| `GET` | `/sdk-keys` | List keys (masked). |
+| `POST` | `/sdk-keys/{id}/revoke` | Revoke a key immediately. |
+
+## Audit trail
+
+Every configuration change appends a **revision**, so a flag's history is always
+complete: who changed what, and when. Read it from the flag detail in the
+console.
+
+<Callout tone="note" title="OpenAPI">
+The API serves a machine-readable OpenAPI 3.1 document at
+[`/openapi.json`](https://api.flagon.io/openapi.json). Coverage of the
+management surface is expanding; the endpoints above are the current source of
+truth.
+</Callout>

@@ -62,7 +62,7 @@ export const auth = betterAuth({
     minPasswordLength: 8,
     // Verification is a nag, not a gate (decision: users get in immediately).
     requireEmailVerification: false,
-    sendResetPassword: async ({ user, url }) => {
+    sendResetPassword: async ({ user, url }: { user: { email: string }; url: string }) => {
       const { subject, html } = resetPasswordTemplate(url);
       await email.send({ to: user.email, subject, html });
     },
@@ -71,7 +71,7 @@ export const auth = betterAuth({
   emailVerification: {
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
-    sendVerificationEmail: async ({ user, url }) => {
+    sendVerificationEmail: async ({ user, url }: { user: { email: string }; url: string }) => {
       const { subject, html } = verifyEmailTemplate(url);
       await email.send({ to: user.email, subject, html });
     },
@@ -204,7 +204,11 @@ export const auth = betterAuth({
         // Seed the GitHub-style multi-email table with the signup address as the
         // verified-or-not primary, so `user_email` is the source of truth from
         // the very first row and `user.email` mirrors the primary.
-        after: async (createdUser) => {
+        after: async (createdUser: {
+          id: string;
+          email: string;
+          emailVerified?: boolean;
+        }) => {
           await db
             .insert(userEmails)
             .values({
@@ -219,7 +223,7 @@ export const auth = betterAuth({
       update: {
         // Keep the primary `user_email` row's verified flag in step when
         // BetterAuth marks the user's email verified.
-        after: async (updatedUser) => {
+        after: async (updatedUser: { email: string; emailVerified?: boolean }) => {
           if (updatedUser.emailVerified) {
             await db
               .update(userEmails)

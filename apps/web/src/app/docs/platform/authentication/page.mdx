@@ -1,0 +1,68 @@
+export const metadata = {
+  title: "Authentication & tokens",
+  description:
+    "How you and your automation authenticate to Flagon: console sessions, access tokens, and product credentials like SDK keys.",
+};
+
+# Authentication & tokens
+
+Flagon has three ways to authenticate, each for a different job. Knowing which is
+which saves a lot of confusion.
+
+| Credential | Who uses it | For |
+| --- | --- | --- |
+| **Session** | You, in a browser | Using the console. |
+| **Access token** | Your scripts and CI | The management [API](/docs/platform/api). |
+| **SDK key** | Your running app | Evaluating feature flags. |
+
+## Sessions
+
+Signing in to the console creates a session. Flagon supports **multiple verified
+emails per user**, so you can sign in with any address you've added and verified;
+your primary address is the one teammates see. Sessions are how the console
+itself talks to the API on your behalf.
+
+## Access tokens
+
+An **access token** authenticates automation against the management API. Send it
+as a bearer token:
+
+```http
+Authorization: Bearer flagon_oat_...
+```
+
+There are two kinds:
+
+- A **personal token** acts as you, across every organization you belong to.
+- An **organization token** is scoped to one organization, ideal for CI or a
+  service that should only touch that org.
+
+Tokens are **shown once**, at creation; Flagon stores only a hash. Create and
+revoke them in the console, under your personal settings or an organization's
+settings. Revocation is immediate.
+
+<Callout tone="warning" title="Keep tokens server-side">
+An access token can change configuration. Keep it out of source control and out
+of browsers, and prefer a narrowly-scoped organization token for automation over
+a personal one.
+</Callout>
+
+## SDK keys
+
+An **SDK key** is a product credential, issued by Feature Flags for **evaluation
+only**. It's scoped to one environment and can read flag configuration but can't
+change anything. It's a different credential from an access token: don't use one
+where the other is expected.
+
+See [SDK keys](/docs/feature-flags/sdk-keys) for the details.
+
+## Which one do I need?
+
+- Building a script or CI job that manages flags? An **access token**.
+- Reading flags from your application at runtime? An **SDK key**.
+- Just clicking around? Your **session**, you're already signed in.
+
+## Next
+
+- **[The Flagon API](/docs/platform/api)**: where access tokens are used.
+- **[SDK keys](/docs/feature-flags/sdk-keys)**: evaluation credentials in depth.

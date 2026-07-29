@@ -56,6 +56,8 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
     if (!db) return;
     await db.delete(schema.sdkKeys).where(eq(schema.sdkKeys.organizationId, orgId));
     await db.delete(schema.flags).where(eq(schema.flags.organizationId, orgId));
+    await db.delete(schema.segments).where(eq(schema.segments.organizationId, orgId));
+    await db.delete(schema.entities).where(eq(schema.entities.organizationId, orgId));
     await db.delete(schema.environments).where(eq(schema.environments.organizationId, orgId));
     await db.delete(authTables.accessTokens).where(eq(authTables.accessTokens.organizationId, orgId));
     await db.delete(authTables.organizations).where(eq(authTables.organizations.id, orgId));
@@ -151,6 +153,51 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
       body: JSON.stringify({ context: {} }),
     });
     expect(noauth.status).toBe(401);
+  });
+
+  it("bulk-evaluates with ETag caching and rejects a malformed body", async () => {
+    const keyRes = await app.request(`${base}/sdk-keys`, {
+      method: "POST",
+      headers: auth(),
+      body: JSON.stringify({ name: "bulk key", environment: "production" }),
+    });
+    const { key } = await keyRes.json();
+    const sdkAuth = {
+      Authorization: `Bearer ${key.token}`,
+      "Content-Type": "application/json",
+    };
+
+    // Bulk eval returns a flags array and an ETag over the config version.
+    const bulk = await app.request(`/ofrep/v1/evaluate/flags`, {
+      method: "POST",
+      headers: sdkAuth,
+      body: JSON.stringify({ context: { targetingKey: "u1" } }),
+    });
+    expect(bulk.status).toBe(200);
+    const etag = bulk.headers.get("etag");
+    expect(etag).toBeTruthy();
+    const body = await bulk.json();
+    expect(Array.isArray(body.flags)).toBe(true);
+    expect(body.flags.find((f: { key: string }) => f.key === "checkout")).toMatchObject({
+      value: true,
+    });
+
+    // Re-request with the ETag → 304 Not Modified, no body.
+    const notModified = await app.request(`/ofrep/v1/evaluate/flags`, {
+      method: "POST",
+      headers: { ...sdkAuth, "If-None-Match": etag as string },
+      body: JSON.stringify({ context: { targetingKey: "u1" } }),
+    });
+    expect(notModified.status).toBe(304);
+
+    // A malformed JSON body is a 400 PARSE_ERROR (not a silently-empty context).
+    const bad = await app.request(`/ofrep/v1/evaluate/flags/checkout`, {
+      method: "POST",
+      headers: sdkAuth,
+      body: "{ not valid json",
+    });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ errorCode: "PARSE_ERROR" });
   });
 
   it("targets a multivariate flag by segment and evaluates via OFREP", async () => {

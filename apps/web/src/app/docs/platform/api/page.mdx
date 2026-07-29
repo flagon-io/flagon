@@ -1,0 +1,79 @@
+export const metadata = {
+  title: "The Flagon API",
+  description:
+    "One organization-scoped REST API under /v1, authenticated with access tokens and documented with OpenAPI.",
+};
+
+# The Flagon API
+
+Everything on Flagon is an API. The console is just a client of it, so anything
+you can do by clicking, you can script. This page covers the API's shape;
+each product documents its own endpoints (for example,
+[Feature Flags management](/docs/feature-flags/management-api)).
+
+## Base URL
+
+```
+https://api.flagon.io
+```
+
+Running Flagon locally, the API is at `http://localhost:3002`.
+
+## Authentication
+
+Most endpoints authenticate with an [access token](/docs/platform/authentication) as a
+bearer token (the console uses your session cookie instead):
+
+```http
+Authorization: Bearer flagon_oat_...
+```
+
+Flag **evaluation** is the exception: it lives under `/ofrep/v1/...`, is
+authenticated by an [SDK key](/docs/feature-flags/sdk-keys), and is read-only. See
+[Evaluate with REST](/docs/feature-flags/evaluate/rest).
+
+## Organization scope
+
+Management endpoints are scoped to an organization by its slug:
+
+```http
+https://api.flagon.io/v1/orgs/{org}/...
+```
+
+The token must be authorized for that organization, an organization token issued
+for it, or a personal token whose owner is a member. Requests are isolated per
+organization at the database level, so a token can never read another
+organization's data.
+
+## Responses and errors
+
+Responses are JSON. Errors use a consistent envelope with an HTTP status and a
+human-readable message, so you can handle them uniformly:
+
+| Status | Meaning |
+| --- | --- |
+| `401` | Missing or invalid credentials. |
+| `403` | Authenticated, but not allowed to act on this organization. |
+| `404` | No such resource. |
+| `422` | The request body failed validation. |
+| `429` | Rate limited; a `Retry-After` header says how long to wait. |
+
+## OpenAPI
+
+The API publishes a machine-readable **OpenAPI 3.1** document you can feed to a
+client generator or an API explorer:
+
+```
+https://api.flagon.io/openapi.json
+```
+
+The root (`GET /`) also returns a small hypermedia index that points to the
+document and the main entry points. Coverage of the document is expanding as
+each product's endpoints are registered.
+
+## Next
+
+- **[Feature Flags management API](/docs/feature-flags/management-api)**: create and
+  configure flags programmatically.
+- **[Authentication & tokens](/docs/platform/authentication)**: mint the tokens these
+  calls need.

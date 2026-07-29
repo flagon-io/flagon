@@ -1,0 +1,141 @@
+export const metadata = {
+  title: "Run Flagon",
+  description:
+    "Self-host Flagon: prerequisites, environment, migrations, and the production notes that keep tenant data isolated.",
+};
+
+# Run Flagon
+
+Flagon is source-available and self-hostable. Self-hosting runs exactly the same
+code as the managed service: three apps plus a Postgres database.
+
+```
+apps/
+  web/   marketing site + docs  (optional to run)
+  app/   the console            → sign in, manage flags
+  api/   the control plane       → OFREP evaluation + /v1 management
+```
+
+The console and API are the two you need; everything talks to Postgres through
+the API.
+
+## Prerequisites
+
+- **Node.js 22** or newer.
+- **PostgreSQL 17.** Managed (Neon, RDS, Cloud SQL) or your own.
+- **Docker** (optional) if you want to run Postgres locally with the bundled
+  compose file.
+
+## 1. Clone and install
+
+```bash
+git clone https://github.com/flagon-io/flagon.git
+cd flagon
+npm install
+```
+
+## 2. Start a database
+
+For local development, the repo ships a Postgres service:
+
+```bash
+npm run compose:up   # postgres on localhost:5432 (user/pass/db: flagon)
+```
+
+In production, point the apps at your managed Postgres instead (see the
+production notes below).
+
+## 3. Configure the environment
+
+Each app reads its own env file. Copy the examples and fill them in:
+
+```bash
+cp apps/api/.env.example apps/api/.env
+cp apps/app/.env.example apps/app/.env.local
+```
+
+The essentials:
+
+| Variable | App | What it is |
+| --- | --- | --- |
+| `DATABASE_URL` | api, app | Postgres connection string. |
+| `BETTER_AUTH_SECRET` | app | A long random secret that signs sessions. Generate one. |
+| `NEXT_PUBLIC_API_URL` | app | Where the API is reachable. |
+| `NEXT_PUBLIC_APP_URL` · `APP_URL` | app · api | The console's public URL (also used for CORS). |
+
+Generate the auth secret with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+<Callout tone="warning" title="Change the auth secret">
+The example ships `BETTER_AUTH_SECRET=dev-secret-change-me`. A production build
+refuses to start with that placeholder. Set a real, random secret, and keep it
+stable, rotating it signs everyone out.
+</Callout>
+
+## 4. Run the migrations
+
+The API and the console each own a migration pipeline. Apply both:
+
+```bash
+npm run db:migrate -w @flagon/api
+npm run db:migrate -w @flagon/app
+```
+
+Migrations are forward-only and safe to run on every deploy; they no-op when
+there is nothing new.
+
+## 5. Start the apps
+
+For local development, run everything at once:
+
+```bash
+npm run dev   # web :3000 · app :3001 · api :3002
+```
+
+For production, build and start each app you need:
+
+```bash
+npm run build
+npm run start -w @flagon/api
+npm run start -w @flagon/app
+```
+
+Open the console, create your organization, and follow the
+[Quickstart](/docs/feature-flags/quickstart).
+
+## Production notes
+
+A few settings matter once real users are involved:
+
+- **Run as the restricted database role.** Flagon isolates every tenant's data
+  with Postgres row-level security, and RLS is only enforced when the API
+  connects as a **non-owner** role. Create a `flagon_app` role with
+  `NOBYPASSRLS`, grant it table access, and set its pooled connection string as
+  `APP_DATABASE_URL`. The API prefers it over `DATABASE_URL` at runtime, so
+  queries run under RLS. Migrations still use the owner connection
+  (`DATABASE_URL_UNPOOLED`).
+
+  <Callout tone="warning" title="This is the one that matters">
+  If the API connects as the database owner or a superuser, RLS is silently
+  bypassed and organizations can see each other's flags. Verify the runtime
+  role before going live.
+  </Callout>
+
+- **Share the session across subdomains.** Serving the console, API, and site on
+  subdomains of one apex? Set `AUTH_COOKIE_DOMAIN=.your-domain` so the session
+  cookie is shared.
+
+- **Wire up email (optional).** Set `RESEND_API_KEY` and `EMAIL_FROM` to send
+  real invites and verification mail. Without a key, emails print to the server
+  log, which is fine for a trial.
+
+- **Turn on error tracking (optional).** Set `SENTRY_DSN` (API) and
+  `NEXT_PUBLIC_SENTRY_DSN` (console). Both are inert until set.
+
+## Next
+
+- **[Quickstart](/docs/feature-flags/quickstart)**: create your first flag.
+- **[SDK keys](/docs/feature-flags/sdk-keys)**: connect an app to your instance.

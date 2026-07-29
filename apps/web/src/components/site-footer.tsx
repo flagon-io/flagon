@@ -34,6 +34,9 @@ export function SiteFooter() {
           ))}
         </nav>
         <div className="order-3 flex items-center justify-center gap-4 sm:justify-end">
+          <Link href="/docs" className="transition-colors hover:text-zinc-200">
+            Docs
+          </Link>
           <a
             href={brand.repo}
             target="_blank"

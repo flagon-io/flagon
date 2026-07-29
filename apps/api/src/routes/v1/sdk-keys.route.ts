@@ -9,6 +9,7 @@ import { jsonError, validationError } from "../../lib/http.js";
 import { resolveOrg } from "../../lib/org-context.js";
 import { ensureEnvironments } from "../../flags/environments.js";
 import { generateSdkKey } from "../../flags/sdk-key.js";
+import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
  * SDK-key management. Mounted under /v1/orgs/:org/sdk-keys.
@@ -30,6 +31,65 @@ const createKey = z.object({
   environment: z.string().min(1),
 });
 
+// --- OpenAPI registration ----------------------------------------------------
+const SDK_KEYS_TAG = "SDK keys";
+const sdkKeyParams = {
+  org: "The organization slug.",
+  id: "The SDK key id.",
+};
+const WRITE_429 = {
+  description: "Too many management writes; retry after the Retry-After delay.",
+};
+
+registerRoute({
+  method: "post",
+  path: "/v1/orgs/{org}/sdk-keys",
+  summary: "Mint an SDK key",
+  description:
+    "Create an SDK key for one environment. The plaintext token is returned once at creation and never again.",
+  tags: [SDK_KEYS_TAG],
+  auth: true,
+  paramDescriptions: sdkKeyParams,
+  request: { body: createKey },
+  responses: {
+    201: {
+      description: "The SDK key, including its plaintext token (returned once).",
+      schemaName: "SdkKeyCreatedResponse",
+    },
+    404: { description: "No environment with that key." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/sdk-keys",
+  summary: "List SDK keys",
+  description: "List the organization's SDK keys as masked metadata. The secret is never returned.",
+  tags: [SDK_KEYS_TAG],
+  auth: true,
+  paramDescriptions: sdkKeyParams,
+  responses: {
+    200: { description: "The organization's SDK keys (masked).", schemaName: "SdkKeyListResponse" },
+  },
+});
+
+registerRoute({
+  method: "post",
+  path: "/v1/orgs/{org}/sdk-keys/{id}/revoke",
+  summary: "Revoke an SDK key",
+  description: "Revoke an SDK key so it can no longer be used to evaluate flags.",
+  tags: [SDK_KEYS_TAG],
+  auth: true,
+  paramDescriptions: sdkKeyParams,
+  responses: {
+    200: { description: "The SDK key was revoked.", schemaName: "DeleteAck" },
+    404: { description: "No SDK key with that id." },
+    429: WRITE_429,
+  },
+});
+
 function serializeKey(
   k: typeof sdkKeys.$inferSelect,
   environmentKey: string | null,
@@ -46,6 +106,33 @@ function serializeKey(
     createdAt: k.createdAt.toISOString(),
   };
 }
+
+// --- Response component schemas ----------------------------------------------
+// The masked metadata shape (serializeKey). The plaintext token is NOT part of
+// this; it is added only to the create response, returned once.
+const sdkKeySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  environmentKey: z.string().nullable(),
+  prefix: z.string(),
+  lastFour: z.string(),
+  masked: z.string(),
+  lastUsedAt: z.string().nullable().describe("ISO 8601 timestamp"),
+  revokedAt: z.string().nullable().describe("ISO 8601 timestamp"),
+  createdAt: z.string().describe("ISO 8601 timestamp"),
+});
+registerComponentSchema("SdkKey", sdkKeySchema);
+registerComponentSchema(
+  "SdkKeyCreatedResponse",
+  z.object({
+    key: sdkKeySchema.extend({
+      token: z
+        .string()
+        .describe("The plaintext SDK key, returned only once at creation."),
+    }),
+  }),
+);
+registerComponentSchema("SdkKeyListResponse", z.object({ keys: z.array(sdkKeySchema) }));
 
 // --- Create ------------------------------------------------------------------
 sdkKeys_.post("/", async (c) => {

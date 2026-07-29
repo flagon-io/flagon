@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { env } from "../env.js";
 import { withOrg } from "../db/tenant.js";
 import { createTtlCache } from "../lib/ttl-cache.js";
@@ -33,6 +34,53 @@ export function getEvaluationData(
   environmentId: string,
 ): Promise<EvaluationData> {
   return cache.get(`${organizationId}:${environmentId}`);
+}
+
+// An ETag per cached config, memoized by the data instance: a warm cache returns
+// the same object, so we hash the config once; an invalidation/reload yields a
+// new instance and a fresh ETag. Config is sorted before hashing so identical
+// config produces an identical ETag even across separate loads.
+const etags = new WeakMap<EvaluationData, string>();
+
+function computeEtag(data: EvaluationData): string {
+  const flags = [...data.flags]
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map((f) => ({
+      key: f.key,
+      enabled: f.enabled,
+      defaultVariantKey: f.defaultVariantKey,
+      defaultServe: f.defaultServe,
+      offVariantKey: f.offVariantKey,
+      variants: f.variants.map((v) => ({ key: v.key, value: v.value })),
+      rules: f.rules.map((r) => ({ conditions: r.conditions, serve: r.serve })),
+    }));
+  const segments = [...data.segments.values()].sort((a, b) =>
+    a.key.localeCompare(b.key),
+  );
+  const hash = createHash("sha1")
+    .update(JSON.stringify({ flags, segments }))
+    .digest("base64url")
+    .slice(0, 27);
+  return `"${hash}"`;
+}
+
+/**
+ * Flag config for one environment, plus a strong ETag over that config. The
+ * OFREP bulk endpoint returns the ETag and honors If-None-Match: because a
+ * client polls with a static context, an unchanged config means unchanged
+ * results, so a matching ETag is a safe 304.
+ */
+export async function getEvaluationDataWithEtag(
+  organizationId: string,
+  environmentId: string,
+): Promise<{ data: EvaluationData; etag: string }> {
+  const data = await getEvaluationData(organizationId, environmentId);
+  let etag = etags.get(data);
+  if (!etag) {
+    etag = computeEtag(data);
+    etags.set(data, etag);
+  }
+  return { data, etag };
 }
 
 /**

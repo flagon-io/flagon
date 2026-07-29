@@ -1,9 +1,10 @@
 name: CI
 
-# Gate every push to main and every PR on the checks that need no infrastructure:
-# type-checking (the API's `lint` is `tsc --noEmit`), ESLint, and the Vitest unit
-# suite. The full production build stays with Vercel, which already runs it on
-# deploy and owns the environment/secrets a Next build needs.
+# Gate every push to main and every PR on: type-checking (the API's `lint` is
+# `tsc --noEmit`), ESLint, and the Vitest suite — including the integration and
+# tenancy tests, which run against a real Postgres AS A RESTRICTED, RLS-ENFORCING
+# role, so row-level security is actually exercised (a superuser would silently
+# bypass it). The full production build stays with Vercel, which runs it on deploy.
 on:
   push:
     branches: [main]
@@ -60,5 +61,25 @@ jobs:
           npm run db:migrate -w @flagon/api
           npm run db:migrate -w @flagon/app
 
-      - name: Test
-        run: npm test
+      # A restricted, RLS-ENFORCING role (NOBYPASSRLS), created after migrations
+      # so the tables exist to grant on. The suite runs AS this role below, so the
+      # integration + tenancy tests actually exercise row-level security instead
+      # of bypassing it. Mirrors production, where the API connects via
+      # APP_DATABASE_URL as exactly such a role.
+      - name: Create restricted app role
+        env:
+          PGPASSWORD: flagon
+        run: |
+          psql -h localhost -U flagon -d flagon -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE flagon_app LOGIN PASSWORD 'flagon_app' NOSUPERUSER NOBYPASSRLS" \
+            -c "GRANT USAGE ON SCHEMA public TO flagon_app" \
+            -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO flagon_app" \
+            -c "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO flagon_app"
+
+      # APP_DATABASE_URL (the restricted role) takes precedence in the DB client,
+      # so every DB-backed test runs under RLS. --no-file-parallelism keeps the
+      # DB-heavy suites off each other's toes.
+      - name: Test (as the RLS-enforcing role)
+        env:
+          APP_DATABASE_URL: postgres://flagon_app:flagon_app@localhost:5432/flagon
+        run: npm test -- --no-file-parallelism

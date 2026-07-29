@@ -209,6 +209,11 @@ export const flagEnvironments = pgTable(
     offVariantId: uuid("off_variant_id").references(() => flagVariants.id, {
       onDelete: "set null",
     }),
+    // The default "serve" when enabled and no targeting rule matches. When null,
+    // the flag serves `defaultVariantId` (a single variant). When set, it holds a
+    // Serve — either { variant } or a { rollout } — so the default can itself be a
+    // percentage rollout ("serve X% to everyone"). Variant references are keys.
+    defaultServe: jsonb("default_serve"),
     ...timestamps,
   },
   (t) => [

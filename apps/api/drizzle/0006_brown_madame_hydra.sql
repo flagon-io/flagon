@@ -1,0 +1,1 @@
+ALTER TABLE "flag_environments" ADD COLUMN "default_serve" jsonb;

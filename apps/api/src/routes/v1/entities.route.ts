@@ -7,6 +7,7 @@ import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
 import { resolveOrg } from "../../lib/org-context.js";
 import type { JsonValue } from "../../flags/types.js";
+import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
  * Entities — the targeting-context schema: the kinds of subject flags evaluate
@@ -44,6 +45,79 @@ const updateEntity = z
   })
   .strict();
 
+// --- OpenAPI registration ----------------------------------------------------
+const ENTITIES_TAG = "Entities";
+const entityParams = {
+  org: "The organization slug.",
+  key: "The entity key.",
+};
+const WRITE_429 = {
+  description: "Too many management writes; retry after the Retry-After delay.",
+};
+
+registerRoute({
+  method: "post",
+  path: "/v1/orgs/{org}/entities",
+  summary: "Create an entity",
+  description:
+    "Define a targeting entity (e.g. user, team) and its typed attributes that rules and segments reference.",
+  tags: [ENTITIES_TAG],
+  auth: true,
+  paramDescriptions: entityParams,
+  request: { body: createEntity },
+  responses: {
+    201: { description: "The entity was created.", schemaName: "EntityResponse" },
+    409: { description: "An entity with that key already exists." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/entities",
+  summary: "List entities",
+  description: "List every entity in the organization with its attributes.",
+  tags: [ENTITIES_TAG],
+  auth: true,
+  paramDescriptions: entityParams,
+  responses: {
+    200: { description: "The organization's entities.", schemaName: "EntityListResponse" },
+  },
+});
+
+registerRoute({
+  method: "patch",
+  path: "/v1/orgs/{org}/entities/{key}",
+  summary: "Update an entity",
+  description: "Edit an entity's label or replace its attribute set.",
+  tags: [ENTITIES_TAG],
+  auth: true,
+  paramDescriptions: entityParams,
+  request: { body: updateEntity },
+  responses: {
+    200: { description: "The updated entity.", schemaName: "EntityResponse" },
+    404: { description: "No entity with that key." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "delete",
+  path: "/v1/orgs/{org}/entities/{key}",
+  summary: "Delete an entity",
+  description: "Permanently delete an entity and its attributes.",
+  tags: [ENTITIES_TAG],
+  auth: true,
+  paramDescriptions: entityParams,
+  responses: {
+    200: { description: "The entity was deleted.", schemaName: "DeleteAck" },
+    404: { description: "No entity with that key." },
+    429: WRITE_429,
+  },
+});
+
 type EntityRow = typeof entities.$inferSelect;
 type AttrRow = typeof entityAttributes.$inferSelect;
 
@@ -58,6 +132,24 @@ function serialize(entity: EntityRow, attrs: AttrRow[]) {
     createdAt: entity.createdAt.toISOString(),
   };
 }
+
+// --- Response component schemas ----------------------------------------------
+const entitySchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  label: z.string(),
+  attributes: z.array(
+    z.object({
+      key: z.string(),
+      dataType: z.string(),
+      labels: z.array(z.string()).nullable(),
+    }),
+  ),
+  createdAt: z.string().describe("ISO 8601 timestamp"),
+});
+registerComponentSchema("Entity", entitySchema);
+registerComponentSchema("EntityResponse", z.object({ entity: entitySchema }));
+registerComponentSchema("EntityListResponse", z.object({ entities: z.array(entitySchema) }));
 
 async function writeAttributes(
   tx: Parameters<Parameters<typeof withOrg>[1]>[0],

@@ -3,7 +3,12 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { getMembershipBySlug } from "@/lib/org";
-import { getSegment, listSegments } from "@/lib/flags-api";
+import {
+  entityAttributeNames,
+  getSegment,
+  listEntities,
+  listSegments,
+} from "@/lib/flags-api";
 import { SegmentRules } from "./segment-rules";
 
 /**
@@ -22,13 +27,15 @@ export default async function SegmentDetail({
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
 
-  const [segment, allSegments] = await Promise.all([
+  const [segment, allSegments, entities] = await Promise.all([
     getSegment(slug, key),
     listSegments(slug),
+    listEntities(slug),
   ]);
   if (!segment) notFound();
   // Segments can reference other segments (the engine guards against cycles).
   const otherSegments = allSegments.filter((s) => s.key !== key);
+  const attributeSuggestions = entityAttributeNames(entities);
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,7 +58,12 @@ export default async function SegmentDetail({
           <p className="mb-3 mt-0.5 text-sm text-zinc-500">
             Define the criteria that determine which users belong to this segment.
           </p>
-          <SegmentRules slug={slug} segment={segment} segments={otherSegments} />
+          <SegmentRules
+            slug={slug}
+            segment={segment}
+            segments={otherSegments}
+            attributeSuggestions={attributeSuggestions}
+          />
         </section>
 
         <aside className="flex flex-col gap-5 lg:border-l lg:border-white/8 lg:pl-6">

@@ -1,0 +1,65 @@
+export const metadata = {
+  title: "Organizations & teams",
+  description:
+    "Organizations are your workspace on Flagon: members, roles, invitations, and how access is scoped.",
+};
+
+# Organizations & teams
+
+An **organization** is your workspace on Flagon. It owns your projects and
+resources, it's the boundary for billing, and it's the team of people who can
+work in it. Every resource on the platform belongs to exactly one organization,
+and access is always scoped to it.
+
+You can belong to more than one organization, and switch between them from the
+console.
+
+## Members and roles
+
+People you add to an organization become **members**, each with a role that
+decides what they can do.
+
+| Role | Can do |
+| --- | --- |
+| **Owner** | Everything, including transferring ownership and deleting the organization. Exactly one per organization. |
+| **Admin** | Manage members, tokens, and all product configuration. |
+| **Member** | Work within the products (create and configure flags, and so on). |
+
+### One owner
+
+Every organization has exactly **one owner**. Ownership isn't a role you assign
+or invite someone into: it moves by **transfer**. The current owner hands
+ownership to another member, and in the same step steps down to admin. That keeps
+accountability unambiguous, there's always exactly one person who ultimately
+controls the organization.
+
+When you invite people, the roles you can give them are **admin** and **member**.
+
+## Invitations
+
+Add teammates by sending an **invitation** to their email from the organization's
+members settings. They accept, sign in, and become a member with the role you
+chose. Because [pricing is usage-based](/docs/platform#principles), there's no
+per-seat cost, invite the whole team.
+
+## Projects
+
+<Callout tone="note" title="Coming soon">
+[Projects](/docs/platform/projects) are not available yet. Today flags are
+organization-global. When projects land they will organize the work for a system
+or team, so a large organization stays navigable instead of being one flat list
+of resources.
+</Callout>
+
+## Signing in
+
+Flagon supports multiple verified email addresses per user, so you can sign in
+with any address you've added and verified, handy when your work and personal
+accounts blur. Your primary address is the one shown to teammates.
+
+## Next
+
+- **[Environments](/docs/platform/environments)**: the stages your work moves
+  through.
+- **[Authentication & tokens](/docs/platform/authentication)**: how people and
+  automation authenticate.

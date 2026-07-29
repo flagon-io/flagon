@@ -28,11 +28,14 @@ export function SegmentRules({
   slug,
   segment,
   segments,
+  attributeSuggestions,
 }: {
   slug: string;
   segment: Segment;
   /** Other segments this one can reference (excludes itself). */
   segments: Segment[];
+  /** Attribute names to autocomplete, from the org's Entities. */
+  attributeSuggestions?: string[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -100,6 +103,7 @@ export function SegmentRules({
         segments={segments}
         joiner={combinator === "any" ? "Or" : "And"}
         leadWord=""
+        attributeSuggestions={attributeSuggestions}
       />
 
       {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}

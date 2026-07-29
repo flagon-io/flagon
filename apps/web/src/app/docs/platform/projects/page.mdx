@@ -1,0 +1,44 @@
+export const metadata = {
+  title: "Projects",
+  description:
+    "Projects group the work for one system or team inside an organization, so a large workspace stays navigable.",
+};
+
+# Projects
+
+<Callout tone="note" title="Coming soon">
+Projects are not available yet. Today flags are organization-global: every flag,
+key, and resource lives directly under your [organization](/docs/platform/organizations).
+This page describes where projects are headed so you can plan for them.
+</Callout>
+
+A **project** will group the work for one system or team inside an
+[organization](/docs/platform/organizations). It's how a large workspace stays
+navigable instead of being one flat list of every flag, key, and resource.
+
+Think of a project as the home for everything that belongs to a single app or
+service: its feature flags first, then the other products attached to it as the
+platform grows. Projects are also the unit the [Catalog](/docs/catalog) will
+organize services around.
+
+## Working in projects
+
+Once projects land:
+
+- Each organization will be able to have as many projects as you need.
+- Resources will belong to a project, so switching projects scopes what you see
+  to that system's work.
+- Projects live under the organization, so [members and roles](/docs/platform/organizations)
+  carry across them: you won't re-invite your team per project.
+
+<Callout tone="note" title="Environments are shared">
+Projects organize *what* you're working on; [environments](/docs/platform/environments)
+(Production, Preview, Development) are the *stages* each project moves through.
+The two compose: a project's flags are configured per environment.
+</Callout>
+
+## Next
+
+- **[Organizations & teams](/docs/platform/organizations)**: the workspace a
+  project lives in.
+- **[Environments](/docs/platform/environments)**: the stages within it.

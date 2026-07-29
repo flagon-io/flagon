@@ -15,6 +15,7 @@ function boolFlag(enabled: boolean, rules: RuleConfig[] = []): FlagConfig {
     ],
     enabled,
     defaultVariantKey: "on",
+    defaultServe: null,
     offVariantKey: "off",
     rules,
   };
@@ -112,6 +113,63 @@ describe("evaluate — rollout (SPLIT)", () => {
   });
 });
 
+describe("evaluate — default rollout (SPLIT with no rule)", () => {
+  function defaultRolloutFlag(): FlagConfig {
+    const flag = boolFlag(true);
+    flag.defaultServe = {
+      rollout: [
+        { variant: "on", weight: 25 },
+        { variant: "off", weight: 75 },
+      ],
+    };
+    return flag;
+  }
+
+  it("splits everyone by default with reason SPLIT (no rules)", () => {
+    const r = evaluate(defaultRolloutFlag(), { targetingKey: "user-123" }, noSegments);
+    expect(r.reason).toBe("SPLIT");
+    expect(["on", "off"]).toContain(r.variant);
+  });
+
+  it("honors default rollout weights (~25/75)", () => {
+    const flag = defaultRolloutFlag();
+    let on = 0;
+    const n = 5000;
+    for (let i = 0; i < n; i++) {
+      if (evaluate(flag, { targetingKey: `u-${i}` }, noSegments).variant === "on") on++;
+    }
+    expect(on / n).toBeGreaterThan(0.19);
+    expect(on / n).toBeLessThan(0.31);
+  });
+
+  it("falls back to the default variant when the default rollout is degenerate", () => {
+    const flag = boolFlag(true);
+    flag.defaultServe = { rollout: [{ variant: "on", weight: 0 }, { variant: "off", weight: 0 }] };
+    const r = evaluate(flag, { targetingKey: "u" }, noSegments);
+    expect(r).toMatchObject({ variant: "on", reason: "STATIC" });
+  });
+});
+
+describe("evaluate — rollout bucketBy", () => {
+  it("buckets on a custom attribute so users in the same account stick together", () => {
+    const flag = boolFlag(true, [
+      {
+        priority: 0,
+        conditions: [],
+        serve: {
+          rollout: [{ variant: "on", weight: 50 }, { variant: "off", weight: 50 }],
+          bucketBy: "accountId",
+        },
+      },
+    ]);
+    // Same accountId → same variant regardless of targetingKey.
+    const a = evaluate(flag, { targetingKey: "user-1", accountId: "acct-9" }, noSegments);
+    const b = evaluate(flag, { targetingKey: "user-2", accountId: "acct-9" }, noSegments);
+    expect(a.variant).toBe(b.variant);
+    expect(a.reason).toBe("SPLIT");
+  });
+});
+
 describe("evaluate — multivariate", () => {
   const color: FlagConfig = {
     id: "flag-color",
@@ -124,6 +182,7 @@ describe("evaluate — multivariate", () => {
     ],
     enabled: true,
     defaultVariantKey: "red",
+    defaultServe: null,
     offVariantKey: "red",
     rules: [
       { priority: 0, conditions: [{ attribute: "team", op: "eq", values: ["design"] }], serve: { variant: "blue" } },

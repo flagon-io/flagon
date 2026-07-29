@@ -53,6 +53,11 @@ export function AccountMenu({ user }: { user: UserInfo }) {
           <Link href="/settings">Your settings</Link>
         </MenuItem>
         <MenuItem asChild>
+          <a href={`${WEB_URL}/docs`} target="_blank" rel="noreferrer">
+            Documentation ↗
+          </a>
+        </MenuItem>
+        <MenuItem asChild>
           <a href={WEB_URL}>{brand.domain} ↗</a>
         </MenuItem>
         <MenuSeparator />

@@ -1,0 +1,173 @@
+export const metadata = {
+  title: "Evaluate with OpenFeature",
+  description:
+    "Wire Flagon into your app with the OpenFeature SDK and the OFREP provider, in Node.js, Go, Python, PHP, or over REST.",
+};
+
+# Evaluate with OpenFeature
+
+[OpenFeature](https://openfeature.dev) is a vendor-neutral standard for feature
+flags. Flagon implements its remote evaluation protocol (OFREP), so you use the
+standard OpenFeature SDK for your language plus the **OFREP provider**, pointed
+at Flagon by URL. There's no Flagon-specific client to adopt.
+
+Pick your language once (top right, or the tabs on any sample) and every example
+on the page follows it.
+
+## 1. Install
+
+Add the OpenFeature SDK and the OFREP provider for your language.
+
+<CodeGroup examples={{
+  python: { code: `pip install openfeature-sdk openfeature-provider-ofrep` },
+  typescript: { code: `npm install @openfeature/server-sdk @openfeature/ofrep-provider` },
+  go: { code: `go get github.com/open-feature/go-sdk github.com/open-feature/go-sdk-contrib/providers/ofrep` },
+  php: { code: `# PHP has no first-party OFREP provider yet. Use any HTTP client.
+composer require guzzlehttp/guzzle` },
+}} />
+
+## 2. Register the provider and evaluate
+
+Configure the provider once, at startup: the `baseUrl` is the Flagon API host
+(the provider appends the OFREP path itself), authenticated with your
+[SDK key](/docs/feature-flags/sdk-keys) as a bearer token. Then evaluate with a
+default value and an [evaluation context](/docs/feature-flags/targeting#evaluation-context).
+
+<CodeGroup examples={{
+  python: { code: `import os
+from openfeature import api
+from openfeature.contrib.provider.ofrep import OFREPProvider
+from openfeature.evaluation_context import EvaluationContext
+
+api.set_provider(OFREPProvider(
+    base_url="https://api.flagon.io",
+    headers_factory=lambda: {"Authorization": f"Bearer {os.environ['FLAGON_SDK_KEY']}"},
+))
+
+client = api.get_client()
+
+show_checkout = client.get_boolean_value(
+    "new-checkout",
+    False,  # default if evaluation can't complete
+    EvaluationContext(targeting_key="user-123", attributes={"plan": "pro"}),
+)` },
+  typescript: { code: `import { OpenFeature } from "@openfeature/server-sdk";
+import { OFREPProvider } from "@openfeature/ofrep-provider";
+
+await OpenFeature.setProviderAndWait(
+  new OFREPProvider({
+    baseUrl: "https://api.flagon.io",
+    headers: [["Authorization", "Bearer " + process.env.FLAGON_SDK_KEY]],
+  }),
+);
+
+const client = OpenFeature.getClient();
+
+const showCheckout = await client.getBooleanValue("new-checkout", false, {
+  targetingKey: "user-123",
+  plan: "pro",
+});` },
+  go: { code: `import (
+    "context"
+    "os"
+
+    "github.com/open-feature/go-sdk-contrib/providers/ofrep"
+    "github.com/open-feature/go-sdk/openfeature"
+)
+
+provider := ofrep.NewProvider(
+    "https://api.flagon.io",
+    ofrep.WithBearerToken(os.Getenv("FLAGON_SDK_KEY")),
+)
+openfeature.SetProvider(provider)
+
+client := openfeature.NewClient("app")
+
+showCheckout, _ := client.BooleanValue(
+    context.Background(),
+    "new-checkout",
+    false, // default if evaluation can't complete
+    openfeature.NewEvaluationContext("user-123", map[string]interface{}{"plan": "pro"}),
+)` },
+  php: { code: `<?php
+// No first-party OFREP provider for PHP yet. Call the protocol directly.
+$client = new GuzzleHttp\\Client();
+
+$res = $client->post("https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout", [
+    "headers" => ["Authorization" => "Bearer " . getenv("FLAGON_SDK_KEY")],
+    "json" => ["context" => ["targetingKey" => "user-123", "plan" => "pro"]],
+]);
+
+$flag = json_decode((string) $res->getBody(), true);
+$showCheckout = $flag["value"] ?? false; // default if evaluation can't complete` },
+  curl: { code: `curl -X POST "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout" \\
+  -H "Authorization: Bearer $FLAGON_SDK_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"context":{"targetingKey":"user-123","plan":"pro"}}'` },
+}} />
+
+The default value (the second argument) is what your code uses if evaluation
+can't complete, so a network blip never throws in your request path. Flags of
+other types have matching methods: string, number, and object.
+
+<Callout tone="tip" title="Set context once">
+Most SDKs let you set a global evaluation context (the signed-in user) once, so
+you don't pass it on every call. See your language's OpenFeature guide.
+</Callout>
+
+## Get the reason and variant
+
+When you need to know *why* a value came back (for logging or debugging), ask for
+the full evaluation details instead of just the value. Every result carries a
+[`reason`](/docs/feature-flags/flags#reasons) (`STATIC`, `TARGETING_MATCH`,
+`SPLIT`, `DISABLED`) and, when applicable, the served `variant`.
+
+<CodeGroup examples={{
+  python: { code: `details = client.get_boolean_details("new-checkout", False, context)
+print(details.value)    # True
+print(details.reason)   # "TARGETING_MATCH"
+print(details.variant)  # "on"` },
+  typescript: { code: `const details = await client.getBooleanDetails("new-checkout", false, context);
+console.log(details.value);   // true
+console.log(details.reason);  // "TARGETING_MATCH"
+console.log(details.variant); // "on"` },
+  go: { code: `details, _ := client.BooleanValueDetails(
+    context.Background(), "new-checkout", false,
+    openfeature.NewEvaluationContext("user-123", nil),
+)
+fmt.Println(details.Value)   // true
+fmt.Println(details.Reason)  // "TARGETING_MATCH"
+fmt.Println(details.Variant) // "on"` },
+  php: { code: `// $flag is the decoded OFREP response from the evaluate call above.
+echo $flag["value"];   // true
+echo $flag["reason"];  // "TARGETING_MATCH"
+echo $flag["variant"]; // "on"` },
+}} />
+
+## Browser and mobile
+
+For a web front end, use the OpenFeature **Web** SDK with the OFREP web provider
+(`@openfeature/web-sdk` + `@openfeature/ofrep-web-provider`).
+
+<Callout tone="warning" title="Don't ship a Production key to the browser">
+Anything in a browser bundle is public. A Production SDK key in front-end code
+lets anyone read your full flag configuration. For untrusted clients, evaluate on
+your own server and send only the resulting values to the browser, or use a key
+scoped to a low-risk environment.
+</Callout>
+
+## Other languages
+
+OpenFeature also has SDKs for .NET, Ruby, Rust, and more. Where a first-party
+OFREP provider exists, the shape is the same: construct it with Flagon's base URL
+and an `Authorization: Bearer` header, register it, then evaluate. Where one
+doesn't exist yet (as with PHP above), call the protocol directly over REST. See
+the [OpenFeature SDK list](https://openfeature.dev/docs/reference/technologies/)
+and the [REST reference](/docs/feature-flags/evaluate/rest).
+
+## Next
+
+- **[REST (OFREP)](/docs/feature-flags/evaluate/rest)**: the exact endpoints,
+  request, and errors.
+- **[Targeting and segments](/docs/feature-flags/targeting)**: what to put in
+  the context.

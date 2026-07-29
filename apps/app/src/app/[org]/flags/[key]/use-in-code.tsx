@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Check, Code2, Copy } from "lucide-react";
 import { Button, Modal, ModalBody, ModalFooter, ModalHeader } from "@flagon/design";
+import { WEB_URL } from "@/lib/urls";
 
 export function UseInCodeButton({ slug, flagKey }: { slug: string; flagKey: string }) {
   const [open, setOpen] = useState(false);
@@ -52,6 +53,14 @@ export function UseInCodeButton({ slug, flagKey }: { slug: string; flagKey: stri
             </div>
           </ModalBody>
           <ModalFooter>
+            <a
+              href={`${WEB_URL}/docs/feature-flags/evaluate/openfeature`}
+              target="_blank"
+              rel="noreferrer"
+              className="mr-auto self-center text-sm text-teal-400 hover:underline"
+            >
+              Integration guide ↗
+            </a>
             <Button variant="primary" onClick={() => setOpen(false)}>
               Done
             </Button>

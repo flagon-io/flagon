@@ -15,6 +15,7 @@ import { resolveOrg } from "../../lib/org-context.js";
 import { recordRevision } from "../../flags/revisions.js";
 import { variantKeysInServe, type ServeInput } from "../../flags/schemas.js";
 import type { JsonValue } from "../../flags/types.js";
+import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
  * Variant editing for multivariate flags. Mounted (via flags.route) at
@@ -37,6 +38,74 @@ const updateVariant = z
   .object({ value: z.unknown().optional(), label: z.string().max(120).nullish() })
   .strict();
 
+// --- OpenAPI registration ----------------------------------------------------
+const VARIANTS_TAG = "Variants";
+const variantParams = {
+  org: "The organization slug.",
+  key: "The flag key.",
+  variantKey: "The variant key (e.g. variant-1).",
+};
+const WRITE_429 = {
+  description: "Too many management writes; retry after the Retry-After delay.",
+};
+
+registerRoute({
+  method: "post",
+  path: "/v1/orgs/{org}/flags/{key}/variants",
+  summary: "Create a variant",
+  description:
+    "Add a variant to a multivariate flag. Boolean flags have fixed on/off variants and reject this.",
+  tags: [VARIANTS_TAG],
+  auth: true,
+  paramDescriptions: variantParams,
+  request: { body: addVariant },
+  responses: {
+    201: { description: "The variant was created.", schemaName: "VariantResponse" },
+    404: { description: "No flag with that key." },
+    409: { description: "The flag is archived; restore it before editing." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "patch",
+  path: "/v1/orgs/{org}/flags/{key}/variants/{variantKey}",
+  summary: "Update a variant",
+  description: "Edit a variant's value or label.",
+  tags: [VARIANTS_TAG],
+  auth: true,
+  paramDescriptions: variantParams,
+  request: { body: updateVariant },
+  responses: {
+    200: { description: "The updated variant.", schemaName: "VariantResponse" },
+    404: { description: "No such flag or variant." },
+    409: { description: "The flag is archived; restore it before editing." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "delete",
+  path: "/v1/orgs/{org}/flags/{key}/variants/{variantKey}",
+  summary: "Delete a variant",
+  description:
+    "Remove a variant. Rejected while a default, off value, or targeting rule still references it.",
+  tags: [VARIANTS_TAG],
+  auth: true,
+  paramDescriptions: variantParams,
+  responses: {
+    200: { description: "The variant was deleted.", schemaName: "DeleteAck" },
+    404: { description: "No such flag or variant." },
+    409: {
+      description:
+        "The flag is archived, or the variant is still referenced by a default, off value, or targeting rule.",
+    },
+    429: WRITE_429,
+  },
+});
+
 function valueTypeError(type: string, value: unknown): string | null {
   if (type === "boolean") return "Boolean flags have fixed on/off variants.";
   if (type === "string" && typeof value !== "string") return "Value must be a string.";
@@ -53,6 +122,17 @@ async function loadFlag(tx: TenantTx, key: string) {
 function serialize(v: typeof flagVariants.$inferSelect) {
   return { id: v.id, key: v.key, value: v.value, label: v.label, sortOrder: v.sortOrder };
 }
+
+// --- Response component schemas ----------------------------------------------
+const variantSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  value: z.unknown(),
+  label: z.string().nullable(),
+  sortOrder: z.number(),
+});
+registerComponentSchema("Variant", variantSchema);
+registerComponentSchema("VariantResponse", z.object({ variant: variantSchema }));
 
 // --- Add ---------------------------------------------------------------------
 variants_.post("/", async (c) => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Plus, X } from "lucide-react";
 import { Input, Select } from "@flagon/design";
 import type { Predicate, Segment } from "@/lib/flags-api";
@@ -230,6 +231,7 @@ export function ConditionRows({
   segments,
   joiner,
   leadWord = "If",
+  attributeSuggestions,
 }: {
   conds: CondDraft[];
   setConds: (updater: (prev: CondDraft[]) => CondDraft[]) => void;
@@ -238,7 +240,15 @@ export function ConditionRows({
   joiner: string;
   /** The word shown before the first row ("If" for flag rules; "" for segments). */
   leadWord?: string;
+  /**
+   * Attribute names to suggest in the custom-attribute input, sourced from the
+   * org's Entities. Autocomplete only: the field stays free text, so a client
+   * can still target any attribute it sends.
+   */
+  attributeSuggestions?: string[];
 }) {
+  const attrListId = useId();
+  const hasSuggestions = Boolean(attributeSuggestions && attributeSuggestions.length);
   const setCond = (i: number, patch: Partial<CondDraft>) =>
     setConds((prev) => prev.map((c, j) => (j === i ? { ...c, ...patch } : c)));
 
@@ -255,6 +265,13 @@ export function ConditionRows({
 
   return (
     <div className="flex flex-col gap-2">
+      {hasSuggestions ? (
+        <datalist id={attrListId}>
+          {attributeSuggestions!.map((a) => (
+            <option key={a} value={a} />
+          ))}
+        </datalist>
+      ) : null}
       {conds.map((c, i) => {
         const crit = criterionById(c.criterion);
         const isSegment = crit.kind === "segment";
@@ -277,6 +294,7 @@ export function ConditionRows({
                 onChange={(e) => setCond(i, { attribute: e.target.value })}
                 placeholder="attribute"
                 aria-label="Attribute"
+                list={hasSuggestions ? attrListId : undefined}
                 className="min-w-0 flex-1 font-mono"
               />
             ) : null}

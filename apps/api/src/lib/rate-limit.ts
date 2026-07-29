@@ -77,6 +77,80 @@ function allow(limit: number): RateLimitResult {
   return { ok: true, limit, remaining: limit, retryAfterSeconds: 0 };
 }
 
+export type ReserveResult = {
+  /** How many of the requested `amount` fell within the limit (0 = blocked). */
+  granted: number;
+  limit: number;
+  /** When the current window ends, in epoch milliseconds. */
+  resetAtMs: number;
+  retryAfterSeconds: number;
+};
+
+/**
+ * Atomically claim up to `amount` requests against a windowed limit in ONE
+ * round-trip, returning how many were within the limit. This is the durable
+ * primitive behind the eval hot-path limiter: a caller reserves a small batch,
+ * spends it locally, and only comes back when the batch is exhausted, so a
+ * high-QPS key costs ~one database write per `amount` evaluations instead of one
+ * per evaluation, while the count still holds across every serverless instance.
+ *
+ * Fixed window, atomic (concurrent reservers can't race the counter), and FAILS
+ * OPEN: on any database error it grants the whole batch, so a hiccup slows the
+ * limiter, never the endpoint it protects.
+ */
+export async function reserveRateLimit(opts: {
+  key: string;
+  amount: number;
+  limit: number;
+  windowSeconds: number;
+}): Promise<ReserveResult> {
+  const { key, limit } = opts;
+  const amount = Math.max(1, Math.floor(opts.amount));
+  const windowSeconds = Math.max(1, Math.floor(opts.windowSeconds));
+  const expired = sql.raw(
+    `rate_limits.window_start < now() - interval '${windowSeconds} seconds'`,
+  );
+
+  try {
+    const rows = (await db.execute(sql`
+      INSERT INTO rate_limits (key, count, window_start)
+      VALUES (${key}, ${amount}, now())
+      ON CONFLICT (key) DO UPDATE SET
+        count = CASE WHEN ${expired} THEN ${amount} ELSE rate_limits.count + ${amount} END,
+        window_start = CASE WHEN ${expired} THEN now() ELSE rate_limits.window_start END
+      RETURNING count, extract(epoch from window_start) AS window_epoch
+    `)) as unknown as Array<{
+      count: number | string;
+      window_epoch: number | string;
+    }>;
+
+    const row = rows[0];
+    if (!row) return grantAll(amount, limit, windowSeconds);
+
+    const count = Number(row.count);
+    // The count before this reservation; anything up to `limit` is grantable.
+    const before = count - amount;
+    const granted = Math.max(0, Math.min(amount, limit - before));
+    const resetAtMs = (Number(row.window_epoch) + windowSeconds) * 1000;
+    const retryAfterSeconds =
+      granted > 0 ? 0 : Math.max(1, Math.ceil(resetAtMs / 1000 - Date.now() / 1000));
+
+    return { granted, limit, resetAtMs, retryAfterSeconds };
+  } catch (err) {
+    logger.warn("rate limit reservation failed; granting locally", { err, key });
+    return grantAll(amount, limit, windowSeconds);
+  }
+}
+
+function grantAll(amount: number, limit: number, windowSeconds: number): ReserveResult {
+  return {
+    granted: amount,
+    limit,
+    resetAtMs: Date.now() + windowSeconds * 1000,
+    retryAfterSeconds: 0,
+  };
+}
+
 /**
  * Send the standard 429 for a tripped limit: a JSON error in the API's usual
  * envelope, plus `Retry-After` and `RateLimit-*` headers so clients can back

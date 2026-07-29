@@ -26,6 +26,7 @@ import {
   type ServeInput,
 } from "../../flags/schemas.js";
 import type { JsonValue, Predicate, Serve } from "../../flags/types.js";
+import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
  * Targeting rules within a flag's environment. Mounted (via flags.route) at
@@ -70,6 +71,132 @@ const replaceRules = z.object({
       }),
     )
     .max(200),
+});
+
+// --- OpenAPI registration ----------------------------------------------------
+const RULES_TAG = "Targeting rules";
+const ruleParams = {
+  org: "The organization slug.",
+  key: "The flag key.",
+  envKey: "The environment key (e.g. production, preview, development).",
+  ruleId: "The targeting rule id.",
+};
+const WRITE_429 = {
+  description: "Too many management writes; retry after the Retry-After delay.",
+};
+const RULES_BASE = "/v1/orgs/{org}/flags/{key}/environments/{envKey}/rules";
+
+registerRoute({
+  method: "post",
+  path: RULES_BASE,
+  summary: "Create a targeting rule",
+  description:
+    "Append a targeting rule to a flag's environment. Rules serve in priority order (lowest first).",
+  tags: [RULES_TAG],
+  auth: true,
+  paramDescriptions: ruleParams,
+  request: { body: createRule },
+  responses: {
+    201: { description: "The rule was created.", schemaName: "RuleResponse" },
+    404: { description: "No such flag or environment." },
+    409: { description: "The flag is archived; restore it before editing." },
+    422: {
+      description:
+        "The submitted data failed validation, or references an unknown variant or segment.",
+    },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "put",
+  path: RULES_BASE,
+  summary: "Replace all targeting rules",
+  description:
+    "Replace the environment's entire ordered rule set in one atomic transaction, recorded as a single revision.",
+  tags: [RULES_TAG],
+  auth: true,
+  paramDescriptions: ruleParams,
+  request: { body: replaceRules },
+  responses: {
+    200: { description: "The replaced rule set.", schemaName: "RuleListResponse" },
+    404: { description: "No such flag or environment." },
+    409: { description: "The flag is archived; restore it before editing." },
+    422: {
+      description:
+        "The submitted data failed validation, or references an unknown variant or segment.",
+    },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "get",
+  path: RULES_BASE,
+  summary: "List targeting rules",
+  description: "List the flag's targeting rules for an environment, in priority order.",
+  tags: [RULES_TAG],
+  auth: true,
+  paramDescriptions: ruleParams,
+  responses: {
+    200: { description: "The environment's targeting rules.", schemaName: "RuleListResponse" },
+    404: { description: "No such flag or environment." },
+  },
+});
+
+registerRoute({
+  method: "patch",
+  path: `${RULES_BASE}/{ruleId}`,
+  summary: "Update a rule",
+  description: "Edit a single targeting rule's description, conditions, serve, or priority.",
+  tags: [RULES_TAG],
+  auth: true,
+  paramDescriptions: ruleParams,
+  request: { body: updateRule },
+  responses: {
+    200: { description: "The updated rule.", schemaName: "RuleResponse" },
+    404: { description: "No such flag, environment, or rule." },
+    409: { description: "The flag is archived; restore it before editing." },
+    422: {
+      description:
+        "The submitted data failed validation, or references an unknown variant or segment.",
+    },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "delete",
+  path: `${RULES_BASE}/{ruleId}`,
+  summary: "Delete a rule",
+  description: "Remove a single targeting rule from a flag's environment.",
+  tags: [RULES_TAG],
+  auth: true,
+  paramDescriptions: ruleParams,
+  responses: {
+    200: { description: "The rule was deleted.", schemaName: "DeleteAck" },
+    404: { description: "No such flag, environment, or rule." },
+    409: { description: "The flag is archived; restore it before editing." },
+    429: WRITE_429,
+  },
+});
+
+registerRoute({
+  method: "post",
+  path: `${RULES_BASE}/reorder`,
+  summary: "Reorder rules",
+  description: "Set the priority order of the environment's rules from an ordered list of rule ids.",
+  tags: [RULES_TAG],
+  auth: true,
+  paramDescriptions: ruleParams,
+  request: { body: reorder },
+  responses: {
+    200: { description: "The rules were reordered.", schemaName: "DeleteAck" },
+    404: { description: "No such flag or environment." },
+    409: { description: "The flag is archived; restore it before editing." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
+  },
 });
 
 type Resolved =
@@ -160,6 +287,20 @@ function serialize(r: typeof flagRules.$inferSelect) {
     updatedAt: r.updatedAt.toISOString(),
   };
 }
+
+// --- Response component schemas ----------------------------------------------
+const ruleSchema = z.object({
+  id: z.string(),
+  priority: z.number(),
+  description: z.string().nullable(),
+  conditions: z.unknown(),
+  serve: z.unknown(),
+  createdAt: z.string().describe("ISO 8601 timestamp"),
+  updatedAt: z.string().describe("ISO 8601 timestamp"),
+});
+registerComponentSchema("Rule", ruleSchema);
+registerComponentSchema("RuleResponse", z.object({ rule: ruleSchema }));
+registerComponentSchema("RuleListResponse", z.object({ rules: z.array(ruleSchema) }));
 
 /** Map a non-ok resolution to a 404 response. */
 function resolveError(c: Context, kind: "no-flag" | "no-env"): Response {

@@ -1,0 +1,55 @@
+export const metadata = {
+  title: "SDK keys",
+  description:
+    "How SDK keys authenticate evaluation, how they are scoped, and how to rotate them.",
+};
+
+# SDK keys
+
+An **SDK key** authenticates flag evaluation. Your app sends it as a bearer
+token on every OFREP request, and it tells Flagon two things: which organization
+you are, and which environment to evaluate against.
+
+```bash
+Authorization: Bearer flagon_sdk_...
+```
+
+## Scope
+
+A key is pinned to **one environment**. A Development key can only read
+Development configuration; it can never see Preview or Production. That is what
+lets you ship identical code to every stage and change behavior only by changing
+which key the app carries.
+
+A key grants **read-only evaluation**. It cannot create flags, change targeting,
+or read the management API. Managing flags is done with an access token or a
+signed-in session in the console, never with an SDK key.
+
+## Creating a key
+
+In the console, open **Flags → SDK Keys**, choose the environment, and create a
+key. The full value is shown **once**, at creation. Copy it then; Flagon stores
+only a hash and can never show it again.
+
+<Callout tone="warning" title="Keep keys out of source control">
+An SDK key reads every flag's configuration in its environment. Load it from an
+environment variable or your secret manager, never commit it, and never ship a
+Production key to a browser bundle where anyone can read it. For client-side and
+mobile apps, prefer evaluating on your own server and sending only the result to
+the client.
+</Callout>
+
+## Rotating and revoking
+
+To rotate a key, create a new one, roll it out to your app, then **revoke** the
+old one from the SDK Keys page. Revocation takes effect immediately: the next
+request using the old key is rejected with `401`. There is no grace period, so
+deploy the new key before revoking the old.
+
+If a key is ever exposed, revoke it right away and mint a replacement.
+
+## Next
+
+- **[Evaluate with OpenFeature](/docs/feature-flags/evaluate/openfeature)**: use the key from your
+  app.
+- **[REST (OFREP)](/docs/feature-flags/evaluate/rest)**: the raw request shape and error codes.

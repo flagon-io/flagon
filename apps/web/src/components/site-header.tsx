@@ -9,9 +9,13 @@ import { AccountMenu } from "@/components/account-menu";
  * `href` render as inert, clearly-disabled labels so the nav's final shape is
  * visible before those pages exist; each becomes a real link as it ships.
  */
-const NAV_ITEMS: readonly { label: string; href?: string }[] = [
+const NAV_ITEMS: readonly {
+  label: string;
+  href?: string;
+  external?: boolean;
+}[] = [
   { label: "Products" },
-  { label: "Resources" },
+  { label: "Docs", href: "/docs" },
   { label: "Enterprise" },
   { label: "Pricing", href: "/pricing" },
 ];
@@ -37,7 +41,15 @@ export async function SiteHeader() {
           </Link>
           <nav className="hidden items-center gap-6 md:flex">
             {NAV_ITEMS.map((item) =>
-              item.href ? (
+              item.href && item.external ? (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  className="text-sm font-medium text-zinc-300 transition-colors hover:text-zinc-100"
+                >
+                  {item.label}
+                </a>
+              ) : item.href ? (
                 <Link
                   key={item.label}
                   href={item.href}

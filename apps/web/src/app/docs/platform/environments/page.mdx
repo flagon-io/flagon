@@ -1,0 +1,54 @@
+export const metadata = {
+  title: "Environments",
+  description:
+    "How Flagon separates Production, Preview, and Development, and how one flag is configured per environment.",
+};
+
+# Environments
+
+An **environment** is a stage of your delivery pipeline. Every Flagon workspace
+comes with three, ready to use:
+
+- **Production**: real users.
+- **Preview**: staging, QA, review apps.
+- **Development**: your machine.
+
+The set is fixed, so there is nothing to provision. A flag exists once across
+the workspace, but its **configuration is per environment**: whether it is on,
+which variant is the default, and which targeting rules apply are all decided
+independently in each environment.
+
+That separation is the point. You can turn `new-checkout` on in Development,
+target it to your team in Preview, and leave it off in Production, all at the
+same time, from the same flag.
+
+## Keys are pinned to an environment
+
+An [SDK key](/docs/feature-flags/sdk-keys) belongs to exactly one environment. The key
+your Development app uses can only ever read Development configuration; it cannot
+see Production. This is what makes it safe to run the same code in every stage:
+the key it carries determines which environment it evaluates against.
+
+```bash
+# Development app
+export FLAGON_SDK_KEY="flagon_sdk_dev_..."
+
+# Production app
+export FLAGON_SDK_KEY="flagon_sdk_prod_..."
+```
+
+Same code, different key, different answers.
+
+## Promoting a change
+
+There is no automatic promotion between environments, and that is deliberate:
+each environment is a separate switch, so turning a flag on in Development can
+never turn it on in Production by accident. When you are ready, open the flag and
+flip the next environment yourself.
+
+## Next
+
+- **[SDK keys](/docs/feature-flags/sdk-keys)**: mint and manage the keys that pin an app
+  to an environment.
+- **[Targeting and segments](/docs/feature-flags/targeting)**: rules apply per
+  environment, so you can target narrowly in Preview and broadly in Production.

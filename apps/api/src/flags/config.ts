@@ -107,6 +107,7 @@ export async function loadEvaluationData(
       defaultVariantKey: fe.defaultVariantId
         ? (keyById.get(fe.defaultVariantId) ?? null)
         : null,
+      defaultServe: (fe.defaultServe as Serve | null) ?? null,
       offVariantKey: fe.offVariantId
         ? (keyById.get(fe.offVariantId) ?? null)
         : null,

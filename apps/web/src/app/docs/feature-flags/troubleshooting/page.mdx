@@ -1,0 +1,84 @@
+export const metadata = {
+  title: "Troubleshooting",
+  description:
+    "Common evaluation problems and how to fix them: auth errors, missing flags, values that won't change, and rate limits.",
+};
+
+# Troubleshooting
+
+Most evaluation issues come down to the wrong credential, the wrong environment,
+or an expectation about timing. Here's how to tell which.
+
+## `401 AUTHENTICATION_ERROR`
+
+The SDK key was missing, malformed, or revoked.
+
+- Confirm you're sending it as `Authorization: Bearer flagon_sdk_...`.
+- Make sure you're using an **SDK key**, not an access token. Evaluation uses SDK
+  keys (`flagon_sdk_...`); the [management API](/docs/feature-flags/management-api) uses
+  access tokens (`flagon_oat_...`). They are not interchangeable.
+- If the key was recently revoked or rotated, mint a new one from the console and
+  update your app. Revocation takes effect immediately.
+
+## `404 FLAG_NOT_FOUND`
+
+The flag isn't configured in the environment your key points at.
+
+- An [SDK key is pinned to one environment](/docs/platform/environments#keys-are-pinned-to-an-environment).
+  A Development key can't see a flag that only exists in Production. Check that
+  the key's environment matches where you configured the flag.
+- Confirm the flag **key** in your code matches the flag's key exactly (it's
+  case-sensitive).
+- A **deleted** flag stops evaluating; an **archived** one keeps evaluating. If
+  you deleted it, that's expected, recreate it or remove the reference.
+
+## The value isn't changing
+
+You flipped the flag in the console but your app still sees the old value.
+
+- **Give it a few seconds.** Flag config is served from a short-lived cache on
+  the evaluation path, so a change is live within seconds, not the same
+  millisecond.
+- **Check the environment.** You may be changing Production while your app
+  evaluates with a Development key (or the reverse). The key decides.
+- **Check where the value comes from.** A disabled flag serves its **off
+  variant**; an enabled flag with no matching rule serves its **default
+  variant**. Look at the returned `reason` (`DISABLED`, `STATIC`, `DEFAULT`,
+  `TARGETING_MATCH`, `SPLIT`) to see which path you hit.
+- **Client-side caching.** Some OpenFeature providers cache flags in memory and
+  refresh on an interval. If you're using bulk evaluation to hydrate once at
+  startup, re-fetch to pick up changes.
+
+## A targeting rule isn't matching
+
+- Flagon only knows the [context your app sends](/docs/feature-flags/targeting#evaluation-context).
+  If a rule checks `plan`, the evaluation context must include `plan`. Flagon
+  does not auto-collect attributes.
+- Attribute paths are dotted: a rule on `app.version` reads
+  `context.app.version`. Make sure the shape matches.
+- Rules are ordered and **first match wins**. A broad rule above a specific one
+  will shadow it, reorder so specific rules come first.
+- Check the `reason`: `TARGETING_MATCH` means a rule matched. `DEFAULT` means the
+  flag has rules but none matched, so the default was served. `STATIC` means the
+  flag has no rules at all. If you expected a match and got `DEFAULT`, the rule
+  did not match the context you sent.
+
+## `429 Too Many Requests`
+
+You're evaluating faster than the per-key limit. Back off using the
+`Retry-After` header. If your app evaluates one flag at a time in a loop, switch
+to **[bulk evaluation](/docs/feature-flags/evaluate/rest#evaluate-every-flag-bulk)**: fetch every
+flag in one request and read from the result in memory.
+
+## The provider never becomes ready
+
+- Await provider registration: `await OpenFeature.setProviderAndWait(...)` before
+  the first evaluation, so a value isn't read before the provider connects.
+- The provider's `baseUrl` is the **API host only**
+  (`https://api.flagon.io`), not the full OFREP path. The provider appends
+  `/ofrep/v1/...` itself.
+
+## Still stuck?
+
+Open an issue on [GitHub](https://github.com/flagon-io/flagon), with the flag
+key, the environment, and the `reason` from the response if you have it.

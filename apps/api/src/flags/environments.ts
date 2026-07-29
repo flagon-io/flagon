@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
 import { environments } from "../db/schema.js";
 
@@ -26,8 +27,13 @@ export async function ensureEnvironments(tx: TenantTx, organizationId: string) {
       target: [environments.organizationId, environments.key],
     });
 
+  // Filter by org EXPLICITLY, not on RLS alone: if the connection ever runs as a
+  // role that bypasses RLS (a superuser, e.g. a misconfigured deploy or local
+  // dev), an unscoped select would return every org's environments and the
+  // caller would seed flag_environments against all of them. Defense in depth.
   return tx
     .select()
     .from(environments)
+    .where(eq(environments.organizationId, organizationId))
     .orderBy(environments.sortOrder);
 }

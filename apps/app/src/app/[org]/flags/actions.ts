@@ -68,6 +68,30 @@ export async function setDefaultVariantAction(
   return {};
 }
 
+export async function setDefaultServeAction(
+  slug: string,
+  key: string,
+  envKey: string,
+  defaultServe: Serve,
+): Promise<{ error?: string }> {
+  const res = await setFlagEnvironment(slug, key, envKey, { defaultServe });
+  if (res.error) return { error: res.error };
+  revalidatePath(`/${slug}/flags/${key}`);
+  return {};
+}
+
+export async function setOffVariantAction(
+  slug: string,
+  key: string,
+  envKey: string,
+  offVariantKey: string,
+): Promise<{ error?: string }> {
+  const res = await setFlagEnvironment(slug, key, envKey, { offVariantKey });
+  if (res.error) return { error: res.error };
+  revalidatePath(`/${slug}/flags/${key}`);
+  return {};
+}
+
 export async function archiveFlagAction(
   slug: string,
   key: string,

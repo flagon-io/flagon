@@ -29,6 +29,17 @@ const schema = z
     EVAL_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(15_000),
     EVAL_RATE_LIMIT: z.coerce.number().int().positive().default(6_000),
     EVAL_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+    // Tokens the durable eval limiter reserves per database round-trip. Larger
+    // means fewer writes per high-QPS key but a larger bounded over-count; the
+    // default is a small fraction of the per-window limit.
+    EVAL_RATE_RESERVE_CHUNK: z.coerce.number().int().positive().default(25),
+    // Management write path. Caps authenticated mutations on /v1/orgs/:org/*
+    // per (org, caller) per window, so a valid token or session can't flood the
+    // write path (each write is a withOrg transaction + revision + cache
+    // invalidation). Generous for console use and reasonable automation; raise
+    // for bulk-import workloads.
+    MGMT_WRITE_RATE_LIMIT: z.coerce.number().int().positive().default(120),
+    MGMT_WRITE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   })
   .refine((e) => Boolean(e.DATABASE_URL || e.APP_DATABASE_URL), {
     message:

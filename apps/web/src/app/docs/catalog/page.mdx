@@ -1,0 +1,61 @@
+export const metadata = {
+  title: "Catalog",
+  description:
+    "The Catalog is the heart of Flagon: a live map of your services, their owners, and the products attached to them.",
+};
+
+# Catalog <Badge tone="soon">Coming soon</Badge>
+
+The **Catalog** is the heart of Flagon. It's a live map of everything you run:
+your services and components, who owns them, which environments they're deployed
+to, and the products (feature flags, deployments, and more) attached to each,
+all in one place, on one foundation.
+
+Where [Feature Flags](/docs/feature-flags) is a product you use, the Catalog is
+the fabric the whole platform hangs on: it's how a service, a team, and the
+things that act on that service stay connected instead of scattered across a
+dozen tools.
+
+<Callout tone="note" title="On the way">
+The Catalog is the centerpiece of what Flagon is becoming, and it's in active
+development. Feature Flags is available today and is built on the same
+foundation: the [organizations](/docs/platform/organizations),
+[projects](/docs/platform/projects), and [environments](/docs/platform/environments)
+the Catalog will bring together. This page will grow as it ships.
+</Callout>
+
+## The idea
+
+Internal developer platforms tend to become another silo: a wiki no one updates,
+a spreadsheet of services, ownership that's true until someone changes teams. The
+Catalog is meant to be the opposite: derived from the same primitives your
+products already use, so it's correct because it's *live*, not because someone
+remembered to update it.
+
+- **Services and components**: what you run, described once.
+- **Ownership**: which [team](/docs/platform/organizations) owns each thing, so
+  a page or a rollout always has an owner.
+- **Environments**: where each service is deployed, shared with every product.
+- **Attached products**: the flags, deployments, and resources acting on a
+  service, all reachable from the service itself.
+
+## How the pieces fit today
+
+The foundation the Catalog is built on already exists and is documented:
+
+<CardGrid cols={3}>
+  <Card href="/docs/platform/projects" title="Projects">
+    Group the work for a system or team.
+  </Card>
+  <Card href="/docs/platform/organizations" title="Organizations & teams">
+    Members, roles, and ownership.
+  </Card>
+  <Card href="/docs/platform/environments" title="Environments">
+    Production, Preview, and Development.
+  </Card>
+</CardGrid>
+
+## Next
+
+- **[What is Flagon](/docs/platform)**: the platform the Catalog anchors.
+- **[Feature Flags](/docs/feature-flags)**: a product available on it today.

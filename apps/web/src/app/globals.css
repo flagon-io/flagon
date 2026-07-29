@@ -32,3 +32,27 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Anchored docs headings: offset the scroll target so a linked heading isn't
+   hidden under the sticky site header. */
+:where(h2, h3, h4)[id] {
+  scroll-margin-top: 6rem;
+}
+
+/*
+ * Syntax-highlighting token colors for sugar-high (the docs code blocks). A
+ * calm dark palette on the near-black surface: teal/green strings, pink
+ * keywords, blue functions, amber numbers, muted comments.
+ */
+:root {
+  --sh-class: #7dd3fc;
+  --sh-identifier: #e2e8f0;
+  --sh-sign: #94a3b8;
+  --sh-property: #93c5fd;
+  --sh-entity: #60a5fa;
+  --sh-jsxliterals: #a5b4fc;
+  --sh-string: #5eead4;
+  --sh-keyword: #f472b6;
+  --sh-comment: #64748b;
+  --sh-number: #fbbf24;
+}

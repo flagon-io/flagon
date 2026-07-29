@@ -1,0 +1,86 @@
+export const metadata = {
+  title: "Documentation",
+  description:
+    "Documentation for Flagon, the self-hostable developer platform: platform fundamentals, Feature Flags, the API, and self-hosting.",
+};
+
+# Flagon documentation
+
+Flagon is a self-hostable **developer platform**: one hub for your services,
+projects, environments, and teams, with the products you'd otherwise buy or build
+stitched into the same foundation. One organization, one login, one bill. These
+docs cover the platform itself and each product built on it.
+
+<CardGrid>
+  <Card href="/docs/platform" eyebrow="Start here" title="What is Flagon" cta="Understand the platform">
+    The foundation every product shares: organizations, projects, environments,
+    and teams.
+  </Card>
+  <Card href="/docs/feature-flags/quickstart" eyebrow="Build" title="Feature Flags quickstart" cta="Ship your first flag">
+    Create a flag, mint an SDK key, and evaluate it from your app in five minutes.
+  </Card>
+</CardGrid>
+
+## Products
+
+The **Catalog** is the centerpiece the platform is built around; **Feature Flags**
+is available on it today, with more products shipping shortly.
+
+<CardGrid>
+  <Card href="/docs/catalog" title="Catalog" badge={<Badge tone="soon">Coming soon</Badge>}>
+    The heart of the platform: a live map of your services, their owners,
+    environments, and the products attached to them.
+  </Card>
+  <Card href="/docs/feature-flags" title="Feature Flags" badge={<Badge tone="available">Available</Badge>}>
+    Change what your app does without a deploy. Target with rules and rollouts,
+    evaluate over OpenFeature in any language.
+  </Card>
+  <Card title="Deployments" badge={<Badge tone="soon">Coming soon</Badge>}>
+    Ship and promote releases across environments from the same platform.
+  </Card>
+  <Card title="Packages" badge={<Badge tone="soon">Coming soon</Badge>}>
+    A private registry for your artifacts, wired into your projects.
+  </Card>
+</CardGrid>
+
+<Callout tone="note" title="One platform, many products">
+Products share Flagon's foundation: one organization, one login, one set of
+environments and teams. Learn a concept once and it carries across everything you
+add.
+</Callout>
+
+## Platform fundamentals
+
+<CardGrid cols={3}>
+  <Card href="/docs/platform/organizations" title="Organizations & teams">
+    Members, roles, and how access works.
+  </Card>
+  <Card href="/docs/platform/projects" title="Projects">
+    Group the work for a system or team.
+  </Card>
+  <Card href="/docs/platform/environments" title="Environments">
+    Production, Preview, and Development.
+  </Card>
+  <Card href="/docs/platform/authentication" title="Authentication & tokens">
+    Sessions, access tokens, and SDK keys.
+  </Card>
+  <Card href="/docs/platform/api" title="The Flagon API">
+    One REST API under `/v1`, with OpenAPI.
+  </Card>
+  <Card href="/docs/self-hosting" title="Self-host Flagon">
+    Run the whole platform yourself.
+  </Card>
+</CardGrid>
+
+## Build with Feature Flags
+
+<CardGrid>
+  <Card href="/docs/feature-flags/evaluate/openfeature" title="Evaluate with OpenFeature">
+    Wire flags into your app with the standard OpenFeature SDK and the OFREP
+    provider, on the server or in the browser.
+  </Card>
+  <Card href="/docs/feature-flags/targeting" title="Targeting & segments">
+    Serve the right value to the right audience with rules, rollouts, and reusable
+    segments.
+  </Card>
+</CardGrid>
