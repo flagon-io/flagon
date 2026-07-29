@@ -24,7 +24,11 @@ export type MarketingUser = {
 
 export const getMarketingSession = cache(async (): Promise<MarketingUser> => {
   const cookie = (await headers()).get("cookie");
-  if (!cookie || !cookie.includes("better-auth")) return null;
+  // The session cookie uses a CUSTOM prefix ("flagon", see the console's
+  // auth.ts advanced.cookiePrefix), so match the stable session-cookie base name
+  // rather than BetterAuth's default "better-auth" (prefix-independent, and it
+  // survives the "__Secure-" variant used in production).
+  if (!cookie || !cookie.includes("session_token")) return null;
 
   try {
     const res = await fetch(`${APP_URL}/api/auth/get-session`, {
