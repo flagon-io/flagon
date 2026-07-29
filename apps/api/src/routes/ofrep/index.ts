@@ -114,7 +114,7 @@ const authError = (c: Context) =>
   c.json(
     {
       errorCode: "AUTHENTICATION_ERROR",
-      errorDetails: "A valid SDK key is required (Authorization: Bearer ...).",
+      errorDetails: "A valid client key is required (Authorization: Bearer ...).",
     },
     401,
   );
@@ -314,7 +314,7 @@ registerRoute({
   path: "/ofrep/v1/evaluate/flags/{key}",
   summary: "Evaluate a flag",
   description:
-    "Evaluate one flag for the supplied evaluation context. Authenticated by an SDK key, which pins the organization and environment.",
+    "Evaluate one flag for the supplied evaluation context. Authenticated by a client key, which pins the organization and environment.",
   tags: [OFREP_TAG],
   security: "sdkKey",
   paramDescriptions: { key: "The flag key." },
@@ -325,7 +325,7 @@ registerRoute({
       description:
         "The request body could not be parsed, the context was invalid, or the flag's configuration could not resolve.",
     },
-    401: { description: "A valid SDK key is required." },
+    401: { description: "A valid client key is required." },
     404: { description: "The flag is not configured in this environment." },
     429: { description: "Too many evaluations; retry after the Retry-After delay." },
   },
@@ -336,7 +336,7 @@ registerRoute({
   path: "/ofrep/v1/evaluate/flags",
   summary: "Evaluate all flags",
   description:
-    "Evaluate every flag configured in the SDK key's environment for the supplied context. Each entry is a success object or a per-flag failure object, so one misconfigured flag never fails the call.",
+    "Evaluate every flag configured in the client key's environment for the supplied context. Each entry is a success object or a per-flag failure object, so one misconfigured flag never fails the call.",
   tags: [OFREP_TAG],
   security: "sdkKey",
   request: { body: evaluateRequestSchema },
@@ -349,7 +349,7 @@ registerRoute({
     400: {
       description: "The request body could not be parsed, or the context was invalid.",
     },
-    401: { description: "A valid SDK key is required." },
+    401: { description: "A valid client key is required." },
     429: { description: "Too many evaluations; retry after the Retry-After delay." },
   },
 });

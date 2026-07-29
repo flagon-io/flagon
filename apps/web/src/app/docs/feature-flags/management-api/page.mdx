@@ -1,17 +1,17 @@
 export const metadata = {
   title: "Management API",
   description:
-    "Create and configure flags, environments, variants, rules, segments, and SDK keys programmatically.",
+    "Create and configure flags, environments, variants, rules, segments, and client keys programmatically.",
 };
 
 # Management API
 
 Everything you do in the console is an API call. The management API is what the
 console itself drives, so anything you can click, you can script: create flags,
-change targeting, mint SDK keys.
+change targeting, mint client keys.
 
 This is separate from [evaluation](/docs/feature-flags/evaluate/rest). Evaluation is authenticated
-by an SDK key and is read-only; management is authenticated by an **access
+by a client key and is read-only; management is authenticated by an **access
 token** (or a signed-in session) and can write.
 
 ## Authentication
@@ -31,8 +31,8 @@ https://api.flagon.io/v1/orgs/{org}/...
 
 <Callout tone="warning" title="Access tokens are powerful">
 An access token can change flag configuration. Keep it server-side and out of
-source control. SDK keys and access tokens are different credentials: never use
-an access token to evaluate, or an SDK key to manage.
+source control. Client keys and access tokens are different credentials: never use
+an access token to evaluate, or a client key to manage.
 </Callout>
 
 ## Flags
@@ -79,13 +79,13 @@ The `PUT .../rules` endpoint replaces the whole ordered rule set atomically,
 which is the safe way to reconcile targeting from source control: send the
 complete desired state, not a diff.
 
-## SDK keys
+## Client keys
 
 | Method | Path (under `/v1/orgs/{org}`) | Purpose |
 | --- | --- | --- |
-| `POST` | `/sdk-keys` | Create a key for an environment (plaintext returned once). |
-| `GET` | `/sdk-keys` | List keys (masked). |
-| `POST` | `/sdk-keys/{id}/revoke` | Revoke a key immediately. |
+| `POST` | `/client-keys` | Create a key for an environment (returns the plaintext token). |
+| `GET` | `/client-keys` | List keys (each includes its plaintext `token`). |
+| `POST` | `/client-keys/{id}/revoke` | Revoke a key immediately. |
 
 ## Audit trail
 

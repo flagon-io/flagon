@@ -1,7 +1,7 @@
 export const metadata = {
   title: "Authentication & tokens",
   description:
-    "How you and your automation authenticate to Flagon: console sessions, access tokens, and product credentials like SDK keys.",
+    "How you and your automation authenticate to Flagon: console sessions, access tokens, and product credentials like client keys.",
 };
 
 # Authentication & tokens
@@ -13,7 +13,7 @@ which saves a lot of confusion.
 | --- | --- | --- |
 | **Session** | You, in a browser | Using the console. |
 | **Access token** | Your scripts and CI | The management [API](/docs/platform/api). |
-| **SDK key** | Your running app | Evaluating feature flags. |
+| **Client key** | Your running app | Evaluating feature flags. |
 
 ## Sessions
 
@@ -47,22 +47,22 @@ of browsers, and prefer a narrowly-scoped organization token for automation over
 a personal one.
 </Callout>
 
-## SDK keys
+## Client keys
 
-An **SDK key** is a product credential, issued by Feature Flags for **evaluation
+A **client key** is a product credential, issued by Feature Flags for **evaluation
 only**. It's scoped to one environment and can read flag configuration but can't
 change anything. It's a different credential from an access token: don't use one
 where the other is expected.
 
-See [SDK keys](/docs/feature-flags/sdk-keys) for the details.
+See [client keys](/docs/feature-flags/client-keys) for the details.
 
 ## Which one do I need?
 
 - Building a script or CI job that manages flags? An **access token**.
-- Reading flags from your application at runtime? An **SDK key**.
+- Reading flags from your application at runtime? A **client key**.
 - Just clicking around? Your **session**, you're already signed in.
 
 ## Next
 
 - **[The Flagon API](/docs/platform/api)**: where access tokens are used.
-- **[SDK keys](/docs/feature-flags/sdk-keys)**: evaluation credentials in depth.
+- **[Client keys](/docs/feature-flags/client-keys)**: evaluation credentials in depth.

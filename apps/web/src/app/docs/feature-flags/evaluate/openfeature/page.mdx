@@ -31,7 +31,7 @@ composer require guzzlehttp/guzzle` },
 
 Configure the provider once, at startup: the `baseUrl` is the Flagon API host
 (the provider appends the OFREP path itself), authenticated with your
-[SDK key](/docs/feature-flags/sdk-keys) as a bearer token. Then evaluate with a
+[client key](/docs/feature-flags/client-keys) as a bearer token. Then evaluate with a
 default value and an [evaluation context](/docs/feature-flags/targeting#evaluation-context).
 
 <CodeGroup examples={{
@@ -42,7 +42,7 @@ from openfeature.evaluation_context import EvaluationContext
 
 api.set_provider(OFREPProvider(
     base_url="https://api.flagon.io",
-    headers_factory=lambda: {"Authorization": f"Bearer {os.environ['FLAGON_SDK_KEY']}"},
+    headers_factory=lambda: {"Authorization": f"Bearer {os.environ['FLAGON_CLIENT_KEY']}"},
 ))
 
 client = api.get_client()
@@ -58,7 +58,7 @@ import { OFREPProvider } from "@openfeature/ofrep-provider";
 await OpenFeature.setProviderAndWait(
   new OFREPProvider({
     baseUrl: "https://api.flagon.io",
-    headers: [["Authorization", "Bearer " + process.env.FLAGON_SDK_KEY]],
+    headers: [["Authorization", "Bearer " + process.env.FLAGON_CLIENT_KEY]],
   }),
 );
 
@@ -78,7 +78,7 @@ const showCheckout = await client.getBooleanValue("new-checkout", false, {
 
 provider := ofrep.NewProvider(
     "https://api.flagon.io",
-    ofrep.WithBearerToken(os.Getenv("FLAGON_SDK_KEY")),
+    ofrep.WithBearerToken(os.Getenv("FLAGON_CLIENT_KEY")),
 )
 openfeature.SetProvider(provider)
 
@@ -95,14 +95,14 @@ showCheckout, _ := client.BooleanValue(
 $client = new GuzzleHttp\\Client();
 
 $res = $client->post("https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout", [
-    "headers" => ["Authorization" => "Bearer " . getenv("FLAGON_SDK_KEY")],
+    "headers" => ["Authorization" => "Bearer " . getenv("FLAGON_CLIENT_KEY")],
     "json" => ["context" => ["targetingKey" => "user-123", "plan" => "pro"]],
 ]);
 
 $flag = json_decode((string) $res->getBody(), true);
 $showCheckout = $flag["value"] ?? false; // default if evaluation can't complete` },
   curl: { code: `curl -X POST "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout" \\
-  -H "Authorization: Bearer $FLAGON_SDK_KEY" \\
+  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"context":{"targetingKey":"user-123","plan":"pro"}}'` },
 }} />
@@ -151,7 +151,7 @@ For a web front end, use the OpenFeature **Web** SDK with the OFREP web provider
 (`@openfeature/web-sdk` + `@openfeature/ofrep-web-provider`).
 
 <Callout tone="warning" title="Don't ship a Production key to the browser">
-Anything in a browser bundle is public. A Production SDK key in front-end code
+Anything in a browser bundle is public. A Production client key in front-end code
 lets anyone read your full flag configuration. For untrusted clients, evaluate on
 your own server and send only the resulting values to the browser, or use a key
 scoped to a low-risk environment.

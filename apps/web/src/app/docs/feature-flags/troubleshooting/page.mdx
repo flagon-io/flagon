@@ -11,11 +11,11 @@ or an expectation about timing. Here's how to tell which.
 
 ## `401 AUTHENTICATION_ERROR`
 
-The SDK key was missing, malformed, or revoked.
+The client key was missing, malformed, or revoked.
 
-- Confirm you're sending it as `Authorization: Bearer flagon_sdk_...`.
-- Make sure you're using an **SDK key**, not an access token. Evaluation uses SDK
-  keys (`flagon_sdk_...`); the [management API](/docs/feature-flags/management-api) uses
+- Confirm you're sending it as `Authorization: Bearer flagon_client_...`.
+- Make sure you're using a **client key**, not an access token. Evaluation uses
+  client keys (`flagon_client_...`); the [management API](/docs/feature-flags/management-api) uses
   access tokens (`flagon_oat_...`). They are not interchangeable.
 - If the key was recently revoked or rotated, mint a new one from the console and
   update your app. Revocation takes effect immediately.
@@ -24,7 +24,7 @@ The SDK key was missing, malformed, or revoked.
 
 The flag isn't configured in the environment your key points at.
 
-- An [SDK key is pinned to one environment](/docs/platform/environments#keys-are-pinned-to-an-environment).
+- A [client key is pinned to one environment](/docs/platform/environments#keys-are-pinned-to-an-environment).
   A Development key can't see a flag that only exists in Production. Check that
   the key's environment matches where you configured the flag.
 - Confirm the flag **key** in your code matches the flag's key exactly (it's

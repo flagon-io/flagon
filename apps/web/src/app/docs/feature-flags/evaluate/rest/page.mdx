@@ -10,11 +10,11 @@ If there is no OpenFeature SDK for your stack, or you just want a raw HTTP call,
 evaluate directly against the **OpenFeature Remote Evaluation Protocol (OFREP)**.
 This is the exact protocol the SDKs speak, so behavior is identical.
 
-All requests go to the Flagon API host and authenticate with an
-[SDK key](/docs/feature-flags/sdk-keys):
+All requests go to the Flagon API host and authenticate with a
+[client key](/docs/feature-flags/client-keys):
 
 ```http
-Authorization: Bearer flagon_sdk_...
+Authorization: Bearer flagon_client_...
 Content-Type: application/json
 ```
 
@@ -37,7 +37,7 @@ under a `context` object:
     {
       label: "cURL",
       code: `curl -X POST "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout" \\
-  -H "Authorization: Bearer $FLAGON_SDK_KEY" \\
+  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"context":{"targetingKey":"user-123","plan":"pro"}}'`,
     },
@@ -49,7 +49,7 @@ under a `context` object:
   {
     method: "POST",
     headers: {
-      Authorization: \`Bearer \${process.env.FLAGON_SDK_KEY}\`,
+      Authorization: \`Bearer \${process.env.FLAGON_CLIENT_KEY}\`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -68,7 +68,7 @@ console.log(flag.value, flag.reason); // true "TARGETING_MATCH"`,
 
 res = requests.post(
     "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout",
-    headers={"Authorization": f"Bearer {os.environ['FLAGON_SDK_KEY']}"},
+    headers={"Authorization": f"Bearer {os.environ['FLAGON_CLIENT_KEY']}"},
     json={"context": {"targetingKey": "user-123", "plan": "pro"}},
 )
 
@@ -83,7 +83,7 @@ req, _ := http.NewRequest(
     "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout",
     body,
 )
-req.Header.Set("Authorization", "Bearer "+os.Getenv("FLAGON_SDK_KEY"))
+req.Header.Set("Authorization", "Bearer "+os.Getenv("FLAGON_CLIENT_KEY"))
 req.Header.Set("Content-Type", "application/json")
 
 res, err := http.DefaultClient.Do(req)`,
@@ -117,7 +117,7 @@ POST /ofrep/v1/evaluate/flags
 
 ```bash
 curl -X POST "https://api.flagon.io/ofrep/v1/evaluate/flags" \
-  -H "Authorization: Bearer $FLAGON_SDK_KEY" \
+  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{"context":{"targetingKey":"user-123","plan":"pro"}}'
 ```
@@ -142,7 +142,7 @@ per flag.
 
 | Status | `errorCode` | Meaning |
 | --- | --- | --- |
-| `401` | `AUTHENTICATION_ERROR` | Missing, malformed, or revoked SDK key. |
+| `401` | `AUTHENTICATION_ERROR` | Missing, malformed, or revoked client key. |
 | `404` | `FLAG_NOT_FOUND` | No flag with that key is configured in this environment. |
 | `429` | None | Too many requests; back off. A `Retry-After` header says for how long. |
 

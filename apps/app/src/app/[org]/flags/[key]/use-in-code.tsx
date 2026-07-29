@@ -11,7 +11,7 @@ export function UseInCodeButton({ slug, flagKey }: { slug: string; flagKey: stri
   const [copied, setCopied] = useState(false);
 
   const snippet = `curl -X POST "$FLAGON_API/ofrep/v1/evaluate/flags/${flagKey}" \\
-  -H "Authorization: Bearer $FLAGON_SDK_KEY" \\
+  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"context":{"targetingKey":"user-123"}}'`;
 
@@ -29,9 +29,9 @@ export function UseInCodeButton({ slug, flagKey }: { slug: string; flagKey: stri
           />
           <ModalBody>
             <p className="mb-3 text-sm text-zinc-500">
-              Authenticate with an SDK key for the environment — create one under{" "}
+              Authenticate with a client key for the environment. Create one under{" "}
               <Link href={`/${slug}/flags/keys`} className="text-teal-400 hover:underline">
-                SDK Keys
+                Client Keys
               </Link>
               .
             </p>

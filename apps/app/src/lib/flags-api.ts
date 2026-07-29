@@ -89,10 +89,11 @@ export type SdkKey = {
   name: string;
   environmentKey: string | null;
   masked: string;
+  /** The full publishable key (retrievable). Null only for legacy keys. */
+  token: string | null;
   lastUsedAt: string | null;
   revokedAt: string | null;
   createdAt: string;
-  token?: string;
 };
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -163,7 +164,7 @@ export async function getFlagUsage(
 }
 
 export async function listSdkKeys(slug: string): Promise<SdkKey[]> {
-  const res = await apiFetch(`/v1/orgs/${slug}/sdk-keys`);
+  const res = await apiFetch(`/v1/orgs/${slug}/client-keys`);
   if (!res.ok) return [];
   return (await res.json()) as SdkKey[];
 }
@@ -264,7 +265,7 @@ export async function createSdkKey(
   body: { name: string; environment: string },
 ) {
   return unwrap<{ key: SdkKey }>(
-    await apiFetch(`/v1/orgs/${slug}/sdk-keys`, {
+    await apiFetch(`/v1/orgs/${slug}/client-keys`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -273,7 +274,7 @@ export async function createSdkKey(
 
 export async function revokeSdkKey(slug: string, id: string) {
   return unwrap<{ ok: true }>(
-    await apiFetch(`/v1/orgs/${slug}/sdk-keys/${id}/revoke`, { method: "POST" }),
+    await apiFetch(`/v1/orgs/${slug}/client-keys/${id}/revoke`, { method: "POST" }),
   );
 }
 

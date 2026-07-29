@@ -30,7 +30,7 @@ export const nav: NavSection[] = [
       { title: "Quickstart", href: "/docs/feature-flags/quickstart" },
       { title: "Flags & variants", href: "/docs/feature-flags/flags" },
       { title: "Targeting & segments", href: "/docs/feature-flags/targeting" },
-      { title: "SDK keys", href: "/docs/feature-flags/sdk-keys" },
+      { title: "Client keys", href: "/docs/feature-flags/client-keys" },
       { title: "Evaluate with OpenFeature", href: "/docs/feature-flags/evaluate/openfeature" },
       { title: "Evaluate with REST", href: "/docs/feature-flags/evaluate/rest" },
       { title: "Management API", href: "/docs/feature-flags/management-api" },

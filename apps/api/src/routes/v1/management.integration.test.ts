@@ -129,7 +129,7 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
     });
     expect(enable.status).toBe(200);
 
-    const keyRes = await app.request(`${base}/sdk-keys`, {
+    const keyRes = await app.request(`${base}/client-keys`, {
       method: "POST",
       headers: auth(),
       body: JSON.stringify({ name: "prod key", environment: "production" }),
@@ -156,7 +156,7 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
   });
 
   it("bulk-evaluates with ETag caching and rejects a malformed body", async () => {
-    const keyRes = await app.request(`${base}/sdk-keys`, {
+    const keyRes = await app.request(`${base}/client-keys`, {
       method: "POST",
       headers: auth(),
       body: JSON.stringify({ name: "bulk key", environment: "production" }),
@@ -176,11 +176,13 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
     expect(bulk.status).toBe(200);
     const etag = bulk.headers.get("etag");
     expect(etag).toBeTruthy();
+    // OFREP bulk is a spec-defined envelope `{ flags: [...] }`, NOT one of our
+    // bare-array /v1 lists. Leave it shaped per the OFREP spec.
     const body = await bulk.json();
-    expect(Array.isArray(body)).toBe(true);
-    expect(body.find((f: { key: string }) => f.key === "checkout")).toMatchObject({
-      value: true,
-    });
+    expect(Array.isArray(body.flags)).toBe(true);
+    expect(
+      body.flags.find((f: { key: string }) => f.key === "checkout"),
+    ).toMatchObject({ value: true });
 
     // Re-request with the ETag → 304 Not Modified, no body.
     const notModified = await app.request(`/ofrep/v1/evaluate/flags`, {
@@ -247,7 +249,7 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
 
     // Mint a production key and evaluate.
     const { key } = await (
-      await app.request(`${base}/sdk-keys`, {
+      await app.request(`${base}/client-keys`, {
         method: "POST",
         headers: auth(),
         body: JSON.stringify({ name: "color key", environment: "production" }),
@@ -311,7 +313,7 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
     expect(rule.status).toBe(201);
 
     const { key } = await (
-      await app.request(`${base}/sdk-keys`, {
+      await app.request(`${base}/client-keys`, {
         method: "POST",
         headers: auth(),
         body: JSON.stringify({ name: "preview", environment: "preview" }),

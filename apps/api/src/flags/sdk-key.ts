@@ -5,13 +5,14 @@ import { sdkKeys } from "../db/schema.js";
 import { hashToken } from "../lib/token-hash.js";
 
 /**
- * SDK-key credentials for OFREP evaluation.
+ * Client-key credentials for OFREP evaluation.
  *
- * An SDK key identifies an (org, environment). Because it must be resolved
+ * A client key identifies an (org, environment). Because it must be resolved
  * BEFORE any org context exists, sdk_keys is an auth-layer table (no RLS): the
- * lookup here runs on the bare client and matches a unique, high-entropy hash —
- * the same shape as access-token auth. Only the SHA-256 hash is stored; the
- * plaintext is returned once, at creation.
+ * lookup here runs on the bare client and matches a unique, high-entropy hash,
+ * the same shape as access-token auth. Client keys are publishable, so the
+ * plaintext is also stored (retrievable in the console); the hash stays the
+ * authentication lookup path.
  */
 // Client keys (renamed from "SDK keys"). New keys mint with the client prefix;
 // keys minted before the rename keep the legacy prefix and still evaluate (both

@@ -1,7 +1,7 @@
 export const metadata = {
   title: "Quickstart",
   description:
-    "Create a flag, mint an SDK key, and evaluate it from your app in a few minutes.",
+    "Create a flag, mint a client key, and evaluate it from your app in a few minutes.",
 };
 
 # Quickstart
@@ -30,23 +30,23 @@ name. You can rename the display name freely, but changing the key means
 changing your code.
 </Callout>
 
-## 2. Create an SDK key
+## 2. Create a client key
 
-Evaluation is authenticated with an **SDK key**, and each key belongs to one
-environment. Open **Flags → SDK Keys**, pick **Development** for now, and create
+Evaluation is authenticated with a **client key**, and each key belongs to one
+environment. Open **Flags → Client Keys**, pick **Development** for now, and create
 a key.
 
-The key is shown **once**. Copy it and set it as an environment variable in your
-app:
+The key is publishable, so you can copy it now or retrieve it anytime from the
+console. Set it as an environment variable in your app:
 
 ```bash
-export FLAGON_SDK_KEY="flagon_sdk_..."
+export FLAGON_CLIENT_KEY="flagon_client_..."
 ```
 
 <Callout tone="warning" title="Treat it like a secret">
-An SDK key can read every flag's configuration in its environment. Keep it out
+A client key can read every flag's configuration in its environment. Keep it out
 of source control and out of your git history. If one leaks, revoke it from the
-SDK Keys page and mint a new one.
+Client Keys page and mint a new one.
 </Callout>
 
 ## 3. Evaluate it from your app
@@ -64,7 +64,7 @@ from openfeature.evaluation_context import EvaluationContext
 
 api.set_provider(OFREPProvider(
     base_url="https://api.flagon.io",
-    headers_factory=lambda: {"Authorization": f"Bearer {os.environ['FLAGON_SDK_KEY']}"},
+    headers_factory=lambda: {"Authorization": f"Bearer {os.environ['FLAGON_CLIENT_KEY']}"},
 ))
 
 client = api.get_client()
@@ -79,7 +79,7 @@ import { OFREPProvider } from "@openfeature/ofrep-provider";
 await OpenFeature.setProviderAndWait(
   new OFREPProvider({
     baseUrl: "https://api.flagon.io",
-    headers: [["Authorization", "Bearer " + process.env.FLAGON_SDK_KEY]],
+    headers: [["Authorization", "Bearer " + process.env.FLAGON_CLIENT_KEY]],
   }),
 );
 
@@ -91,7 +91,7 @@ console.log(showCheckout); // false: the flag is off by default` },
   go: { code: `// go get github.com/open-feature/go-sdk github.com/open-feature/go-sdk-contrib/providers/ofrep
 provider := ofrep.NewProvider(
     "https://api.flagon.io",
-    ofrep.WithBearerToken(os.Getenv("FLAGON_SDK_KEY")),
+    ofrep.WithBearerToken(os.Getenv("FLAGON_CLIENT_KEY")),
 )
 openfeature.SetProvider(provider)
 
@@ -106,13 +106,13 @@ fmt.Println(showCheckout) // false: the flag is off by default` },
 // composer require guzzlehttp/guzzle
 $client = new GuzzleHttp\\Client();
 $res = $client->post("https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout", [
-    "headers" => ["Authorization" => "Bearer " . getenv("FLAGON_SDK_KEY")],
+    "headers" => ["Authorization" => "Bearer " . getenv("FLAGON_CLIENT_KEY")],
     "json" => ["context" => ["targetingKey" => "user-123"]],
 ]);
 $flag = json_decode((string) $res->getBody(), true);
 echo $flag["value"] ? "true" : "false"; // false: the flag is off by default` },
   curl: { code: `curl -X POST "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout" \\
-  -H "Authorization: Bearer $FLAGON_SDK_KEY" \\
+  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"context":{"targetingKey":"user-123"}}'
 # => { "key": "new-checkout", "value": false, "reason": "DISABLED", ... }` },

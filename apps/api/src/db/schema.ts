@@ -320,10 +320,11 @@ export const flagRules = pgTable(
 );
 
 /**
- * Client SDK credentials, scoped to a single environment. Only the SHA-256 hash
- * is stored; the plaintext is shown once at creation (same discipline as
- * access_tokens). The API authenticates OFREP calls by hashing the presented key
- * and looking it up.
+ * Client SDK credentials, scoped to a single environment. These are PUBLISHABLE
+ * keys (they ship in client apps), so the plaintext `token` is stored and stays
+ * retrievable in the console — unlike access_tokens, which stay hashed. The API
+ * still authenticates OFREP calls by hashing the presented key (`keyHash`) and
+ * looking it up.
  */
 export const sdkKeys = pgTable(
   "sdk_keys",
@@ -337,6 +338,11 @@ export const sdkKeys = pgTable(
     keyHash: text("key_hash").notNull().unique(),
     prefix: text("prefix").notNull(),
     lastFour: text("last_four").notNull(),
+    // Client keys are PUBLISHABLE (they ship in client apps), so we store the
+    // plaintext to make them retrievable in the console — unlike access tokens,
+    // which stay hashed. Null for keys minted before this became retrievable
+    // (those remain masked). keyHash is still the lookup path.
+    token: text("token"),
     createdByUserId: uuid("created_by_user_id"),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),

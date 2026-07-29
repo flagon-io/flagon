@@ -206,7 +206,7 @@ function jsonBody(content: Content | undefined): MediaType | undefined {
 
 function securityLabel(op: Operation): string | null {
   const scheme = op.security?.[0] ? Object.keys(op.security[0]!)[0] : null;
-  if (scheme === "sdkKeyAuth") return "SDK key";
+  if (scheme === "clientKeyAuth") return "Client key";
   if (scheme === "bearerAuth") return "Access token";
   return null;
 }

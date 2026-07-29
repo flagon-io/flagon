@@ -100,7 +100,7 @@ registerComponentSchema(
   }),
 );
 
-type SecurityName = "bearerAuth" | "sdkKeyAuth";
+type SecurityName = "bearerAuth" | "clientKeyAuth";
 
 const SECURITY_SCHEMES: Record<SecurityName, Record<string, unknown>> = {
   bearerAuth: {
@@ -109,11 +109,11 @@ const SECURITY_SCHEMES: Record<SecurityName, Record<string, unknown>> = {
     description:
       "A Flagon access token (`flagon_oat_...`) for the management API. Send it as `Authorization: Bearer <token>`.",
   },
-  sdkKeyAuth: {
+  clientKeyAuth: {
     type: "http",
     scheme: "bearer",
     description:
-      "A Flagon SDK key (`flagon_sdk_...`), scoped to one environment, for OFREP evaluation. Send it as `Authorization: Bearer <key>`.",
+      "A Flagon client key (`flagon_client_...`), scoped to one environment, for OFREP evaluation. Send it as `Authorization: Bearer <key>`.",
   },
 };
 
@@ -123,7 +123,7 @@ const TAG_DEFS: { name: string; description: string }[] = [
   {
     name: "OFREP evaluation",
     description:
-      "Evaluate flags with an SDK key over the OpenFeature Remote Evaluation Protocol (single and bulk).",
+      "Evaluate flags with a client key over the OpenFeature Remote Evaluation Protocol (single and bulk).",
   },
   { name: "Flags", description: "Create and configure flags and their per-environment state." },
   { name: "Variants", description: "The values a flag can serve." },
@@ -134,7 +134,7 @@ const TAG_DEFS: { name: string; description: string }[] = [
   { name: "Segments", description: "Reusable, named audiences referenced by targeting rules." },
   { name: "Entities", description: "Known targeting subjects and their attributes." },
   { name: "Environments", description: "The stages a flag is configured across." },
-  { name: "SDK keys", description: "Per-environment keys that authenticate OFREP evaluation." },
+  { name: "Client keys", description: "Per-environment publishable keys that authenticate OFREP evaluation." },
   { name: "Members", description: "People in an organization." },
   { name: "Account", description: "The authenticated caller." },
   { name: "Waitlist", description: "Public early-access intake." },
@@ -277,7 +277,7 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
 
     const scheme: SecurityName | undefined =
       route.security === "sdkKey"
-        ? "sdkKeyAuth"
+        ? "clientKeyAuth"
         : route.security === "bearer" || route.auth
           ? "bearerAuth"
           : undefined;

@@ -24,17 +24,17 @@ same time, from the same flag.
 
 ## Keys are pinned to an environment
 
-An [SDK key](/docs/feature-flags/sdk-keys) belongs to exactly one environment. The key
+A [client key](/docs/feature-flags/client-keys) belongs to exactly one environment. The key
 your Development app uses can only ever read Development configuration; it cannot
 see Production. This is what makes it safe to run the same code in every stage:
 the key it carries determines which environment it evaluates against.
 
 ```bash
-# Development app
-export FLAGON_SDK_KEY="flagon_sdk_dev_..."
+# Development app (a key minted in the Development environment)
+export FLAGON_CLIENT_KEY="flagon_client_..."
 
-# Production app
-export FLAGON_SDK_KEY="flagon_sdk_prod_..."
+# Production app (a key minted in the Production environment)
+export FLAGON_CLIENT_KEY="flagon_client_..."
 ```
 
 Same code, different key, different answers.
@@ -48,7 +48,7 @@ flip the next environment yourself.
 
 ## Next
 
-- **[SDK keys](/docs/feature-flags/sdk-keys)**: mint and manage the keys that pin an app
+- **[Client keys](/docs/feature-flags/client-keys)**: mint and manage the keys that pin an app
   to an environment.
 - **[Targeting and segments](/docs/feature-flags/targeting)**: rules apply per
   environment, so you can target narrowly in Preview and broadly in Production.

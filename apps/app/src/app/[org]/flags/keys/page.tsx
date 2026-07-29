@@ -7,8 +7,9 @@ import { FLAG_ENVIRONMENTS, listSdkKeys } from "@/lib/flags-api";
 import { SdkKeysManager } from "./sdk-keys-manager";
 
 /**
- * SDK keys — per-environment client credentials used to evaluate flags over
- * OFREP. Keys are shown once at creation; only their hash is stored.
+ * Client keys: per-environment publishable credentials used to evaluate flags
+ * over OFREP. They are retrievable in full (the plaintext is stored alongside
+ * its hash, which stays the auth lookup path).
  */
 export default async function SdkKeysPage({
   params,

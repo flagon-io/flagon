@@ -50,6 +50,13 @@
       "when": 1785304208333,
       "tag": "0006_brown_madame_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785400000000,
+      "tag": "0007_client_key_token",
+      "breakpoints": true
     }
   ]
 }

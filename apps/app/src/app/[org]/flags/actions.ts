@@ -134,11 +134,13 @@ export async function createSdkKeyAction(
   slug: string,
   name: string,
   environment: string,
-): Promise<{ token?: string; error?: string }> {
+): Promise<{ error?: string }> {
   const res = await createSdkKey(slug, { name, environment });
   if (res.error) return { error: res.error };
+  // Client keys are retrievable, so no need to surface the plaintext here; the
+  // refreshed keys list renders it with a copy button.
   revalidatePath(`/${slug}/flags/keys`);
-  return { token: res.data?.key.token };
+  return {};
 }
 
 export async function revokeSdkKeyAction(

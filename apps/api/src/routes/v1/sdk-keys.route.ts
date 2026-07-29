@@ -12,15 +12,15 @@ import { generateSdkKey } from "../../flags/sdk-key.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
- * SDK-key management. Mounted under /v1/orgs/:org/sdk-keys.
+ * Client-key management. Mounted under /v1/orgs/:org/client-keys.
  *
  * sdk_keys is an auth-layer table (see the migration): the eval path must
  * resolve a key to its org BEFORE any org context exists, so it can't be
  * RLS-gated. Management here therefore scopes by organization_id in the query
  * (app layer), exactly as the console does for access tokens. The environment a
  * key belongs to IS validated through withOrg(), so a key can only ever point at
- * one of the caller's own environments. The plaintext key is returned ONCE, at
- * creation; only its hash is stored.
+ * one of the caller's own environments. Client keys are publishable, so the
+ * plaintext is stored and stays retrievable; the hash is the auth lookup path.
  */
 export const sdkKeys_ = new Hono();
 
@@ -32,10 +32,10 @@ const createKey = z.object({
 });
 
 // --- OpenAPI registration ----------------------------------------------------
-const SDK_KEYS_TAG = "SDK keys";
-const sdkKeyParams = {
+const CLIENT_KEYS_TAG = "Client keys";
+const clientKeyParams = {
   org: "The organization slug.",
-  id: "The SDK key id.",
+  id: "The client key id.",
 };
 const WRITE_429 = {
   description: "Too many management writes; retry after the Retry-After delay.",
@@ -43,18 +43,18 @@ const WRITE_429 = {
 
 registerRoute({
   method: "post",
-  path: "/v1/orgs/{org}/sdk-keys",
-  summary: "Mint an SDK key",
+  path: "/v1/orgs/{org}/client-keys",
+  summary: "Create a client key",
   description:
-    "Create an SDK key for one environment. The plaintext token is returned once at creation and never again.",
-  tags: [SDK_KEYS_TAG],
+    "Create a client key for one environment. Client keys are publishable, so the response includes the plaintext token and it stays retrievable afterwards.",
+  tags: [CLIENT_KEYS_TAG],
   auth: true,
-  paramDescriptions: sdkKeyParams,
+  paramDescriptions: clientKeyParams,
   request: { body: createKey },
   responses: {
     201: {
-      description: "The SDK key, including its plaintext token (returned once).",
-      schemaName: "SdkKeyCreatedResponse",
+      description: "The client key, including its plaintext token.",
+      schemaName: "ClientKeyCreatedResponse",
     },
     404: { description: "No environment with that key." },
     422: { description: "The submitted data failed validation." },
@@ -64,28 +64,28 @@ registerRoute({
 
 registerRoute({
   method: "get",
-  path: "/v1/orgs/{org}/sdk-keys",
-  summary: "List SDK keys",
-  description: "List the organization's SDK keys as masked metadata. The secret is never returned.",
-  tags: [SDK_KEYS_TAG],
+  path: "/v1/orgs/{org}/client-keys",
+  summary: "List client keys",
+  description: "List the organization's client keys. Each includes its plaintext token, since client keys are publishable and retrievable.",
+  tags: [CLIENT_KEYS_TAG],
   auth: true,
-  paramDescriptions: sdkKeyParams,
+  paramDescriptions: clientKeyParams,
   responses: {
-    200: { description: "The organization's SDK keys (masked).", schemaName: "SdkKeyListResponse" },
+    200: { description: "The organization's client keys.", schemaName: "ClientKeyListResponse" },
   },
 });
 
 registerRoute({
   method: "post",
-  path: "/v1/orgs/{org}/sdk-keys/{id}/revoke",
-  summary: "Revoke an SDK key",
-  description: "Revoke an SDK key so it can no longer be used to evaluate flags.",
-  tags: [SDK_KEYS_TAG],
+  path: "/v1/orgs/{org}/client-keys/{id}/revoke",
+  summary: "Revoke a client key",
+  description: "Revoke a client key so it can no longer be used to evaluate flags.",
+  tags: [CLIENT_KEYS_TAG],
   auth: true,
-  paramDescriptions: sdkKeyParams,
+  paramDescriptions: clientKeyParams,
   responses: {
-    200: { description: "The SDK key was revoked.", schemaName: "DeleteAck" },
-    404: { description: "No SDK key with that id." },
+    200: { description: "The client key was revoked.", schemaName: "DeleteAck" },
+    404: { description: "No client key with that id." },
     429: WRITE_429,
   },
 });
@@ -101,6 +101,9 @@ function serializeKey(
     prefix: k.prefix,
     lastFour: k.lastFour,
     masked: `${k.prefix}_••••${k.lastFour}`,
+    // Publishable client key, retrievable in full. Null only for legacy keys
+    // minted before keys became retrievable (those stay masked).
+    token: k.token ?? null,
     lastUsedAt: k.lastUsedAt?.toISOString() ?? null,
     revokedAt: k.revokedAt?.toISOString() ?? null,
     createdAt: k.createdAt.toISOString(),
@@ -108,31 +111,26 @@ function serializeKey(
 }
 
 // --- Response component schemas ----------------------------------------------
-// The masked metadata shape (serializeKey). The plaintext token is NOT part of
-// this; it is added only to the create response, returned once.
-const sdkKeySchema = z.object({
+// Client keys are publishable, so the plaintext `token` is retrievable in list +
+// create responses (null only for legacy keys minted before this).
+const clientKeySchema = z.object({
   id: z.string(),
   name: z.string(),
   environmentKey: z.string().nullable(),
   prefix: z.string(),
   lastFour: z.string(),
   masked: z.string(),
+  token: z
+    .string()
+    .nullable()
+    .describe("The plaintext key (publishable, retrievable). Null for legacy keys."),
   lastUsedAt: z.string().nullable().describe("ISO 8601 timestamp"),
   revokedAt: z.string().nullable().describe("ISO 8601 timestamp"),
   createdAt: z.string().describe("ISO 8601 timestamp"),
 });
-registerComponentSchema("SdkKey", sdkKeySchema);
-registerComponentSchema(
-  "SdkKeyCreatedResponse",
-  z.object({
-    key: sdkKeySchema.extend({
-      token: z
-        .string()
-        .describe("The plaintext SDK key, returned only once at creation."),
-    }),
-  }),
-);
-registerComponentSchema("SdkKeyListResponse", z.array(sdkKeySchema));
+registerComponentSchema("ClientKey", clientKeySchema);
+registerComponentSchema("ClientKeyCreatedResponse", z.object({ key: clientKeySchema }));
+registerComponentSchema("ClientKeyListResponse", z.array(clientKeySchema));
 
 // --- Create ------------------------------------------------------------------
 sdkKeys_.post("/", async (c) => {
@@ -167,18 +165,16 @@ sdkKeys_.post("/", async (c) => {
       keyHash: gen.keyHash,
       prefix: gen.prefix,
       lastFour: gen.lastFour,
+      // Publishable: store the plaintext so it stays retrievable in the console.
+      token: gen.token,
       createdByUserId: ctx.actorUserId,
     })
     .returning();
 
-  // The one and only time the plaintext is returned.
-  return c.json(
-    { key: { ...serializeKey(row, env.key), token: gen.token } },
-    201,
-  );
+  return c.json({ key: serializeKey(row, env.key) }, 201);
 });
 
-// --- List (masked) -----------------------------------------------------------
+// --- List (retrievable) ------------------------------------------------------
 sdkKeys_.get("/", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;

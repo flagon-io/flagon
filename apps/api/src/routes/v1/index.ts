@@ -30,7 +30,7 @@ const orgs = new Hono();
 // runs. The pattern captures :org so the limit is keyed per (org, caller).
 orgs.use("/:org/*", managementWriteLimit);
 orgs.route("/:org/flags", flags_);
-orgs.route("/:org/sdk-keys", sdkKeys_);
+orgs.route("/:org/client-keys", sdkKeys_);
 orgs.route("/:org/segments", segments_);
 orgs.route("/:org/entities", entities_);
 orgs.route("/:org/environments", environments_);
