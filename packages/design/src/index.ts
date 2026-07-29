@@ -27,6 +27,12 @@ export { Field } from "./components/field";
 export { Button, type ButtonVariant } from "./components/button";
 export { Switch } from "./components/switch";
 export {
+  Toaster,
+  toast,
+  type ToastTone,
+  type ToastItem,
+} from "./components/toast";
+export {
   Modal,
   ModalHeader,
   ModalBody,

@@ -17,7 +17,13 @@ import { API_URL } from "@/lib/urls";
  */
 export const authClient = createAuthClient({
   baseURL: API_URL,
-  fetchOptions: { credentials: "include" },
+  fetchOptions: {
+    credentials: "include",
+    // Never let a request hang forever (a stuck server would otherwise leave the
+    // UI spinning). 15s is generous for auth; on timeout the call rejects/returns
+    // an error the caller surfaces (toast + re-enabled button).
+    timeout: 15_000,
+  },
   plugins: [usernameClient(), organizationClient()],
 });
 

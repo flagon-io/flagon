@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Field, submitButtonClass } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
+import { toast } from "@flagon/design";
 import { SocialButtons } from "@/components/social-buttons";
 import type { OAuthProviders } from "@/lib/oauth";
 import { authClient } from "@/lib/auth-client";
@@ -39,25 +40,35 @@ export function LoginForm({ providers }: { providers: OAuthProviders }) {
     const identifier = String(form.get("identifier") ?? "").trim();
     const password = String(form.get("password") ?? "");
 
-    const { error } = identifier.includes("@")
-      ? await authClient.signIn.email({ email: identifier, password })
-      : await authClient.signIn.username({ username: identifier, password });
+    try {
+      const { error } = identifier.includes("@")
+        ? await authClient.signIn.email({ email: identifier, password })
+        : await authClient.signIn.username({ username: identifier, password });
 
-    if (error) {
-      setError(
-        error.message ??
-          "We could not sign you in. Check your details and try again.",
-      );
+      if (error) {
+        const msg =
+          error.message ??
+          "We could not sign you in. Check your details and try again.";
+        setError(msg);
+        toast.error("Couldn't sign in", msg);
+        setPending(false);
+        return;
+      }
+
+      // Where to land is decided by the root router once the session cookie is
+      // set (active org, org picker, or create-org). `redirect` carries a
+      // deep-link a guard bounced us from.
+      const next = params.get("redirect") || "/";
+      router.push(next);
+      router.refresh();
+    } catch {
+      // Network failure / timeout / anything that rejects: never leave the button
+      // spinning. Surface it and re-enable so the user can retry.
+      const msg = "We couldn't reach the server. Check your connection and try again.";
+      setError(msg);
+      toast.error("Sign-in failed", msg);
       setPending(false);
-      return;
     }
-
-    // Where to land is decided by the root router once the session cookie is
-    // set (active org, org picker, or create-org). `redirect` carries a
-    // deep-link a guard bounced us from.
-    const next = params.get("redirect") || "/";
-    router.push(next);
-    router.refresh();
   }
 
   return (
