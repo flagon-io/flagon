@@ -1,0 +1,169 @@
+export const metadata = {
+  title: "REST (OFREP)",
+  description:
+    "Evaluate flags with a plain HTTP request using the OpenFeature Remote Evaluation Protocol: endpoints, request, response, and errors.",
+};
+
+# REST (OFREP)
+
+If there is no OpenFeature SDK for your stack, or you just want a raw HTTP call,
+evaluate directly against the **OpenFeature Remote Evaluation Protocol (OFREP)**.
+This is the exact protocol the SDKs speak, so behavior is identical.
+
+All requests go to the Flagon API host and authenticate with an
+[SDK key](/concepts/sdk-keys):
+
+```http
+Authorization: Bearer flagon_sdk_...
+Content-Type: application/json
+```
+
+<Callout tone="note" title="Base URL">
+Examples use `https://api.flagon.io`. Running Flagon locally, the API is at
+`http://localhost:3002`.
+</Callout>
+
+## Evaluate one flag
+
+```http
+POST /ofrep/v1/evaluate/flags/{key}
+```
+
+The body carries the [evaluation context](/concepts/targeting#evaluation-context)
+under a `context` object:
+
+<CodeTabs
+  tabs={[
+    {
+      label: "cURL",
+      code: `curl -X POST "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout" \\
+  -H "Authorization: Bearer $FLAGON_SDK_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"context":{"targetingKey":"user-123","plan":"pro"}}'`,
+    },
+    {
+      label: "Node.js",
+      caption: "fetch",
+      code: `const res = await fetch(
+  "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout",
+  {
+    method: "POST",
+    headers: {
+      Authorization: \`Bearer \${process.env.FLAGON_SDK_KEY}\`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      context: { targetingKey: "user-123", plan: "pro" },
+    }),
+  },
+);
+
+const flag = await res.json();
+console.log(flag.value, flag.reason); // true "TARGETING_MATCH"`,
+    },
+    {
+      label: "Python",
+      caption: "requests",
+      code: `import os, requests
+
+res = requests.post(
+    "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout",
+    headers={"Authorization": f"Bearer {os.environ['FLAGON_SDK_KEY']}"},
+    json={"context": {"targetingKey": "user-123", "plan": "pro"}},
+)
+
+flag = res.json()
+print(flag["value"], flag["reason"])`,
+    },
+    {
+      label: "Go",
+      code: `body := strings.NewReader(\`{"context":{"targetingKey":"user-123","plan":"pro"}}\`)
+req, _ := http.NewRequest(
+    "POST",
+    "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout",
+    body,
+)
+req.Header.Set("Authorization", "Bearer "+os.Getenv("FLAGON_SDK_KEY"))
+req.Header.Set("Content-Type", "application/json")
+
+res, err := http.DefaultClient.Do(req)`,
+    },
+  ]}
+/>
+
+A successful response resolves the flag for that context:
+
+```json
+{
+  "key": "new-checkout",
+  "value": true,
+  "reason": "TARGETING_MATCH",
+  "variant": "on",
+  "metadata": {}
+}
+```
+
+The `value` is typed by the flag: a boolean, string, number, or JSON object. See
+[reasons](/concepts/flags#reasons) for what each `reason` means.
+
+## Evaluate every flag (bulk)
+
+To fetch every flag configured in the key's environment in one round trip, omit
+the key:
+
+```http
+POST /ofrep/v1/evaluate/flags
+```
+
+```bash
+curl -X POST "https://api.flagon.io/ofrep/v1/evaluate/flags" \
+  -H "Authorization: Bearer $FLAGON_SDK_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"context":{"targetingKey":"user-123","plan":"pro"}}'
+```
+
+The response is a `flags` array, each entry the same shape as a single
+evaluation:
+
+```json
+{
+  "flags": [
+    { "key": "new-checkout", "value": true, "reason": "TARGETING_MATCH", "variant": "on", "metadata": {} },
+    { "key": "theme", "value": "dark", "reason": "STATIC", "variant": "dark", "metadata": {} }
+  ]
+}
+```
+
+Bulk is how SDKs hydrate all flags at once. Fetch on startup (and refresh
+periodically), then evaluate from the result in memory rather than making a call
+per flag.
+
+## Errors
+
+| Status | `errorCode` | Meaning |
+| --- | --- | --- |
+| `401` | `AUTHENTICATION_ERROR` | Missing, malformed, or revoked SDK key. |
+| `404` | `FLAG_NOT_FOUND` | No flag with that key is configured in this environment. |
+| `429` | — | Too many requests; back off. A `Retry-After` header says for how long. |
+
+Error responses carry an `errorDetails` string with a human-readable
+explanation. On any error, an OpenFeature SDK falls back to the default value you
+passed; if you call OFREP directly, handle these statuses and fall back the same
+way, so a flag never takes down a request.
+
+## Notes on behavior
+
+- **The clock is the server's.** Time-based targeting evaluates against Flagon's
+  clock (`$currentTime`), so a client can't shift a scheduled rollout by sending
+  its own time.
+- **Archived flags still evaluate.** Only deleting a flag stops it resolving, so
+  old clients don't break mid-migration.
+- **Config is cached briefly.** A configuration change is live within a few
+  seconds, not necessarily the same millisecond.
+
+## Next
+
+- **[Evaluate with OpenFeature](/evaluate/openfeature)** — let an SDK handle
+  this for you.
+- **[Management API](/reference/management-api)** — create and configure flags
+  programmatically.

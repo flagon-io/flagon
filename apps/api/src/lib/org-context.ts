@@ -28,6 +28,22 @@ export type OrgContext = {
   actorUserId: string | null;
 };
 
+/**
+ * Resolve an org slug to its id with no authorization — for callers that have
+ * ALREADY authorized the request and just need the id (e.g. cache invalidation
+ * after a mutation). Returns null if the slug is unknown.
+ */
+export async function orgIdBySlug(slug: string): Promise<string | null> {
+  const row = (
+    await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.slug, slug))
+      .limit(1)
+  )[0];
+  return row?.id ?? null;
+}
+
 export async function resolveOrg(c: Context): Promise<OrgContext | Response> {
   const slug = c.req.param("org");
   if (!slug) return jsonError(c, 400, "Missing organization in the path.");

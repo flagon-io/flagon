@@ -22,6 +22,13 @@ const schema = z
     DATABASE_URL: z.string().min(1).optional(),
     APP_DATABASE_URL: z.string().min(1).optional(),
     SENTRY_DSN: z.string().url().optional(),
+    // OFREP eval hot path. The cache serves projected flag config for up to this
+    // long before reloading (staleness bound; a flag change propagates within
+    // it). The burst limiter caps evaluations per SDK key per window, per
+    // instance. Defaults suit a single pilot customer; raise for scale.
+    EVAL_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(15_000),
+    EVAL_RATE_LIMIT: z.coerce.number().int().positive().default(6_000),
+    EVAL_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   })
   .refine((e) => Boolean(e.DATABASE_URL || e.APP_DATABASE_URL), {
     message:

@@ -17,6 +17,7 @@ import { users } from "../../db/auth-tables.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
 import { resolveOrg } from "../../lib/org-context.js";
+import { invalidateEvalCacheOnWrite } from "../../lib/eval-invalidate.js";
 import { ensureEnvironments } from "../../flags/environments.js";
 import { recordRevision } from "../../flags/revisions.js";
 import { flagUsage, flagUsageSummaries, type FlagUsageSummary } from "../../flags/usage.js";
@@ -41,6 +42,9 @@ export const ARCHIVED_MESSAGE =
   "This flag is archived. Restore it before editing.";
 
 flags_.use("*", authContext);
+// A successful flag/variant/rule write invalidates the org's eval-cache entry so
+// changes go live at once (covers the nested variants/rules routers too).
+flags_.use("*", invalidateEvalCacheOnWrite);
 
 // Nested sub-resources of a flag. Params (org, key, envKey) propagate down.
 flags_.route("/:key/variants", variants_);

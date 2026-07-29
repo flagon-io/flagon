@@ -1,0 +1,70 @@
+export const metadata = {
+  title: "Flags and variants",
+  description:
+    "The building blocks: flag types, variants, the default and off values, and archiving.",
+};
+
+# Flags and variants
+
+A **flag** is a named decision your code asks Flagon to make. A **variant** is
+one of the possible answers. Every evaluation returns exactly one variant's
+value, plus a reason explaining why.
+
+## Flag types
+
+A flag has a type, and every variant's value must match it.
+
+| Type | Values | Typical use |
+| --- | --- | --- |
+| `boolean` | `true` / `false` | Turn a feature on or off. |
+| `string` | any text | Pick a copy variant, a theme, a plan tier. |
+| `number` | any number | A limit, a rollout size, a price point. |
+| `json` | any JSON object | Ship structured config as one flag. |
+
+A boolean flag is created for you with two variants, `on` and `off`. A
+multivariate flag (string, number, or json) can have as many variants as you
+need; you name each one and give it a value.
+
+## The default and off variants
+
+Each flag carries two per-environment choices:
+
+- The **default variant** is what a flag serves when it is enabled and no
+  targeting rule matches. It is the "everyone else" answer.
+- The **off variant** is what a flag serves when it is disabled in that
+  environment. Turning a flag off doesn't make it disappear; it makes every
+  evaluation resolve to this value.
+
+Keeping an explicit off variant means disabling a flag is predictable: you know
+exactly what your code will receive.
+
+## Reasons
+
+Every evaluation comes back with a `reason` so you can tell *why* a value was
+served:
+
+| Reason | Meaning |
+| --- | --- |
+| `STATIC` | The flag is enabled and served its default variant. |
+| `TARGETING_MATCH` | A targeting rule matched and chose the variant. |
+| `SPLIT` | A percentage rollout assigned the variant. |
+| `DISABLED` | The flag is off in this environment; the off variant was served. |
+| `ERROR` | Evaluation could not complete; your code's default value is used. |
+
+## Archiving
+
+When a flag has done its job, **archive** it. Archiving marks the flag as
+retired and hides it from the active list, but it keeps evaluating: any code
+still referencing the key resolves to its configured value, so an old client
+never breaks. Once you have removed every reference from your code, delete the
+flag to stop evaluation entirely.
+
+Archived flags are frozen. Restore a flag before editing its configuration
+again.
+
+## Next
+
+- **[Environments](/concepts/environments)** — the same flag, configured
+  separately per stage.
+- **[Targeting and segments](/concepts/targeting)** — serve different variants
+  to different audiences.

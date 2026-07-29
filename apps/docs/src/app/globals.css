@@ -1,0 +1,39 @@
+@import "tailwindcss";
+/* Relative, not the "@flagon/design/styles.css" package specifier: Turbopack's
+   dev CSS resolver does not honor the package exports map for @import. */
+@import "../../../../packages/design/src/styles.css";
+
+/*
+ * @flagon/design ships its components as raw source, so Tailwind has to scan
+ * that source for the utility classes they use, on top of this app's own.
+ * Path is relative to this file: four levels up is the repo root.
+ */
+@source "../../../../packages/design/src";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/*
+ * Flagon runs one theme, dark. The brand's near-black and off-white live here;
+ * the teal accent comes from Tailwind's built-in `teal-*` palette.
+ */
+:root {
+  --background: #09090b;
+  --foreground: #fafafa;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Anchored headings: offset scroll target so a linked heading isn't hidden
+   under the sticky top bar. */
+:where(h2, h3, h4)[id] {
+  scroll-margin-top: 6rem;
+}

@@ -1,0 +1,112 @@
+export const metadata = {
+  title: "Targeting and segments",
+  description:
+    "Serve different variants to different audiences with rules, conditions, percentage rollouts, and reusable segments.",
+};
+
+# Targeting and segments
+
+Targeting decides which variant a given evaluation receives. When a flag is
+enabled, Flagon walks its **rules** in order; the first rule whose conditions
+match serves its variant. If no rule matches, the flag serves its **default
+variant**.
+
+## Evaluation context
+
+Your app passes a **context** with every evaluation: what Flagon knows about the
+current user or request. It always includes a `targetingKey` (the stable
+identity used for consistent bucketing), plus any custom attributes you supply.
+
+```json
+{
+  "context": {
+    "targetingKey": "user-123",
+    "plan": "pro",
+    "email": "robin@flagon.io",
+    "app": { "version": "1.4.0" },
+    "country": "US"
+  }
+}
+```
+
+Attributes are yours to define; a rule references them by name. Nested values are
+reached with a dotted path, so `app.version` reads `1.4.0` above.
+
+<Callout tone="note" title="Flagon does not guess">
+Context is only what your application sends. Flagon does not auto-collect email,
+country, device, or OS. If a rule needs an attribute, pass it in the context.
+</Callout>
+
+## Rules
+
+A rule is an **IF / THEN**: if every condition matches, serve this variant. A
+condition compares one attribute with an operator against one or more values.
+
+For example, "serve `on` to anyone on the `pro` plan":
+
+- **Attribute**: `plan`
+- **Operator**: `equals`
+- **Value**: `pro`
+- **Serve**: `on`
+
+Rules are ordered. Drag to reorder them in the console; the first match wins, so
+put your most specific rules first.
+
+### Operators
+
+| Operator | Matches when the attribute… |
+| --- | --- |
+| `equals` / `not equals` | is (isn't) the value |
+| `is one of` / `is not one of` | is (isn't) in the list |
+| `contains` / `does not contain` | contains the substring |
+| `starts with` / `ends with` | has the prefix / suffix |
+| `>` `>=` `<` `<=` | compares numerically |
+| `before` / `after` | is an earlier / later moment (ISO date or epoch) |
+| `matches regex` | matches the regular expression |
+| `semver >` `>=` `=` `<=` `<` | compares as a version (`1.10.0` > `1.9.0`) |
+| `exists` / `does not exist` | is present (absent) in the context |
+
+Comparisons are forgiving about type: the string `"42"` and the number `42`
+compare equal, so you don't have to coerce context values yourself.
+
+### AND / OR groups
+
+Conditions in a rule are ANDed by default: all must match. For anything richer,
+nest **all** (AND) and **any** (OR) groups to any depth, for example "on the pro
+plan AND (in the US OR a beta tester)".
+
+## Percentage rollouts
+
+Instead of a single variant, a rule can serve a **weighted split**: give each
+variant a share of traffic, and Flagon assigns each context consistently by
+hashing its `targetingKey`. The same user always lands in the same bucket, so a
+50/50 rollout is stable across evaluations, not a coin flip per request.
+
+A rollout that serves `on` to 10% of users, `off` to the rest, gradually becomes
+a full launch as you raise the weight. Matches from a rollout carry the reason
+`SPLIT`.
+
+## Segments
+
+A **segment** is a named, reusable set of conditions, defined once and referenced
+from any rule. Define "beta users" as `email ends with @flagon.io OR plan is
+one of [pro, enterprise]`, then target that segment from as many flags as you
+like. Change the segment, and every rule that references it updates at once.
+
+Segments can reference other segments; Flagon guards against cycles, so a
+segment that (transitively) references itself simply doesn't match rather than
+looping.
+
+## Scheduling with time
+
+Because targeting can compare time, you can schedule a change without being
+awake for it. Flagon stamps each evaluation with the server's current time as
+`$currentTime`, so a rule like "`$currentTime` is `after` `2026-08-01T09:00:00Z`
+→ serve `on`" flips the flag on at that instant. The clock is the server's, so a
+client can't spoof it by sending its own time.
+
+## Next
+
+- **[Evaluate with OpenFeature](/evaluate/openfeature)** — pass context from
+  your app.
+- **[REST (OFREP)](/evaluate/rest)** — the exact request and response shape.

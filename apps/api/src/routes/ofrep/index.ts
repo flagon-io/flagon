@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { withOrg } from "../../db/tenant.js";
-import { loadEvaluationData } from "../../flags/config.js";
+import { env } from "../../env.js";
+import { getEvaluationData } from "../../flags/eval-cache.js";
 import { evaluate } from "../../flags/evaluate.js";
 import { recordEvaluations, type UsageEntry } from "../../flags/usage.js";
+import { createHotRateLimiter } from "../../lib/hot-rate-limit.js";
+import { tooManyRequests } from "../../lib/rate-limit.js";
 import {
   looksLikeSdkKey,
   resolveSdkKey,
@@ -28,6 +30,17 @@ import type {
  * data to the key's org; the pure engine (flags/evaluate.ts) does the rest.
  */
 export const ofrep = new Hono();
+
+/**
+ * Per-instance burst guardrail on evaluation, keyed by SDK key. In-memory on
+ * purpose (see hot-rate-limit.ts): a DB-backed check per eval would undo the
+ * eval-cache's whole point. Turns away runaway clients cheaply; precise global
+ * quotas and real DoS defense live elsewhere (billing, the edge/CDN).
+ */
+const evalLimiter = createHotRateLimiter({
+  limit: env.EVAL_RATE_LIMIT,
+  windowSeconds: env.EVAL_RATE_WINDOW_SECONDS,
+});
 
 async function authenticate(c: Context): Promise<SdkKeyIdentity | null> {
   const authorization = c.req.header("authorization");
@@ -110,17 +123,19 @@ ofrep.post("/v1/evaluate/flags/:key", async (c) => {
   const identity = await authenticate(c);
   if (!identity) return authError(c);
 
+  const limited = evalLimiter.check(identity.keyId);
+  if (!limited.ok) return tooManyRequests(c, limited);
+
   const key = c.req.param("key");
   const context = await readContext(c);
 
-  const outcome = await withOrg(identity.organizationId, async (tx) => {
-    const data = await loadEvaluationData(tx, identity.environmentId, key);
-    const flag = data.flags.find((f) => f.key === key);
-    if (!flag) return null;
-    return { result: evaluate(flag, context, data.segments), flagId: flag.id };
-  });
+  const data = await getEvaluationData(
+    identity.organizationId,
+    identity.environmentId,
+  );
+  const flag = data.flags.find((f) => f.key === key);
 
-  if (!outcome) {
+  if (!flag) {
     return c.json(
       {
         key,
@@ -131,11 +146,13 @@ ofrep.post("/v1/evaluate/flags/:key", async (c) => {
     );
   }
 
+  const result = evaluate(flag, context, data.segments);
+
   await record(c, identity.organizationId, identity.environmentId, [
-    usageEntry(outcome.flagId, outcome.result),
+    usageEntry(flag.id, result),
   ]);
 
-  return c.json(toOfrep(outcome.result));
+  return c.json(toOfrep(result));
 });
 
 // Bulk: all flags configured in the key's environment.
@@ -143,16 +160,19 @@ ofrep.post("/v1/evaluate/flags", async (c) => {
   const identity = await authenticate(c);
   if (!identity) return authError(c);
 
+  const limited = evalLimiter.check(identity.keyId);
+  if (!limited.ok) return tooManyRequests(c, limited);
+
   const context = await readContext(c);
 
-  const outcome = await withOrg(identity.organizationId, async (tx) => {
-    const data = await loadEvaluationData(tx, identity.environmentId);
-    const results = data.flags.map((flag) => evaluate(flag, context, data.segments));
-    const entries = data.flags.map((flag, i) => usageEntry(flag.id, results[i]));
-    return { results, entries };
-  });
+  const data = await getEvaluationData(
+    identity.organizationId,
+    identity.environmentId,
+  );
+  const results = data.flags.map((flag) => evaluate(flag, context, data.segments));
+  const entries = data.flags.map((flag, i) => usageEntry(flag.id, results[i]));
 
-  await record(c, identity.organizationId, identity.environmentId, outcome.entries);
+  await record(c, identity.organizationId, identity.environmentId, entries);
 
-  return c.json({ flags: outcome.results.map(toOfrep) });
+  return c.json({ flags: results.map(toOfrep) });
 });

@@ -6,6 +6,7 @@ import { segments } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
 import { resolveOrg } from "../../lib/org-context.js";
+import { invalidateEvalCacheOnWrite } from "../../lib/eval-invalidate.js";
 import { conditionsSchema } from "../../flags/schemas.js";
 import type { JsonValue } from "../../flags/types.js";
 
@@ -16,6 +17,9 @@ import type { JsonValue } from "../../flags/types.js";
 export const segments_ = new Hono();
 
 segments_.use("*", authContext);
+// A successful segment write invalidates the org's eval-cache entry (segments
+// are referenced by rules, so a segment change changes evaluation output).
+segments_.use("*", invalidateEvalCacheOnWrite);
 
 const slug = z
   .string()
