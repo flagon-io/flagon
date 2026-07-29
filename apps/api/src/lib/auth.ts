@@ -39,9 +39,14 @@ import { resolvePrimaryEmail } from "./user-emails.js";
 
 const email = createEmailSender();
 
-// Sibling origins allowed to drive auth. The API's OWN origin is its baseURL.
-const APP_URL = process.env.APP_URL ?? "http://localhost:3001";
-const WEB_URL = process.env.WEB_URL ?? "http://localhost:3000";
+// Sibling origins allowed to drive auth (CORS + BetterAuth trustedOrigins). Fall
+// back to the NEXT_PUBLIC_* names so the API trusts app./www. even when only
+// those are configured — otherwise cross-origin sign-in is rejected. The API's
+// OWN origin is its baseURL.
+const APP_URL =
+  process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001";
+const WEB_URL =
+  process.env.WEB_URL ?? process.env.NEXT_PUBLIC_WEB_URL ?? "http://localhost:3000";
 const SELF_URL =
   process.env.BETTER_AUTH_URL ?? `http://localhost:${process.env.PORT ?? "3002"}`;
 

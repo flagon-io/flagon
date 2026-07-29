@@ -23,10 +23,14 @@ import { cors } from "hono/cors";
  * to every origin. Splitting the two closes that: credentials are offered ONLY
  * to the trusted origins, and everyone else gets a credential-free wildcard.
  */
+// Fall back to the NEXT_PUBLIC_* names too: those are set on every project for
+// the Next apps, so honoring them here means the API trusts app./www. even when
+// only the public vars are configured (a real prod footgun otherwise — the
+// browser auth calls are credentialed and MUST get an echoed origin, not "*").
 const trusted = new Set(
   [
-    process.env.APP_URL ?? "http://localhost:3001",
-    process.env.WEB_URL ?? "http://localhost:3000",
+    process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001",
+    process.env.WEB_URL ?? process.env.NEXT_PUBLIC_WEB_URL ?? "http://localhost:3000",
   ].filter(Boolean),
 );
 
