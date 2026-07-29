@@ -103,8 +103,12 @@ async function fromCookie(c: Context): Promise<AuthIdentity> {
 
   const appUrl = process.env.APP_URL ?? "http://localhost:3001";
   try {
+    // Bounded: this cross-service call sits in front of every cookie-authed API
+    // request, so a slow/hung console must not hang the API. Timeout fails
+    // closed (the catch returns null -> 401), never open.
     const res = await fetch(`${appUrl}/api/auth/get-session`, {
       headers: { cookie },
+      signal: AbortSignal.timeout(2000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as {

@@ -9,7 +9,8 @@ import {
 import { evaluate } from "../../flags/evaluate.js";
 import { recordEvaluations, type UsageEntry } from "../../flags/usage.js";
 import { createDurableEvalLimiter } from "../../lib/durable-eval-limiter.js";
-import { tooManyRequests } from "../../lib/rate-limit.js";
+import { rateLimit, tooManyRequests } from "../../lib/rate-limit.js";
+import { clientIp } from "../../lib/http.js";
 import {
   looksLikeSdkKey,
   resolveSdkKey,
@@ -55,6 +56,25 @@ async function authenticate(c: Context): Promise<SdkKeyIdentity | null> {
   const token = authorization.slice(7).trim();
   if (!looksLikeSdkKey(token)) return null;
   return resolveSdkKey(token);
+}
+
+/**
+ * Resolve the SDK key, or return the response to send. A bad/absent key still
+ * costs a resolveSdkKey DB lookup, so a flood of invalid keys could hammer the
+ * database on this public hot path. Throttle repeated FAILURES by IP (mirroring
+ * the management API's failed-bearer backstop) before returning 401; a valid key
+ * never touches the limiter.
+ */
+async function requireSdkKey(c: Context): Promise<SdkKeyIdentity | Response> {
+  const identity = await authenticate(c);
+  if (identity) return identity;
+  const limited = await rateLimit({
+    key: `sdk-fail:${clientIp(c)}`,
+    limit: 60,
+    windowSeconds: 60,
+  });
+  if (!limited.ok) return tooManyRequests(c, limited);
+  return authError(c);
 }
 
 type ContextOrError =
@@ -167,8 +187,8 @@ function toBulkEntry(result: EvaluationResult): Record<string, unknown> {
 
 // Single flag.
 ofrep.post("/v1/evaluate/flags/:key", async (c) => {
-  const identity = await authenticate(c);
-  if (!identity) return authError(c);
+  const identity = await requireSdkKey(c);
+  if (identity instanceof Response) return identity;
 
   const limited = await evalLimiter.check(identity.keyId);
   if (!limited.ok) return tooManyRequests(c, limited);
@@ -219,8 +239,8 @@ ofrep.post("/v1/evaluate/flags/:key", async (c) => {
 
 // Bulk: all flags configured in the key's environment.
 ofrep.post("/v1/evaluate/flags", async (c) => {
-  const identity = await authenticate(c);
-  if (!identity) return authError(c);
+  const identity = await requireSdkKey(c);
+  if (identity instanceof Response) return identity;
 
   const limited = await evalLimiter.check(identity.keyId);
   if (!limited.ok) return tooManyRequests(c, limited);
