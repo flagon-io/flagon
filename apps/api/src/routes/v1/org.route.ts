@@ -21,24 +21,37 @@ export const org_ = new Hono();
 
 org_.use("*", authContext);
 
-const updateOrg = z.object({
-  name: z.string().trim().min(1).max(120),
-  slug: z.string().trim().min(1).max(48),
-});
+const updateOrg = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    slug: z.string().trim().min(1).max(48).optional(),
+    projectCreationPolicy: z.enum(["managers", "members"]).optional(),
+  })
+  .refine(
+    (d) =>
+      d.name !== undefined || d.slug !== undefined || d.projectCreationPolicy !== undefined,
+    { message: "Provide at least one field to update." },
+  );
 
 registerComponentSchema(
   "OrgResponse",
   z.object({
-    org: z.object({ id: z.string(), name: z.string(), slug: z.string(), plan: z.string() }),
+    org: z.object({
+      id: z.string(),
+      name: z.string(),
+      slug: z.string(),
+      plan: z.string(),
+      projectCreationPolicy: z.string(),
+    }),
   }),
 );
 
 registerRoute({
   method: "patch",
   path: "/v1/orgs/{org}",
-  summary: "Rename an organization",
+  summary: "Update organization settings",
   description:
-    "Update an organization's display name and URL slug. Owner/admin only. The plan is not settable here — it changes only through billing.",
+    "Update an organization's display name, URL slug, and/or its project-creation policy. Owner/admin only. The plan is not settable here — it changes only through billing.",
   tags: ["Organizations"],
   auth: true,
   paramDescriptions: { org: "The organization slug." },
@@ -59,29 +72,46 @@ org_.patch("/", async (c) => {
 
   const parsed = updateOrg.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
-  const name = parsed.data.name.trim();
-  const slug = parsed.data.slug.trim().toLowerCase();
 
-  if (!isValidSlug(slug) || isReserved(slug))
-    return jsonError(c, 422, "That URL is invalid or reserved.");
+  // Apply only the fields that were sent — the console rename form submits
+  // name + slug; the project-creation control submits just the policy.
+  const updates: {
+    name?: string;
+    slug?: string;
+    projectCreationPolicy?: "managers" | "members";
+  } = {};
 
-  // Uniqueness (excluding this org).
-  const clash = await db
-    .select({ id: organizations.id })
-    .from(organizations)
-    .where(and(eq(organizations.slug, slug), ne(organizations.id, ctx.orgId)))
-    .limit(1);
-  if (clash.length) return jsonError(c, 409, "That URL is already taken.");
+  if (parsed.data.name !== undefined) updates.name = parsed.data.name.trim();
+
+  if (parsed.data.slug !== undefined) {
+    const slug = parsed.data.slug.trim().toLowerCase();
+    if (!isValidSlug(slug) || isReserved(slug))
+      return jsonError(c, 422, "That URL is invalid or reserved.");
+
+    // Uniqueness (excluding this org).
+    const clash = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(and(eq(organizations.slug, slug), ne(organizations.id, ctx.orgId)))
+      .limit(1);
+    if (clash.length) return jsonError(c, 409, "That URL is already taken.");
+    updates.slug = slug;
+  }
+
+  if (parsed.data.projectCreationPolicy !== undefined) {
+    updates.projectCreationPolicy = parsed.data.projectCreationPolicy;
+  }
 
   const [row] = await db
     .update(organizations)
-    .set({ name, slug })
+    .set(updates)
     .where(eq(organizations.id, ctx.orgId))
     .returning({
       id: organizations.id,
       name: organizations.name,
       slug: organizations.slug,
       plan: organizations.plan,
+      projectCreationPolicy: organizations.projectCreationPolicy,
     });
 
   return c.json({ org: row });

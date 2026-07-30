@@ -348,10 +348,31 @@ export type ApiToken = {
   expiresAt: string | null;
 };
 
+type OrgSettings = {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  projectCreationPolicy: string;
+};
+
 /** Rename an organization (name + slug). Owner/admin. */
 export async function renameOrg(slug: string, body: { name: string; slug: string }) {
-  return unwrap<{ org: { id: string; name: string; slug: string; plan: string } }>(
+  return unwrap<{ org: OrgSettings }>(
     await apiFetch(`/v1/orgs/${slug}`, { method: "PATCH", body: JSON.stringify(body) }),
+  );
+}
+
+/** Set who may create projects in the org ('managers' | 'members'). Owner/admin. */
+export async function setProjectCreationPolicy(
+  slug: string,
+  policy: "managers" | "members",
+) {
+  return unwrap<{ org: OrgSettings }>(
+    await apiFetch(`/v1/orgs/${slug}`, {
+      method: "PATCH",
+      body: JSON.stringify({ projectCreationPolicy: policy }),
+    }),
   );
 }
 

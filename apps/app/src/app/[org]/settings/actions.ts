@@ -1,6 +1,7 @@
 "use server";
 
-import { renameOrg } from "@/lib/flags-api";
+import { revalidatePath } from "next/cache";
+import { renameOrg, setProjectCreationPolicy } from "@/lib/flags-api";
 
 type Result = { error?: string; ok?: string; newSlug?: string };
 
@@ -23,4 +24,18 @@ export async function updateOrgAction(formData: FormData): Promise<Result> {
     ok: "Organization updated.",
     newSlug: newSlug && newSlug !== currentSlug ? newSlug : undefined,
   };
+}
+
+/**
+ * Set the org's project-creation policy (GitHub-style base permission). The API
+ * authorizes owner/admin and writes; we revalidate so the setting re-renders.
+ */
+export async function updateProjectCreationPolicyAction(
+  slug: string,
+  policy: "managers" | "members",
+): Promise<{ error?: string; ok?: string }> {
+  const { error } = await setProjectCreationPolicy(slug, policy);
+  if (error) return { error };
+  revalidatePath(`/${slug}/settings`);
+  return { ok: "Project creation updated." };
 }

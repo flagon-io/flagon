@@ -131,6 +131,9 @@ export const organizations = pgTable(
     stripeCustomerId: text("stripe_customer_id"),
     stripeSubscriptionId: text("stripe_subscription_id"),
     subscriptionStatus: text("subscription_status"),
+    // Org base permission: who may create projects ('managers' | 'members').
+    // See apps/app/src/db/schema.ts (DDL owner) + migration 0002.
+    projectCreationPolicy: text("project_creation_policy").notNull().default("managers"),
     metadata: text("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

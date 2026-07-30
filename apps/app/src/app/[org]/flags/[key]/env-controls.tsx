@@ -152,7 +152,13 @@ export function EnvCard({
             onValueChange={apply}
             options={options}
             ariaLabel={`${env.name} feature state`}
-            className={`w-auto! ${readOnly ? "pointer-events-none opacity-60" : pending ? "pointer-events-none" : ""}`}
+            className={`w-auto! transition-opacity ${
+              readOnly
+                ? "pointer-events-none opacity-60"
+                : pending
+                  ? "pointer-events-none animate-pulse opacity-70"
+                  : ""
+            }`}
           />
           <IconToggle
             title="Targeting rules"

@@ -22,6 +22,8 @@ export type OrgMembership = {
   // `isOrgLocked` in @/lib/billing.
   stripeCustomerId: string | null;
   subscriptionStatus: string | null;
+  /** Org base permission for who may create projects ('managers' | 'members'). */
+  projectCreationPolicy: string;
 };
 
 /**
@@ -41,6 +43,7 @@ export const getUserOrganizations = cache(async (
       logo: organizations.logo,
       stripeCustomerId: organizations.stripeCustomerId,
       subscriptionStatus: organizations.subscriptionStatus,
+      projectCreationPolicy: organizations.projectCreationPolicy,
     })
     .from(members)
     .innerJoin(organizations, eq(members.organizationId, organizations.id))
@@ -67,6 +70,7 @@ export const getMembershipBySlug = cache(async (
       logo: organizations.logo,
       stripeCustomerId: organizations.stripeCustomerId,
       subscriptionStatus: organizations.subscriptionStatus,
+      projectCreationPolicy: organizations.projectCreationPolicy,
     })
     .from(members)
     .innerJoin(organizations, eq(members.organizationId, organizations.id))

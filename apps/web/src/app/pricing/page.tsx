@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { brand, GridBackdrop } from "@flagon/design";
+import { BleedBand, brand, GridBackdrop } from "@flagon/design";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { PricingTable } from "./pricing-table";
@@ -22,7 +22,7 @@ export default function PricingPage() {
       <SiteHeader />
 
       <main className="relative z-10 flex-1 pb-20">
-        <div className="mx-auto w-full max-w-3xl px-6 pt-12 pb-16 text-center">
+        <div className="mx-auto w-full max-w-3xl px-6 pt-24 pb-16 text-center">
           <h1 className="text-4xl font-semibold tracking-tight text-zinc-50 sm:text-5xl">
             Simple, usage-based pricing
           </h1>
@@ -35,12 +35,14 @@ export default function PricingPage() {
 
         <PricingTable />
 
-        <div className="mx-auto mt-10 max-w-2xl px-6 text-center text-sm text-zinc-500">
-          <p>
+        {/* Full-bleed strip directly under the table: the note gets the whole
+            width so it sits on one line instead of wrapping for no reason. */}
+        <BleedBand>
+          <p className="px-6 py-4 text-center text-sm text-zinc-500">
             Your plan fee is a usage credit. You are only billed beyond it, and
             spending limits keep a bill from ever surprising you.
           </p>
-        </div>
+        </BleedBand>
 
         {/* Self-host: it exists, but make the honest case for letting us run it. */}
         <div className="mx-auto mt-20 max-w-2xl px-6 text-center">

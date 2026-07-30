@@ -25,12 +25,41 @@ export type RateLimitResult = {
   retryAfterSeconds: number;
 };
 
+/**
+ * Prune rate-limit rows whose window ended long ago. A key past its window is
+ * treated as fresh on next use, so old rows carry no meaning — without a sweep
+ * the table grows one row per distinct key (every `sdk-fail:<ip>`, etc.) forever.
+ * Best-effort and self-contained: no external cron required (works self-hosted),
+ * and callable directly if you'd rather drive it from a scheduled job.
+ */
+export async function sweepRateLimits(olderThanSeconds = 86_400): Promise<number> {
+  const cutoff = Math.max(60, Math.floor(olderThanSeconds));
+  try {
+    const res = (await db.execute(
+      sql.raw(
+        `DELETE FROM rate_limits WHERE window_start < now() - interval '${cutoff} seconds'`,
+      ),
+    )) as unknown as { count?: number };
+    return res?.count ?? 0;
+  } catch (err) {
+    logger.warn("rate limit sweep failed", { err });
+    return 0;
+  }
+}
+
+// Fire the sweep on ~1 in 500 checks, without awaiting it, so the table stays
+// bounded automatically: busier instances (more keys) sweep more often.
+function maybeSweep(): void {
+  if (Math.random() < 0.002) void sweepRateLimits();
+}
+
 export async function rateLimit(opts: {
   key: string;
   limit: number;
   windowSeconds: number;
 }): Promise<RateLimitResult> {
   const { key, limit } = opts;
+  maybeSweep();
   // Trusted integer from our own call sites (never user input), so inlining it
   // into the interval literal is safe and sidesteps parameter-type ambiguity.
   const windowSeconds = Math.max(1, Math.floor(opts.windowSeconds));
@@ -105,6 +134,7 @@ export async function reserveRateLimit(opts: {
   windowSeconds: number;
 }): Promise<ReserveResult> {
   const { key, limit } = opts;
+  maybeSweep();
   const amount = Math.max(1, Math.floor(opts.amount));
   const windowSeconds = Math.max(1, Math.floor(opts.windowSeconds));
   const expired = sql.raw(

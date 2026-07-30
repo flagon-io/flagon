@@ -392,6 +392,68 @@ export const flagRevisions = pgTable(
 );
 
 /**
+ * A Flagon org's connection to a GitHub App installation. An org can connect
+ * several (Vercel-style); a project picks a repo from one of them. Ordinary
+ * tenant data (org-scoped, RLS): we store the installation id + account metadata
+ * only, NEVER a token — installation tokens are minted on demand from the App
+ * private key (see lib/github). GitHub numeric ids are stored as text (no math
+ * on them, no precision worries).
+ */
+export const githubInstallations = pgTable(
+  "github_installations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    installationId: text("installation_id").notNull(),
+    accountLogin: text("account_login").notNull(),
+    accountType: text("account_type").notNull(),
+    accountAvatarUrl: text("account_avatar_url"),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("github_installations_org_install_key").on(
+      t.organizationId,
+      t.installationId,
+    ),
+    index("github_installations_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * A project: the org's foundational primitive, built on a GitHub repo (Vercel
+ * style). Almost everything else keys off a project. Tenant data (org-scoped,
+ * RLS). The repo fields are denormalized from GitHub so a project survives a
+ * disconnect; `githubInstallationId` is nullable and SET NULL on disconnect.
+ */
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    githubInstallationId: uuid("github_installation_id").references(
+      () => githubInstallations.id,
+      { onDelete: "set null" },
+    ),
+    repoId: text("repo_id"),
+    repoFullName: text("repo_full_name"),
+    repoDefaultBranch: text("repo_default_branch"),
+    repoPrivate: boolean("repo_private").notNull().default(false),
+    rootDirectory: text("root_directory").notNull().default(""),
+    framework: text("framework"),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("projects_org_key_key").on(t.organizationId, t.key),
+    index("projects_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
  * Per-day evaluation counts, bucketed by (flag, environment, served variant,
  * reason). The OFREP endpoints upsert into this at eval time so the console can
  * show how each flag is actually being used. Tenant data (org-scoped, RLS).
@@ -441,6 +503,8 @@ export type Segment = typeof segments.$inferSelect;
 export type FlagRule = typeof flagRules.$inferSelect;
 export type SdkKey = typeof sdkKeys.$inferSelect;
 export type FlagRevision = typeof flagRevisions.$inferSelect;
+export type GithubInstallation = typeof githubInstallations.$inferSelect;
+export type Project = typeof projects.$inferSelect;
 
 /** Everything the migrator and query layer should know about. */
 export const schema = {
@@ -456,6 +520,8 @@ export const schema = {
   flagRules,
   sdkKeys,
   flagRevisions,
+  githubInstallations,
+  projects,
 };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm

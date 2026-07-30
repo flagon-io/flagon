@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { OrgGeneralForm } from "./general-form";
+import { ProjectCreationForm } from "./project-creation-form";
 
 export const metadata: Metadata = { title: "General · Organization settings" };
 
@@ -21,7 +22,7 @@ export default async function OrgGeneralSettingsPage({
   const canManage = canManageOrg(membership.role);
 
   return (
-    <div>
+    <div className="flex flex-col gap-6">
       <SettingsHeader
         title="Organization"
         description="Your organization's name, URL, and plan."
@@ -38,6 +39,21 @@ export default async function OrgGeneralSettingsPage({
           currentSlug={membership.slug}
           initialName={membership.name}
           initialPlan={membership.plan}
+          canManage={canManage}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Project creation"
+        description={
+          canManage
+            ? "Choose who can create projects. Owners and admins always can."
+            : "Who can create projects in this organization."
+        }
+      >
+        <ProjectCreationForm
+          slug={membership.slug}
+          initialPolicy={membership.projectCreationPolicy}
           canManage={canManage}
         />
       </SettingsSection>

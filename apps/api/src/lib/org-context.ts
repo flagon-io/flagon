@@ -27,6 +27,8 @@ export type OrgContext = {
   /** Member role, or "owner" for an org token. Actor user id for the audit log. */
   role: string;
   actorUserId: string | null;
+  /** Org base permission for project creation ('managers' | 'members'). */
+  projectCreationPolicy: string;
 };
 
 /**
@@ -72,6 +74,21 @@ export function requireManager(c: Context, ctx: OrgContext): Response | null {
   return null;
 }
 
+/**
+ * Gate project creation to the org's base permission (GitHub-style). Owners and
+ * admins may always create; ordinary members may only when the org has opened
+ * creation up ('members'). Returns a 403 Response to short-circuit, or null.
+ */
+export function requireProjectCreator(c: Context, ctx: OrgContext): Response | null {
+  if (isManagerRole(ctx.role)) return null;
+  if (ctx.projectCreationPolicy === "members") return null;
+  return jsonError(
+    c,
+    403,
+    "Only owners and admins can create projects in this organization.",
+  );
+}
+
 export async function resolveOrg(
   c: Context,
   opts: { allowLocked?: boolean } = {},
@@ -95,6 +112,7 @@ export async function resolveOrg(
         slug: organizations.slug,
         plan: organizations.plan,
         subscriptionStatus: organizations.subscriptionStatus,
+        projectCreationPolicy: organizations.projectCreationPolicy,
       })
       .from(organizations)
       .where(eq(organizations.slug, slug))
@@ -123,7 +141,13 @@ export async function resolveOrg(
         "This token is not authorized for that organization.",
       );
     }
-    return { orgId: org.id, orgSlug: org.slug, role: "owner", actorUserId: null };
+    return {
+      orgId: org.id,
+      orgSlug: org.slug,
+      role: "owner",
+      actorUserId: null,
+      projectCreationPolicy: org.projectCreationPolicy,
+    };
   }
 
   const membership = (
@@ -144,5 +168,6 @@ export async function resolveOrg(
     orgSlug: org.slug,
     role: membership.role,
     actorUserId: auth.user.id,
+    projectCreationPolicy: org.projectCreationPolicy,
   };
 }

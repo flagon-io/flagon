@@ -15,6 +15,7 @@ import {
   CreditCard,
   Flag,
   FlaskConical,
+  Globe,
   KeyRound,
   LifeBuoy,
   Logs,
@@ -168,8 +169,10 @@ function buildNav(base: string): {
         // work on events across every product. Broad enough that it supersedes
         // Runbooks, which is why there is no separate Runbooks entry.
         { kind: "soon", label: "Automations", icon: Workflow },
+        // Org-level integration hub (source providers today; Slack, issue
+        // tracking, observability to follow). Scoped per purpose, not per vendor.
+        { kind: "link", label: "Integrations", icon: Plug, href: `${base}/integrations` },
         { kind: "soon", label: "Teams", icon: Users },
-        { kind: "soon", label: "Integrations", icon: Plug },
       ],
       // Reliability suite (Better Stack-style, but Flagon's own product): the
       // play is Incidents — they feed the Status Page and drive On-call.
@@ -214,7 +217,39 @@ export function WorkspaceSidebar({
 
   const base = `/${current.slug}`;
   const { sections, areas } = buildNav(base);
-  const activeArea = areas.find((a) => inArea(pathname, a));
+  const staticArea = areas.find((a) => inArea(pathname, a));
+
+  // A per-project area is dynamic (keyed on the :project slug in the path), so it
+  // is built here rather than in the static buildNav. Overview is real today;
+  // the rest are "Soon" placeholders that later phases fill in.
+  const projectKey = pathname.startsWith(`${base}/projects/`)
+    ? pathname.slice(`${base}/projects/`.length).split("/")[0]
+    : null;
+  const projectBase = projectKey ? `${base}/projects/${projectKey}` : "";
+  const activeArea: NavArea | undefined = projectKey
+    ? {
+        key: `project:${projectKey}`,
+        label: projectKey,
+        icon: Boxes,
+        href: projectBase,
+        groups: [
+          {
+            items: [
+              { label: "Overview", icon: Boxes, href: projectBase },
+              { label: "Deployments", icon: Rocket, soon: true },
+              { label: "Domains", icon: Globe, soon: true },
+            ],
+          },
+          {
+            heading: "Settings",
+            items: [
+              { label: "General", icon: SlidersHorizontal, soon: true },
+              { label: "Environment Variables", icon: KeyRound, soon: true },
+            ],
+          },
+        ],
+      }
+    : staticArea;
 
   // The nav swaps between the root and a feature's sub-nav in place. Remember the
   // last view (root = depth 0, inside an area = depth 1) so the incoming panel

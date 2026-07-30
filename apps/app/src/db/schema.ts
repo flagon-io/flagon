@@ -148,6 +148,9 @@ export const organizations = pgTable("organizations", {
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   subscriptionStatus: text("subscription_status"),
+  // Org base permission (GitHub-style): who may create projects. 'managers'
+  // (owner/admin) by default; 'members' opens it to any member. Set via the API.
+  projectCreationPolicy: text("project_creation_policy").notNull().default("managers"),
   // BetterAuth stores arbitrary org metadata as a JSON string here.
   metadata: text("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true })

@@ -16,6 +16,7 @@
     "react-dom": "^19"
   },
   "dependencies": {
+    "@icons-pack/react-simple-icons": "^13.13.0",
     "lucide-react": "^1.27.0",
     "radix-ui": "^1.6.7"
   }

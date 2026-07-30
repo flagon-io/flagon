@@ -12,6 +12,8 @@ import { billing_ } from "./billing.route.js";
 import { org_ } from "./org.route.js";
 import { orgTokens_ } from "./tokens.route.js";
 import { emailVerify_ } from "./emails.route.js";
+import { github_, githubSetup_ } from "./github.route.js";
+import { projects_ } from "./projects.route.js";
 import { managementWriteLimit } from "../../lib/management-rate-limit.js";
 
 export const v1 = new Hono();
@@ -21,6 +23,9 @@ v1.route("/waitlist", waitlist);
 v1.route("/me", me);
 // Public (token-authed) secondary-email confirmation link target.
 v1.route("/email/verify", emailVerify_);
+// GitHub App setup ingest: NOT org-scoped in the path (the fixed post-install
+// redirect resolves its org from a signed state, then checks membership).
+v1.route("/integrations/github", githubSetup_);
 
 // Org-scoped management surface: /v1/orgs/:org/*. The console and org-token API
 // consumers manage the flags product here; each handler authorizes the org and
@@ -37,6 +42,8 @@ orgs.route("/:org/environments", environments_);
 orgs.route("/:org/members", members_);
 orgs.route("/:org/billing", billing_);
 orgs.route("/:org/tokens", orgTokens_);
+orgs.route("/:org/integrations/github", github_);
+orgs.route("/:org/projects", projects_);
 // The org resource itself (PATCH /:org rename). Registered last so the more
 // specific sub-resource routes above take precedence.
 orgs.route("/:org", org_);
