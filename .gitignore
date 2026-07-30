@@ -16,6 +16,11 @@ out/
 .env.copy
 !.env.example
 
+# secrets / keys — never commit
+*.pem
+*.key
+*.p8
+
 # misc
 .DS_Store
 *.log
