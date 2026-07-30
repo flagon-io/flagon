@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "@/lib/auth";
+import { PROJECTS_ENABLED } from "@/lib/features";
 import { startGithubConnection } from "@/lib/projects-api";
 
 /**
@@ -12,6 +13,7 @@ import { startGithubConnection } from "@/lib/projects-api";
  */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
+  if (!PROJECTS_ENABLED) return NextResponse.redirect(new URL("/", url.origin));
   const installationId = url.searchParams.get("installation_id");
   const state = url.searchParams.get("state") ?? "";
 

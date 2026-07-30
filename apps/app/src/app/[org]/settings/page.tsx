@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
+import { PROJECTS_ENABLED } from "@/lib/features";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { OrgGeneralForm } from "./general-form";
 import { ProjectCreationForm } from "./project-creation-form";
@@ -43,20 +44,22 @@ export default async function OrgGeneralSettingsPage({
         />
       </SettingsSection>
 
-      <SettingsSection
-        title="Project creation"
-        description={
-          canManage
-            ? "Choose who can create projects. Owners and admins always can."
-            : "Who can create projects in this organization."
-        }
-      >
-        <ProjectCreationForm
-          slug={membership.slug}
-          initialPolicy={membership.projectCreationPolicy}
-          canManage={canManage}
-        />
-      </SettingsSection>
+      {PROJECTS_ENABLED ? (
+        <SettingsSection
+          title="Project creation"
+          description={
+            canManage
+              ? "Choose who can create projects. Owners and admins always can."
+              : "Who can create projects in this organization."
+          }
+        >
+          <ProjectCreationForm
+            slug={membership.slug}
+            initialPolicy={membership.projectCreationPolicy}
+            canManage={canManage}
+          />
+        </SettingsSection>
+      ) : null}
     </div>
   );
 }

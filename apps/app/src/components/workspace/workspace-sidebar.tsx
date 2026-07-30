@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { PROJECTS_ENABLED } from "@/lib/features";
 import {
   Activity,
   Archive,
@@ -158,7 +159,11 @@ function buildNav(base: string): {
     areas: [flags, settings],
     sections: [
       [
-        { kind: "link", label: "Projects", icon: Boxes, href: base },
+        // Projects (+ its Integrations hub) is a WIP feature — shown as a link
+        // when enabled, otherwise a "soon" placeholder. See @/lib/features.
+        PROJECTS_ENABLED
+          ? { kind: "link", label: "Projects", icon: Boxes, href: base }
+          : { kind: "soon", label: "Projects", icon: Boxes },
         { kind: "soon", label: "Packages", icon: Package },
         { kind: "soon", label: "Deployments", icon: Rocket },
         { kind: "soon", label: "Logs", icon: Logs },
@@ -170,8 +175,10 @@ function buildNav(base: string): {
         // Runbooks, which is why there is no separate Runbooks entry.
         { kind: "soon", label: "Automations", icon: Workflow },
         // Org-level integration hub (source providers today; Slack, issue
-        // tracking, observability to follow). Scoped per purpose, not per vendor.
-        { kind: "link", label: "Integrations", icon: Plug, href: `${base}/integrations` },
+        // tracking, observability to follow). Part of the Projects WIP feature.
+        ...(PROJECTS_ENABLED
+          ? [{ kind: "link", label: "Integrations", icon: Plug, href: `${base}/integrations` } as const]
+          : []),
         { kind: "soon", label: "Teams", icon: Users },
       ],
       // Reliability suite (Better Stack-style, but Flagon's own product): the
@@ -222,9 +229,10 @@ export function WorkspaceSidebar({
   // A per-project area is dynamic (keyed on the :project slug in the path), so it
   // is built here rather than in the static buildNav. Overview is real today;
   // the rest are "Soon" placeholders that later phases fill in.
-  const projectKey = pathname.startsWith(`${base}/projects/`)
-    ? pathname.slice(`${base}/projects/`.length).split("/")[0]
-    : null;
+  const projectKey =
+    PROJECTS_ENABLED && pathname.startsWith(`${base}/projects/`)
+      ? pathname.slice(`${base}/projects/`.length).split("/")[0]
+      : null;
   const projectBase = projectKey ? `${base}/projects/${projectKey}` : "";
   const activeArea: NavArea | undefined = projectKey
     ? {

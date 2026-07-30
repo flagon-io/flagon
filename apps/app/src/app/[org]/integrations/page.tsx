@@ -1,6 +1,7 @@
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Bell, CircleDot, LineChart } from "lucide-react";
 import { getSession } from "@/lib/auth";
+import { PROJECTS_ENABLED } from "@/lib/features";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { listGithubInstallations } from "@/lib/projects-api";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
@@ -18,6 +19,8 @@ export default async function IntegrationsPage({
 }: {
   params: Promise<{ org: string }>;
 }) {
+  if (!PROJECTS_ENABLED) notFound();
+
   const { org: slug } = await params;
   const session = await getSession();
   if (!session) redirect("/login");

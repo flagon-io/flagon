@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { PROJECTS_ENABLED } from "@/lib/features";
 import { getMembershipBySlug } from "@/lib/org";
 import { getProject } from "@/lib/projects-api";
 
@@ -16,6 +17,8 @@ export default async function ProjectLayout({
   children: ReactNode;
   params: Promise<{ org: string; project: string }>;
 }) {
+  if (!PROJECTS_ENABLED) notFound();
+
   const { org: slug, project: key } = await params;
   const session = await getSession();
   if (!session) redirect("/login");
