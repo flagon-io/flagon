@@ -8,15 +8,19 @@ import {
   createRule,
   createSdkKey,
   createSegment,
+  createVariant,
   deleteEntity,
   deleteFlag,
   deleteRule,
   deleteSegment,
+  deleteVariant,
   replaceRules,
   revokeSdkKey,
   setFlagEnvironment,
   updateFlagMeta,
+  updateSdkKey,
   updateSegment,
+  updateVariant,
   type FlagType,
   type Predicate,
   type Serve,
@@ -75,6 +79,57 @@ export async function setDefaultServeAction(
   defaultServe: Serve,
 ): Promise<{ error?: string }> {
   const res = await setFlagEnvironment(slug, key, envKey, { defaultServe });
+  if (res.error) return { error: res.error };
+  revalidatePath(`/${slug}/flags/${key}`);
+  return {};
+}
+
+/**
+ * Set a multivariate flag's "state" in one environment from the segmented
+ * control: either off (enabled:false, serves the off value) or a served variant
+ * (enabled:true + that variant as the default serve), in a single atomic PATCH.
+ */
+export async function setFeatureStateAction(
+  slug: string,
+  key: string,
+  envKey: string,
+  body: { enabled: boolean; defaultServe?: Serve },
+): Promise<{ error?: string }> {
+  const res = await setFlagEnvironment(slug, key, envKey, body);
+  if (res.error) return { error: res.error };
+  revalidatePath(`/${slug}/flags/${key}`);
+  return {};
+}
+
+export async function createVariantAction(
+  slug: string,
+  key: string,
+  body: { value: unknown; label?: string | null },
+): Promise<{ error?: string }> {
+  const res = await createVariant(slug, key, body);
+  if (res.error) return { error: res.error };
+  revalidatePath(`/${slug}/flags/${key}`);
+  return {};
+}
+
+export async function updateVariantAction(
+  slug: string,
+  key: string,
+  variantKey: string,
+  body: { value?: unknown; label?: string | null },
+): Promise<{ error?: string }> {
+  const res = await updateVariant(slug, key, variantKey, body);
+  if (res.error) return { error: res.error };
+  revalidatePath(`/${slug}/flags/${key}`);
+  return {};
+}
+
+export async function deleteVariantAction(
+  slug: string,
+  key: string,
+  variantKey: string,
+): Promise<{ error?: string }> {
+  const res = await deleteVariant(slug, key, variantKey);
   if (res.error) return { error: res.error };
   revalidatePath(`/${slug}/flags/${key}`);
   return {};
@@ -139,6 +194,17 @@ export async function createSdkKeyAction(
   if (res.error) return { error: res.error };
   // Client keys are retrievable, so no need to surface the plaintext here; the
   // refreshed keys list renders it with a copy button.
+  revalidatePath(`/${slug}/flags/keys`);
+  return {};
+}
+
+export async function updateSdkKeyAction(
+  slug: string,
+  id: string,
+  name: string,
+): Promise<{ error?: string }> {
+  const res = await updateSdkKey(slug, id, { name });
+  if (res.error) return { error: res.error };
   revalidatePath(`/${slug}/flags/keys`);
   return {};
 }

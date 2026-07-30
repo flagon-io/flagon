@@ -132,19 +132,22 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
       return <CodeBlock raw={raw} label={label} />;
     },
     table: (props) => (
-      <div className="my-6 overflow-x-auto">
+      <div className="my-6 overflow-x-auto rounded-lg border border-white/10">
         <table className="w-full border-collapse text-sm" {...props} />
       </div>
     ),
-    thead: (props) => <thead {...props} />,
+    thead: (props) => <thead className="bg-white/4" {...props} />,
+    tr: (props) => (
+      <tr className="border-b border-white/8 last:border-0" {...props} />
+    ),
     th: (props) => (
       <th
-        className="border-b border-white/15 px-3 py-2 text-left font-semibold text-zinc-300"
+        className="px-3.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-400"
         {...props}
       />
     ),
     td: (props) => (
-      <td className="border-b border-white/5 px-3 py-2 align-top text-zinc-400" {...props} />
+      <td className="px-3.5 py-2.5 align-top text-zinc-400 [&_code]:whitespace-nowrap" {...props} />
     ),
   };
 }

@@ -15,6 +15,7 @@ import {
   Textarea,
 } from "@flagon/design";
 import { createFlagAction } from "./actions";
+import { JsonEditor } from "./json-editor";
 import type { FlagType } from "@/lib/flags-api";
 
 const TYPES: { value: string; label: string }[] = [
@@ -163,18 +164,23 @@ function CreateFlagDialog({ slug, onClose }: { slug: string; onClose: () => void
                           </button>
                         ) : null}
                       </div>
-                      <Textarea
-                        value={v.value}
-                        onChange={(e) => setVariant(i, { value: e.target.value })}
-                        placeholder={VALUE_PLACEHOLDER.json}
-                        rows={4}
-                        className="font-mono text-xs"
-                      />
+                      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-600">
+                        Label (optional)
+                      </span>
                       <Input
                         value={v.label}
                         onChange={(e) => setVariant(i, { label: e.target.value })}
-                        placeholder="Label (optional)"
-                        className="mt-2"
+                        placeholder={`Variant ${i + 1}`}
+                        aria-label={`Variant ${i + 1} label`}
+                        className="mb-3 max-w-xs"
+                      />
+                      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-600">
+                        Value
+                      </span>
+                      <JsonEditor
+                        value={v.value}
+                        onChange={(val) => setVariant(i, { value: val })}
+                        ariaLabel={`Variant ${i + 1} value`}
                       />
                     </div>
                   ))

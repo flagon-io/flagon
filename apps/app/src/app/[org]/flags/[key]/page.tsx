@@ -17,6 +17,7 @@ import { EvaluationsAside } from "./evaluations-aside";
 import { FlagActions } from "./flag-actions";
 import { FlagInfoPanel } from "./flag-info-panel";
 import { UseInCodeButton } from "./use-in-code";
+import { VariantsEditor } from "./variants-editor";
 
 /**
  * Flag detail: the variants a flag can resolve to, and its configuration in each
@@ -93,27 +94,14 @@ export default async function FlagDetail({
         <div className="flex min-w-0 flex-col gap-6">
           {/* Variants — only meaningful for multivariate flags (boolean is on/off). */}
           {!isBoolean ? (
-            <section>
-              <h2 className="mb-2 text-sm font-medium text-zinc-300">Variants</h2>
-              <div className="overflow-hidden rounded-xl border border-white/10">
-                {detail.variants.map((v, i) => (
-                  <div
-                    key={v.id}
-                    className={`flex items-center justify-between gap-3 px-4 py-2.5 ${
-                      i > 0 ? "border-t border-white/8" : ""
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-xs text-zinc-500">{v.key}</span>
-                      <span className="font-mono text-sm text-zinc-100">
-                        {JSON.stringify(v.value)}
-                      </span>
-                    </div>
-                    {v.label ? <span className="text-xs text-zinc-500">{v.label}</span> : null}
-                  </div>
-                ))}
-              </div>
-            </section>
+            <VariantsEditor
+              slug={slug}
+              flagKey={detail.flag.key}
+              type={detail.flag.type as "string" | "number" | "json"}
+              variants={detail.variants}
+              canManage={canManageOrg(membership.role)}
+              readOnly={archived}
+            />
           ) : null}
 
           {/* Environments */}

@@ -3,7 +3,7 @@ import { brand } from "@flagon/design";
 import { LegalShell } from "@/components/legal-shell";
 
 export const metadata: Metadata = {
-  title: `Privacy Policy (Draft) — ${brand.name}`,
+  title: `Privacy Policy (Draft) · ${brand.name}`,
   description: `Draft policy for how ${brand.name} collects, uses, and protects your data.`,
 };
 
@@ -11,7 +11,7 @@ export default function PrivacyPage() {
   return (
     <LegalShell
       title="Privacy Policy"
-      updated="July 27, 2026"
+      updated="July 30, 2026"
       draft
       intro={`This policy explains what ${brand.legalName} collects when you use ${brand.name}, why, and the choices you have.`}
     >
@@ -23,7 +23,22 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Organization and content data</strong> you create in the
-          product, such as organizations, members, and settings.
+          product, such as organizations, members, settings, and the flags,
+          segments, and other configuration you define.
+        </li>
+        <li>
+          <strong>Payment information</strong> when you subscribe to a paid plan.
+          Payments are handled by our payment processor, Stripe; we do not
+          receive or store full card numbers. We keep your plan, subscription
+          status, and billing history.
+        </li>
+        <li>
+          <strong>Usage and evaluation data</strong> generated when your
+          applications evaluate flags. We record aggregate counts and metering
+          for analytics and billing. Any evaluation context your app sends is
+          processed to return a result; where we derive per-flag analytics, we
+          use counts and de-identified (salted-hash) samples rather than storing
+          raw targeting identifiers.
         </li>
         <li>
           <strong>Technical data</strong> generated as you use the service, such
@@ -36,6 +51,11 @@ export default function PrivacyPage() {
       <ul>
         <li>to provide, maintain, and secure the service;</li>
         <li>to authenticate you and protect against abuse;</li>
+        <li>to meter usage, calculate billing, and process payments;</li>
+        <li>
+          to produce the analytics we show you (for example, per-flag evaluation
+          counts and pass rates);
+        </li>
         <li>
           to send account and service messages (for example, email verification
           and password resets);
@@ -49,9 +69,17 @@ export default function PrivacyPage() {
       <h2>Sharing</h2>
       <p>
         We do not sell your personal data. We share it only with service
-        providers who help us run {brand.name} (such as hosting and email
-        delivery) under appropriate confidentiality obligations, with members of
-        your organization as the product requires, or where the law requires it.
+        providers who help us run {brand.name} (such as hosting, email delivery,
+        and payment processing via Stripe) under appropriate confidentiality
+        obligations, with members of your organization as the product requires,
+        or where the law requires it.
+      </p>
+
+      <h2>Cookies</h2>
+      <p>
+        We use a small number of strictly necessary cookies, primarily a signed
+        session cookie to keep you logged in across {brand.name}. We do not use
+        third-party advertising cookies.
       </p>
 
       <h2>Retention</h2>

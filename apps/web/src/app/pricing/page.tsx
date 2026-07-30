@@ -14,7 +14,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { SIGN_UP_URL } from "@/lib/urls";
 
 export const metadata: Metadata = {
-  title: `Pricing — ${brand.name}`,
+  title: `Pricing · ${brand.name}`,
   description: `Simple, usage-based pricing for ${brand.name}. Start free.`,
 };
 

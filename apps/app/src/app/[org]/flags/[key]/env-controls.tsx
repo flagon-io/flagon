@@ -2,12 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Crosshair, Plus, PowerOff, Scale, Trash2 } from "lucide-react";
-import { Button, Input, Select, Switch } from "@flagon/design";
+import { ChevronDown, Crosshair, Plus, Scale, Shuffle, Trash2 } from "lucide-react";
+import { Button, Input, SegmentedControl, Select } from "@flagon/design";
 import {
   saveRulesAction,
   setDefaultServeAction,
-  setOffVariantAction,
+  setFeatureStateAction,
   toggleFlagEnvAction,
 } from "../actions";
 import {
@@ -19,7 +19,24 @@ import {
   type CondDraft,
 } from "../condition-builder";
 import type { FlagEnvConfig, FlagVariant, Predicate, Segment, Serve } from "@/lib/flags-api";
+import { variantLabel } from "@/lib/variant-label";
 
+function isRolloutServe(serve: Serve | null): boolean {
+  return Boolean(serve && typeof serve === "object" && "rollout" in serve);
+}
+function serveVariantKey(serve: Serve | null): string | null {
+  return serve && typeof serve === "object" && "variant" in serve
+    ? (serve as { variant: string }).variant
+    : null;
+}
+
+/**
+ * One environment's control. The segmented control is the feature's STATE in this
+ * environment, not an "on/off" for the environment itself: for a boolean that is
+ * Off / On, for a multivariate flag it is Off or the served variant. Picking a
+ * variant enables the flag and makes it the default serve in a single write; the
+ * targeting and rollout icons open the detail panel below.
+ */
 export function EnvCard({
   slug,
   flagKey,
@@ -42,17 +59,68 @@ export function EnvCard({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [enabled, setEnabled] = useState(env.enabled);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [optimistic, setOptimistic] = useState<string | null>(null);
 
-  function setOn(next: boolean) {
-    setEnabled(next);
+  // A multivariate flag is never "off": it always returns a value. The segmented
+  // control is simply the default serve (the ELSE of the targeting editor). Only
+  // a boolean has an Off/On, because there Off IS a value (false).
+  const rollout = !isBoolean && isRolloutServe(env.defaultServe);
+  const serverState = isBoolean
+    ? env.enabled
+      ? "on"
+      : "off"
+    : rollout
+      ? ROLLOUT
+      : (serveVariantKey(env.defaultServe) ??
+        env.defaultVariantKey ??
+        variants[0]?.key ??
+        "");
+  // Show the picked segment immediately; drop the override once the server agrees.
+  const currentState = optimistic ?? serverState;
+  if (optimistic !== null && optimistic === serverState) setOptimistic(null);
+
+  const options = isBoolean
+    ? [
+        { value: "off", label: "Off" },
+        { value: "on", label: "On" },
+      ]
+    : [
+        ...variants.map((v, i) => ({ value: v.key, label: variantLabel(v, i) })),
+        ...(rollout ? [{ value: ROLLOUT, label: "Split" }] : []),
+      ];
+
+  function apply(next: string) {
+    if (readOnly) return;
+    // A rollout is configured in the expanded panel, not chosen here.
+    if (next === ROLLOUT) {
+      setOpen(true);
+      return;
+    }
     setError(null);
+    setOptimistic(next);
+
+    if (isBoolean) {
+      start(async () => {
+        const res = await toggleFlagEnvAction(slug, flagKey, env.key, next === "on");
+        if (res.error) {
+          setOptimistic(null);
+          setError(res.error);
+        } else router.refresh();
+      });
+      return;
+    }
+
+    // Multivariate: the picked variant becomes the default serve (and the flag is
+    // active, since it always returns a value).
     start(async () => {
-      const res = await toggleFlagEnvAction(slug, flagKey, env.key, next);
+      const res = await setFeatureStateAction(slug, flagKey, env.key, {
+        enabled: true,
+        defaultServe: { variant: next },
+      });
       if (res.error) {
-        setEnabled(!next);
+        setOptimistic(null);
         setError(res.error);
       } else router.refresh();
     });
@@ -64,48 +132,47 @@ export function EnvCard({
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="flex items-center gap-2 text-left"
+          className="flex min-w-0 items-center gap-2 text-left"
         >
           <ChevronDown
-            className={`h-4 w-4 text-zinc-500 transition-transform ${open ? "" : "-rotate-90"}`}
+            className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform ${open ? "" : "-rotate-90"}`}
           />
-          <div>
+          <div className="min-w-0">
             <p className="font-medium text-zinc-100">{env.name}</p>
-            <p className="text-xs text-zinc-500">
+            <p className="truncate text-xs text-zinc-500">
               {env.rules.length === 0
                 ? "No targeting rules"
                 : `${env.rules.length} targeting rule${env.rules.length > 1 ? "s" : ""}`}
             </p>
           </div>
         </button>
-        <div className="flex items-center gap-2.5">
-          <span
-            className={`text-xs font-medium ${enabled ? "text-teal-400" : "text-zinc-500"}`}
-          >
-            {enabled ? "On" : "Off"}
-          </span>
-          <Switch
-            checked={enabled}
-            onCheckedChange={setOn}
-            disabled={pending || readOnly}
-            ariaLabel={`${env.name} enabled`}
+        <div className="flex shrink-0 items-center gap-2">
+          <SegmentedControl
+            value={currentState}
+            onValueChange={apply}
+            options={options}
+            ariaLabel={`${env.name} feature state`}
+            className={`w-auto! ${readOnly ? "pointer-events-none opacity-60" : pending ? "pointer-events-none" : ""}`}
           />
+          <IconToggle
+            title="Targeting rules"
+            active={env.rules.length > 0}
+            onClick={() => setOpen(true)}
+          >
+            <Crosshair className="h-4 w-4" />
+          </IconToggle>
+          <IconToggle
+            title="Percentage rollout"
+            active={rollout}
+            onClick={() => setOpen(true)}
+          >
+            <Shuffle className="h-4 w-4" />
+          </IconToggle>
         </div>
       </div>
 
       {open ? (
         <div className="border-t border-white/6 p-4">
-          {/* Booleans serve `false` when off; a multivariate flag needs an
-              explicit choice of what "off" returns, so offer it here. */}
-          {!isBoolean ? (
-            <OffVariantPicker
-              slug={slug}
-              flagKey={flagKey}
-              env={env}
-              variants={variants}
-              readOnly={readOnly}
-            />
-          ) : null}
           <div className="mb-3 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
             <Crosshair className="h-3.5 w-3.5" /> Targeting rules
           </div>
@@ -118,7 +185,6 @@ export function EnvCard({
             defaultVariantKey={env.defaultVariantKey}
             variants={variants}
             segments={segments}
-            isBoolean={isBoolean}
             readOnly={readOnly}
             attributeSuggestions={attributeSuggestions}
             onSaved={() => router.refresh()}
@@ -131,61 +197,32 @@ export function EnvCard({
   );
 }
 
-/**
- * The value a multivariate flag serves while an environment is OFF (evaluation
- * reason DISABLED). Booleans don't need this (off is false); every other type
- * does, and without a control it silently defaults to the first variant.
- */
-function OffVariantPicker({
-  slug,
-  flagKey,
-  env,
-  variants,
-  readOnly,
+/** A square icon button that reads as "active" when the feature it opens is set. */
+function IconToggle({
+  title,
+  active,
+  onClick,
+  children,
 }: {
-  slug: string;
-  flagKey: string;
-  env: FlagEnvConfig;
-  variants: FlagVariant[];
-  readOnly: boolean;
+  title: string;
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
 }) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [value, setValue] = useState(env.offVariantKey ?? variants[0]?.key ?? "");
-  const [error, setError] = useState<string | null>(null);
-
-  function choose(next: string) {
-    const prev = value;
-    setValue(next);
-    setError(null);
-    start(async () => {
-      const res = await setOffVariantAction(slug, flagKey, env.key, next);
-      if (res.error) {
-        setValue(prev);
-        setError(res.error);
-      } else {
-        router.refresh();
-      }
-    });
-  }
-
   return (
-    <div className="mb-4">
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
-        <PowerOff className="h-3.5 w-3.5" /> When off, serve
-      </div>
-      <Select
-        value={value}
-        onValueChange={choose}
-        ariaLabel={`${env.name} off variant`}
-        disabled={pending || readOnly}
-        options={variants.map((v) => ({ value: v.key, label: v.label || String(v.value) }))}
-      />
-      <p className="mt-1.5 text-xs text-zinc-500">
-        The value returned while this environment is off.
-      </p>
-      {error ? <p className="mt-1 text-xs text-red-400">{error}</p> : null}
-    </div>
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      className={`grid h-9 w-9 shrink-0 place-items-center rounded-md border transition-colors ${
+        active
+          ? "border-teal-500/40 bg-teal-500/10 text-teal-300"
+          : "border-white/10 text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -357,7 +394,6 @@ function RulesEditor({
   defaultVariantKey,
   variants,
   segments,
-  isBoolean,
   readOnly = false,
   attributeSuggestions,
   onSaved,
@@ -370,7 +406,6 @@ function RulesEditor({
   defaultVariantKey: string | null;
   variants: FlagVariant[];
   segments: Segment[];
-  isBoolean: boolean;
   readOnly?: boolean;
   attributeSuggestions?: string[];
   onSaved: () => void;
@@ -521,25 +556,46 @@ function RulesEditor({
         <Plus className="h-4 w-4" /> Add rule
       </button>
 
-      {/* Default — always last, always the fallback, and itself editable. */}
-      <div className="rounded-lg border border-dashed border-white/12 bg-black/20 p-3">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="w-12 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-            Else
-          </span>
-          <span className="text-xs text-zinc-500">
-            serve to everyone {drafts.length > 0 ? "not matched above" : "by default"}
-          </span>
-        </div>
-        <div className="pl-14">
-          <ServePicker
+      {/* The single-variant default is set by the state control at the top of
+          this card, so it is not repeated here. Only a percentage rollout, which
+          that control can't express, is edited here. */}
+      {defaultDraft.serveVariant === ROLLOUT ? (
+        <div className="rounded-lg border border-dashed border-white/12 bg-black/20 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-medium tracking-wide text-zinc-500 uppercase">
+              Default rollout
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setDefaultDraft((prev) => ({ ...prev, serveVariant: variants[0]?.key ?? "" }))
+              }
+              className="text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+            >
+              Remove
+            </button>
+          </div>
+          <RolloutWeights
             variants={variants}
             draft={defaultDraft}
             onChange={(patch) => setDefaultDraft((prev) => ({ ...prev, ...patch }))}
-            allowVariantRollout={isBoolean}
           />
         </div>
-      </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() =>
+            setDefaultDraft((prev) => ({
+              ...prev,
+              serveVariant: ROLLOUT,
+              weights: balanceWeights({}, variants),
+            }))
+          }
+          className="flex items-center gap-1.5 self-start rounded-md px-1 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+        >
+          <Shuffle className="h-3.5 w-3.5" /> Roll out a percentage to everyone
+        </button>
+      )}
 
       {dirty ? (
         <div className="mt-1 flex items-center justify-end gap-2">
@@ -655,11 +711,6 @@ function ServePicker({
   allowVariantRollout?: boolean;
 }) {
   const isRollout = draft.serveVariant === ROLLOUT;
-  const total = variants.reduce((sum, v) => sum + (draft.weights[v.key] ?? 0), 0);
-  const colors = ["bg-teal-400", "bg-sky-400", "bg-violet-400", "bg-amber-400", "bg-rose-400"];
-
-  const setWeight = (key: string, value: number) =>
-    onChange({ weights: { ...draft.weights, [key]: Math.max(0, value) } });
 
   return (
     <div>
@@ -672,7 +723,7 @@ function ServePicker({
           onValueChange={(v) => onChange({ serveVariant: v })}
           ariaLabel="Serve"
           options={[
-            ...variants.map((v) => ({ value: v.key, label: v.label || String(v.value) })),
+            ...variants.map((v, i) => ({ value: v.key, label: variantLabel(v, i) })),
             ...(allowVariantRollout || variants.length > 1
               ? [{ value: ROLLOUT, label: "a percentage rollout" }]
               : []),
@@ -681,77 +732,104 @@ function ServePicker({
       </div>
 
       {isRollout ? (
-        <div className="mt-2 flex flex-col gap-2 rounded-md border border-white/10 bg-black/30 p-3">
-          {/* Live distribution bar. */}
-          <div className="flex h-2 overflow-hidden rounded-full bg-white/5">
-            {variants.map((v, i) =>
-              (draft.weights[v.key] ?? 0) > 0 ? (
-                <div
-                  key={v.key}
-                  className={colors[i % colors.length]}
-                  style={{ width: `${((draft.weights[v.key] ?? 0) / (total || 1)) * 100}%` }}
-                  title={`${v.label || v.key}: ${draft.weights[v.key] ?? 0}%`}
-                />
-              ) : null,
-            )}
-          </div>
-
-          {variants.map((v, i) => (
-            <div key={v.key} className="flex items-center gap-2">
-              <span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${colors[i % colors.length]}`} />
-              <span className="w-28 truncate text-sm text-zinc-300">
-                {v.label || String(v.value)}
-              </span>
-              <Input
-                type="number"
-                min={0}
-                max={100}
-                value={String(draft.weights[v.key] ?? 0)}
-                onChange={(e) => setWeight(v.key, Number(e.target.value) || 0)}
-                aria-label={`${v.key} weight`}
-                className="w-20"
-              />
-              <span className="text-sm text-zinc-500">%</span>
-            </div>
-          ))}
-
-          <div className="flex items-center justify-between gap-2">
-            <p className={`text-xs ${total === 100 ? "text-zinc-500" : "text-amber-400"}`}>
-              Total: {total}%{total !== 100 ? " — must be 100" : ""}
-            </p>
-            {total !== 100 ? (
-              <button
-                type="button"
-                onClick={() => onChange({ weights: balanceWeights(draft.weights, variants) })}
-                className="inline-flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300"
-              >
-                <Scale className="h-3.5 w-3.5" /> Balance to 100%
-              </button>
-            ) : null}
-          </div>
-
-          {/* Bucket-by: which attribute keeps a subject in the same slice. */}
-          <label className="mt-1 flex flex-wrap items-center gap-2 border-t border-white/8 pt-2 text-xs text-zinc-500">
-            Bucket by
-            <Input
-              value={draft.bucketBy}
-              onChange={(e) => onChange({ bucketBy: e.target.value })}
-              placeholder={TARGETING_KEY}
-              aria-label="Bucket by attribute"
-              className="w-44"
-            />
-            <span className="text-zinc-600">
-              same value → same variant. Blank uses {TARGETING_KEY}.
-            </span>
-          </label>
+        <div className="mt-2">
+          <RolloutWeights variants={variants} draft={draft} onChange={onChange} />
         </div>
       ) : null}
     </div>
   );
 }
 
+/**
+ * A percentage-rollout editor: a live distribution bar, a per-variant weight, a
+ * Balance button that snaps the weights to total 100%, and an optional bucket-by
+ * attribute so a given subject always lands in the same slice.
+ */
+function RolloutWeights({
+  variants,
+  draft,
+  onChange,
+}: {
+  variants: FlagVariant[];
+  draft: ServeDraft;
+  onChange: (patch: Partial<ServeDraft>) => void;
+}) {
+  const total = variants.reduce((sum, v) => sum + (draft.weights[v.key] ?? 0), 0);
+  const colors = ["bg-teal-400", "bg-sky-400", "bg-violet-400", "bg-amber-400", "bg-rose-400"];
+  const setWeight = (key: string, value: number) =>
+    onChange({ weights: { ...draft.weights, [key]: Math.max(0, value) } });
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-white/10 bg-black/30 p-3">
+      {/* Live distribution bar. */}
+      <div className="flex h-2 overflow-hidden rounded-full bg-white/5">
+        {variants.map((v, i) =>
+          (draft.weights[v.key] ?? 0) > 0 ? (
+            <div
+              key={v.key}
+              className={colors[i % colors.length]}
+              style={{ width: `${((draft.weights[v.key] ?? 0) / (total || 1)) * 100}%` }}
+              title={`${variantLabel(v, i)}: ${draft.weights[v.key] ?? 0}%`}
+            />
+          ) : null,
+        )}
+      </div>
+
+      {variants.map((v, i) => (
+        <div key={v.key} className="flex items-center gap-2">
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${colors[i % colors.length]}`} />
+          <span className="w-28 truncate text-sm text-zinc-300">{variantLabel(v, i)}</span>
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            value={String(draft.weights[v.key] ?? 0)}
+            onChange={(e) => setWeight(v.key, Number(e.target.value) || 0)}
+            aria-label={`${v.key} weight`}
+            className="w-20"
+          />
+          <span className="text-sm text-zinc-500">%</span>
+        </div>
+      ))}
+
+      <div className="flex items-center justify-between gap-2">
+        <p className={`text-xs ${total === 100 ? "text-zinc-500" : "text-amber-400"}`}>
+          Total: {total}%{total !== 100 ? " (must total 100)" : ""}
+        </p>
+        {total !== 100 ? (
+          <button
+            type="button"
+            onClick={() => onChange({ weights: balanceWeights(draft.weights, variants) })}
+            className="inline-flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300"
+          >
+            <Scale className="h-3.5 w-3.5" /> Balance to 100%
+          </button>
+        ) : null}
+      </div>
+
+      {/* Bucket-by: which attribute keeps a subject in the same slice. */}
+      <label className="mt-1 flex flex-wrap items-center gap-2 border-t border-white/8 pt-2 text-xs text-zinc-500">
+        Bucket by
+        <Input
+          value={draft.bucketBy}
+          onChange={(e) => onChange({ bucketBy: e.target.value })}
+          placeholder={TARGETING_KEY}
+          aria-label="Bucket by attribute"
+          className="w-44"
+        />
+        <span className="text-zinc-600">
+          same value keeps a subject on one variant. Blank uses {TARGETING_KEY}.
+        </span>
+      </label>
+    </div>
+  );
+}
+
 function describeServe(serve: unknown, variants: FlagVariant[]): string {
-  const label = (key: string) => variants.find((v) => v.key === key)?.label || key;
+  const label = (key: string) => {
+    const i = variants.findIndex((v) => v.key === key);
+    return i >= 0 ? variantLabel(variants[i]!, i) : key;
+  };
   if (serve && typeof serve === "object" && "rollout" in serve) {
     const s = serve as { rollout: { variant: string; weight: number }[]; bucketBy?: string };
     const by = s.bucketBy ? ` by ${s.bucketBy}` : "";

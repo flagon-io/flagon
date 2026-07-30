@@ -27,7 +27,7 @@ export default async function OrgProjects({
         </h1>
         <span
           aria-disabled="true"
-          title="Creating projects — coming soon"
+          title="Creating projects (coming soon)"
           className="cursor-not-allowed rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-zinc-500"
         >
           New Project

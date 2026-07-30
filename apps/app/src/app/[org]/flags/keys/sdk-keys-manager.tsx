@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   Button,
   Field,
@@ -13,8 +13,24 @@ import {
   ModalHeader,
   Select,
 } from "@flagon/design";
-import { createSdkKeyAction, revokeSdkKeyAction } from "../actions";
+import {
+  createSdkKeyAction,
+  revokeSdkKeyAction,
+  updateSdkKeyAction,
+} from "../actions";
 import type { Environment, SdkKey } from "@/lib/flags-api";
+
+function relativeTime(iso: string): string {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return `${Math.floor(d / 30)}mo ago`;
+}
 
 /**
  * Client keys, grouped by the fixed environments (Production, Preview,
@@ -76,6 +92,7 @@ export function SdkKeysManager({
                   {envKeys.map((k, i) => (
                     <KeyRow
                       key={k.id}
+                      slug={slug}
                       k={k}
                       divided={i > 0}
                       canManage={canManage}
@@ -120,20 +137,26 @@ export function SdkKeysManager({
 }
 
 function KeyRow({
+  slug,
   k,
   divided,
   canManage,
   pending,
   onRevoke,
 }: {
+  slug: string;
   k: SdkKey;
   divided: boolean;
   canManage: boolean;
   pending: boolean;
   onRevoke: () => void;
 }) {
+  const router = useRouter();
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [labelDraft, setLabelDraft] = useState(k.name);
+  const [savingLabel, saveLabel] = useTransition();
   const hasToken = Boolean(k.token);
   const shown = hasToken && revealed ? (k.token as string) : k.masked;
 
@@ -144,14 +167,57 @@ function KeyRow({
     setTimeout(() => setCopied(false), 1500);
   }
 
+  function commitLabel() {
+    setEditing(false);
+    const next = labelDraft.trim();
+    if (next === k.name) return;
+    saveLabel(async () => {
+      const res = await updateSdkKeyAction(slug, k.id, next);
+      if (!res.error) router.refresh();
+    });
+  }
+
   return (
     <div
-      className={`flex items-center justify-between gap-3 px-4 py-3 ${
+      className={`flex items-center gap-3 px-4 py-3 ${
         divided ? "border-t border-white/6" : ""
       }`}
     >
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-zinc-100">{k.name}</p>
+        {editing ? (
+          <Input
+            autoFocus
+            value={labelDraft}
+            onChange={(e) => setLabelDraft(e.target.value)}
+            onBlur={commitLabel}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                setLabelDraft(k.name);
+                setEditing(false);
+              }
+            }}
+            placeholder="Unlabelled key"
+            className="h-7 max-w-xs px-2 py-0.5 text-sm"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => canManage && setEditing(true)}
+            disabled={!canManage}
+            className="group flex max-w-full items-center gap-1.5 text-left"
+          >
+            <span
+              className={`truncate text-sm ${k.name ? "text-zinc-100" : "italic text-zinc-500"}`}
+            >
+              {k.name || "Unlabelled key"}
+            </span>
+            {canManage ? (
+              <Pencil className="h-3 w-3 shrink-0 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
+            ) : null}
+          </button>
+        )}
+
         <div className="mt-1 flex items-center gap-1.5">
           <code className="min-w-0 flex-1 truncate rounded bg-black/30 px-2 py-1 font-mono text-xs text-zinc-300">
             {shown}
@@ -181,10 +247,14 @@ function KeyRow({
             </>
           ) : null}
         </div>
-        <p className="mt-1 text-xs text-zinc-600">
-          {k.lastUsedAt
-            ? `Last used ${new Date(k.lastUsedAt).toLocaleDateString()}`
-            : "Never used"}
+
+        <p className="mt-1.5 text-xs text-zinc-600">
+          {savingLabel
+            ? "Saving…"
+            : k.lastUsedAt
+              ? `Last used ${relativeTime(k.lastUsedAt)}`
+              : "Never used"}
+          <span className="text-zinc-700"> · Added {relativeTime(k.createdAt)}</span>
         </p>
       </div>
       {canManage ? (
@@ -220,9 +290,9 @@ function CreateKeyModal({
 
   function create() {
     setError(null);
-    const envName = environments.find((e) => e.key === environment)?.name ?? "Client";
     start(async () => {
-      const res = await createSdkKeyAction(slug, label.trim() || `${envName} key`, environment);
+      // An empty label is fine; the key shows as "Unlabelled" and can be named later.
+      const res = await createSdkKeyAction(slug, label.trim(), environment);
       if (res.error) return setError(res.error);
       // Retrievable keys: no one-time reveal. Close and let the list show it.
       onClose();

@@ -219,6 +219,41 @@ export async function setFlagEnvironment(
   );
 }
 
+export async function createVariant(
+  slug: string,
+  key: string,
+  body: { value: unknown; label?: string | null },
+) {
+  return unwrap<{ variant: FlagVariant }>(
+    await apiFetch(`/v1/orgs/${slug}/flags/${key}/variants`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function updateVariant(
+  slug: string,
+  key: string,
+  variantKey: string,
+  body: { value?: unknown; label?: string | null },
+) {
+  return unwrap<{ variant: FlagVariant }>(
+    await apiFetch(`/v1/orgs/${slug}/flags/${key}/variants/${variantKey}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function deleteVariant(slug: string, key: string, variantKey: string) {
+  return unwrap<{ ok: true }>(
+    await apiFetch(`/v1/orgs/${slug}/flags/${key}/variants/${variantKey}`, {
+      method: "DELETE",
+    }),
+  );
+}
+
 export async function archiveFlag(
   slug: string,
   key: string,
@@ -267,6 +302,15 @@ export async function createSdkKey(
   return unwrap<{ key: SdkKey }>(
     await apiFetch(`/v1/orgs/${slug}/client-keys`, {
       method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function updateSdkKey(slug: string, id: string, body: { name: string }) {
+  return unwrap<{ key: SdkKey }>(
+    await apiFetch(`/v1/orgs/${slug}/client-keys/${id}`, {
+      method: "PATCH",
       body: JSON.stringify(body),
     }),
   );

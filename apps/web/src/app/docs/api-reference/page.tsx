@@ -76,7 +76,10 @@ async function getSpec(): Promise<OpenApiDoc | null> {
 
 type Schemas = Record<string, JsonSchema>;
 
-function deref(schema: JsonSchema, schemas: Schemas): { schema: JsonSchema; name?: string } {
+function deref(
+  schema: JsonSchema,
+  schemas: Schemas,
+): { schema: JsonSchema; name?: string } {
   if (schema.$ref) {
     const name = schema.$ref.split("/").pop();
     if (name && schemas[name]) return { schema: schemas[name], name };
@@ -84,7 +87,10 @@ function deref(schema: JsonSchema, schemas: Schemas): { schema: JsonSchema; name
   return { schema };
 }
 
-function unwrapNullable(schema: JsonSchema): { schema: JsonSchema; nullable: boolean } {
+function unwrapNullable(schema: JsonSchema): {
+  schema: JsonSchema;
+  nullable: boolean;
+} {
   if (schema.anyOf) {
     const nonNull = schema.anyOf.filter((s) => s.type !== "null");
     const nullable = nonNull.length !== schema.anyOf.length;
@@ -93,7 +99,10 @@ function unwrapNullable(schema: JsonSchema): { schema: JsonSchema; nullable: boo
   }
   if (Array.isArray(schema.type) && schema.type.includes("null")) {
     const rest = schema.type.filter((t) => t !== "null");
-    return { schema: { ...schema, type: rest.length === 1 ? rest[0] : rest }, nullable: true };
+    return {
+      schema: { ...schema, type: rest.length === 1 ? rest[0] : rest },
+      nullable: true,
+    };
   }
   return { schema, nullable: false };
 }
@@ -103,7 +112,8 @@ function typeLabel(input: JsonSchema, schemas: Schemas): string {
   const { schema } = unwrapNullable(d);
   if (name && (schema.type === "object" || schema.properties)) return name;
   if (schema.enum) return schema.enum.map((v) => JSON.stringify(v)).join(" | ");
-  if (schema.type === "array") return `${typeLabel(schema.items ?? {}, schemas)}[]`;
+  if (schema.type === "array")
+    return `${typeLabel(schema.items ?? {}, schemas)}[]`;
   const t = Array.isArray(schema.type) ? schema.type.join(" | ") : schema.type;
   if (!t) return "any";
   return schema.format ? `${t} · ${schema.format}` : t;
@@ -163,18 +173,29 @@ function SchemaTree({
           const { schema: ps } = unwrapNullable(pd);
           const nested =
             (ps.properties && depth < 5) ||
-            (ps.type === "array" && ps.items && (deref(ps.items, schemas).schema.properties || ps.items.$ref));
+            (ps.type === "array" &&
+              ps.items &&
+              (deref(ps.items, schemas).schema.properties || ps.items.$ref));
           return (
-            <li key={name} className="rounded-md border border-white/5 bg-white/[0.02] px-3 py-2">
+            <li
+              key={name}
+              className="rounded-md border border-white/5 bg-white/2 px-3 py-2"
+            >
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <code className="font-mono text-[13px] text-teal-300">{name}</code>
-                <span className="font-mono text-xs text-zinc-400">{typeLabel(prop, schemas)}</span>
+                <code className="font-mono text-[13px] text-teal-300">
+                  {name}
+                </code>
+                <span className="font-mono text-xs text-zinc-400">
+                  {typeLabel(prop, schemas)}
+                </span>
                 {required.has(name) ? (
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-rose-300/80">
                     required
                   </span>
                 ) : (
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-600">optional</span>
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-600">
+                    optional
+                  </span>
                 )}
               </div>
               {ps.description ? (
@@ -182,7 +203,11 @@ function SchemaTree({
               ) : null}
               {nested ? (
                 <div className="mt-2 border-l border-white/10 pl-3">
-                  <SchemaTree schema={prop} schemas={schemas} depth={depth + 1} />
+                  <SchemaTree
+                    schema={prop}
+                    schemas={schemas}
+                    depth={depth + 1}
+                  />
                 </div>
               ) : null}
             </li>
@@ -194,8 +219,12 @@ function SchemaTree({
 
   return (
     <div className="text-sm">
-      <span className="font-mono text-xs text-zinc-400">{typeLabel(schema, schemas)}</span>
-      {s.description ? <p className="mt-1 text-xs text-zinc-400">{s.description}</p> : null}
+      <span className="font-mono text-xs text-zinc-400">
+        {typeLabel(schema, schemas)}
+      </span>
+      {s.description ? (
+        <p className="mt-1 text-xs text-zinc-400">{s.description}</p>
+      ) : null}
     </div>
   );
 }
@@ -227,10 +256,12 @@ function OperationBlock({
   const responses = Object.entries(op.responses ?? {});
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 sm:p-5">
+    <div className="rounded-xl border border-white/10 bg-white/2 p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-2">
         <MethodBadge method={method} />
-        <code className="break-all font-mono text-sm text-zinc-200">{path}</code>
+        <code className="break-all font-mono text-sm text-zinc-200">
+          {path}
+        </code>
         {auth ? (
           <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-400 ring-1 ring-inset ring-white/10">
             Auth: {auth}
@@ -242,20 +273,33 @@ function OperationBlock({
         )}
       </div>
 
-      {op.summary ? <p className="mt-3 text-sm font-medium text-zinc-100">{op.summary}</p> : null}
-      {op.description ? <p className="mt-1 text-sm text-zinc-400">{op.description}</p> : null}
+      {op.summary ? (
+        <p className="mt-3 text-sm font-medium text-zinc-100">{op.summary}</p>
+      ) : null}
+      {op.description ? (
+        <p className="mt-1 text-sm text-zinc-400">{op.description}</p>
+      ) : null}
 
       {op.parameters && op.parameters.length ? (
         <div className="mt-4">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Path parameters</h4>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Path parameters
+          </h4>
           <ul className="mt-2 flex flex-col gap-1.5">
             {op.parameters.map((p) => (
-              <li key={p.name} className="flex flex-wrap items-baseline gap-x-2">
-                <code className="font-mono text-[13px] text-teal-300">{p.name}</code>
+              <li
+                key={p.name}
+                className="flex flex-wrap items-baseline gap-x-2"
+              >
+                <code className="font-mono text-[13px] text-teal-300">
+                  {p.name}
+                </code>
                 <span className="font-mono text-xs text-zinc-500">
                   {p.schema ? typeLabel(p.schema, schemas) : "string"}
                 </span>
-                {p.description ? <span className="text-xs text-zinc-400">{p.description}</span> : null}
+                {p.description ? (
+                  <span className="text-xs text-zinc-400">{p.description}</span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -264,7 +308,9 @@ function OperationBlock({
 
       {reqBody?.schema ? (
         <div className="mt-4">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Request body</h4>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Request body
+          </h4>
           <div className="mt-2">
             <SchemaTree schema={reqBody.schema} schemas={schemas} />
           </div>
@@ -273,7 +319,9 @@ function OperationBlock({
 
       {responses.length ? (
         <div className="mt-4">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Responses</h4>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Responses
+          </h4>
           <div className="mt-2 flex flex-col gap-3">
             {responses.map(([status, res]) => {
               const body = jsonBody(res.content);
@@ -289,7 +337,9 @@ function OperationBlock({
                     >
                       {status}
                     </span>
-                    <span className="text-xs text-zinc-400">{res.description}</span>
+                    <span className="text-xs text-zinc-400">
+                      {res.description}
+                    </span>
                   </div>
                   {ok && body?.schema ? (
                     <div className="mt-2 border-l border-white/10 pl-3">
@@ -315,12 +365,13 @@ export default async function ApiReferencePage() {
       <div className="not-prose">
         <h1 className="text-2xl font-semibold text-zinc-100">API Reference</h1>
         <p className="mt-3 text-sm text-zinc-400">
-          The live API document could not be loaded right now. It is always available as raw OpenAPI
-          3.1 at{" "}
+          The live API document could not be loaded right now. It is always
+          available as raw OpenAPI 3.1 at{" "}
           <a href={specUrl} className="text-teal-300 underline">
             {specUrl}
           </a>
-          , and the guides under Feature Flags cover evaluation and the management API in prose.
+          , and the guides under Feature Flags cover evaluation and the
+          management API in prose.
         </p>
       </div>
     );
@@ -332,7 +383,10 @@ export default async function ApiReferencePage() {
 
   // Group operations by tag, in the document's tag order, then any untagged.
   const tagOrder = (spec.tags ?? []).map((t) => t.name);
-  const byTag = new Map<string, { method: Method; path: string; op: Operation }[]>();
+  const byTag = new Map<
+    string,
+    { method: Method; path: string; op: Operation }[]
+  >();
   for (const [path, item] of Object.entries(spec.paths)) {
     for (const method of METHODS) {
       const op = item[method];
@@ -347,19 +401,24 @@ export default async function ApiReferencePage() {
     ...tagOrder.filter((t) => byTag.has(t)),
     ...[...byTag.keys()].filter((t) => !tagOrder.includes(t)),
   ];
-  const tagDescription = new Map((spec.tags ?? []).map((t) => [t.name, t.description]));
+  const tagDescription = new Map(
+    (spec.tags ?? []).map((t) => [t.name, t.description]),
+  );
 
   return (
     <div className="not-prose">
       <h1 className="text-2xl font-semibold text-zinc-100">API Reference</h1>
       <p className="mt-3 text-sm text-zinc-400">
-        The complete Flagon REST API, generated from the live OpenAPI 3.1 document so it never drifts
-        from the running service. Point any OpenAPI tool at the raw spec, or read it inline below.
+        The complete Flagon REST API, generated from the live OpenAPI 3.1
+        document so it never drifts from the running service. Point any OpenAPI
+        tool at the raw spec, or read it inline below.
       </p>
 
-      <div className="mt-5 flex flex-col gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-5 flex flex-col gap-2 rounded-xl border border-white/10 bg-white/2 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="text-xs uppercase tracking-wide text-zinc-500">Base URL</div>
+          <div className="text-xs uppercase tracking-wide text-zinc-500">
+            Base URL
+          </div>
           <code className="font-mono text-zinc-200">{baseUrl}</code>
         </div>
         <a
@@ -371,8 +430,10 @@ export default async function ApiReferencePage() {
       </div>
 
       {Object.keys(schemeDescriptions).length ? (
-        <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Authentication</h2>
+        <div className="mt-4 rounded-xl border border-white/10 bg-white/2 p-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Authentication
+          </h2>
           <ul className="mt-2 flex flex-col gap-1.5 text-sm text-zinc-400">
             {Object.entries(schemeDescriptions).map(([name, s]) => (
               <li key={name}>{s.description ?? name}</li>
@@ -386,7 +447,9 @@ export default async function ApiReferencePage() {
           <section key={tag}>
             <h2 className="text-lg font-semibold text-zinc-100">{tag}</h2>
             {tagDescription.get(tag) ? (
-              <p className="mt-1 text-sm text-zinc-400">{tagDescription.get(tag)}</p>
+              <p className="mt-1 text-sm text-zinc-400">
+                {tagDescription.get(tag)}
+              </p>
             ) : null}
             <div className="mt-4 flex flex-col gap-4">
               {byTag.get(tag)!.map(({ method, path, op }) => (

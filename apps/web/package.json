@@ -17,9 +17,10 @@
     "@sentry/nextjs": "^10.68.0",
     "lucide-react": "^1.27.0",
     "next": "16.2.12",
-    "sugar-high": "^0.9.3",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "remark-gfm": "^4.0.1",
+    "sugar-high": "^0.9.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

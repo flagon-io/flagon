@@ -31,10 +31,15 @@ const nextConfig: NextConfig = {
   },
 };
 
-// First-party MDX for the docs. No remark/rehype plugins: the mapping in
-// src/mdx-components.tsx does the styling and the custom CodeBlock/CodeTabs
-// components handle code, so the pipeline builds cleanly under Turbopack.
-const withMDX = createMDX({});
+// First-party MDX for the docs. GFM (remark-gfm) is enabled so tables, task
+// lists, strikethrough, and autolinks render; the mapping in src/mdx-components
+// styles the resulting elements. Plugins are passed by STRING name (not imported)
+// so the config stays serializable for Turbopack's MDX loader.
+const withMDX = createMDX({
+  options: {
+    remarkPlugins: [["remark-gfm", {}]],
+  },
+});
 
 /**
  * Sentry only touches the build when a DSN is configured. Without it — local

@@ -3,7 +3,7 @@ import { brand } from "@flagon/design";
 import { LegalShell } from "@/components/legal-shell";
 
 export const metadata: Metadata = {
-  title: `Terms of Service (Draft) — ${brand.name}`,
+  title: `Terms of Service (Draft) · ${brand.name}`,
   description: `Draft terms that will govern your use of ${brand.name}.`,
 };
 
@@ -11,7 +11,7 @@ export default function TermsPage() {
   return (
     <LegalShell
       title="Terms of Service"
-      updated="July 27, 2026"
+      updated="July 30, 2026"
       draft
       intro={`These terms govern your use of ${brand.name}, operated by ${brand.legalName} ("we", "us"). By creating an account or using the service, you agree to them.`}
     >
@@ -61,11 +61,19 @@ export default function TermsPage() {
         your activity within it.
       </p>
 
-      <h2>6. Fees</h2>
+      <h2>6. Plans and fees</h2>
       <p>
-        Paid plans and billing are not enabled during the alpha; usage is
-        currently provided at no charge. When billing is introduced, prices and
-        terms will be presented before they apply to you.
+        {brand.name} offers a free tier and paid plans. Paid plans are billed on
+        a recurring basis through our payment processor, Stripe, at the prices
+        shown when you subscribe. Some plans include usage-based charges for
+        evaluations beyond an included allowance. Fees are non-refundable except
+        where required by law, and if a payment fails or a subscription lapses we
+        may restrict access to paid features until it is resolved.
+      </p>
+      <p>
+        Because we are in alpha, plans, prices, and limits may change. We will
+        present any change before it applies to you; continuing to use a paid
+        plan after a change takes effect means you accept it.
       </p>
 
       <h2>7. Termination</h2>

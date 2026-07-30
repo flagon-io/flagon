@@ -44,35 +44,47 @@ function relativeTime(iso: string): string {
   return `${Math.floor(mo / 12)}y ago`;
 }
 
+// Fixed bar count so every row's sparkline is the same width and the columns
+// line up, whether or not the flag has any traffic yet.
+const SPARK_BARS = 14;
+
+function normalizeSeries(series?: number[]): number[] {
+  const s = series ?? [];
+  if (s.length >= SPARK_BARS) return s.slice(s.length - SPARK_BARS);
+  return [...Array(SPARK_BARS - s.length).fill(0), ...s];
+}
+
 function MiniSparkline({ values }: { values: number[] }) {
   const max = Math.max(1, ...values);
   return (
-    <div className="flex h-6 items-end gap-px" aria-hidden>
+    <div className="flex h-6 w-13 shrink-0 items-end gap-px" aria-hidden>
       {values.map((v, i) => (
         <div
           key={i}
-          className={`w-0.75 rounded-sm ${v > 0 ? "bg-teal-500/60" : "bg-white/10"}`}
-          style={{ height: `${v > 0 ? Math.max(18, (v / max) * 100) : 12}%` }}
+          className={`flex-1 rounded-sm ${v > 0 ? "bg-teal-500/60" : "bg-white/8"}`}
+          style={{ height: `${v > 0 ? Math.max(18, (v / max) * 100) : 14}%` }}
         />
       ))}
     </div>
   );
 }
 
+// The usage cell always renders a chart (empty bars when there's no traffic yet)
+// so the column keeps a fixed footprint and every row aligns.
 function ChecksCell({ usage }: { usage: FlagSummary["usage"] }) {
-  if (!usage || usage.total === 0) {
-    return <span className="hidden text-xs text-zinc-600 sm:block">No checks</span>;
-  }
+  const cph = usage && usage.total > 0 ? usage.checksPerHour : null;
   const rate =
-    usage.checksPerHour >= 1
-      ? `${Math.round(usage.checksPerHour)}/hr`
-      : usage.checksPerHour > 0
-        ? "<1/hr"
-        : "0/hr";
+    cph === null
+      ? "—"
+      : cph >= 1
+        ? `${Math.round(cph)}/hr`
+        : cph > 0
+          ? "<1/hr"
+          : "0/hr";
   return (
-    <div className="hidden items-center gap-2 sm:flex">
-      <MiniSparkline values={usage.series} />
-      <span className="w-12 whitespace-nowrap text-right text-xs tabular-nums text-zinc-500">
+    <div className="hidden items-center justify-end gap-2 sm:flex">
+      <MiniSparkline values={normalizeSeries(usage?.series)} />
+      <span className="w-10 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-zinc-500">
         {rate}
       </span>
     </div>
@@ -186,7 +198,7 @@ export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[]
               <Link
                 key={flag.id}
                 href={`/${slug}/flags/${flag.key}`}
-                className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition-colors hover:bg-white/3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto_auto_auto] ${
+                className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition-colors hover:bg-white/3 sm:grid-cols-[minmax(0,1fr)_180px_160px_140px_64px] ${
                   i > 0 ? "border-t border-white/8" : ""
                 }`}
               >
@@ -223,7 +235,7 @@ export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[]
                   ) : null}
                 </div>
                 <ChecksCell usage={flag.usage} />
-                <span className="whitespace-nowrap text-xs text-zinc-600">
+                <span className="whitespace-nowrap text-right text-xs text-zinc-600">
                   {relativeTime(flag.createdAt)}
                 </span>
               </Link>

@@ -3,7 +3,7 @@ import { brand } from "@flagon/design";
 import { LegalShell } from "@/components/legal-shell";
 
 export const metadata: Metadata = {
-  title: `Security (Draft) — ${brand.name}`,
+  title: `Security (Draft) · ${brand.name}`,
   description: `Draft overview of how ${brand.name} protects your account and data, and how to report a vulnerability.`,
 };
 

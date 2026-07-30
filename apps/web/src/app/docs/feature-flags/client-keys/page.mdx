@@ -32,12 +32,13 @@ a key. Client keys are publishable and retrievable: copy the value at creation,
 or read it again anytime from the Client Keys page. Flagon stores the token, so
 you never lose access to it.
 
-<Callout tone="warning" title="Keep keys out of source control">
-A client key reads every flag's configuration in its environment. Load it from an
-environment variable or your secret manager, never commit it, and never ship a
-Production key to a browser bundle where anyone can read it. For client-side and
-mobile apps, prefer evaluating on your own server and sending only the result to
-the client.
+<Callout tone="note" title="Publishable, not secret">
+A client key is meant to ship in client code, the same as a Stripe publishable key
+or a web analytics key. It is evaluation-only and pinned to one environment, so it
+can never manage flags, reach another environment, or touch the management API. The
+one thing to know: anyone holding the key can evaluate every flag in that
+environment, so treat that environment's flag values as public. Don't store secrets
+in flag values, and use a separate key per environment.
 </Callout>
 
 ## Rotating and revoking

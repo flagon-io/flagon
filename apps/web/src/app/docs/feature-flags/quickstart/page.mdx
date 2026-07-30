@@ -43,10 +43,11 @@ console. Set it as an environment variable in your app:
 export FLAGON_CLIENT_KEY="flagon_client_..."
 ```
 
-<Callout tone="warning" title="Treat it like a secret">
-A client key can read every flag's configuration in its environment. Keep it out
-of source control and out of your git history. If one leaks, revoke it from the
-Client Keys page and mint a new one.
+<Callout tone="note" title="Publishable, not secret">
+A client key is safe to ship in client code, like a Stripe publishable key. It
+only evaluates flags, and only in its one environment. Anyone holding it can read
+that environment's flag values, so keep secrets out of flag values. Revoke and
+replace a key anytime from the Client Keys page.
 </Callout>
 
 ## 3. Evaluate it from your app

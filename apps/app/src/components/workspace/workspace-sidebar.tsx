@@ -6,7 +6,9 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   Archive,
+  ArrowUpRight,
   BellRing,
+  BookText,
   Boxes,
   ChevronLeft,
   ChevronRight,
@@ -26,11 +28,13 @@ import {
   Signal,
   SlidersHorizontal,
   Split,
+  SquareCode,
   Terminal,
   Users,
   type LucideIcon,
 } from "lucide-react";
 import type { OrgMembership } from "@/lib/org";
+import { WEB_URL } from "@/lib/urls";
 import { OrgSwitcher } from "./org-switcher";
 import { WorkspaceSearch } from "./workspace-search";
 
@@ -40,7 +44,14 @@ export const SIDEBAR_COOKIE = "flagon_sidebar";
  * A single navigable row. `href` present + `soon` unset means a real link;
  * `soon` marks a surface we are building toward (rendered disabled).
  */
-type NavItem = { label: string; icon: LucideIcon; href?: string; soon?: boolean };
+type NavItem = {
+  label: string;
+  icon: LucideIcon;
+  href?: string;
+  soon?: boolean;
+  /** An off-site link (docs, OpenFeature): opens in a new tab, not a Next route. */
+  external?: boolean;
+};
 type NavGroup = { heading?: string; items: NavItem[] };
 
 /**
@@ -95,6 +106,29 @@ function buildNav(base: string): {
         items: [
           { label: "Client Keys", icon: KeyRound, href: `${base}/flags/keys` },
           { label: "Archive", icon: Archive, href: `${base}/flags/archive` },
+        ],
+      },
+      {
+        heading: "Resources",
+        items: [
+          {
+            label: "Documentation",
+            icon: BookText,
+            href: `${WEB_URL}/docs/feature-flags`,
+            external: true,
+          },
+          {
+            label: "Evaluate with OpenFeature",
+            icon: SquareCode,
+            href: `${WEB_URL}/docs/feature-flags/evaluate/openfeature`,
+            external: true,
+          },
+          {
+            label: "OpenFeature",
+            icon: ArrowUpRight,
+            href: "https://openfeature.dev",
+            external: true,
+          },
         ],
       },
     ],
@@ -366,6 +400,14 @@ function AreaNav({
                 label={item.label}
                 collapsed={collapsed}
               />
+            ) : item.external ? (
+              <NavExternal
+                key={item.href}
+                href={item.href}
+                Icon={item.icon}
+                label={item.label}
+                collapsed={collapsed}
+              />
             ) : (
               <NavRow
                 key={item.href}
@@ -418,6 +460,41 @@ function NavRow({
   );
 }
 
+/** An off-site resource link: opens in a new tab, with a subtle out-arrow. */
+function NavExternal({
+  href,
+  Icon,
+  label,
+  collapsed,
+}: {
+  href: string;
+  Icon: LucideIcon;
+  label: string;
+  collapsed: boolean;
+}) {
+  return (
+    <li>
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        title={collapsed ? label : undefined}
+        className={`group flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-200 ${
+          collapsed ? "justify-center" : ""
+        }`}
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        {!collapsed ? (
+          <>
+            <span className="truncate">{label}</span>
+            <ArrowUpRight className="ml-auto h-3.5 w-3.5 shrink-0 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
+          </>
+        ) : null}
+      </a>
+    </li>
+  );
+}
+
 /** A not-yet-built surface: shown, disabled, with a "Soon" tag. */
 function NavSoon({
   Icon,
@@ -432,7 +509,7 @@ function NavSoon({
     <li>
       <span
         aria-disabled="true"
-        title={`${label} — coming soon`}
+        title={`${label} (coming soon)`}
         className={`flex cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-zinc-600 select-none ${
           collapsed ? "justify-center" : ""
         }`}

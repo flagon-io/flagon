@@ -2,7 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, ArchiveRestore, History, MoreHorizontal, Trash2 } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  History,
+  MoreHorizontal,
+  Trash2,
+} from "lucide-react";
 import {
   Button,
   Menu,
@@ -109,7 +115,7 @@ export function FlagActions({
               <MenuSeparator />
               <MenuItem
                 onSelect={() => setConfirmDelete(true)}
-                className="text-red-400 data-[highlighted]:text-red-300"
+                className="text-red-400 data-highlighted:text-red-300"
               >
                 <Trash2 className="h-4 w-4" /> Delete flag
               </MenuItem>
@@ -120,7 +126,10 @@ export function FlagActions({
 
       {showHistory ? (
         <Modal onClose={() => setShowHistory(false)} size="md">
-          <ModalHeader title="Version history" onClose={() => setShowHistory(false)} />
+          <ModalHeader
+            title="Version history"
+            onClose={() => setShowHistory(false)}
+          />
           <ModalBody>
             {revisions.length === 0 ? (
               <p className="text-sm text-zinc-500">No history yet.</p>
@@ -150,7 +159,9 @@ export function FlagActions({
                         ))}
                       </ul>
                     ) : null}
-                    <span className="text-xs text-zinc-600">{r.userName || "System"}</span>
+                    <span className="text-xs text-zinc-600">
+                      {r.userName || "System"}
+                    </span>
                   </li>
                 ))}
               </ol>
@@ -166,12 +177,16 @@ export function FlagActions({
 
       {confirmDelete ? (
         <Modal onClose={() => setConfirmDelete(false)} size="sm">
-          <ModalHeader title="Delete flag" onClose={() => setConfirmDelete(false)} />
+          <ModalHeader
+            title="Delete flag"
+            onClose={() => setConfirmDelete(false)}
+          />
           <ModalBody>
             <p className="text-sm text-zinc-400">
               This permanently deletes{" "}
-              <code className="font-mono text-zinc-200">{flagKey}</code> and all of its
-              variants, environment config, and targeting rules. This cannot be undone.
+              <code className="font-mono text-zinc-200">{flagKey}</code> and all
+              of its variants, environment config, and targeting rules. This
+              cannot be undone.
             </p>
           </ModalBody>
           <ModalFooter>

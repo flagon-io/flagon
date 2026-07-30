@@ -27,9 +27,12 @@ export const sdkKeys_ = new Hono();
 sdkKeys_.use("*", authContext);
 
 const createKey = z.object({
-  name: z.string().trim().min(1).max(120),
+  // The label is optional; an unlabelled key is valid and shows as "Unlabelled".
+  name: z.string().trim().max(120).optional().default(""),
   environment: z.string().min(1),
 });
+
+const renameKey = z.object({ name: z.string().trim().max(120) });
 
 // --- OpenAPI registration ----------------------------------------------------
 const CLIENT_KEYS_TAG = "Client keys";
@@ -72,6 +75,23 @@ registerRoute({
   paramDescriptions: clientKeyParams,
   responses: {
     200: { description: "The organization's client keys.", schemaName: "ClientKeyListResponse" },
+  },
+});
+
+registerRoute({
+  method: "patch",
+  path: "/v1/orgs/{org}/client-keys/{id}",
+  summary: "Rename a client key",
+  description: "Change a client key's label. An empty label leaves it unlabelled.",
+  tags: [CLIENT_KEYS_TAG],
+  auth: true,
+  paramDescriptions: clientKeyParams,
+  request: { body: renameKey },
+  responses: {
+    200: { description: "The updated client key.", schemaName: "ClientKey" },
+    404: { description: "No client key with that id." },
+    422: { description: "The submitted data failed validation." },
+    429: WRITE_429,
   },
 });
 
@@ -209,4 +229,32 @@ sdkKeys_.post("/:id/revoke", async (c) => {
 
   if (!row) return jsonError(c, 404, "SDK key not found.");
   return c.json({ ok: true });
+});
+
+// --- Rename ------------------------------------------------------------------
+sdkKeys_.patch("/:id", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
+
+  const parsed = renameKey.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return validationError(c, parsed.error);
+
+  const [row] = await db
+    .update(sdkKeys)
+    .set({ name: parsed.data.name })
+    .where(and(eq(sdkKeys.id, c.req.param("id")), eq(sdkKeys.organizationId, ctx.orgId)))
+    .returning();
+  if (!row) return jsonError(c, 404, "Client key not found.");
+
+  const envKey = await withOrg(ctx.orgId, (tx) =>
+    tx
+      .select({ key: environments.key })
+      .from(environments)
+      .where(eq(environments.id, row.environmentId))
+      .limit(1)
+      .then((r) => r[0]?.key ?? null),
+  );
+  return c.json({ key: serializeKey(row, envKey) });
 });
