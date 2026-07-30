@@ -137,7 +137,12 @@ function CreateFlagDialog({ slug, onClose }: { slug: string; onClose: () => void
           <Field label="Type">
             <SegmentedControl
               value={type}
-              onValueChange={(v) => setType(v as FlagType)}
+              onValueChange={(v) => {
+                setType(v as FlagType);
+                // Values are type-specific; start fresh so a JSON draft doesn't
+                // linger in a Number field (and vice versa).
+                setVariants([{ value: "", label: "" }]);
+              }}
               options={TYPES}
               ariaLabel="Flag value type"
             />
@@ -180,6 +185,7 @@ function CreateFlagDialog({ slug, onClose }: { slug: string; onClose: () => void
                       <JsonEditor
                         value={v.value}
                         onChange={(val) => setVariant(i, { value: val })}
+                        placeholder={VALUE_PLACEHOLDER.json}
                         ariaLabel={`Variant ${i + 1} value`}
                       />
                     </div>

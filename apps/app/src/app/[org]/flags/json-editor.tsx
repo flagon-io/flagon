@@ -41,6 +41,7 @@ export function JsonEditor({
   disabled,
   invalid,
   ariaLabel,
+  placeholder,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -48,6 +49,8 @@ export function JsonEditor({
   disabled?: boolean;
   invalid?: boolean;
   ariaLabel?: string;
+  /** Muted hint shown in the editor while it is empty (like a textarea placeholder). */
+  placeholder?: string;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
@@ -88,7 +91,12 @@ export function JsonEditor({
           ref={preRef}
           aria-hidden
           className="pointer-events-none absolute inset-0 max-h-56 overflow-hidden whitespace-pre px-3 py-2 leading-5 text-zinc-300"
-          dangerouslySetInnerHTML={{ __html: `${highlightJson(value)}\n` }}
+          dangerouslySetInnerHTML={{
+            __html:
+              value === "" && placeholder
+                ? `<span class="text-zinc-600">${escapeHtml(placeholder)}</span>`
+                : `${highlightJson(value)}\n`,
+          }}
         />
         <textarea
           ref={taRef}
