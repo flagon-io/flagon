@@ -569,7 +569,12 @@ flags_.post("/", async (c) => {
         organizationId: ctx.orgId,
         flagId: flag.id,
         environmentId: env.id,
-        enabled: false,
+        // A boolean flag starts Off (serves false) — the safe default for a new
+        // feature. A multivariate flag has no "off" state in the product model:
+        // it always returns a value, so it starts enabled, serving its default
+        // variant. Creating it disabled would make targeting rules and rollouts
+        // silently dead (evaluation returns DISABLED before consulting them).
+        enabled: type !== "boolean",
         defaultVariantId: idByKey.get(plan.defaultKey) ?? null,
         offVariantId: idByKey.get(plan.offKey) ?? null,
       })),

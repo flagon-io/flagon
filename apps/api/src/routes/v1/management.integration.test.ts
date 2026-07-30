@@ -85,6 +85,27 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
       }),
     });
     expect(res.status).toBe(201);
+
+    // A multivariate flag is created ENABLED in every environment (unlike a
+    // boolean, which starts Off). Otherwise evaluation would short-circuit to
+    // DISABLED and its default/rules/rollouts would be silently dead.
+    const detail = await (await app.request(`${base}/flags/color`, { headers: auth() })).json();
+    expect(detail.environments.every((e: { enabled: boolean }) => e.enabled)).toBe(true);
+
+    // And it evaluates to its default variant (first = "red"), reason STATIC —
+    // proving it is live on creation with no explicit enable.
+    const keyRes = await app.request(`${base}/client-keys`, {
+      method: "POST",
+      headers: auth(),
+      body: JSON.stringify({ name: "color key", environment: "production" }),
+    });
+    const { key } = await keyRes.json();
+    const evalRes = await app.request(`/ofrep/v1/evaluate/flags/color`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ context: { targetingKey: "u1" } }),
+    });
+    expect(await evalRes.json()).toMatchObject({ key: "color", value: "red", reason: "STATIC" });
   });
 
   it("rejects a duplicate slug (409) and a bad variant type (422)", async () => {

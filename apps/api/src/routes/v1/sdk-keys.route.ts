@@ -88,7 +88,7 @@ registerRoute({
   paramDescriptions: clientKeyParams,
   request: { body: renameKey },
   responses: {
-    200: { description: "The updated client key.", schemaName: "ClientKey" },
+    200: { description: "The updated client key.", schemaName: "ClientKeyResponse" },
     404: { description: "No client key with that id." },
     422: { description: "The submitted data failed validation." },
     429: WRITE_429,
@@ -149,6 +149,7 @@ const clientKeySchema = z.object({
   createdAt: z.string().describe("ISO 8601 timestamp"),
 });
 registerComponentSchema("ClientKey", clientKeySchema);
+registerComponentSchema("ClientKeyResponse", z.object({ key: clientKeySchema }));
 registerComponentSchema("ClientKeyCreatedResponse", z.object({ key: clientKeySchema }));
 registerComponentSchema("ClientKeyListResponse", z.array(clientKeySchema));
 

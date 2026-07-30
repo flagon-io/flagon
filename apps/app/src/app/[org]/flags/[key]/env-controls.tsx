@@ -185,6 +185,8 @@ export function EnvCard({
             defaultVariantKey={env.defaultVariantKey}
             variants={variants}
             segments={segments}
+            isBoolean={isBoolean}
+            enabled={env.enabled}
             readOnly={readOnly}
             attributeSuggestions={attributeSuggestions}
             onSaved={() => router.refresh()}
@@ -394,6 +396,8 @@ function RulesEditor({
   defaultVariantKey,
   variants,
   segments,
+  isBoolean,
+  enabled,
   readOnly = false,
   attributeSuggestions,
   onSaved,
@@ -406,6 +410,9 @@ function RulesEditor({
   defaultVariantKey: string | null;
   variants: FlagVariant[];
   segments: Segment[];
+  isBoolean: boolean;
+  /** The env's current enabled state, so a multivariate save can self-enable. */
+  enabled: boolean;
   readOnly?: boolean;
   attributeSuggestions?: string[];
   onSaved: () => void;
@@ -523,7 +530,17 @@ function RulesEditor({
         const res = await saveRulesAction(slug, flagKey, envKey, rulePayload);
         if (res.error) return setError(res.error);
       }
-      if (defaultDirty) {
+      // A multivariate flag is never "off": ensure it is enabled whenever its
+      // config is written, so rules and rollouts actually take effect (evaluation
+      // returns DISABLED before consulting them otherwise). Boolean flags keep
+      // their explicit Off/On state.
+      if (!isBoolean && (defaultDirty || !enabled)) {
+        const res = await setFeatureStateAction(slug, flagKey, envKey, {
+          enabled: true,
+          defaultServe: builtDefault.serve,
+        });
+        if (res.error) return setError(res.error);
+      } else if (defaultDirty) {
         const res = await setDefaultServeAction(slug, flagKey, envKey, builtDefault.serve);
         if (res.error) return setError(res.error);
       }
