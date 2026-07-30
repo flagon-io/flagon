@@ -11,10 +11,20 @@
 export type PlanId = "hobby" | "pro" | "enterprise";
 
 export type PlanPrice = {
-  /** The headline figure, e.g. "Free", "$20", "Custom". */
+  /** The monthly figure, e.g. "$0", "$20", "Custom". */
   amount: string;
-  /** Optional unit after the figure, e.g. "/mo". */
-  suffix?: string;
+  /** Unit after the figure, e.g. "per month". Omit for Custom pricing. */
+  unit?: string;
+  /** Makes metering explicit right in the price, Laravel-style: "plus usage".
+   *  The fee is a usage credit; you are only billed beyond it. */
+  plus?: string;
+};
+
+export type PlanFeature = {
+  text: string;
+  /** A planned capability not yet shipped: rendered muted with a "Soon" tag, so
+   *  the roadmap is visible without implying it already works. */
+  soon?: boolean;
 };
 
 export type Plan = {
@@ -22,11 +32,11 @@ export type Plan = {
   name: string;
   description: string;
   price: PlanPrice;
-  /** A small callout under the price, e.g. the alpha note. */
+  /** A small callout under the price (e.g. Hobby's Pro-only-usage note). */
   note?: string;
   /** Intro line above the feature list, e.g. "Everything in Hobby, plus". */
   featuresLead?: string;
-  features: string[];
+  features: PlanFeature[];
   /** Whether the plan can be chosen right now. */
   available: boolean;
   /** Highlight as the recommended plan (only shown once it is available). */
@@ -39,48 +49,55 @@ export const PLANS: Plan[] = [
   {
     id: "hobby",
     name: "Hobby",
-    description: "The perfect starting place for personal projects.",
-    price: { amount: "$0", suffix: "/mo" },
-    note: "Limited to 1 user",
+    description: "For personal projects and trying Flagon out.",
+    price: { amount: "$0", unit: "per month" },
+    // Be honest: Hobby is not "everything" — it is one user with a free usage
+    // allowance, and some usage and features need Pro.
+    note: "One user. Usage beyond the free allowance needs Pro.",
     features: [
-      "All core products",
-      "Unlimited projects and environments",
-      "Community support",
+      { text: "All core products, at hobby scale" },
+      { text: "Unlimited projects and environments" },
+      { text: "A monthly usage allowance included" },
+      { text: "Community support" },
     ],
     available: true,
-    ctaLabel: "Create a free organization",
+    ctaLabel: "Start for free",
   },
   {
     id: "pro",
     name: "Pro",
     description: "Everything you need to build and scale with a team.",
-    price: { amount: "$20", suffix: "/mo" },
-    note: "Billed monthly. Cancel anytime.",
+    price: { amount: "$20", unit: "per month", plus: "plus usage" },
+    // The fee is a usage credit, not a seat charge: it covers usage, and you are
+    // only billed more if you go past it.
+    note: "The $20 goes toward usage. Pay more only if you exceed it.",
     featuresLead: "All Hobby features, plus:",
     features: [
-      "Unlimited team members and roles",
-      "SSO with SAML and SCIM",
-      "Audit logs",
-      "Usage-based pricing, never per-seat",
-      "Priority support",
+      { text: "Unlimited team members and roles" },
+      { text: "Usage-based pricing, never per-seat" },
+      { text: "Higher usage allowance included" },
+      { text: "Priority support" },
+      { text: "SSO with SAML and SCIM", soon: true },
+      { text: "Audit logs", soon: true },
+      { text: "7-day log retention", soon: true },
     ],
     available: true,
     popular: true,
-    ctaLabel: "Create a Pro organization",
+    ctaLabel: "Start with Pro",
   },
   {
     id: "enterprise",
     name: "Enterprise",
     description: "Critical security, compliance, support, and SLAs.",
     price: { amount: "Custom" },
-    note: "Let's talk and see how we can serve you best.",
+    note: "Let's find the right fit for your team.",
     featuresLead: "All Pro features, plus:",
     features: [
-      "Dedicated support and SLAs",
-      "Data residency options",
-      "Custom usage volumes",
-      "Invoicing and procurement",
-      "Security reviews",
+      { text: "Dedicated support and SLAs" },
+      { text: "Custom usage volumes" },
+      { text: "Invoicing and procurement" },
+      { text: "Security reviews" },
+      { text: "Data residency options", soon: true },
     ],
     available: false,
     ctaLabel: "Contact sales",

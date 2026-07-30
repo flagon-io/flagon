@@ -63,7 +63,7 @@ export {
   planName,
   planAllowsInvites,
 } from "./plans";
-export type { Plan, PlanId, PlanPrice } from "./plans";
+export type { Plan, PlanId, PlanPrice, PlanFeature } from "./plans";
 export {
   IconStandards,
   IconUsage,

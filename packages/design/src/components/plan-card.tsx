@@ -118,13 +118,17 @@ export function PlanCard({
         ) : null}
       </div>
 
-      {/* Price */}
-      <div className="mt-5 flex items-baseline gap-1.5">
+      {/* Price. "plus usage" sits right in the price so metering is never a
+          surprise; the annual note appears only on the annual interval. */}
+      <div className="mt-5 flex flex-wrap items-baseline gap-x-1.5">
         <span className="text-4xl font-semibold tracking-tight text-zinc-100">
           {plan.price.amount}
         </span>
-        {plan.price.suffix ? (
-          <span className="text-sm text-zinc-500">{plan.price.suffix}</span>
+        {plan.price.unit ? (
+          <span className="text-sm text-zinc-500">{plan.price.unit}</span>
+        ) : null}
+        {plan.price.plus ? (
+          <span className="text-sm font-medium text-zinc-400">{plan.price.plus}</span>
         ) : null}
       </div>
       {plan.note ? (
@@ -142,11 +146,14 @@ export function PlanCard({
         <ul className="flex flex-col gap-2.5">
           {plan.features.map((feature) => (
             <li
-              key={feature}
-              className="flex items-start gap-2.5 text-sm text-zinc-300"
+              key={feature.text}
+              className={`flex items-start gap-2.5 text-sm ${
+                feature.soon ? "text-zinc-500" : "text-zinc-300"
+              }`}
             >
-              <CheckIcon />
-              <span>{feature}</span>
+              <CheckIcon dim={feature.soon} />
+              <span className="flex-1">{feature.text}</span>
+              {feature.soon ? <SoonTag /> : null}
             </li>
           ))}
         </ul>
@@ -187,13 +194,13 @@ function Pill({
   );
 }
 
-function CheckIcon() {
+function CheckIcon({ dim = false }: { dim?: boolean }) {
   return (
     <svg
       width="15"
       height="15"
       viewBox="0 0 16 16"
-      className="mt-0.5 shrink-0 text-zinc-500"
+      className={`mt-0.5 shrink-0 ${dim ? "text-zinc-600" : "text-teal-400/80"}`}
       aria-hidden
       focusable="false"
     >
@@ -206,5 +213,14 @@ function CheckIcon() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+/** Marks a feature that is on the roadmap but not shipped yet. */
+function SoonTag() {
+  return (
+    <span className="shrink-0 self-center rounded border border-white/12 px-1 py-px text-[9px] font-medium leading-none tracking-wide text-zinc-500 uppercase">
+      Soon
+    </span>
   );
 }

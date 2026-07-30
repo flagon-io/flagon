@@ -13,11 +13,13 @@ const NAV_ITEMS: readonly {
   label: string;
   href?: string;
   external?: boolean;
+  /** Render inert with a "Soon" badge (a surface we are building toward). */
+  soon?: boolean;
 }[] = [
-  { label: "Products" },
-  { label: "Docs", href: "/docs" },
-  { label: "Enterprise" },
+  { label: "Products", soon: true },
   { label: "Pricing", href: "/pricing" },
+  { label: "Enterprise", soon: true },
+  { label: "Docs", href: "/docs" },
 ];
 
 /**
@@ -62,9 +64,14 @@ export async function SiteHeader() {
                   key={item.label}
                   aria-disabled="true"
                   title="Coming soon"
-                  className="cursor-not-allowed text-sm font-medium text-zinc-500 select-none"
+                  className="flex cursor-not-allowed items-center gap-1.5 text-sm font-medium text-zinc-500 select-none"
                 >
                   {item.label}
+                  {item.soon ? (
+                    <span className="rounded border border-white/15 px-1 py-0.5 text-[9px] font-semibold tracking-wide text-zinc-500 uppercase">
+                      Soon
+                    </span>
+                  ) : null}
                 </span>
               ),
             )}

@@ -104,7 +104,7 @@ export default async function OrgBillingPage({
             description={
               isPro
                 ? "Update your card, download invoices, or cancel."
-                : `${PRO?.price.amount ?? "$20"}${PRO?.price.suffix ?? "/mo"}, billed monthly. Cancel anytime.`
+                : `${PRO?.price.amount ?? "$20"} per month plus usage, billed monthly. Cancel anytime.`
             }
           >
             {!canManage ? (
@@ -128,15 +128,19 @@ export default async function OrgBillingPage({
               <div className="flex flex-col gap-4">
                 {PRO ? (
                   <ul className="flex flex-col gap-1.5">
-                    {PRO.features.map((f) => (
-                      <li
-                        key={f}
-                        className="flex items-center gap-2 text-sm text-zinc-300"
-                      >
-                        <Check className="h-4 w-4 shrink-0 text-teal-400" />
-                        {f}
-                      </li>
-                    ))}
+                    {/* Only tout what actually ships today; roadmap ("soon")
+                        features are omitted from the upgrade pitch. */}
+                    {PRO.features
+                      .filter((f) => !f.soon)
+                      .map((f) => (
+                        <li
+                          key={f.text}
+                          className="flex items-center gap-2 text-sm text-zinc-300"
+                        >
+                          <Check className="h-4 w-4 shrink-0 text-teal-400" />
+                          {f.text}
+                        </li>
+                      ))}
                   </ul>
                 ) : null}
                 <BillingActionButton

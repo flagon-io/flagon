@@ -26,11 +26,12 @@ import {
   Rocket,
   Settings,
   Signal,
+  Siren,
   SlidersHorizontal,
   Split,
   SquareCode,
-  Terminal,
   Users,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { OrgMembership } from "@/lib/org";
@@ -163,16 +164,19 @@ function buildNav(base: string): {
       ],
       [
         { kind: "area", area: flags },
+        // A first-class feature category (GitHub Actions / Vercel-style): run
+        // work on events across every product. Broad enough that it supersedes
+        // Runbooks, which is why there is no separate Runbooks entry.
+        { kind: "soon", label: "Automations", icon: Workflow },
         { kind: "soon", label: "Teams", icon: Users },
         { kind: "soon", label: "Integrations", icon: Plug },
       ],
-      // Reliability suite (Better Stack-style, but Flagon's own product): status
-      // pages, on-call/incidents, and runbook automation. Flagon-native labels,
-      // not the third-party tools these riff on.
+      // Reliability suite (Better Stack-style, but Flagon's own product): the
+      // play is Incidents — they feed the Status Page and drive On-call.
       [
+        { kind: "soon", label: "Incidents", icon: Siren },
         { kind: "soon", label: "Status Page", icon: Signal },
         { kind: "soon", label: "On-call", icon: BellRing },
-        { kind: "soon", label: "Runbooks", icon: Terminal },
       ],
       [
         { kind: "soon", label: "Usage", icon: Activity },
