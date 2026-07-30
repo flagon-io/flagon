@@ -159,11 +159,9 @@ function buildNav(base: string): {
     areas: [flags, settings],
     sections: [
       [
-        // Projects (+ its Integrations hub) is a WIP feature — shown as a link
-        // when enabled, otherwise a "soon" placeholder. See @/lib/features.
-        PROJECTS_ENABLED
-          ? { kind: "link", label: "Projects", icon: Boxes, href: base }
-          : { kind: "soon", label: "Projects", icon: Boxes },
+        // Projects is the org home, so its link always works; while the feature
+        // is WIP (see @/lib/features) that home shows a coming-soon placeholder.
+        { kind: "link", label: "Projects", icon: Boxes, href: base },
         { kind: "soon", label: "Packages", icon: Package },
         { kind: "soon", label: "Deployments", icon: Rocket },
         { kind: "soon", label: "Logs", icon: Logs },
