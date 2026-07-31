@@ -25,6 +25,7 @@ export {
 } from "./components/segmented-control";
 export { Input, Textarea } from "./components/input";
 export { Field } from "./components/field";
+export { TopLoader } from "./components/top-loader";
 export { Button, type ButtonVariant } from "./components/button";
 export { Switch } from "./components/switch";
 export { Skeleton } from "./components/skeleton";
