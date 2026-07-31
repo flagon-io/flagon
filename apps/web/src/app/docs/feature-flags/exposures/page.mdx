@@ -1,0 +1,160 @@
+export const metadata = {
+  title: "Record exposures",
+  description:
+    "Send flag exposures to Flagon for usage and experiment analytics: the endpoint, a batching helper, request, response, and errors.",
+};
+
+# Record exposures
+
+Evaluating a flag is **free and unlimited** — you never pay to check a flag. An
+**exposure** is the analytics event you send when you want usage or experiment
+analysis on that check: how often a flag serves each variant, pass rates, lift.
+Exposures are the one billable meter, so you send them only for the flags you
+actually want to measure.
+
+All requests go to the Flagon API host and authenticate with a
+[client key](/docs/feature-flags/client-keys) — the same key you evaluate with:
+
+```http
+POST /ofrep/v1/exposures
+Authorization: Bearer flagon_client_...
+Content-Type: application/json
+```
+
+<Callout tone="note" title="Base URL">
+Examples use `https://api.flagon.io`. Running Flagon locally, the API is at
+`http://localhost:3002`.
+</Callout>
+
+## Send a batch
+
+The body is an `events` array. Each entry names the flag `key` it relates to; any
+other fields you attach are ignored for now (Flagon meters the count). Send up to
+**1,000** events per request and chunk anything larger.
+
+<CodeTabs
+  tabs={[
+    {
+      label: "cURL",
+      code: `curl -X POST "https://api.flagon.io/ofrep/v1/exposures" \\
+  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"events":[{"key":"new-checkout","value":true},{"key":"theme","value":"dark"}]}'`,
+    },
+    {
+      label: "Node.js",
+      caption: "fetch",
+      code: `await fetch("https://api.flagon.io/ofrep/v1/exposures", {
+  method: "POST",
+  headers: {
+    Authorization: \`Bearer \${process.env.FLAGON_CLIENT_KEY}\`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    events: [
+      { key: "new-checkout", value: true },
+      { key: "theme", value: "dark" },
+    ],
+  }),
+});`,
+    },
+    {
+      label: "Python",
+      caption: "requests",
+      code: `import os, requests
+
+requests.post(
+    "https://api.flagon.io/ofrep/v1/exposures",
+    headers={"Authorization": f"Bearer {os.environ['FLAGON_CLIENT_KEY']}"},
+    json={"events": [{"key": "new-checkout", "value": True}]},
+)`,
+    },
+  ]}
+/>
+
+A `202` means the batch was accepted for metering:
+
+```json
+{ "recorded": 2 }
+```
+
+## A batching helper
+
+You rarely want a network call per exposure. Buffer them and flush in batches on
+a timer (and once more as the page unloads, so nothing is lost):
+
+```js
+const FLAGON_API = "https://api.flagon.io";
+const MAX_BATCH = 1000;
+
+// Buffer exposures and flush them in batches.
+export function createExposureRecorder(clientKey, { flushMs = 5000 } = {}) {
+  let queue = [];
+
+  async function flush() {
+    if (queue.length === 0) return;
+    const events = queue.splice(0, MAX_BATCH);
+    await fetch(`${FLAGON_API}/ofrep/v1/exposures`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${clientKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ events }),
+      keepalive: true, // let an in-flight flush finish during unload
+    });
+  }
+
+  const timer = setInterval(flush, flushMs);
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", flush);
+  }
+
+  return {
+    // Call right after you evaluate a flag you want analytics on.
+    record(key, extra) {
+      queue.push({ key, ...extra });
+      if (queue.length >= MAX_BATCH) flush();
+    },
+    flush,
+    stop() {
+      clearInterval(timer);
+      return flush();
+    },
+  };
+}
+```
+
+Wire it in next to your evaluations:
+
+```js
+const exposures = createExposureRecorder(process.env.FLAGON_CLIENT_KEY);
+
+const value = client.getBooleanValue("new-checkout", false);
+exposures.record("new-checkout", { value });
+```
+
+## Errors
+
+| Status | `errorCode` | Meaning |
+| --- | --- | --- |
+| `400` | `PARSE_ERROR` | The body was not valid JSON. |
+| `400` | `INVALID_CONTEXT` | `events` was missing, not an array, or larger than 1,000. |
+| `401` | `AUTHENTICATION_ERROR` | Missing, malformed, or revoked client key. |
+| `429` | None | Too many requests; back off. A `Retry-After` header says for how long. |
+
+## Notes on behavior
+
+- **Recording is best-effort.** A `202` means accepted for rollup; exposures are
+  analytics, so a dropped batch is never worth failing your request over. Do not
+  block a user path on the flush.
+- **Only the count is metered.** Flagon stores per-day counts, not the exposure
+  detail, so extra fields you attach do not change your bill.
+- **Checks stay free.** Evaluating flags never counts against your plan — only the
+  exposures you choose to send do. See [pricing](/pricing) for each plan's
+  included events.
+
+## Next
+
+- **[Client keys](/docs/feature-flags/client-keys)**: mint the key exposures authenticate with.
+- **[Evaluate with REST](/docs/feature-flags/evaluate/rest)**: the free evaluation calls these pair with.

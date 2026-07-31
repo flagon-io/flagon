@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { authContext, getAuth } from "../../lib/auth-context.js";
 import { jsonError } from "../../lib/http.js";
-import { resolveOrg, requireManager } from "../../lib/org-context.js";
+import { resolveOrg, requireBillingManager } from "../../lib/org-context.js";
 import {
   createCheckoutUrl,
   createPortalUrl,
@@ -81,9 +81,9 @@ function actorFrom(c: Context) {
 }
 
 billing_.post("/checkout", async (c) => {
-  const ctx = await resolveOrg(c, { allowLocked: true });
+  const ctx = await resolveOrg(c, { allowLocked: true, allowBillingWrite: true });
   if (ctx instanceof Response) return ctx;
-  const denied = requireManager(c, ctx);
+  const denied = requireBillingManager(c, ctx);
   if (denied) return denied;
   if (!isBillingConfigured())
     return jsonError(c, 503, "Billing is not available on this deployment.");
@@ -104,9 +104,9 @@ billing_.post("/checkout", async (c) => {
 });
 
 billing_.post("/portal", async (c) => {
-  const ctx = await resolveOrg(c, { allowLocked: true });
+  const ctx = await resolveOrg(c, { allowLocked: true, allowBillingWrite: true });
   if (ctx instanceof Response) return ctx;
-  const denied = requireManager(c, ctx);
+  const denied = requireBillingManager(c, ctx);
   if (denied) return denied;
 
   const org = await getBillingOrgById(ctx.orgId);

@@ -11,6 +11,10 @@ export {
   isPlanId,
   isSelectablePlan,
   planName,
+  planIncludedEvents,
+  planOverage,
+  planBaseCents,
   planAllowsInvites,
+  EVENT_OVERAGE_PER_MILLION_CENTS,
 } from "@flagon/design/plans";
 export type { Plan, PlanId, PlanPrice } from "@flagon/design/plans";

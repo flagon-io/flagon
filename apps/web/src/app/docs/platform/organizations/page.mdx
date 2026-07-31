@@ -23,7 +23,9 @@ decides what they can do.
 | --- | --- |
 | **Owner** | Everything, including transferring ownership and deleting the organization. Exactly one per organization. |
 | **Admin** | Manage members, tokens, and all product configuration. |
-| **Member** | Work within the products (create and configure flags, and so on). |
+| **Member** | Work within the products (create and configure flags, projects, and the catalog). |
+| **Viewer** | View everything in the organization. Read-only, changes nothing. |
+| **Billing** | Manage billing and invoices. Read-only everywhere else. |
 
 ### One owner
 
@@ -33,7 +35,8 @@ ownership to another member, and in the same step steps down to admin. That keep
 accountability unambiguous, there's always exactly one person who ultimately
 controls the organization.
 
-When you invite people, the roles you can give them are **admin** and **member**.
+Invitations go out as **admin** or **member**. The read-only roles, **viewer** and
+**billing**, are assigned from the members list once someone has joined.
 
 ## Invitations
 
@@ -42,14 +45,13 @@ members settings. They accept, sign in, and become a member with the role you
 chose. Because [pricing is usage-based](/docs/platform#principles), there's no
 per-seat cost, invite the whole team.
 
-## Projects
+## Projects & teams
 
-<Callout tone="note" title="Coming soon">
-[Projects](/docs/platform/projects) are not available yet. Today flags are
-organization-global. When projects land they will organize the work for a system
-or team, so a large organization stays navigable instead of being one flat list
-of resources.
-</Callout>
+Your organization's work is a [catalog](/docs/catalog) of
+[projects](/docs/platform/projects), each owned by a [team](/docs/platform/teams).
+Teams group your people and carry project ownership; projects describe the systems
+you run. Feature flags are still organization-global today; the catalog is the map
+of the systems those flags, and future products, act on.
 
 ## Signing in
 

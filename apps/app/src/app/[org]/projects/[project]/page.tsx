@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, GitBranch, Lock, Rocket } from "lucide-react";
-import { IconGitHub } from "@flagon/design";
+import { ArrowLeft, GitFork, Rocket, Settings, ShieldCheck, Users } from "lucide-react";
 import { getSession } from "@/lib/auth";
-import { getMembershipBySlug } from "@/lib/org";
+import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { getProject } from "@/lib/projects-api";
+import { LIFECYCLES, TIERS, labelFor } from "@/lib/catalog";
+import { ProjectReadme } from "./project-readme";
 
 /**
- * Project overview — the catalog card for one project. Any member sees it; the
- * deeper configuration (settings, env vars/secrets) is role-gated on its own
- * pages. Deployments and Domains are coming; this is the landing today.
+ * Project overview — the catalog card for one project: its ownership and metadata,
+ * plus the catalog surfaces still to come. Any member sees it; editing the
+ * metadata lives on the settings page (owner/admin only).
  */
 export default async function ProjectOverview({
   params,
@@ -24,7 +25,7 @@ export default async function ProjectOverview({
   const project = await getProject(slug, key);
   if (!project) notFound();
 
-  const repoUrl = project.repoFullName ? `https://github.com/${project.repoFullName}` : null;
+  const canManage = canManageOrg(membership.role);
 
   return (
     <div className="flex flex-col gap-6">
@@ -40,52 +41,68 @@ export default async function ProjectOverview({
           <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
             {project.name}
           </h1>
-          {project.repoFullName ? (
-            <a
-              href={repoUrl ?? "#"}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-300"
-            >
-              <IconGitHub className="h-3.5 w-3.5" /> {project.repoFullName}
-              {project.repoPrivate ? <Lock className="h-3 w-3" /> : null}
-            </a>
-          ) : (
-            <p className="mt-1 text-sm text-amber-400/80">Repository disconnected</p>
-          )}
+          <p className="mt-1 font-mono text-sm text-zinc-500">{project.key}</p>
         </div>
+        {canManage ? (
+          <Link
+            href={`/${slug}/projects/${key}/settings`}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/8 hover:text-zinc-100"
+          >
+            <Settings className="h-4 w-4" /> Settings
+          </Link>
+        ) : null}
       </div>
+
+      {project.description ? (
+        <p className="max-w-2xl text-sm text-zinc-400">{project.description}</p>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <InfoCard label="Repository">
-          <span className="flex items-center gap-1.5 text-zinc-200">
-            <IconGitHub className="h-4 w-4 text-zinc-500" />
-            {project.repoFullName ?? "—"}
-          </span>
+        <InfoCard label="Owner">
+          {project.ownerTeam ? (
+            <Link
+              href={`/${slug}/teams/${project.ownerTeam.key}`}
+              className="inline-flex items-center gap-1.5 text-zinc-200 hover:text-zinc-100"
+            >
+              <Users className="h-4 w-4 text-zinc-500" /> {project.ownerTeam.name}
+            </Link>
+          ) : (
+            <span className="text-zinc-500">No owner</span>
+          )}
         </InfoCard>
-        <InfoCard label="Production branch">
-          <span className="flex items-center gap-1.5 text-zinc-200">
-            <GitBranch className="h-4 w-4 text-zinc-500" />
-            {project.repoDefaultBranch ?? "—"}
-          </span>
+        <InfoCard label="Lifecycle">
+          <Value text={labelFor(LIFECYCLES, project.lifecycle)} />
         </InfoCard>
-        <InfoCard label="Root directory">
-          <span className="font-mono text-zinc-200">{project.rootDirectory || "./"}</span>
+        <InfoCard label="Tier">
+          <Value text={labelFor(TIERS, project.tier)} />
         </InfoCard>
       </div>
 
-      <div className="flex items-start gap-3 rounded-xl border border-dashed border-white/12 bg-white/2 px-4 py-4">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/5 text-zinc-400">
-          <Rocket className="h-4 w-4" />
-        </span>
-        <div>
-          <p className="text-sm font-medium text-zinc-200">Deployments are coming</p>
-          <p className="mt-1 text-sm text-zinc-500">
-            Your repository is connected. Builds and deployments will land here.
-            Meanwhile, configure environment variables and settings from the
-            project nav.
-          </p>
+      {project.tags.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {project.tags.map((t) => (
+            <span
+              key={t}
+              className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs text-zinc-300"
+            >
+              {t}
+            </span>
+          ))}
         </div>
+      ) : null}
+
+      <ProjectReadme
+        slug={slug}
+        projectKey={project.key}
+        projectName={project.name}
+        readme={project.readme}
+        canManage={canManage}
+      />
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <SoonCard icon={<Rocket className="h-4 w-4" />} title="Deployments" />
+        <SoonCard icon={<GitFork className="h-4 w-4" />} title="Dependencies" />
+        <SoonCard icon={<ShieldCheck className="h-4 w-4" />} title="Scorecards" />
       </div>
     </div>
   );
@@ -96,6 +113,28 @@ function InfoCard({ label, children }: { label: string; children: React.ReactNod
     <div className="rounded-xl border border-white/10 bg-white/2 px-4 py-3">
       <p className="mb-1.5 text-xs font-medium text-zinc-500">{label}</p>
       <p className="truncate text-sm">{children}</p>
+    </div>
+  );
+}
+
+function Value({ text }: { text: string | null }) {
+  return text ? (
+    <span className="text-zinc-200">{text}</span>
+  ) : (
+    <span className="text-zinc-500">—</span>
+  );
+}
+
+function SoonCard({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-dashed border-white/12 bg-white/2 px-4 py-3.5">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/5 text-zinc-400">
+        {icon}
+      </span>
+      <div>
+        <p className="text-sm font-medium text-zinc-300">{title}</p>
+        <p className="text-xs text-zinc-600">Coming soon</p>
+      </div>
     </div>
   );
 }

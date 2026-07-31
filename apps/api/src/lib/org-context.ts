@@ -49,9 +49,36 @@ export async function orgIdBySlug(slug: string): Promise<string | null> {
 
 const MANAGER_ROLES = new Set(["owner", "admin"]);
 
+// Read-only org roles: they can SEE everything in the org but change nothing.
+// `viewer` is read-only everywhere; `billing` is read-only everywhere EXCEPT the
+// billing endpoints, which opt back in via resolveOrg's `allowBillingWrite`.
+// Enforcement is centralized in resolveOrg (the one gate every management
+// handler funnels through), so a read-only role can never reach a write path —
+// present or future — without every route having to remember to guard.
+const READ_ONLY_ROLES = new Set(["viewer", "billing"]);
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 /** Whether a role may perform privileged actions (credentials, destructive deletes). */
 export function isManagerRole(role: string): boolean {
   return MANAGER_ROLES.has(role);
+}
+
+/** Whether a role is org-wide read-only (viewer/billing). */
+export function isReadOnlyRole(role: string): boolean {
+  return READ_ONLY_ROLES.has(role);
+}
+
+/**
+ * Billing endpoints (checkout/portal): owners/admins, plus the dedicated
+ * `billing` role. Everyone else — including read-only `viewer` — is refused.
+ */
+export function requireBillingManager(c: Context, ctx: OrgContext): Response | null {
+  if (isManagerRole(ctx.role) || ctx.role === "billing") return null;
+  return jsonError(
+    c,
+    403,
+    "This action requires an owner, admin, or billing role in this organization.",
+  );
 }
 
 /**
@@ -89,9 +116,32 @@ export function requireProjectCreator(c: Context, ctx: OrgContext): Response | n
   );
 }
 
+/**
+ * Refuse a WRITE (POST/PUT/PATCH/DELETE) from an org-wide read-only role. Reads
+ * (GET) always pass. `billing` may write only where a route opts in with
+ * `allowBillingWrite` (the billing endpoints). Returns a 403 Response to
+ * short-circuit, or null to proceed.
+ */
+function enforceReadOnly(
+  c: Context,
+  role: string,
+  opts: { allowBillingWrite?: boolean },
+): Response | null {
+  if (!WRITE_METHODS.has(c.req.method.toUpperCase())) return null;
+  if (!READ_ONLY_ROLES.has(role)) return null;
+  if (role === "billing" && opts.allowBillingWrite) return null;
+  return jsonError(
+    c,
+    403,
+    role === "billing"
+      ? "Your billing role can only manage billing in this organization."
+      : "Your role in this organization is read-only.",
+  );
+}
+
 export async function resolveOrg(
   c: Context,
-  opts: { allowLocked?: boolean } = {},
+  opts: { allowLocked?: boolean; allowBillingWrite?: boolean } = {},
 ): Promise<OrgContext | Response> {
   const slug = c.req.param("org");
   if (!slug) return jsonError(c, 400, "Missing organization in the path.");
@@ -118,13 +168,43 @@ export async function resolveOrg(
       .where(eq(organizations.slug, slug))
       .limit(1)
   )[0];
-  if (!org) return jsonError(c, 404, "Organization not found.");
+  // Authorize BEFORE revealing anything about the org. A caller who isn't
+  // authorized for THIS org gets a uniform 404 — whether the org doesn't exist,
+  // or exists but they aren't a member — so an outsider can't probe slug
+  // existence, membership, or an org's subscription/lock state from the status
+  // code. Existence and lock state are only ever observable to a real member.
+  let role: string;
+  let actorUserId: string | null;
+  if (auth.kind === "organization") {
+    if (!org || auth.organization.id !== org.id) {
+      return jsonError(c, 404, "Organization not found.");
+    }
+    role = "owner";
+    actorUserId = null;
+  } else {
+    const membership = org
+      ? (
+          await db
+            .select({ role: members.role })
+            .from(members)
+            .where(
+              and(eq(members.organizationId, org.id), eq(members.userId, auth.user.id)),
+            )
+            .limit(1)
+        )[0]
+      : undefined;
+    if (!org || !membership) {
+      return jsonError(c, 404, "Organization not found.");
+    }
+    role = membership.role;
+    actorUserId = auth.user.id;
+  }
 
-  // A locked (lapsed/unpaid) Pro org is refused the whole management surface —
-  // for org tokens and members alike — so the lock cannot be bypassed via the
-  // API. `allowLocked` is the single exception, for the billing endpoints: a
-  // locked org must still be able to reactivate. The SDK/OFREP path is
-  // unaffected (a locked org that never paid was never issued an SDK key).
+  // The caller is an authorized member of a real org. Only now do the lock +
+  // read-only gates apply: a locked (lapsed/unpaid) org refuses its own members
+  // the management surface with a reactivation pointer, and a viewer/billing
+  // role can never reach a write handler. `allowLocked` is the billing exception
+  // so a lapsed org can still reactivate.
   if (!opts.allowLocked && isOrgLocked(org)) {
     return jsonError(
       c,
@@ -132,42 +212,14 @@ export async function resolveOrg(
       "This organization's subscription is inactive. Reactivate it in the console to continue.",
     );
   }
-
-  if (auth.kind === "organization") {
-    if (auth.organization.id !== org.id) {
-      return jsonError(
-        c,
-        403,
-        "This token is not authorized for that organization.",
-      );
-    }
-    return {
-      orgId: org.id,
-      orgSlug: org.slug,
-      role: "owner",
-      actorUserId: null,
-      projectCreationPolicy: org.projectCreationPolicy,
-    };
-  }
-
-  const membership = (
-    await db
-      .select({ role: members.role })
-      .from(members)
-      .where(
-        and(eq(members.organizationId, org.id), eq(members.userId, auth.user.id)),
-      )
-      .limit(1)
-  )[0];
-  if (!membership) {
-    return jsonError(c, 403, "You are not a member of that organization.");
-  }
+  const readOnly = enforceReadOnly(c, role, opts);
+  if (readOnly) return readOnly;
 
   return {
     orgId: org.id,
     orgSlug: org.slug,
-    role: membership.role,
-    actorUserId: auth.user.id,
+    role,
+    actorUserId,
     projectCreationPolicy: org.projectCreationPolicy,
   };
 }

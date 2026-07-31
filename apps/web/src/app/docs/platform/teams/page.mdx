@@ -1,0 +1,52 @@
+export const metadata = {
+  title: "Teams",
+  description:
+    "Teams group people inside an organization and own projects in the catalog, with maintainer and member roles.",
+};
+
+# Teams
+
+A **team** is a named group of people inside an
+[organization](/docs/platform/organizations). Teams are how ownership works in
+the [Catalog](/docs/catalog): a team owns the [projects](/docs/platform/projects)
+it's responsible for, so every project has a clear, living owner instead of a
+name in a spreadsheet.
+
+## Team roles
+
+Membership in a team is GitHub-style, with two roles:
+
+- **Maintainer**: can manage the team, its membership, and its details.
+- **Member**: belongs to the team and is surfaced as an owner of the team's
+  projects.
+
+Only people who are already members of the organization can be added to a team.
+
+## Who can manage a team
+
+- **Owners and admins** of the organization can create teams, delete them, and
+  manage any team's membership.
+- A team's own **maintainers** can manage that team: edit its details and add,
+  remove, or re-role its members.
+
+Deleting a team leaves the projects it owned in place, simply without an owner,
+so nothing is lost.
+
+## Organization member roles
+
+Team roles are separate from a person's role in the organization itself. Across
+the whole organization, members carry one of:
+
+- **Owner**: full access. Transferred, not assigned.
+- **Admin**: manage the organization, its members, and every project.
+- **Member**: create and manage flags, projects, and the catalog.
+- **Viewer**: view projects and the catalog. Read-only.
+- **Billing**: manage billing and invoices. Read-only elsewhere.
+
+See [Organizations](/docs/platform/organizations) for how membership and
+invitations work.
+
+## Next
+
+- **[Projects](/docs/platform/projects)**: what a team owns.
+- **[Catalog](/docs/catalog)**: the map teams and projects build.

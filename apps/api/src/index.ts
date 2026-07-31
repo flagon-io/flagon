@@ -19,7 +19,6 @@ import { buildOpenApiDocument, buildRootIndex } from "./openapi/registry.js";
 import { ofrep } from "./routes/ofrep/index.js";
 import { v1 } from "./routes/v1/index.js";
 import { stripeWebhook } from "./routes/webhooks/stripe.route.js";
-import { githubWebhook } from "./routes/webhooks/github.route.js";
 import { auth } from "./lib/auth.js";
 
 // The API is the control plane: everything that matters (today: the waitlist;
@@ -96,7 +95,6 @@ app.route("/ofrep", ofrep);
 // Stripe webhook: authenticated by request signature, not a token/cookie, so it
 // sits outside /v1 and the management middleware. See the route for details.
 app.route("/webhooks/stripe", stripeWebhook);
-app.route("/webhooks/github", githubWebhook);
 
 // Authentication: the API hosts BetterAuth. Its generic handler is a Web
 // Request -> Response, which Hono provides via c.req.raw and returns verbatim

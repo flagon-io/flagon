@@ -1,8 +1,21 @@
 import type { Metadata } from "next";
-import { BleedBand, brand, GridBackdrop } from "@flagon/design";
+import {
+  BleedBand,
+  brand,
+  GridBackdrop,
+  planIncludedEvents,
+  EVENT_OVERAGE_PER_MILLION_CENTS,
+} from "@flagon/design";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { PricingTable } from "./pricing-table";
+
+// Rendered from the shared catalog so the marketing copy can never drift from
+// what the app actually meters. "2M" / "5M" and the per-1K overage rate.
+const millions = (n: number) => `${n / 1_000_000}M`;
+const HOBBY_EVENTS = millions(planIncludedEvents("hobby"));
+const PRO_EVENTS = millions(planIncludedEvents("pro"));
+const PER_1K = (EVENT_OVERAGE_PER_MILLION_CENTS / 1000 / 100).toFixed(2);
 
 export const metadata: Metadata = {
   title: `Pricing · ${brand.name}`,
@@ -27,9 +40,9 @@ export default function PricingPage() {
             Simple, usage-based pricing
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-zinc-400">
-            A monthly base that goes toward your usage, pooled across every
-            product. You pay for usage, never for seats, so adding a teammate
-            never changes the bill. Start free and self-host any time.
+            Flag checks are free and unlimited. Every plan includes a monthly pool
+            of analytics events, and you pay for usage, never for seats, so adding
+            a teammate never changes the bill. Start free and self-host any time.
           </p>
         </div>
 
@@ -38,9 +51,11 @@ export default function PricingPage() {
         {/* Full-bleed strip directly under the table: the note gets the whole
             width so it sits on one line instead of wrapping for no reason. */}
         <BleedBand>
-          <p className="px-6 py-4 text-center text-sm text-zinc-500">
-            Your plan fee is a usage credit. You are only billed beyond it, and
-            spending limits keep a bill from ever surprising you.
+          <p className="mx-auto max-w-3xl px-6 py-4 text-center text-sm text-zinc-500">
+            Flag &amp; config checks are always free and unlimited. Hobby includes{" "}
+            {HOBBY_EVENTS} analytics events a month and simply pauses there, never
+            a surprise bill. Pro includes {PRO_EVENTS} and bills ${PER_1K} per
+            1,000 events beyond it.
           </p>
         </BleedBand>
 

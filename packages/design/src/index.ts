@@ -21,6 +21,7 @@ export { Select, type SelectOption } from "./components/select";
 export {
   SegmentedControl,
   type SegmentedOption,
+  type SegmentedSize,
 } from "./components/segmented-control";
 export { Input, Textarea } from "./components/input";
 export { Field } from "./components/field";
@@ -63,6 +64,9 @@ export {
   isSelectablePlan,
   planName,
   planAllowsInvites,
+  planIncludedEvents,
+  planOverage,
+  EVENT_OVERAGE_PER_MILLION_CENTS,
 } from "./plans";
 export type { Plan, PlanId, PlanPrice, PlanFeature } from "./plans";
 export {
@@ -71,4 +75,6 @@ export {
   IconSelfHost,
   IconArrowRight,
   IconGitHub,
+  IconGitLab,
+  IconBitbucket,
 } from "./components/icons";

@@ -79,10 +79,16 @@ export const getMembershipBySlug = cache(async (
   return rows[0] ?? null;
 });
 
-const MANAGER_ROLES = new Set(["owner", "admin"]);
-export function canManageOrg(role: string): boolean {
-  return MANAGER_ROLES.has(role);
-}
+// Role helpers are pure and client-safe, so they live in ./roles (no
+// server-only / DB). Re-exported here so existing server-side callers can keep
+// importing them from "@/lib/org"; client components must import from
+// "@/lib/roles" directly to avoid pulling this server module into the bundle.
+export {
+  canManageOrg,
+  canWriteOrg,
+  ASSIGNABLE_ORG_ROLES,
+  orgRoleLabel,
+} from "./roles";
 
 /**
  * Whether the user already owns a Hobby organization. An account may own only

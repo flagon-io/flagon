@@ -1,8 +1,8 @@
 import { Hono } from "hono";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { withOrg } from "../../db/tenant.js";
-import { githubInstallations, projects } from "../../db/schema.js";
+import { withOrg, type TenantTx } from "../../db/tenant.js";
+import { projects, teams, projectAccess } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
 import {
@@ -12,64 +12,77 @@ import {
 } from "../../lib/org-context.js";
 import { isValidSlug } from "../../lib/slug.js";
 import { isReserved } from "../../lib/reserved.js";
-import { listInstallationRepos } from "../../lib/github.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
- * Projects — the org's foundational primitive, each built on a GitHub repo.
- * Mounted at /v1/orgs/:org/projects. Visible org-wide (a member sees the catalog
- * of what exists + a project's overview); creating, editing, and deleting are
- * owner/admin only. Everything runs in withOrg() so RLS enforces tenancy.
+ * Projects — the org's foundational primitive and the unit the service catalog
+ * organizes around. Mounted at /v1/orgs/:org/projects. Visible org-wide (a member
+ * sees the catalog of what exists + a project's overview); creating, editing, and
+ * deleting are owner/admin only. Everything runs in withOrg() so RLS enforces
+ * tenancy.
  */
 export const projects_ = new Hono();
 projects_.use("*", authContext);
 
 const TAG = "Projects";
 
-const createBody = z
-  .object({
-    name: z.string().trim().min(1).max(100),
-    key: z.string().trim().min(1).max(100),
-    // A repository is optional: a project can start bare and attach one later
-    // from settings. When present, both fields must come together.
-    githubInstallationId: z.string().uuid().optional(),
-    repoId: z.string().min(1).optional(),
-  })
-  .refine((d) => Boolean(d.githubInstallationId) === Boolean(d.repoId), {
-    message: "Provide both a connection and a repository, or neither.",
-  });
+// Catalog vocab (OpsLevel-style). Kept small + explicit so the console can render
+// a fixed picker; nullable everywhere so a project can stay bare.
+const LIFECYCLES = ["planning", "in_development", "alpha", "beta", "ga", "deprecated"] as const;
+const TIERS = ["1", "2", "3", "4"] as const;
+// GitHub-repository-style access levels a team can hold on a project.
+const ACCESS_ROLES = ["read", "triage", "write", "maintain", "admin"] as const;
+const tagsField = z.array(z.string().trim().min(1).max(40)).max(20);
+
+const createBody = z.object({
+  name: z.string().trim().min(1).max(100),
+  key: z.string().trim().min(1).max(100),
+  description: z.string().trim().max(500).optional(),
+});
 const updateBody = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
-    rootDirectory: z.string().trim().max(200).optional(),
+    description: z.string().trim().max(500).nullable().optional(),
+    // Set/clear the owning team by its key (null clears ownership).
+    ownerTeamKey: z.string().trim().min(1).max(100).nullable().optional(),
+    lifecycle: z.enum(LIFECYCLES).nullable().optional(),
+    tier: z.enum(TIERS).nullable().optional(),
+    tags: tagsField.optional(),
+    // The project README, Markdown. Generous cap to bound abuse.
+    readme: z.string().max(100_000).nullable().optional(),
   })
   .strict();
 
+const ownerTeamSchema = z.object({ key: z.string(), name: z.string() }).nullable();
 const projectSchema = z.object({
   key: z.string(),
   name: z.string(),
-  repoFullName: z.string().nullable(),
-  repoDefaultBranch: z.string().nullable(),
-  repoPrivate: z.boolean(),
-  rootDirectory: z.string(),
-  framework: z.string().nullable(),
-  githubInstallationId: z.string().nullable(),
+  description: z.string().nullable(),
+  ownerTeam: ownerTeamSchema,
+  lifecycle: z.string().nullable(),
+  tier: z.string().nullable(),
+  tags: z.array(z.string()),
+  readme: z.string().nullable(),
   createdAt: z.string(),
 });
 registerComponentSchema("Project", projectSchema);
 registerComponentSchema("ProjectResponse", z.object({ project: projectSchema }));
 registerComponentSchema("ProjectListResponse", z.array(projectSchema));
 
-function serialize(p: typeof projects.$inferSelect) {
+function serialize(
+  p: typeof projects.$inferSelect,
+  ownerTeamKey: string | null,
+  ownerTeamName: string | null,
+) {
   return {
     key: p.key,
     name: p.name,
-    repoFullName: p.repoFullName,
-    repoDefaultBranch: p.repoDefaultBranch,
-    repoPrivate: p.repoPrivate,
-    rootDirectory: p.rootDirectory,
-    framework: p.framework,
-    githubInstallationId: p.githubInstallationId,
+    description: p.description,
+    ownerTeam: ownerTeamKey && ownerTeamName ? { key: ownerTeamKey, name: ownerTeamName } : null,
+    lifecycle: p.lifecycle,
+    tier: p.tier,
+    tags: p.tags,
+    readme: p.readme,
     createdAt: p.createdAt.toISOString(),
   };
 }
@@ -80,7 +93,7 @@ registerRoute({
   method: "get",
   path: "/v1/orgs/{org}/projects",
   summary: "List projects",
-  description: "Every project in the organization (the catalog). Visible to any member.",
+  description: "Every project in the organization (the catalog), with catalog metadata. Visible to any member.",
   tags: [TAG],
   auth: true,
   paramDescriptions: pParams,
@@ -90,7 +103,7 @@ registerRoute({
   method: "get",
   path: "/v1/orgs/{org}/projects/{key}",
   summary: "Get a project",
-  description: "One project by key.",
+  description: "One project by key, with its catalog metadata.",
   tags: [TAG],
   auth: true,
   paramDescriptions: { ...pParams, key: "The project key." },
@@ -100,15 +113,14 @@ registerRoute({
   method: "post",
   path: "/v1/orgs/{org}/projects",
   summary: "Create a project",
-  description:
-    "Create a project, optionally linked to a repository in a connected source provider. Omit the connection and repository to start bare and attach one later.",
+  description: "Create a project by name and key, optionally with a description.",
   tags: [TAG],
   auth: true,
   paramDescriptions: pParams,
   request: { body: createBody },
   responses: {
     201: { description: "The created project.", schemaName: "ProjectResponse" },
-    400: { description: "Unknown connection, inaccessible repo, or reserved/invalid key." },
+    400: { description: "Reserved or invalid key." },
     409: { description: "A project with that key already exists." },
     422: { description: "The submitted data failed validation." },
   },
@@ -117,12 +129,17 @@ registerRoute({
   method: "patch",
   path: "/v1/orgs/{org}/projects/{key}",
   summary: "Update a project",
-  description: "Rename a project or change its root directory.",
+  description: "Rename a project or edit its catalog metadata (description, owning team, type, lifecycle, tier, tags).",
   tags: [TAG],
   auth: true,
   paramDescriptions: { ...pParams, key: "The project key." },
   request: { body: updateBody },
-  responses: { 200: { description: "The updated project.", schemaName: "ProjectResponse" }, 404: { description: "No such project." }, 422: { description: "Validation failed." } },
+  responses: {
+    200: { description: "The updated project.", schemaName: "ProjectResponse" },
+    400: { description: "Unknown owning team." },
+    404: { description: "No such project." },
+    422: { description: "Validation failed." },
+  },
 });
 registerRoute({
   method: "delete",
@@ -135,14 +152,25 @@ registerRoute({
   responses: { 200: { description: "Deleted.", schemaName: "DeleteAck" }, 404: { description: "No such project." } },
 });
 
+// A project row joined to its (optional) owning team, for serialization.
+const selectWithOwner = {
+  project: projects,
+  ownerTeamKey: teams.key,
+  ownerTeamName: teams.name,
+};
+
 // --- List / get (member) ----------------------------------------------------
 projects_.get("/", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
   const rows = await withOrg(ctx.orgId, (tx) =>
-    tx.select().from(projects).orderBy(desc(projects.createdAt)),
+    tx
+      .select(selectWithOwner)
+      .from(projects)
+      .leftJoin(teams, eq(teams.id, projects.ownerTeamId))
+      .orderBy(desc(projects.createdAt)),
   );
-  return c.json(rows.map(serialize));
+  return c.json(rows.map((r) => serialize(r.project, r.ownerTeamKey, r.ownerTeamName)));
 });
 
 projects_.get("/:key", async (c) => {
@@ -150,14 +178,15 @@ projects_.get("/:key", async (c) => {
   if (ctx instanceof Response) return ctx;
   const row = await withOrg(ctx.orgId, (tx) =>
     tx
-      .select()
+      .select(selectWithOwner)
       .from(projects)
+      .leftJoin(teams, eq(teams.id, projects.ownerTeamId))
       .where(eq(projects.key, c.req.param("key")))
       .limit(1)
       .then((r) => r[0]),
   );
   if (!row) return jsonError(c, 404, "Project not found.");
-  return c.json({ project: serialize(row) });
+  return c.json({ project: serialize(row.project, row.ownerTeamKey, row.ownerTeamName) });
 });
 
 // --- Create (org policy: managers always; members when the org opts in) ------
@@ -169,81 +198,35 @@ projects_.post("/", async (c) => {
 
   const parsed = createBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
-  const { name, key, githubInstallationId, repoId } = parsed.data;
+  const { name, key, description } = parsed.data;
 
   if (!isValidSlug(key) || isReserved(key)) {
     return jsonError(c, 400, "Choose a different project key (letters, numbers, dashes).");
   }
 
-  // Resolve the repository only if one was chosen. When it is, the installation
-  // must belong to this org and the repo must be one it can access — re-fetched
-  // from GitHub for authoritative, un-spoofable metadata. Otherwise the project
-  // starts bare (repo attached later from settings).
-  let repoValues: {
-    githubInstallationId: string | null;
-    repoId: string | null;
-    repoFullName: string | null;
-    repoDefaultBranch: string | null;
-    repoPrivate: boolean;
-  } = {
-    githubInstallationId: null,
-    repoId: null,
-    repoFullName: null,
-    repoDefaultBranch: null,
-    repoPrivate: false,
-  };
-
-  if (githubInstallationId && repoId) {
-    const inst = await withOrg(ctx.orgId, (tx) =>
-      tx
-        .select()
-        .from(githubInstallations)
-        .where(eq(githubInstallations.id, githubInstallationId))
-        .limit(1)
-        .then((r) => r[0]),
-    );
-    if (!inst) return jsonError(c, 400, "That connection was not found.");
-
-    let repo;
-    try {
-      repo = (await listInstallationRepos(inst.installationId)).find((r) => r.id === repoId);
-    } catch {
-      return jsonError(c, 502, "Could not reach GitHub. Try again shortly.");
-    }
-    if (!repo) return jsonError(c, 400, "That repository is not accessible from this connection.");
-
-    repoValues = {
-      githubInstallationId: inst.id,
-      repoId: repo.id,
-      repoFullName: repo.fullName,
-      repoDefaultBranch: repo.defaultBranch,
-      repoPrivate: repo.private,
-    };
-  }
-
-  const existing = await withOrg(ctx.orgId, (tx) =>
-    tx
+  const result = await withOrg(ctx.orgId, async (tx) => {
+    const existing = await tx
       .select({ id: projects.id })
       .from(projects)
       .where(eq(projects.key, key))
       .limit(1)
-      .then((r) => r[0]),
-  );
-  if (existing) return jsonError(c, 409, `A project named "${key}" already exists.`);
+      .then((r) => r[0]);
+    if (existing) return "conflict" as const;
 
-  const [row] = await withOrg(ctx.orgId, (tx) =>
-    tx
+    const [row] = await tx
       .insert(projects)
       .values({
         organizationId: ctx.orgId,
         key,
         name,
-        ...repoValues,
+        description: description ?? null,
         createdByUserId: ctx.actorUserId,
       })
-      .returning(),
-  );
-  return c.json({ project: serialize(row) }, 201);
+      .returning();
+    return serialize(row, null, null);
+  });
+  if (result === "conflict") return jsonError(c, 409, `A project named "${key}" already exists.`);
+  return c.json({ project: result }, 201);
 });
 
 // --- Update / delete (manager) ---------------------------------------------
@@ -255,16 +238,48 @@ projects_.patch("/:key", async (c) => {
 
   const parsed = updateBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
+  const { ownerTeamKey, ...rest } = parsed.data;
 
-  const [row] = await withOrg(ctx.orgId, (tx) =>
-    tx
+  const result = await withOrg(ctx.orgId, async (tx) => {
+    // Resolve the owning team by key when the caller is (re)assigning it. `null`
+    // clears ownership; omitted leaves it untouched.
+    const set: Record<string, unknown> = { ...rest, updatedAt: new Date() };
+    if (ownerTeamKey !== undefined) {
+      if (ownerTeamKey === null) {
+        set.ownerTeamId = null;
+      } else {
+        const team = await tx
+          .select({ id: teams.id })
+          .from(teams)
+          .where(eq(teams.key, ownerTeamKey))
+          .limit(1)
+          .then((r) => r[0]);
+        if (!team) return "unknown_team" as const;
+        set.ownerTeamId = team.id;
+      }
+    }
+
+    const [row] = await tx
       .update(projects)
-      .set({ ...parsed.data, updatedAt: new Date() })
+      .set(set)
       .where(eq(projects.key, c.req.param("key")))
-      .returning(),
-  );
-  if (!row) return jsonError(c, 404, "Project not found.");
-  return c.json({ project: serialize(row) });
+      .returning();
+    if (!row) return "not_found" as const;
+
+    const owner = row.ownerTeamId
+      ? await tx
+          .select({ key: teams.key, name: teams.name })
+          .from(teams)
+          .where(eq(teams.id, row.ownerTeamId))
+          .limit(1)
+          .then((r) => r[0])
+      : null;
+    return serialize(row, owner?.key ?? null, owner?.name ?? null);
+  });
+
+  if (result === "unknown_team") return jsonError(c, 400, "That team does not exist.");
+  if (result === "not_found") return jsonError(c, 404, "Project not found.");
+  return c.json({ project: result });
 });
 
 projects_.delete("/:key", async (c) => {
@@ -280,5 +295,215 @@ projects_.delete("/:key", async (c) => {
       .returning({ id: projects.id }),
   );
   if (!row) return jsonError(c, 404, "Project not found.");
+  return c.json({ ok: true });
+});
+
+// --- Access (GitHub-repository style) ---------------------------------------
+// A team is granted a role on a project. The project's OWNING team is always an
+// implicit admin and is not stored as a grant. Managing access is owner/admin.
+const addAccessBody = z.object({
+  teamKey: z.string().trim().min(1).max(100),
+  role: z.enum(ACCESS_ROLES),
+});
+const accessRoleBody = z.object({ role: z.enum(ACCESS_ROLES) }).strict();
+
+const accessGrantSchema = z.object({
+  teamKey: z.string(),
+  teamName: z.string(),
+  role: z.string(),
+});
+registerComponentSchema("ProjectAccessGrant", accessGrantSchema);
+registerComponentSchema(
+  "ProjectAccessResponse",
+  z.object({
+    owner: z.object({ key: z.string(), name: z.string() }).nullable(),
+    grants: z.array(accessGrantSchema),
+  }),
+);
+
+async function projectByKey(tx: TenantTx, key: string) {
+  return tx
+    .select({ id: projects.id, ownerTeamId: projects.ownerTeamId })
+    .from(projects)
+    .where(eq(projects.key, key))
+    .limit(1)
+    .then((r) => r[0] ?? null);
+}
+async function teamByKey(tx: TenantTx, key: string) {
+  return tx
+    .select({ id: teams.id })
+    .from(teams)
+    .where(eq(teams.key, key))
+    .limit(1)
+    .then((r) => r[0] ?? null);
+}
+
+const aParams = { ...pParams, key: "The project key." };
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/projects/{key}/access",
+  summary: "List project access",
+  description: "The teams granted access to a project (plus its implicit owner). Visible to any member.",
+  tags: [TAG],
+  auth: true,
+  paramDescriptions: aParams,
+  responses: {
+    200: { description: "The project's access.", schemaName: "ProjectAccessResponse" },
+    404: { description: "No such project." },
+  },
+});
+registerRoute({
+  method: "post",
+  path: "/v1/orgs/{org}/projects/{key}/access",
+  summary: "Grant a team access",
+  description: "Grant a team a role on a project. Owner/admin only.",
+  tags: [TAG],
+  auth: true,
+  paramDescriptions: aParams,
+  request: { body: addAccessBody },
+  responses: {
+    201: { description: "Granted.", schemaName: "DeleteAck" },
+    400: { description: "Unknown team, or the team already owns the project." },
+    404: { description: "No such project." },
+    409: { description: "That team already has access." },
+    422: { description: "Validation failed." },
+  },
+});
+registerRoute({
+  method: "patch",
+  path: "/v1/orgs/{org}/projects/{key}/access/{teamKey}",
+  summary: "Change a team's access role",
+  description: "Change the role a team holds on a project. Owner/admin only.",
+  tags: [TAG],
+  auth: true,
+  paramDescriptions: { ...aParams, teamKey: "The team key." },
+  request: { body: accessRoleBody },
+  responses: {
+    200: { description: "Updated.", schemaName: "DeleteAck" },
+    404: { description: "No such project or grant." },
+    422: { description: "Validation failed." },
+  },
+});
+registerRoute({
+  method: "delete",
+  path: "/v1/orgs/{org}/projects/{key}/access/{teamKey}",
+  summary: "Revoke a team's access",
+  description: "Remove a team's access to a project. Owner/admin only.",
+  tags: [TAG],
+  auth: true,
+  paramDescriptions: { ...aParams, teamKey: "The team key." },
+  responses: { 200: { description: "Revoked.", schemaName: "DeleteAck" }, 404: { description: "No such project or grant." } },
+});
+
+projects_.get("/:key/access", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const result = await withOrg(ctx.orgId, async (tx) => {
+    const proj = await projectByKey(tx, c.req.param("key"));
+    if (!proj) return null;
+    const owner = proj.ownerTeamId
+      ? await tx
+          .select({ key: teams.key, name: teams.name })
+          .from(teams)
+          .where(eq(teams.id, proj.ownerTeamId))
+          .limit(1)
+          .then((r) => r[0] ?? null)
+      : null;
+    const grants = await tx
+      .select({ teamKey: teams.key, teamName: teams.name, role: projectAccess.role })
+      .from(projectAccess)
+      .innerJoin(teams, eq(teams.id, projectAccess.teamId))
+      .where(eq(projectAccess.projectId, proj.id))
+      .orderBy(teams.name);
+    return { owner, grants };
+  });
+  if (!result) return jsonError(c, 404, "Project not found.");
+  return c.json(result);
+});
+
+projects_.post("/:key/access", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
+  const parsed = addAccessBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return validationError(c, parsed.error);
+
+  const result = await withOrg(ctx.orgId, async (tx) => {
+    const proj = await projectByKey(tx, c.req.param("key"));
+    if (!proj) return "not_found" as const;
+    const team = await teamByKey(tx, parsed.data.teamKey);
+    if (!team) return "unknown_team" as const;
+    if (proj.ownerTeamId === team.id) return "is_owner" as const;
+    const existing = await tx
+      .select({ id: projectAccess.id })
+      .from(projectAccess)
+      .where(and(eq(projectAccess.projectId, proj.id), eq(projectAccess.teamId, team.id)))
+      .limit(1)
+      .then((r) => r[0]);
+    if (existing) return "conflict" as const;
+    await tx.insert(projectAccess).values({
+      organizationId: ctx.orgId,
+      projectId: proj.id,
+      teamId: team.id,
+      role: parsed.data.role,
+    });
+    return "ok" as const;
+  });
+
+  if (result === "not_found") return jsonError(c, 404, "Project not found.");
+  if (result === "unknown_team") return jsonError(c, 400, "That team does not exist.");
+  if (result === "is_owner")
+    return jsonError(c, 400, "That team already owns the project (implicit admin).");
+  if (result === "conflict") return jsonError(c, 409, "That team already has access.");
+  return c.json({ ok: true }, 201);
+});
+
+projects_.patch("/:key/access/:teamKey", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
+  const parsed = accessRoleBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return validationError(c, parsed.error);
+
+  const result = await withOrg(ctx.orgId, async (tx) => {
+    const proj = await projectByKey(tx, c.req.param("key"));
+    if (!proj) return "not_found" as const;
+    const team = await teamByKey(tx, c.req.param("teamKey"));
+    if (!team) return "no_grant" as const;
+    const [row] = await tx
+      .update(projectAccess)
+      .set({ role: parsed.data.role })
+      .where(and(eq(projectAccess.projectId, proj.id), eq(projectAccess.teamId, team.id)))
+      .returning({ id: projectAccess.id });
+    return row ? ("ok" as const) : ("no_grant" as const);
+  });
+
+  if (result === "not_found" || result === "no_grant")
+    return jsonError(c, 404, "That team does not have access to the project.");
+  return c.json({ ok: true });
+});
+
+projects_.delete("/:key/access/:teamKey", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
+
+  const result = await withOrg(ctx.orgId, async (tx) => {
+    const proj = await projectByKey(tx, c.req.param("key"));
+    if (!proj) return "not_found" as const;
+    const team = await teamByKey(tx, c.req.param("teamKey"));
+    if (!team) return "no_grant" as const;
+    const [row] = await tx
+      .delete(projectAccess)
+      .where(and(eq(projectAccess.projectId, proj.id), eq(projectAccess.teamId, team.id)))
+      .returning({ id: projectAccess.id });
+    return row ? ("ok" as const) : ("no_grant" as const);
+  });
+
+  if (result === "not_found" || result === "no_grant")
+    return jsonError(c, 404, "That team does not have access to the project.");
   return c.json({ ok: true });
 });

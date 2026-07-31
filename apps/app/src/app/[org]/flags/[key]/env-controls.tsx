@@ -152,6 +152,7 @@ export function EnvCard({
             onValueChange={apply}
             options={options}
             ariaLabel={`${env.name} feature state`}
+            size="sm"
             className={`w-auto! transition-opacity ${
               readOnly
                 ? "pointer-events-none opacity-60"
@@ -223,7 +224,7 @@ function IconToggle({
       title={title}
       aria-label={title}
       onClick={onClick}
-      className={`grid h-9 w-9 shrink-0 place-items-center rounded-md border transition-colors ${
+      className={`grid h-8 w-8 shrink-0 place-items-center rounded-md border transition-colors ${
         active
           ? "border-teal-500/40 bg-teal-500/10 text-teal-300"
           : "border-white/10 text-zinc-400 hover:bg-white/5 hover:text-zinc-200"

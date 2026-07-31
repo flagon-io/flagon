@@ -163,6 +163,57 @@ export async function getFlagUsage(
   return (await res.json()).usage as FlagUsage;
 }
 
+// --- Org-wide usage (the Usage page) ----------------------------------------
+export type UsageGroupBy = "meter" | "flag" | "environment" | "reason";
+
+export type UsagePoint = { start: string; usage: number; chargeCents: number };
+
+export type UsageSeries = {
+  key: string;
+  label: string;
+  /** The product this line rolls up under, for the invoice's per-product bands. */
+  product: string;
+  usage: number;
+  chargeCents: number;
+  /** Whether this line is charged for. Free lines render "Free" instead of a price. */
+  billable: boolean;
+  /** Whether Flagon records this meter yet (Events is not — its 0 is "not metered"). */
+  tracked: boolean;
+  unit: string;
+  pricePerMillionCents: number;
+  points: UsagePoint[];
+};
+
+export type OrgUsage = {
+  range: { from: string; to: string };
+  groupBy: UsageGroupBy;
+  currency: "usd";
+  /** The product these meters roll up under (the table's group header). */
+  product: string;
+  periods: string[];
+  series: UsageSeries[];
+  totals: { usage: number; billableUsage: number; chargeCents: number };
+};
+
+/**
+ * Org-wide evaluation usage for the usage page, priced through the API's meter
+ * registry. `from`/`to` are YYYY-MM-DD (default the trailing 30 days server-side);
+ * `groupBy` splits the series by environment (default) or flag.
+ */
+export async function getOrgUsage(
+  slug: string,
+  opts?: { from?: string; to?: string; groupBy?: UsageGroupBy },
+): Promise<OrgUsage | null> {
+  const q = new URLSearchParams();
+  if (opts?.from) q.set("from", opts.from);
+  if (opts?.to) q.set("to", opts.to);
+  if (opts?.groupBy) q.set("groupBy", opts.groupBy);
+  const qs = q.toString();
+  const res = await apiFetch(`/v1/orgs/${slug}/usage${qs ? `?${qs}` : ""}`);
+  if (!res.ok) return null;
+  return (await res.json()).usage as OrgUsage;
+}
+
 export async function listSdkKeys(slug: string): Promise<SdkKey[]> {
   const res = await apiFetch(`/v1/orgs/${slug}/client-keys`);
   if (!res.ok) return [];

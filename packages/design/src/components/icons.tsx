@@ -1,4 +1,4 @@
-import { SiGithub } from "@icons-pack/react-simple-icons";
+import { SiGithub, SiGitlab, SiBitbucket } from "@icons-pack/react-simple-icons";
 
 /**
  * The icon set.
@@ -30,4 +30,14 @@ export {
  */
 export function IconGitHub({ className }: { className?: string }) {
   return <SiGithub color="currentColor" className={className} />;
+}
+
+/** The GitLab mark (simple-icons). Inherits theme color, like {@link IconGitHub}. */
+export function IconGitLab({ className }: { className?: string }) {
+  return <SiGitlab color="currentColor" className={className} />;
+}
+
+/** The Bitbucket mark (simple-icons). Inherits theme color, like {@link IconGitHub}. */
+export function IconBitbucket({ className }: { className?: string }) {
+  return <SiBitbucket color="currentColor" className={className} />;
 }

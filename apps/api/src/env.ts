@@ -57,20 +57,6 @@ const schema = z
     // Email (verification / reset / invites now send from the API).
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
-    // GitHub App (Projects connect a repo through it). OPTIONAL: the API boots
-    // and serves without it; the GitHub/project endpoints report "not
-    // configured" until set. The private key is a PEM and may be stored
-    // base64-encoded to survive env transport (lib/github decodes if needed).
-    GITHUB_APP_ID: z.string().optional(),
-    GITHUB_APP_SLUG: z.string().optional(),
-    GITHUB_APP_PRIVATE_KEY: z.string().optional(),
-    GITHUB_APP_CLIENT_ID: z.string().optional(),
-    GITHUB_APP_CLIENT_SECRET: z.string().optional(),
-    GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
-    // Encrypts project environment-variable SECRETS at rest (AES-256-GCM). A
-    // 32-byte key, base64 or hex. OPTIONAL until secrets are used; required to
-    // read or write secret env vars.
-    SECRETS_ENCRYPTION_KEY: z.string().optional(),
   })
   .refine((e) => Boolean(e.DATABASE_URL || e.APP_DATABASE_URL), {
     message:

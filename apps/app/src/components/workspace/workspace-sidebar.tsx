@@ -3,7 +3,6 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PROJECTS_ENABLED } from "@/lib/features";
 import {
   Activity,
   Archive,
@@ -14,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CreditCard,
+  FileCog,
   Flag,
   FlaskConical,
   Globe,
@@ -159,8 +159,7 @@ function buildNav(base: string): {
     areas: [flags, settings],
     sections: [
       [
-        // Projects is the org home, so its link always works; while the feature
-        // is WIP (see @/lib/features) that home shows a coming-soon placeholder.
+        // Projects is the org home, so its link always works.
         { kind: "link", label: "Projects", icon: Boxes, href: base },
         { kind: "soon", label: "Packages", icon: Package },
         { kind: "soon", label: "Deployments", icon: Rocket },
@@ -172,12 +171,9 @@ function buildNav(base: string): {
         // work on events across every product. Broad enough that it supersedes
         // Runbooks, which is why there is no separate Runbooks entry.
         { kind: "soon", label: "Automations", icon: Workflow },
-        // Org-level integration hub (source providers today; Slack, issue
-        // tracking, observability to follow). Part of the Projects WIP feature.
-        ...(PROJECTS_ENABLED
-          ? [{ kind: "link", label: "Integrations", icon: Plug, href: `${base}/integrations` } as const]
-          : []),
-        { kind: "soon", label: "Teams", icon: Users },
+        // Org-level integration hub (Slack, issue tracking, observability, source
+        // providers — all coming soon for now).
+        { kind: "link", label: "Integrations", icon: Plug, href: `${base}/integrations` },
       ],
       // Reliability suite (Better Stack-style, but Flagon's own product): the
       // play is Incidents — they feed the Status Page and drive On-call.
@@ -187,7 +183,8 @@ function buildNav(base: string): {
         { kind: "soon", label: "On-call", icon: BellRing },
       ],
       [
-        { kind: "soon", label: "Usage", icon: Activity },
+        { kind: "link", label: "Teams", icon: Users, href: `${base}/teams` },
+        { kind: "link", label: "Usage", icon: Activity, href: `${base}/usage` },
         { kind: "soon", label: "Support", icon: LifeBuoy },
         { kind: "area", area: settings },
       ],
@@ -227,10 +224,9 @@ export function WorkspaceSidebar({
   // A per-project area is dynamic (keyed on the :project slug in the path), so it
   // is built here rather than in the static buildNav. Overview is real today;
   // the rest are "Soon" placeholders that later phases fill in.
-  const projectKey =
-    PROJECTS_ENABLED && pathname.startsWith(`${base}/projects/`)
-      ? pathname.slice(`${base}/projects/`.length).split("/")[0]
-      : null;
+  const projectKey = pathname.startsWith(`${base}/projects/`)
+    ? pathname.slice(`${base}/projects/`.length).split("/")[0]
+    : null;
   const projectBase = projectKey ? `${base}/projects/${projectKey}` : "";
   const activeArea: NavArea | undefined = projectKey
     ? {
@@ -249,8 +245,8 @@ export function WorkspaceSidebar({
           {
             heading: "Settings",
             items: [
-              { label: "General", icon: SlidersHorizontal, soon: true },
-              { label: "Environment Variables", icon: KeyRound, soon: true },
+              { label: "General", icon: SlidersHorizontal, href: `${projectBase}/settings` },
+              { label: "Config", icon: FileCog, soon: true },
             ],
           },
         ],

@@ -51,6 +51,7 @@ export default async function OrgMembersPage({
 
       <SettingsSection title="Members" description={`${members.length} total`}>
         <MembersList
+          slug={membership.slug}
           organizationId={membership.id}
           currentUserId={session.user.id}
           canManage={canManage}

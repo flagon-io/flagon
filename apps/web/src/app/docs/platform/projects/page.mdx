@@ -1,44 +1,67 @@
 export const metadata = {
   title: "Projects",
   description:
-    "Projects group the work for one system or team inside an organization, so a large workspace stays navigable.",
+    "Projects are the unit of the catalog: each one describes a system you run, who owns it, and its metadata.",
 };
 
 # Projects
 
-<Callout tone="note" title="Coming soon">
-Projects are not available yet. Today flags are organization-global: every flag,
-key, and resource lives directly under your [organization](/docs/platform/organizations).
-This page describes where projects are headed so you can plan for them.
-</Callout>
+A **project** is the unit of the [Catalog](/docs/catalog): the home for one
+system you run inside an [organization](/docs/platform/organizations). Every
+project has a name and a key, and carries catalog metadata so your workspace is a
+described map of what exists rather than a flat list.
 
-A **project** will group the work for one system or team inside an
-[organization](/docs/platform/organizations). It's how a large workspace stays
-navigable instead of being one flat list of every flag, key, and resource.
+## Catalog metadata
 
-Think of a project as the home for everything that belongs to a single app or
-service: its feature flags first, then the other products attached to it as the
-platform grows. Projects are also the unit the [Catalog](/docs/catalog) will
-organize services around.
+Each project can record:
 
-## Working in projects
+- **Description**: a short summary of what it is.
+- **Owning [team](/docs/platform/teams)**: the team responsible for it, so a
+  project always has a clear owner.
+- **Lifecycle**: planning, in development, alpha, beta, GA, or deprecated.
+- **Tier**: a criticality tier from 1 (critical) to 4 (low).
+- **Tags**: free-form labels for grouping and search.
 
-Once projects land:
+Any member of the organization can browse the catalog and open a project. Editing
+a project's metadata, and assigning its owning team, is done from the project's
+settings by an owner or admin.
 
-- Each organization will be able to have as many projects as you need.
-- Resources will belong to a project, so switching projects scopes what you see
-  to that system's work.
-- Projects live under the organization, so [members and roles](/docs/platform/organizations)
-  carry across them: you won't re-invite your team per project.
+## Creating and owning projects
+
+- Owners and admins can always create projects. An organization can also open
+  creation up to all members from its settings.
+- Assign an **owning team** from a project's settings. The team then shows the
+  project under the projects it owns, and its maintainers are the people
+  accountable for it.
+
+## Access
+
+Beyond its owner, a project has an **access list**, managed like a GitHub
+repository's. Grant a [team](/docs/platform/teams) a role on the project:
+
+- **Read**: view the project and its catalog entry.
+- **Triage**: read, plus manage its status and metadata.
+- **Write**: contribute to and configure the project.
+- **Maintain**: manage the project, short of destructive actions.
+- **Admin**: full access, including access and deletion.
+
+The owning team is always an implicit admin. Managing a project's access is done
+by an owner or admin from the project's settings.
 
 <Callout tone="note" title="Environments are shared">
 Projects organize *what* you're working on; [environments](/docs/platform/environments)
-(Production, Preview, Development) are the *stages* each project moves through.
-The two compose: a project's flags are configured per environment.
+(Production, Preview, Development) are the *stages* each one moves through. The two
+compose.
+</Callout>
+
+<Callout tone="note" title="Flags are organization-global today">
+Feature flags currently live directly under your organization, not inside a
+single project. Projects are the catalog's map of your systems; scoping a
+product's resources to a project is part of how the catalog grows.
 </Callout>
 
 ## Next
 
-- **[Organizations & teams](/docs/platform/organizations)**: the workspace a
-  project lives in.
-- **[Environments](/docs/platform/environments)**: the stages within it.
+- **[Teams](/docs/platform/teams)**: who owns each project.
+- **[Catalog](/docs/catalog)**: how projects fit the bigger picture.
+- **[Environments](/docs/platform/environments)**: the stages within a project.

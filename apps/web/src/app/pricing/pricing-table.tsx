@@ -8,8 +8,9 @@ import { SIGN_UP_URL } from "@/lib/urls";
  * stacked PlanCard. Both render the same catalog as the in-app create-organization
  * picker, so the two never drift.
  *
- * Pricing is a single monthly base plus metered usage (the base is a usage
- * credit, not a seat charge) — no annual/discount interval.
+ * Pricing is a single monthly base plus metered usage: free unlimited flag
+ * checks, a per-plan monthly pool of analytics events, and overage only on the
+ * paid plan. No per-seat charge, no annual/discount interval.
  */
 export function PricingTable() {
   return (

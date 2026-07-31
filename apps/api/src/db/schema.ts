@@ -392,40 +392,8 @@ export const flagRevisions = pgTable(
 );
 
 /**
- * A Flagon org's connection to a GitHub App installation. An org can connect
- * several (Vercel-style); a project picks a repo from one of them. Ordinary
- * tenant data (org-scoped, RLS): we store the installation id + account metadata
- * only, NEVER a token — installation tokens are minted on demand from the App
- * private key (see lib/github). GitHub numeric ids are stored as text (no math
- * on them, no precision worries).
- */
-export const githubInstallations = pgTable(
-  "github_installations",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    installationId: text("installation_id").notNull(),
-    accountLogin: text("account_login").notNull(),
-    accountType: text("account_type").notNull(),
-    accountAvatarUrl: text("account_avatar_url"),
-    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
-    createdByUserId: uuid("created_by_user_id"),
-    ...timestamps,
-  },
-  (t) => [
-    uniqueIndex("github_installations_org_install_key").on(
-      t.organizationId,
-      t.installationId,
-    ),
-    index("github_installations_org_idx").on(t.organizationId),
-  ],
-);
-
-/**
- * A project: the org's foundational primitive, built on a GitHub repo (Vercel
- * style). Almost everything else keys off a project. Tenant data (org-scoped,
- * RLS). The repo fields are denormalized from GitHub so a project survives a
- * disconnect; `githubInstallationId` is nullable and SET NULL on disconnect.
+ * A project: the org's foundational primitive. Almost everything else keys off a
+ * project. Tenant data (org-scoped, RLS).
  */
 export const projects = pgTable(
   "projects",
@@ -434,22 +402,106 @@ export const projects = pgTable(
     organizationId: uuid("organization_id").notNull(),
     key: text("key").notNull(),
     name: text("name").notNull(),
-    githubInstallationId: uuid("github_installation_id").references(
-      () => githubInstallations.id,
-      { onDelete: "set null" },
-    ),
-    repoId: text("repo_id"),
-    repoFullName: text("repo_full_name"),
-    repoDefaultBranch: text("repo_default_branch"),
-    repoPrivate: boolean("repo_private").notNull().default(false),
-    rootDirectory: text("root_directory").notNull().default(""),
-    framework: text("framework"),
+    // Catalog metadata (OpsLevel-style). All optional so a project can start
+    // bare and get enriched over time.
+    description: text("description"),
+    // The team that owns this project in the catalog. SET NULL on team delete so
+    // the project survives, just unowned. Forward ref: teams is defined below.
+    ownerTeamId: uuid("owner_team_id").references(() => teams.id, {
+      onDelete: "set null",
+    }),
+    lifecycle: text("lifecycle"),
+    tier: text("tier"),
+    tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
+    // The project's README (Markdown). Manually managed today; when a repository
+    // is linked in the future it syncs from the repo's README.md.
+    readme: text("readme"),
     createdByUserId: uuid("created_by_user_id"),
     ...timestamps,
   },
   (t) => [
     uniqueIndex("projects_org_key_key").on(t.organizationId, t.key),
     index("projects_org_idx").on(t.organizationId),
+    index("projects_owner_team_idx").on(t.ownerTeamId),
+  ],
+);
+
+/**
+ * A team: a named group of people inside an org (GitHub-style). A team owns
+ * projects (the catalog owner) and carries its own membership + roles. Tenant
+ * data (org-scoped, RLS).
+ */
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("teams_org_key_key").on(t.organizationId, t.key),
+    index("teams_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * Team membership: one row per (team, user). `role` is GitHub-style —
+ * 'maintainer' (can manage the team + its membership) or 'member'. Tenant data
+ * (org-scoped, RLS); `organizationId` is denormalized so the row is covered by
+ * the same tenant policy as everything else. `userId` points at the app-owned
+ * users table with no cross-pipeline FK (same convention as createdByUserId).
+ */
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    role: text("role").notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("team_members_team_user_key").on(t.teamId, t.userId),
+    index("team_members_org_idx").on(t.organizationId),
+    index("team_members_team_idx").on(t.teamId),
+  ],
+);
+
+/**
+ * Per-project access, GitHub-repository style: a team is granted a role on a
+ * project ('read' | 'triage' | 'write' | 'maintain' | 'admin'). The project's
+ * owning team (projects.ownerTeamId) is an implicit admin and is NOT stored here.
+ * Tenant data (org-scoped, RLS).
+ */
+export const projectAccess = pgTable(
+  "project_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("read"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_access_project_team_key").on(t.projectId, t.teamId),
+    index("project_access_org_idx").on(t.organizationId),
+    index("project_access_project_idx").on(t.projectId),
   ],
 );
 
@@ -492,6 +544,40 @@ export const flagEvalRollups = pgTable(
   ],
 );
 
+/**
+ * Per-day billable event counts, bucketed by (organization, day, source). This is
+ * the money meter (`events`): analytics/telemetry events a customer sends —
+ * flag exposures today (POST /ofrep/v1/exposures), other products' events later.
+ * Deliberately org-level and product-neutral: it carries no flag/environment FK,
+ * so any future product can emit into it under a new `source`. Tenant data
+ * (org-scoped, RLS). Contrast flag_eval_rollups, which counts the FREE checks
+ * with full flag/env/variant/reason detail for the analytics views.
+ */
+export const usageEventRollups = pgTable(
+  "usage_event_rollups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    day: date("day").notNull(),
+    /** What produced the event, namespaced by product, e.g. "flags.exposure" (a
+     *  flag exposure). The billing meter sums across sources; the label lets the
+     *  invoice break it down per product later. */
+    source: text("source").notNull().default("flags.exposure"),
+    count: integer("count").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("usage_event_rollups_bucket_key").on(
+      t.organizationId,
+      t.day,
+      t.source,
+    ),
+    index("usage_event_rollups_org_idx").on(t.organizationId),
+  ],
+);
+
 export type Flag = typeof flags.$inferSelect;
 export type NewFlag = typeof flags.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
@@ -503,8 +589,10 @@ export type Segment = typeof segments.$inferSelect;
 export type FlagRule = typeof flagRules.$inferSelect;
 export type SdkKey = typeof sdkKeys.$inferSelect;
 export type FlagRevision = typeof flagRevisions.$inferSelect;
-export type GithubInstallation = typeof githubInstallations.$inferSelect;
 export type Project = typeof projects.$inferSelect;
+export type Team = typeof teams.$inferSelect;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type ProjectAccess = typeof projectAccess.$inferSelect;
 
 /** Everything the migrator and query layer should know about. */
 export const schema = {
@@ -520,8 +608,12 @@ export const schema = {
   flagRules,
   sdkKeys,
   flagRevisions,
-  githubInstallations,
   projects,
+  teams,
+  teamMembers,
+  projectAccess,
+  flagEvalRollups,
+  usageEventRollups,
 };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm

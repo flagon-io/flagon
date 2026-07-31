@@ -8,6 +8,7 @@ import {
 } from "../../flags/eval-cache.js";
 import { evaluate } from "../../flags/evaluate.js";
 import { recordEvaluations, type UsageEntry } from "../../flags/usage.js";
+import { recordEvents } from "../../usage/events.js";
 import { createDurableEvalLimiter } from "../../lib/durable-eval-limiter.js";
 import { rateLimit, tooManyRequests } from "../../lib/rate-limit.js";
 import { clientIp } from "../../lib/http.js";
@@ -135,13 +136,7 @@ function ofrepFail(
  * waitUntil so it doesn't add latency to the eval response when available (e.g.
  * on Vercel); otherwise awaits (local/tests). recordEvaluations never throws.
  */
-async function record(
-  c: Context,
-  organizationId: string,
-  environmentId: string,
-  entries: UsageEntry[],
-): Promise<void> {
-  const promise = recordEvaluations(organizationId, environmentId, entries);
+function defer(c: Context, promise: Promise<unknown>): Promise<void> | void {
   let ctx: { waitUntil?: (p: Promise<unknown>) => void } | undefined;
   try {
     ctx = c.executionCtx;
@@ -149,7 +144,16 @@ async function record(
     ctx = undefined;
   }
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(promise);
-  else await promise;
+  else return promise as Promise<void>;
+}
+
+async function record(
+  c: Context,
+  organizationId: string,
+  environmentId: string,
+  entries: UsageEntry[],
+): Promise<void> {
+  await defer(c, recordEvaluations(organizationId, environmentId, entries));
 }
 
 const usageEntry = (flagId: string, result: EvaluationResult): UsageEntry => ({
@@ -272,6 +276,60 @@ ofrep.post("/v1/evaluate/flags", async (c) => {
   return c.json({ flags: results.map(toBulkEntry) });
 });
 
+/**
+ * The most events we fold from a single ingest request. A batch beyond this is
+ * rejected (400) rather than silently truncated, so a client never believes it
+ * recorded more than it did. Clients should chunk larger batches.
+ */
+const MAX_EXPOSURES_PER_REQUEST = 1000;
+
+/**
+ * Exposure ingest: the billable events meter.
+ *
+ * A flag CHECK is free (that is the wedge); an EXPOSURE is the analytics event a
+ * customer chooses to send when they want usage or experiment analysis on a
+ * check. Same SDK-key auth and rate limiter as
+ * evaluation; the body is a batch of exposures and we count them into the daily
+ * rollups (usage_event_rollups) off the hot path. We store only the count, not
+ * the exposure detail. Best-effort: recording never fails the request.
+ *
+ *   POST /ofrep/v1/exposures   body: { "events": [ { "key": "my-flag", ... } ] }
+ */
+ofrep.post("/v1/exposures", async (c) => {
+  const identity = await requireSdkKey(c);
+  if (identity instanceof Response) return identity;
+
+  const limited = await evalLimiter.check(identity.keyId);
+  if (!limited.ok) return tooManyRequests(c, limited);
+
+  const text = await c.req.text().catch(() => "");
+  let body: unknown;
+  try {
+    body = text.trim() === "" ? {} : JSON.parse(text);
+  } catch {
+    return ofrepFail(c, 400, "PARSE_ERROR", "Request body is not valid JSON.");
+  }
+
+  const events = (body as { events?: unknown } | null)?.events;
+  if (!Array.isArray(events)) {
+    return ofrepFail(c, 400, "INVALID_CONTEXT", "`events` must be an array of exposures.");
+  }
+  if (events.length > MAX_EXPOSURES_PER_REQUEST) {
+    return ofrepFail(
+      c,
+      400,
+      "INVALID_CONTEXT",
+      `Too many events in one request (max ${MAX_EXPOSURES_PER_REQUEST}); send them in smaller batches.`,
+    );
+  }
+
+  if (events.length > 0) {
+    await defer(c, recordEvents(identity.organizationId, events.length, { source: "flags.exposure" }));
+  }
+
+  return c.json({ recorded: events.length }, 202);
+});
+
 // --- OpenAPI registration ----------------------------------------------------
 // The two evaluation endpoints, declared so they appear in GET /openapi.json and
 // the root index. Both take an SDK key and read the OFREP evaluation context.
@@ -351,5 +409,32 @@ registerRoute({
     },
     401: { description: "A valid client key is required." },
     429: { description: "Too many evaluations; retry after the Retry-After delay." },
+  },
+});
+
+// The exposure ingest body: a batch of analytics events. Each entry carries the
+// flag key it relates to (and any client-side detail); Flagon meters the count.
+const exposuresRequestSchema = z.object({
+  events: z
+    .array(z.object({ key: z.string().optional() }).catchall(z.unknown()))
+    .describe("A batch of exposure events; the count is metered."),
+});
+registerComponentSchema("ExposuresRequest", exposuresRequestSchema);
+registerComponentSchema("ExposuresResponse", z.object({ recorded: z.number() }));
+
+registerRoute({
+  method: "post",
+  path: "/ofrep/v1/exposures",
+  summary: "Record flag exposures",
+  description:
+    "Record a batch of flag exposures for analytics. A flag check is free; an exposure is the billable analytics event you send when you want usage or experiment analysis on a check. Authenticated by the same client key as evaluation. Flagon meters the number of events; the batch is capped per request, so chunk larger volumes. Best-effort: a 202 means the batch was accepted for rollup.",
+  tags: [OFREP_TAG],
+  security: "sdkKey",
+  request: { body: exposuresRequestSchema },
+  responses: {
+    202: { description: "The exposures were accepted for metering.", schemaName: "ExposuresResponse" },
+    400: { description: "The request body could not be parsed, or `events` was invalid or too large." },
+    401: { description: "A valid client key is required." },
+    429: { description: "Too many requests; retry after the Retry-After delay." },
   },
 });

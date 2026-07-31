@@ -4,8 +4,10 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Select } from "@flagon/design";
 import { authClient } from "@/lib/auth-client";
+import { ASSIGNABLE_ORG_ROLES, orgRoleLabel } from "@/lib/roles";
 import { submitButtonClass } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
+import { setMemberRoleAction } from "./actions";
 
 type MemberRow = {
   memberId: string;
@@ -16,13 +18,17 @@ type MemberRow = {
   role: string;
 };
 
-const ASSIGNABLE = ["admin", "member"] as const;
+// Invites go through BetterAuth, which only speaks owner/admin/member — so the
+// read-only roles (viewer/billing) are assigned after a person joins, via the
+// role picker below (which writes the app-owned members table directly).
+const INVITE_ROLES = ["admin", "member"] as const;
+const ROLE_OPTIONS = ASSIGNABLE_ORG_ROLES.map((r) => ({ value: r.value, label: r.label }));
 
 /** Invite-by-email form. Owner/admin only (the page gates rendering). */
 export function InviteMemberForm({ organizationId }: { organizationId: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<(typeof ASSIGNABLE)[number]>("member");
+  const [role, setRole] = useState<(typeof INVITE_ROLES)[number]>("member");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -69,8 +75,8 @@ export function InviteMemberForm({ organizationId }: { organizationId: string })
           <Select
             ariaLabel="Role"
             value={role}
-            onValueChange={(v) => setRole(v as (typeof ASSIGNABLE)[number])}
-            options={ASSIGNABLE.map((r) => ({ value: r, label: r }))}
+            onValueChange={(v) => setRole(v as (typeof INVITE_ROLES)[number])}
+            options={INVITE_ROLES.map((r) => ({ value: r, label: orgRoleLabel(r) }))}
           />
         </div>
         <button
@@ -89,11 +95,13 @@ export function InviteMemberForm({ organizationId }: { organizationId: string })
 
 /** The member roster, with role changes and removal for managers. */
 export function MembersList({
+  slug,
   organizationId,
   currentUserId,
   canManage,
   members,
 }: {
+  slug: string;
   organizationId: string;
   currentUserId: string;
   canManage: boolean;
@@ -106,13 +114,11 @@ export function MembersList({
   async function changeRole(m: MemberRow, role: string) {
     setBusy(m.memberId);
     setError(null);
-    const { error } = await authClient.organization.updateMemberRole({
-      memberId: m.memberId,
-      role: role as "admin" | "member",
-      organizationId,
-    });
+    // Role changes (including viewer/billing) go through the app-owned members
+    // table, not BetterAuth — see settings/members/actions.ts.
+    const { error } = await setMemberRoleAction(slug, m.memberId, role);
     setBusy(null);
-    if (error) setError(error.message ?? "Could not update the role.");
+    if (error) setError(error);
     else router.refresh();
   }
 
@@ -161,12 +167,10 @@ export function MembersList({
                     disabled={busy === m.memberId}
                     onValueChange={(v) => changeRole(m, v)}
                     className="px-2 py-1 text-xs"
-                    options={ASSIGNABLE.map((r) => ({ value: r, label: r }))}
+                    options={ROLE_OPTIONS}
                   />
                 ) : (
-                  <span className="text-xs capitalize text-zinc-400">
-                    {m.role}
-                  </span>
+                  <span className="text-xs text-zinc-400">{orgRoleLabel(m.role)}</span>
                 )}
                 {editable ? (
                   <button
