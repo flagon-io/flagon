@@ -70,19 +70,23 @@ function TopLoaderInner() {
   }, [clearTimers, done]);
 
   // START: the authoritative App Router signals (client nav uses pushState;
-  // back/forward fires popstate).
+  // back/forward fires popstate). Next 16 calls pushState from INSIDE a React
+  // insertion effect, where scheduling a state update synchronously is illegal
+  // ("useInsertionEffect must not schedule updates"). So defer start() to a
+  // microtask, which runs right after the commit, where setState is fine again.
   useEffect(() => {
     const origPush = history.pushState.bind(history);
     const origReplace = history.replaceState.bind(history);
     history.pushState = (...args: Parameters<History["pushState"]>) => {
-      start();
-      return origPush(...args);
+      const result = origPush(...args);
+      queueMicrotask(start);
+      return result;
     };
     history.replaceState = (...args: Parameters<History["replaceState"]>) => {
       // replaceState is used for shallow updates too; only signal a real one.
       return origReplace(...args);
     };
-    const onPop = () => start();
+    const onPop = () => queueMicrotask(start);
     window.addEventListener("popstate", onPop);
     return () => {
       history.pushState = origPush;
