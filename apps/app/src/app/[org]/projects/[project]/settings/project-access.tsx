@@ -80,8 +80,8 @@ export function ProjectAccessManager({
         {access.owner ? (
           <li className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
             <div className="flex min-w-0 items-center gap-2.5">
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
-                <Users className="h-4 w-4" />
+              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
+                <Users className="size-4" />
               </span>
               <div className="min-w-0">
                 <p className="truncate text-sm text-zinc-100">{access.owner.name}</p>
@@ -100,8 +100,8 @@ export function ProjectAccessManager({
             className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
           >
             <div className="flex min-w-0 items-center gap-2.5">
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
-                <Users className="h-4 w-4" />
+              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
+                <Users className="size-4" />
               </span>
               <p className="truncate text-sm text-zinc-100">{g.teamName}</p>
             </div>
@@ -120,7 +120,7 @@ export function ProjectAccessManager({
                   options={ROLE_OPTIONS}
                 />
               ) : (
-                <span className="text-xs capitalize text-zinc-400">{g.role}</span>
+                <span className="text-xs text-zinc-400 capitalize">{g.role}</span>
               )}
               {canManage ? (
                 <button
@@ -170,7 +170,7 @@ export function ProjectAccessManager({
             />
           </div>
           <Button variant="secondary" onClick={add} disabled={adding || !addTeam}>
-            <Plus className="h-4 w-4" /> Add
+            <Plus className="size-4" /> Add
           </Button>
         </div>
       ) : null}

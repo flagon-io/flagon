@@ -132,7 +132,7 @@ export function ConsumptionBreakdown({
                 className="flex items-center gap-1.5 text-xs text-zinc-400"
               >
                 <span
-                  className="h-2.5 w-2.5 rounded-full"
+                  className="size-2.5 rounded-full"
                   style={{ backgroundColor: s.color }}
                 />
                 {s.label}
@@ -358,11 +358,11 @@ function TooltipBody({
           {rows.map((r) => (
             <li key={r.key} className="flex items-center gap-2">
               <span
-                className="h-2 w-2 shrink-0 rounded-full"
+                className="size-2 shrink-0 rounded-full"
                 style={{ backgroundColor: r.color }}
               />
               <span className="text-zinc-400">{r.label}</span>
-              <span className="ml-auto font-medium tabular-nums text-zinc-200">
+              <span className="ml-auto font-medium text-zinc-200 tabular-nums">
                 {fmt(r.value, r.unit)}
               </span>
             </li>

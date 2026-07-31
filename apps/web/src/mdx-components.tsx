@@ -142,7 +142,7 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     ),
     th: (props) => (
       <th
-        className="px-3.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-400"
+        className="px-3.5 py-2.5 text-left text-xs font-semibold tracking-wide text-zinc-400 uppercase"
         {...props}
       />
     ),

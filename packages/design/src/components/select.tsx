@@ -33,7 +33,7 @@ export function Select({
         className={[
           "flex h-10 items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 px-3 text-sm text-zinc-100 outline-none transition-colors",
           "focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20",
-          "disabled:cursor-not-allowed disabled:opacity-60 data-[placeholder]:text-zinc-500",
+          "disabled:cursor-not-allowed disabled:opacity-60 data-placeholder:text-zinc-500",
           className ?? "",
         ].join(" ")}
       >
@@ -46,17 +46,17 @@ export function Select({
         <S.Content
           position="popper"
           sideOffset={6}
-          className="z-50 max-h-[var(--radix-select-content-available-height)] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-white/10 bg-zinc-900/95 shadow-xl backdrop-blur"
+          className="rounded-lg border-white/10 bg-zinc-900/95 shadow-xl backdrop-blur z-50 max-h-(--radix-select-content-available-height) min-w-(--radix-select-trigger-width) overflow-hidden border"
         >
           <S.Viewport className="p-1">
             {options.map((o) => (
               <S.Item
                 key={o.value}
                 value={o.value}
-                className="relative flex cursor-pointer items-center rounded-md py-2 pr-8 pl-3 text-sm text-zinc-200 outline-none select-none data-[highlighted]:bg-white/5 data-[highlighted]:text-zinc-100 data-[state=checked]:text-teal-300"
+                className="rounded-md py-2 pr-8 pl-3 text-sm text-zinc-200 data-highlighted:bg-white/5 data-highlighted:text-zinc-100 data-[state=checked]:text-teal-300 relative flex cursor-pointer items-center outline-none select-none"
               >
                 <S.ItemText>{o.label}</S.ItemText>
-                <S.ItemIndicator className="absolute right-2.5 text-teal-400">
+                <S.ItemIndicator className="right-2.5 text-teal-400 absolute">
                   <Check />
                 </S.ItemIndicator>
               </S.Item>

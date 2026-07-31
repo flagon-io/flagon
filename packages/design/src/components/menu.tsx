@@ -42,7 +42,7 @@ export function MenuContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-56 overflow-hidden rounded-lg border border-white/10 bg-zinc-900/95 py-1 shadow-xl backdrop-blur",
+          "min-w-56 rounded-lg border-white/10 bg-zinc-900/95 py-1 shadow-xl backdrop-blur z-50 overflow-hidden border",
           className,
         )}
         {...props}
@@ -58,7 +58,7 @@ export function MenuItem({
   return (
     <DM.Item
       className={cn(
-        "flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-zinc-300 outline-none select-none data-[highlighted]:bg-white/5 data-[highlighted]:text-zinc-100 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
+        "gap-2 px-3 py-2 text-sm text-zinc-300 data-highlighted:bg-white/5 data-highlighted:text-zinc-100 flex cursor-pointer items-center outline-none select-none data-disabled:cursor-not-allowed data-disabled:opacity-50",
         className,
       )}
       {...props}
@@ -71,7 +71,7 @@ export function MenuSeparator({
   ...props
 }: ComponentPropsWithoutRef<typeof DM.Separator>) {
   return (
-    <DM.Separator className={cn("my-1 h-px bg-white/8", className)} {...props} />
+    <DM.Separator className={cn("my-1 bg-white/8 h-px", className)} {...props} />
   );
 }
 

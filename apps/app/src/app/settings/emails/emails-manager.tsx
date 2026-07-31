@@ -135,7 +135,7 @@ export function EmailsManager({
             value={newEmail}
             onChange={(e) => setNewEmail(e.target.value)}
             placeholder="you@company.com"
-            className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20"
+            className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 transition outline-none placeholder:text-zinc-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20"
           />
         </div>
         <button
@@ -164,7 +164,7 @@ function Badge({
   };
   return (
     <span
-      className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tones[tone]}`}
+      className={`rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase ${tones[tone]}`}
     >
       {children}
     </span>

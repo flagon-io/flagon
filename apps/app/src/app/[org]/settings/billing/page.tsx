@@ -137,7 +137,7 @@ export default async function OrgBillingPage({
                           key={f.text}
                           className="flex items-center gap-2 text-sm text-zinc-300"
                         >
-                          <Check className="h-4 w-4 shrink-0 text-teal-400" />
+                          <Check className="size-4 shrink-0 text-teal-400" />
                           {f.text}
                         </li>
                       ))}

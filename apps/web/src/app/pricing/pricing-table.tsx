@@ -103,9 +103,9 @@ function HeadCell({ plan }: { plan: Plan }) {
           <span className="text-sm font-medium text-zinc-400">{plan.price.plus}</span>
         ) : null}
       </div>
-      <p className="mt-3 text-sm leading-6 text-zinc-400">{plan.description}</p>
+      <p className="mt-3 text-sm/6 text-zinc-400">{plan.description}</p>
       {plan.note ? (
-        <p className="mt-2 text-xs leading-5 text-zinc-500">{plan.note}</p>
+        <p className="mt-2 text-xs/5 text-zinc-500">{plan.note}</p>
       ) : null}
     </div>
   );
@@ -123,7 +123,7 @@ function FeatureCell({ plan }: { plan: Plan }) {
         {plan.features.map((feature) => (
           <li
             key={feature.text}
-            className={`flex items-start gap-2.5 text-sm leading-6 ${
+            className={`flex items-start gap-2.5 text-sm/6 ${
               feature.soon ? "text-zinc-500" : "text-zinc-300"
             }`}
           >
@@ -151,7 +151,7 @@ function Pill({ children, accent = false }: { children: ReactNode; accent?: bool
 
 function SoonTag() {
   return (
-    <span className="shrink-0 self-center rounded border border-white/12 px-1 py-px text-[9px] font-medium leading-none tracking-wide text-zinc-500 uppercase">
+    <span className="shrink-0 self-center rounded border border-white/12 px-1 py-px text-[9px] leading-none font-medium tracking-wide text-zinc-500 uppercase">
       Soon
     </span>
   );

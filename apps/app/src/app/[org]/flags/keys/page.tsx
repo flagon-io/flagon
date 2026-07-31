@@ -30,7 +30,7 @@ export default async function SdkKeysPage({
         href={`/${slug}/flags`}
         className="inline-flex w-fit items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-300"
       >
-        <ArrowLeft className="h-4 w-4" /> Flags
+        <ArrowLeft className="size-4" /> Flags
       </Link>
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Client Keys</h1>

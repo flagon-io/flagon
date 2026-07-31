@@ -24,7 +24,7 @@ export default function NotFound() {
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
             Page not found
           </h1>
-          <p className="mx-auto max-w-sm text-sm leading-6 text-zinc-400">
+          <p className="mx-auto max-w-sm text-sm/6 text-zinc-400">
             {"That page doesn't exist, or it hasn't shipped yet. Head back home."}
           </p>
         </div>

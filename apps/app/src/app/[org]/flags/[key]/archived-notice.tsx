@@ -25,7 +25,7 @@ export function ArchivedNotice({ slug, flagKey }: { slug: string; flagKey: strin
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-2.5">
-        <Archive className="mt-0.5 h-4 w-4 shrink-0 text-amber-400/90" />
+        <Archive className="mt-0.5 size-4 shrink-0 text-amber-400/90" />
         <div>
           <p className="text-sm font-medium text-amber-200/90">This flag is archived</p>
           <p className="text-sm text-amber-200/60">

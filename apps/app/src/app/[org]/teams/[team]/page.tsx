@@ -52,7 +52,7 @@ export default async function TeamDetail({
         href={`/${slug}/teams`}
         className="inline-flex w-fit items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-300"
       >
-        <ArrowLeft className="h-4 w-4" /> Teams
+        <ArrowLeft className="size-4" /> Teams
       </Link>
 
       <TeamHeader
@@ -98,8 +98,8 @@ export default async function TeamDetail({
                   href={`/${slug}/projects/${p.key}`}
                   className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/3"
                 >
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
-                    <Boxes className="h-4 w-4" />
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
+                    <Boxes className="size-4" />
                   </span>
                   <div className="min-w-0">
                     <p className="truncate text-sm text-zinc-100">{p.name}</p>

@@ -137,7 +137,7 @@ function TagEditor({
             disabled={disabled}
             className="text-zinc-500 hover:text-red-400"
           >
-            <X className="h-3 w-3" />
+            <X className="size-3" />
           </button>
         </span>
       ))}
@@ -164,7 +164,7 @@ function TagEditor({
           disabled={disabled}
           className="inline-flex items-center gap-1 rounded-md border border-dashed border-white/15 px-2 py-0.5 text-xs text-zinc-500 hover:text-zinc-300"
         >
-          <Plus className="h-3 w-3" /> Add
+          <Plus className="size-3" /> Add
         </button>
       )}
     </div>

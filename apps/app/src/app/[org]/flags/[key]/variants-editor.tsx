@@ -60,7 +60,7 @@ function defaultValue(type: MultiType): unknown {
 function FieldLabel({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <span
-      className={`mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-600 ${className}`}
+      className={`mb-1 block text-[11px] font-medium tracking-wide text-zinc-600 uppercase ${className}`}
     >
       {children}
     </span>
@@ -136,7 +136,7 @@ export function VariantsEditor({
               disabled={pending}
               onClick={() => run(() => createVariantAction(slug, flagKey, { value: defaultValue(type) }))}
             >
-              <Plus className="h-3.5 w-3.5" /> Add variant
+              <Plus className="size-3.5" /> Add variant
             </Button>
           ) : null}
         </div>
@@ -191,7 +191,7 @@ function VariantRow({
   const indexDot = (
     <div className="flex shrink-0 items-center gap-2.5 pt-6">
       <span className="w-6 text-right font-mono text-xs text-zinc-600">#{index + 1}</span>
-      <span className={`h-2.5 w-2.5 rounded-full ${dot}`} />
+      <span className={`size-2.5 rounded-full ${dot}`} />
     </div>
   );
 
@@ -201,9 +201,9 @@ function VariantRow({
       onClick={() => onRun(() => deleteVariantAction(slug, flagKey, variant.key))}
       disabled={pending}
       title="Remove variant"
-      className="mt-6 grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
+      className="mt-6 grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
     >
-      <Trash2 className="h-4 w-4" />
+      <Trash2 className="size-4" />
     </button>
   ) : (
     <span className="w-8 shrink-0" />

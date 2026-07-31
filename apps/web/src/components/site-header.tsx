@@ -36,7 +36,7 @@ export async function SiteHeader() {
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-6">
         <div className="flex items-center gap-8">
           <Link href="/" className="flex items-center gap-2.5">
-            <FlagonMark className="h-7 w-7" />
+            <FlagonMark className="size-7" />
             <span className="text-[15px] font-semibold tracking-tight">
               {brand.name}
             </span>

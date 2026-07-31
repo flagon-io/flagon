@@ -85,14 +85,14 @@ export function OrgSwitcher({
           </Command.Empty>
           <Command.Group
             heading="Organizations"
-            className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-1 [&_[cmdk-group-heading]]:pb-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-zinc-500 [&_[cmdk-group-heading]]:uppercase"
+            className="**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:pt-1 **:[[cmdk-group-heading]]:pb-1.5 **:[[cmdk-group-heading]]:text-[11px] **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:text-zinc-500 **:[[cmdk-group-heading]]:uppercase"
           >
             {orgs.map((o) => (
               <Command.Item
                 key={o.id}
                 value={`${o.name} ${o.slug}`}
                 onSelect={() => switchTo(o)}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none data-[selected=true]:bg-white/8 data-[selected=true]:text-zinc-100"
+                className="flex cursor-pointer items-center gap-2 rounded-md p-2 text-sm text-zinc-200 outline-none data-[selected=true]:bg-white/8 data-[selected=true]:text-zinc-100"
               >
                 <OrgAvatar org={o} />
                 <span className="min-w-0 flex-1 truncate">{o.name}</span>
@@ -100,9 +100,9 @@ export function OrgSwitcher({
                   {planName(o.plan)}
                 </span>
                 {o.id === current.id ? (
-                  <Check className="h-4 w-4 shrink-0 text-teal-400" />
+                  <Check className="size-4 shrink-0 text-teal-400" />
                 ) : (
-                  <span className="h-4 w-4 shrink-0" />
+                  <span className="size-4 shrink-0" />
                 )}
               </Command.Item>
             ))}
@@ -116,8 +116,8 @@ export function OrgSwitcher({
           onClick={createOrg}
           className="flex items-center gap-2 border-t border-white/8 px-3 py-2.5 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-zinc-100"
         >
-          <span className="grid h-6 w-6 shrink-0 place-items-center rounded border border-dashed border-white/15 text-zinc-400">
-            <Plus className="h-3.5 w-3.5" />
+          <span className="grid size-6 shrink-0 place-items-center rounded border border-dashed border-white/15 text-zinc-400">
+            <Plus className="size-3.5" />
           </span>
           Create organization
         </button>
@@ -132,7 +132,7 @@ export function OrgSwitcher({
           <button
             type="button"
             aria-label={`${current.name} — switch organization`}
-            className="flex w-full items-center justify-center rounded-md px-2 py-1.5 outline-none transition-colors hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-teal-500/50"
+            className="flex w-full items-center justify-center rounded-md px-2 py-1.5 transition-colors outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-teal-500/50"
           >
             <OrgAvatar org={current} />
           </button>
@@ -165,9 +165,9 @@ export function OrgSwitcher({
             <button
               type="button"
               aria-label="Switch organization"
-              className="shrink-0 rounded-md p-1.5 text-zinc-500 outline-none transition-colors hover:bg-white/5 hover:text-zinc-300 focus-visible:ring-2 focus-visible:ring-teal-500/50"
+              className="shrink-0 rounded-md p-1.5 text-zinc-500 transition-colors outline-none hover:bg-white/5 hover:text-zinc-300 focus-visible:ring-2 focus-visible:ring-teal-500/50"
             >
-              <ChevronsUpDown className="h-4 w-4" />
+              <ChevronsUpDown className="size-4" />
             </button>
           </PopoverTrigger>
         </div>
@@ -187,13 +187,13 @@ function OrgAvatar({ org }: { org: { name: string; logo: string | null } }) {
       <img
         src={org.logo}
         alt=""
-        className="h-6 w-6 shrink-0 rounded object-cover"
+        className="size-6 shrink-0 rounded object-cover"
       />
     );
   }
   return (
-    <span className="grid h-6 w-6 shrink-0 place-items-center rounded bg-white/5">
-      <FlagonMark className="h-4 w-4" />
+    <span className="grid size-6 shrink-0 place-items-center rounded bg-white/5">
+      <FlagonMark className="size-4" />
     </span>
   );
 }

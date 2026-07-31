@@ -33,7 +33,7 @@ export function Switch({
         className ?? "",
       ].join(" ")}
     >
-      <S.Thumb className="pointer-events-none block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform will-change-transform data-[state=checked]:translate-x-5.5" />
+      <S.Thumb className="h-5 w-5 translate-x-0.5 bg-white shadow-sm data-[state=checked]:translate-x-5.5 pointer-events-none block rounded-full transition-transform will-change-transform" />
     </S.Root>
   );
 }

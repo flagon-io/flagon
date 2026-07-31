@@ -54,7 +54,7 @@ export default async function FlagDetail({
         href={`/${slug}/flags`}
         className="inline-flex w-fit items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-300"
       >
-        <ArrowLeft className="h-4 w-4" /> Flags
+        <ArrowLeft className="size-4" /> Flags
       </Link>
 
       <div className="flex items-start justify-between gap-3">
@@ -63,7 +63,7 @@ export default async function FlagDetail({
             <h1 className="font-mono text-xl font-semibold tracking-tight text-zinc-100">
               {detail.flag.key}
             </h1>
-            <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs capitalize text-zinc-400">
+            <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-zinc-400 capitalize">
               {detail.flag.type}
             </span>
             {archived ? (

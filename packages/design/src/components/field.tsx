@@ -19,7 +19,7 @@ export function Field({
 }) {
   return (
     <div className={className}>
-      <label htmlFor={htmlFor} className="block text-xs font-medium text-zinc-400">
+      <label htmlFor={htmlFor} className="text-xs font-medium text-zinc-400 block">
         {label}
       </label>
       <div className="mt-1.5">{children}</div>

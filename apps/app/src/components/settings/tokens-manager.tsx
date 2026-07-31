@@ -123,7 +123,7 @@ export function TokensManager({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="CI deploy"
-              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20"
+              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 transition outline-none placeholder:text-zinc-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20"
             />
           </div>
           <div className="flex flex-col gap-1.5">

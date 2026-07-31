@@ -18,7 +18,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     <nav className="flex flex-col gap-6 text-sm">
       {nav.map((section) => (
         <div key={section.title}>
-          <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-zinc-600">
+          <div className="mb-2 px-3 text-xs font-semibold tracking-wide text-zinc-600 uppercase">
             {section.title}
           </div>
           <ul className="flex flex-col gap-0.5">
@@ -63,7 +63,7 @@ function Pager() {
           className="group flex flex-col rounded-lg border border-white/10 px-4 py-3 transition hover:border-white/20 hover:bg-white/5"
         >
           <span className="flex items-center gap-1 text-xs text-zinc-500">
-            <ArrowLeft className="h-3 w-3" /> Previous
+            <ArrowLeft className="size-3" /> Previous
           </span>
           <span className="mt-1 text-sm font-medium text-zinc-200 group-hover:text-teal-300">
             {prev.title}
@@ -78,7 +78,7 @@ function Pager() {
           className="group flex flex-col rounded-lg border border-white/10 px-4 py-3 text-right transition hover:border-white/20 hover:bg-white/5"
         >
           <span className="flex items-center justify-end gap-1 text-xs text-zinc-500">
-            Next <ArrowRight className="h-3 w-3" />
+            Next <ArrowRight className="size-3" />
           </span>
           <span className="mt-1 text-sm font-medium text-zinc-200 group-hover:text-teal-300">
             {next.title}
@@ -114,15 +114,15 @@ export function DocsChrome({ children }: { children: React.ReactNode }) {
             className="absolute inset-0 bg-black/60"
             onClick={() => setOpen(false)}
           />
-          <aside className="absolute left-0 top-0 h-full w-72 overflow-y-auto border-r border-white/10 bg-[#0b0f10] p-6">
+          <aside className="absolute top-0 left-0 h-full w-72 overflow-y-auto border-r border-white/10 bg-[#0b0f10] p-6">
             <div className="mb-4 flex justify-end">
               <button
                 type="button"
                 aria-label="Close navigation"
                 onClick={() => setOpen(false)}
-                className="grid h-8 w-8 place-items-center rounded-md text-zinc-400 hover:bg-white/5"
+                className="grid size-8 place-items-center rounded-md text-zinc-400 hover:bg-white/5"
               >
-                <X className="h-5 w-5" />
+                <X className="size-5" />
               </button>
             </div>
             <Sidebar onNavigate={() => setOpen(false)} />
@@ -138,7 +138,7 @@ export function DocsChrome({ children }: { children: React.ReactNode }) {
             onClick={() => setOpen(true)}
             className="inline-flex items-center gap-2 rounded-md border border-white/10 px-3 py-1.5 text-sm text-zinc-300 hover:bg-white/5 lg:hidden"
           >
-            <BookText className="h-4 w-4" /> Menu
+            <BookText className="size-4" /> Menu
           </button>
           <div className="ml-auto hidden items-center gap-2 sm:flex">
             <span className="text-xs text-zinc-500">Language</span>

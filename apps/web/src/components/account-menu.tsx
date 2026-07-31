@@ -33,7 +33,7 @@ export function AccountMenu({ user }: { user: MarketingUser }) {
         <button
           type="button"
           aria-label="Account menu"
-          className="grid h-8 w-8 place-items-center rounded-full bg-white/10 text-xs font-semibold text-zinc-200 transition-opacity outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-teal-500/50"
+          className="grid size-8 place-items-center rounded-full bg-white/10 text-xs font-semibold text-zinc-200 transition-opacity outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-teal-500/50"
         >
           {(user.name || user.email).charAt(0).toUpperCase()}
         </button>

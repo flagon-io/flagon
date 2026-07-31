@@ -62,14 +62,14 @@ export function SegmentsManager({
           className="flex-1"
         />
         <Button variant="primary" onClick={() => setCreating(true)}>
-          <Plus className="h-4 w-4" /> Create Segment
+          <Plus className="size-4" /> Create Segment
         </Button>
       </div>
 
       {segments.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/2 px-6 py-20 text-center">
-          <span className="grid h-11 w-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
-            <PieChart className="h-5 w-5" />
+          <span className="grid size-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
+            <PieChart className="size-5" />
           </span>
           <div>
             <p className="text-sm font-medium text-zinc-200">No segments yet</p>
@@ -78,7 +78,7 @@ export function SegmentsManager({
             </p>
           </div>
           <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4" /> Create Segment
+            <Plus className="size-4" /> Create Segment
           </Button>
         </div>
       ) : (
@@ -94,7 +94,7 @@ export function SegmentsManager({
                 href={`/${slug}/flags/segments/${s.key}`}
                 className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 transition-colors hover:bg-white/3"
               >
-                <PieChart className="h-4 w-4 shrink-0 text-zinc-500" />
+                <PieChart className="size-4 shrink-0 text-zinc-500" />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-zinc-100">{s.name}</span>
@@ -104,7 +104,7 @@ export function SegmentsManager({
                     {summarize(s.conditions)}
                   </p>
                 </div>
-                <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-zinc-600" />
+                <ChevronRight className="ml-auto size-4 shrink-0 text-zinc-600" />
               </Link>
               {canManage ? (
                 <button
@@ -112,9 +112,9 @@ export function SegmentsManager({
                   onClick={() => remove(s.key)}
                   disabled={pending}
                   title="Delete segment"
-                  className="mr-2 grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
+                  className="mr-2 grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="size-4" />
                 </button>
               ) : null}
             </div>

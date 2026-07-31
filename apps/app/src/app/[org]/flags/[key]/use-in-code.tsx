@@ -18,7 +18,7 @@ export function UseInCodeButton({ slug, flagKey }: { slug: string; flagKey: stri
   return (
     <>
       <Button variant="secondary" onClick={() => setOpen(true)}>
-        <Code2 className="h-4 w-4" /> Use in Code
+        <Code2 className="size-4" /> Use in Code
       </Button>
       {open ? (
         <Modal onClose={() => setOpen(false)} size="lg">
@@ -36,7 +36,7 @@ export function UseInCodeButton({ slug, flagKey }: { slug: string; flagKey: stri
               .
             </p>
             <div className="relative">
-              <pre className="overflow-x-auto rounded-lg border border-white/10 bg-black/40 p-4 pr-12 text-xs leading-relaxed text-zinc-300">
+              <pre className="overflow-x-auto rounded-lg border border-white/10 bg-black/40 p-4 pr-12 text-xs/relaxed text-zinc-300">
                 {snippet}
               </pre>
               <button
@@ -46,9 +46,9 @@ export function UseInCodeButton({ slug, flagKey }: { slug: string; flagKey: stri
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1500);
                 }}
-                className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-md border border-white/10 bg-zinc-900 text-zinc-300 hover:bg-white/5"
+                className="absolute top-2 right-2 grid size-8 place-items-center rounded-md border border-white/10 bg-zinc-900 text-zinc-300 hover:bg-white/5"
               >
-                {copied ? <Check className="h-4 w-4 text-teal-400" /> : <Copy className="h-4 w-4" />}
+                {copied ? <Check className="size-4 text-teal-400" /> : <Copy className="size-4" />}
               </button>
             </div>
           </ModalBody>

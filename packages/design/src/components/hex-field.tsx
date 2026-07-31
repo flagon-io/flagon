@@ -88,10 +88,10 @@ export function HexField({
       // narrow columns leave no empty half to fill. The motion stops below
       // `lg` (see styles.css): 300-odd animated nodes is the wrong thing to
       // ask of a phone, and a still lattice is most of the charm anyway.
-      className={`pointer-events-none absolute right-0 top-0 h-[46%] w-[78%] overflow-hidden sm:h-[55%] sm:w-[62%] lg:inset-y-0 lg:h-auto ${
+      className={`right-0 top-0 sm:h-[55%] sm:w-[62%] lg:inset-y-0 lg:h-auto pointer-events-none absolute h-[46%] w-[78%] overflow-hidden ${
         quiet
-          ? "opacity-45 lg:w-[54%] lg:opacity-65"
-          : "opacity-60 lg:w-[62%] lg:opacity-100"
+          ? "lg:w-[54%] lg:opacity-65 opacity-45"
+          : "lg:w-[62%] lg:opacity-100 opacity-60"
       }`}
       // Fades to nothing well before the headline's column. The mask lives on
       // this element because it is the only box in the tree that is exactly
@@ -106,7 +106,7 @@ export function HexField({
       <svg
         viewBox={`${-R} ${-R} ${WIDTH} ${HEIGHT}`}
         preserveAspectRatio="xMaxYMid slice"
-        className="absolute inset-0 h-full w-full"
+        className="inset-0 absolute size-full"
         role="presentation"
       >
         <defs>

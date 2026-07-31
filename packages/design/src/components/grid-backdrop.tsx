@@ -20,16 +20,16 @@ export function GridBackdrop() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-0 z-0 hidden justify-center lg:flex"
+      className="inset-0 lg:flex pointer-events-none fixed z-0 hidden justify-center"
     >
-      <div className="relative h-full w-full max-w-7xl">
+      <div className="max-w-7xl relative size-full">
         {/* The content column's own edges, carried the full height. */}
-        <span className="absolute inset-y-0 left-0 w-px bg-white/6" />
-        <span className="absolute inset-y-0 right-0 w-px bg-white/6" />
+        <span className="inset-y-0 left-0 bg-white/6 absolute w-px" />
+        <span className="inset-y-0 right-0 bg-white/6 absolute w-px" />
         {/* Margin guides: fainter, and outside the column, so they read as the
             grid continuing rather than as another container. */}
-        <span className="absolute inset-y-0 -left-24 w-px bg-white/3" />
-        <span className="absolute inset-y-0 -right-24 w-px bg-white/3" />
+        <span className="inset-y-0 -left-24 bg-white/3 absolute w-px" />
+        <span className="inset-y-0 -right-24 bg-white/3 absolute w-px" />
       </div>
     </div>
   );

@@ -40,7 +40,7 @@ export function CreateFlagButton({ slug }: { slug: string }) {
   return (
     <>
       <Button variant="primary" onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> Create Flag
+        <Plus className="size-4" /> Create Flag
       </Button>
       {open ? <CreateFlagDialog slug={slug} onClose={() => setOpen(false)} /> : null}
     </>
@@ -165,11 +165,11 @@ function CreateFlagDialog({ slug, onClose }: { slug: string; onClose: () => void
                             onClick={() => removeVariant(i)}
                             className="text-zinc-500 hover:text-red-400"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="size-4" />
                           </button>
                         ) : null}
                       </div>
-                      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-600">
+                      <span className="mb-1 block text-[11px] font-medium tracking-wide text-zinc-600 uppercase">
                         Label (optional)
                       </span>
                       <Input
@@ -179,7 +179,7 @@ function CreateFlagDialog({ slug, onClose }: { slug: string; onClose: () => void
                         aria-label={`Variant ${i + 1} label`}
                         className="mb-3 max-w-xs"
                       />
-                      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-600">
+                      <span className="mb-1 block text-[11px] font-medium tracking-wide text-zinc-600 uppercase">
                         Value
                       </span>
                       <JsonEditor
@@ -209,9 +209,9 @@ function CreateFlagDialog({ slug, onClose }: { slug: string; onClose: () => void
                         type="button"
                         onClick={() => removeVariant(i)}
                         disabled={variants.length === 1}
-                        className="grid h-9 w-9 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400 disabled:opacity-30 disabled:hover:text-zinc-500"
+                        className="grid size-9 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400 disabled:opacity-30 disabled:hover:text-zinc-500"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="size-4" />
                       </button>
                     </div>
                   ))}
@@ -221,7 +221,7 @@ function CreateFlagDialog({ slug, onClose }: { slug: string; onClose: () => void
                 onClick={addVariant}
                 className="inline-flex w-fit items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/10"
               >
-                <Plus className="h-3.5 w-3.5" /> Add variant
+                <Plus className="size-3.5" /> Add variant
               </button>
             </div>
           ) : null}

@@ -67,7 +67,7 @@ export function SdkKeysManager({
       {canManage ? (
         <div className="flex justify-end">
           <Button variant="secondary" onClick={() => setModalEnv(environments[0]?.key ?? "")}>
-            <Plus className="h-4 w-4" /> Create Client Key
+            <Plus className="size-4" /> Create Client Key
           </Button>
         </div>
       ) : null}
@@ -79,11 +79,11 @@ export function SdkKeysManager({
             <h2 className="mb-2.5 text-sm font-semibold text-zinc-100">{env.name}</h2>
             <div className="overflow-hidden rounded-xl border border-white/8 bg-white/2">
               {envKeys.length === 0 ? (
-                <div className="flex items-center justify-between px-4 py-4">
+                <div className="flex items-center justify-between p-4">
                   <span className="text-sm text-zinc-500">No client keys for {env.name}</span>
                   {canManage ? (
                     <Button variant="secondary" size="sm" onClick={() => setModalEnv(env.key)}>
-                      <Plus className="h-3.5 w-3.5" /> Create Client Key
+                      <Plus className="size-3.5" /> Create Client Key
                     </Button>
                   ) : null}
                 </div>
@@ -103,7 +103,7 @@ export function SdkKeysManager({
                   {canManage ? (
                     <div className="border-t border-white/6 px-2.5 py-2">
                       <Button variant="ghost" size="sm" onClick={() => setModalEnv(env.key)}>
-                        <Plus className="h-3.5 w-3.5" /> Create Client Key
+                        <Plus className="size-3.5" /> Create Client Key
                       </Button>
                     </div>
                   ) : null}
@@ -114,7 +114,7 @@ export function SdkKeysManager({
         );
       })}
 
-      <p className="rounded-lg border border-white/8 bg-white/2 px-4 py-3 text-xs leading-relaxed text-zinc-500">
+      <p className="rounded-lg border border-white/8 bg-white/2 px-4 py-3 text-xs/relaxed text-zinc-500">
         Client keys are publishable: they ship in your app and can be retrieved here
         any time. Use one with the OpenFeature OFREP provider (or a plain POST to{" "}
         <code className="font-mono text-zinc-400">/ofrep/v1/evaluate/flags</code>) to
@@ -208,12 +208,12 @@ function KeyRow({
             className="group flex max-w-full items-center gap-1.5 text-left"
           >
             <span
-              className={`truncate text-sm ${k.name ? "text-zinc-100" : "italic text-zinc-500"}`}
+              className={`truncate text-sm ${k.name ? "text-zinc-100" : "text-zinc-500 italic"}`}
             >
               {k.name || "Unlabelled key"}
             </span>
             {canManage ? (
-              <Pencil className="h-3 w-3 shrink-0 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
+              <Pencil className="size-3 shrink-0 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
             ) : null}
           </button>
         )}
@@ -228,20 +228,20 @@ function KeyRow({
                 type="button"
                 onClick={() => setRevealed((v) => !v)}
                 title={revealed ? "Hide" : "Reveal"}
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
+                className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
               >
-                {revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {revealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
               </button>
               <button
                 type="button"
                 onClick={copy}
                 title="Copy"
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
+                className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
               >
                 {copied ? (
-                  <Check className="h-3.5 w-3.5 text-teal-400" />
+                  <Check className="size-3.5 text-teal-400" />
                 ) : (
-                  <Copy className="h-3.5 w-3.5" />
+                  <Copy className="size-3.5" />
                 )}
               </button>
             </>
@@ -263,9 +263,9 @@ function KeyRow({
           onClick={onRevoke}
           disabled={pending}
           title="Revoke"
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
+          className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
         >
-          <Trash2 className="h-4 w-4" />
+          <Trash2 className="size-4" />
         </button>
       ) : null}
     </div>

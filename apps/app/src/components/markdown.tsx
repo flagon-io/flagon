@@ -53,7 +53,7 @@ const components: Components = {
   ),
   pre: (props) => (
     <pre
-      className="my-4 overflow-x-auto rounded-lg border border-white/10 bg-black/40 p-4 text-sm leading-relaxed text-zinc-200 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-zinc-200"
+      className="my-4 overflow-x-auto rounded-lg border border-white/10 bg-black/40 p-4 text-sm/relaxed text-zinc-200 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-zinc-200"
       {...props}
     />
   ),

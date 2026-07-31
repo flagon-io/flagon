@@ -39,7 +39,7 @@ export default function PricingPage() {
           <h1 className="text-4xl font-semibold tracking-tight text-zinc-50 sm:text-5xl">
             Simple, usage-based pricing
           </h1>
-          <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-zinc-400">
+          <p className="mx-auto mt-5 max-w-xl text-base/7 text-zinc-400">
             Flag checks are free and unlimited. Every plan includes a monthly pool
             of analytics events, and you pay for usage, never for seats, so adding
             a teammate never changes the bill. Start free and self-host any time.
@@ -64,7 +64,7 @@ export default function PricingPage() {
           <h2 className="text-lg font-semibold text-zinc-100">
             Rather run it yourself?
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-zinc-400">
+          <p className="mx-auto mt-3 max-w-xl text-sm/7 text-zinc-400">
             Flagon is source-available and free to self-host, with no user limit.
             But then the upgrades, scaling, backups, and 3am pages are yours to
             own. The managed platform is the same Flagon without any of that, so

@@ -9,7 +9,7 @@ export function FormError({ children }: { children: ReactNode }) {
   return (
     <p
       role="alert"
-      className="rounded-md border border-red-500/25 bg-red-500/5 px-3 py-2.5 text-xs leading-5 text-red-300"
+      className="rounded-md border border-red-500/25 bg-red-500/5 px-3 py-2.5 text-xs/5 text-red-300"
     >
       {children}
     </p>
@@ -21,7 +21,7 @@ export function FormNotice({ children }: { children: ReactNode }) {
   return (
     <p
       role="status"
-      className="rounded-md border border-teal-500/25 bg-teal-500/5 px-3 py-2.5 text-xs leading-5 text-teal-200"
+      className="rounded-md border border-teal-500/25 bg-teal-500/5 px-3 py-2.5 text-xs/5 text-teal-200"
     >
       {children}
     </p>

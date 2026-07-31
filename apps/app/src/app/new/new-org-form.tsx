@@ -113,7 +113,7 @@ export function NewOrgForm({ hasHobby }: { hasHobby: boolean }) {
             ) : null}
           </div>
           <div className="flex items-stretch overflow-hidden rounded-md border border-white/10 bg-white/5 focus-within:border-teal-500/50 focus-within:ring-2 focus-within:ring-teal-500/20">
-            <span className="flex items-center whitespace-nowrap border-r border-white/10 bg-white/2 px-3 text-sm text-zinc-500">
+            <span className="flex items-center border-r border-white/10 bg-white/2 px-3 text-sm whitespace-nowrap text-zinc-500">
               app.flagon.io/
             </span>
             <input

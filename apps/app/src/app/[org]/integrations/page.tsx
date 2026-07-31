@@ -52,7 +52,7 @@ export default async function IntegrationsPage({
                 key={p.label}
                 className="flex items-center gap-2.5 rounded-lg border border-white/8 bg-white/2 px-3 py-2.5"
               >
-                <Icon className="h-4.5 w-4.5 shrink-0 text-zinc-400" />
+                <Icon className="size-4.5 shrink-0 text-zinc-400" />
                 <span className="flex-1 text-sm text-zinc-200">{p.label}</span>
                 <SoonPill />
               </li>
@@ -62,12 +62,12 @@ export default async function IntegrationsPage({
       </SettingsSection>
 
       <ComingSoonSection
-        icon={<Bell className="h-4 w-4" />}
+        icon={<Bell className="size-4" />}
         title="Notifications"
         description="Send flag changes and events to Slack, Discord, or a webhook."
       />
       <ComingSoonSection
-        icon={<LineChart className="h-4 w-4" />}
+        icon={<LineChart className="size-4" />}
         title="Observability"
         description="Stream metrics and exposures to Datadog, Sentry, or your own sink."
       />
@@ -87,7 +87,7 @@ function ComingSoonSection({
   return (
     <SettingsSection title={title} description={description} action={<SoonPill />}>
       <div className="flex items-center gap-3 text-sm text-zinc-500">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/5 text-zinc-400">
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/5 text-zinc-400">
           {icon}
         </span>
         <span>Not available yet. We&apos;ll light this up as we build it out.</span>

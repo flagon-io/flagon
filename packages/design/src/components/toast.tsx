@@ -48,9 +48,12 @@ function push(tone: ToastTone, title: string, description?: string) {
 }
 
 export const toast = {
-  error: (title: string, description?: string) => push("error", title, description),
-  success: (title: string, description?: string) => push("success", title, description),
-  info: (title: string, description?: string) => push("info", title, description),
+  error: (title: string, description?: string) =>
+    push("error", title, description),
+  success: (title: string, description?: string) =>
+    push("success", title, description),
+  info: (title: string, description?: string) =>
+    push("info", title, description),
   dismiss,
 };
 
@@ -69,12 +72,12 @@ export function Toaster() {
   );
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-full max-w-sm flex-col gap-2">
+    <div className="bottom-4 right-4 max-w-sm gap-2 pointer-events-none fixed z-100 flex w-full flex-col">
       {list.map((t) => (
         <div
           key={t.id}
           role="alert"
-          className={`pointer-events-auto flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg backdrop-blur ${TONE_STYLES[t.tone]}`}
+          className={`gap-3 rounded-lg px-4 py-3 shadow-lg backdrop-blur pointer-events-auto flex items-start border ${TONE_STYLES[t.tone]}`}
         >
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium">{t.title}</p>
@@ -86,10 +89,21 @@ export function Toaster() {
             type="button"
             aria-label="Dismiss"
             onClick={() => dismiss(t.id)}
-            className="shrink-0 rounded p-0.5 text-current/60 transition-colors hover:text-current"
+            className="rounded p-0.5 shrink-0 text-current/60 transition-colors hover:text-current"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M3 3l8 8M11 3l-8 8"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
             </svg>
           </button>
         </div>

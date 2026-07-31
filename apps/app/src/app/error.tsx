@@ -35,7 +35,7 @@ export default function Error({
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
           Something went wrong
         </h1>
-        <p className="mx-auto max-w-sm text-sm leading-6 text-zinc-400">
+        <p className="mx-auto max-w-sm text-sm/6 text-zinc-400">
           {"Your session is safe — this was a hiccup loading the page, not a sign-out. Try again, and we've been notified."}
         </p>
         {error.digest ? (

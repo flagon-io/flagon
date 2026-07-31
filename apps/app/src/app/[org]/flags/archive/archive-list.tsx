@@ -50,8 +50,8 @@ export function ArchiveList({
   if (flags.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/2 px-6 py-20 text-center">
-        <span className="grid h-11 w-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
-          <Archive className="h-5 w-5" />
+        <span className="grid size-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
+          <Archive className="size-5" />
         </span>
         <div>
           <p className="text-sm font-medium text-zinc-200">No archived flags</p>
@@ -66,7 +66,7 @@ export function ArchiveList({
   return (
     <div className="flex flex-col gap-4">
       <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+        <Search className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-zinc-500" />
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -94,7 +94,7 @@ export function ArchiveList({
                   href={`/${slug}/flags/${flag.key}`}
                   className="flex min-w-0 flex-1 items-center gap-2.5"
                 >
-                  <Icon className="h-4 w-4 shrink-0 text-zinc-500" />
+                  <Icon className="size-4 shrink-0 text-zinc-500" />
                   <span className="truncate font-mono text-sm text-zinc-300">{flag.key}</span>
                   {(flag.tags ?? []).slice(0, 3).map((t) => (
                     <span
@@ -105,7 +105,7 @@ export function ArchiveList({
                     </span>
                   ))}
                 </Link>
-                <span className="hidden whitespace-nowrap text-xs text-zinc-600 sm:block">
+                <span className="hidden text-xs whitespace-nowrap text-zinc-600 sm:block">
                   Archived {relativeTime(flag.archivedAt)}
                 </span>
                 <FlagActions

@@ -189,11 +189,11 @@ function SchemaTree({
                   {typeLabel(prop, schemas)}
                 </span>
                 {required.has(name) ? (
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-rose-300/80">
+                  <span className="text-[10px] font-semibold tracking-wide text-rose-300/80 uppercase">
                     required
                   </span>
                 ) : (
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-600">
+                  <span className="text-[10px] tracking-wide text-zinc-600 uppercase">
                     optional
                   </span>
                 )}
@@ -259,15 +259,15 @@ function OperationBlock({
     <div className="rounded-xl border border-white/10 bg-white/2 p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-2">
         <MethodBadge method={method} />
-        <code className="break-all font-mono text-sm text-zinc-200">
+        <code className="font-mono text-sm break-all text-zinc-200">
           {path}
         </code>
         {auth ? (
-          <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-400 ring-1 ring-inset ring-white/10">
+          <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-400 ring-1 ring-white/10 ring-inset">
             Auth: {auth}
           </span>
         ) : (
-          <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-500 ring-1 ring-inset ring-white/10">
+          <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-500 ring-1 ring-white/10 ring-inset">
             Public
           </span>
         )}
@@ -282,7 +282,7 @@ function OperationBlock({
 
       {op.parameters && op.parameters.length ? (
         <div className="mt-4">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
             Path parameters
           </h4>
           <ul className="mt-2 flex flex-col gap-1.5">
@@ -308,7 +308,7 @@ function OperationBlock({
 
       {reqBody?.schema ? (
         <div className="mt-4">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
             Request body
           </h4>
           <div className="mt-2">
@@ -319,7 +319,7 @@ function OperationBlock({
 
       {responses.length ? (
         <div className="mt-4">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
             Responses
           </h4>
           <div className="mt-2 flex flex-col gap-3">
@@ -416,14 +416,14 @@ export default async function ApiReferencePage() {
 
       <div className="mt-5 flex flex-col gap-2 rounded-xl border border-white/10 bg-white/2 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="text-xs uppercase tracking-wide text-zinc-500">
+          <div className="text-xs tracking-wide text-zinc-500 uppercase">
             Base URL
           </div>
           <code className="font-mono text-zinc-200">{baseUrl}</code>
         </div>
         <a
           href={specUrl}
-          className="inline-flex w-fit items-center gap-2 rounded-lg bg-teal-400/10 px-3 py-1.5 text-sm font-medium text-teal-300 ring-1 ring-inset ring-teal-400/30 hover:bg-teal-400/15"
+          className="inline-flex w-fit items-center gap-2 rounded-lg bg-teal-400/10 px-3 py-1.5 text-sm font-medium text-teal-300 ring-1 ring-teal-400/30 ring-inset hover:bg-teal-400/15"
         >
           Download openapi.json
         </a>
@@ -431,7 +431,7 @@ export default async function ApiReferencePage() {
 
       {Object.keys(schemeDescriptions).length ? (
         <div className="mt-4 rounded-xl border border-white/10 bg-white/2 p-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h2 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
             Authentication
           </h2>
           <ul className="mt-2 flex flex-col gap-1.5 text-sm text-zinc-400">

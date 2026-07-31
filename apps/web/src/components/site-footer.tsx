@@ -15,9 +15,9 @@ export function SiteFooter() {
 
   return (
     <footer className="relative z-10 w-full border-t border-white/5">
-      <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-4 px-6 py-6 text-sm text-zinc-500 sm:grid-cols-[1fr_auto_1fr]">
+      <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-4 p-6 text-sm text-zinc-500 sm:grid-cols-[1fr_auto_1fr]">
         <p className="order-2 flex items-center justify-center gap-2">
-          <FlagonMark className="h-4 w-4 shrink-0" />
+          <FlagonMark className="size-4 shrink-0" />
           <span>
             © {year} {brand.legalName}
           </span>
@@ -44,7 +44,7 @@ export function SiteFooter() {
             aria-label={`${brand.name} on GitHub`}
             className="transition-colors hover:text-zinc-200"
           >
-            <IconGitHub className="h-5 w-5" />
+            <IconGitHub className="size-5" />
           </a>
         </div>
       </div>

@@ -16,9 +16,9 @@ export default function NotFound() {
         <a
           href={WEB_URL}
           aria-label={`Back to ${brand.domain}`}
-          className="rounded-md transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+          className="rounded-md transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:outline-none"
         >
-          <FlagonMark className="h-10 w-10" />
+          <FlagonMark className="size-10" />
         </a>
 
         <div className="space-y-2">
@@ -28,7 +28,7 @@ export default function NotFound() {
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
             Page not found
           </h1>
-          <p className="mx-auto max-w-xs text-sm leading-6 text-zinc-400">
+          <p className="mx-auto max-w-xs text-sm/6 text-zinc-400">
             {"That page doesn't exist, or it moved. Check the address, or head back."}
           </p>
         </div>

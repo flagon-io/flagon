@@ -31,7 +31,7 @@ export function Field({ id, label, aside, hint, ...props }: FieldProps) {
         {aside}
       </div>
       <input id={id} className={inputClass} {...props} />
-      {hint ? <p className="text-xs leading-5 text-zinc-500">{hint}</p> : null}
+      {hint ? <p className="text-xs/5 text-zinc-500">{hint}</p> : null}
     </div>
   );
 }

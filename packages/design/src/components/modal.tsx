@@ -37,7 +37,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 pt-[8vh]"
+      className="inset-0 bg-black/60 p-4 fixed z-50 flex items-start justify-center overflow-y-auto pt-[8vh]"
       onClick={onClose}
     >
       <div
@@ -66,7 +66,7 @@ export function ModalHeader({
   onClose?: () => void;
 }) {
   return (
-    <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 px-6 py-4">
+    <div className="gap-4 border-white/10 px-6 py-4 flex shrink-0 items-start justify-between border-b">
       <div>
         <h2 className="text-base font-semibold text-zinc-100">{title}</h2>
         {description ? <p className="mt-1 text-sm text-zinc-500">{description}</p> : null}
@@ -76,7 +76,7 @@ export function ModalHeader({
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="-mr-1.5 -mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-300"
+          className="-mr-1.5 -mt-1 h-8 w-8 rounded-md text-zinc-500 hover:bg-white/5 hover:text-zinc-300 grid shrink-0 place-items-center transition-colors"
         >
           <X className="h-4 w-4" />
         </button>
@@ -101,7 +101,7 @@ export function ModalBody({
 
 export function ModalFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="flex shrink-0 items-center justify-end gap-2 border-t border-white/10 px-6 py-4">
+    <div className="gap-2 border-white/10 px-6 py-4 flex shrink-0 items-center justify-end border-t">
       {children}
     </div>
   );

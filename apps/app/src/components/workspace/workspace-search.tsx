@@ -72,10 +72,10 @@ export function WorkspaceSearch({
         aria-label="Search"
         title="Search (Ctrl/⌘ K)"
         className={`flex w-full items-center rounded-md border border-white/10 bg-white/5 text-zinc-500 transition-colors hover:border-white/20 hover:text-zinc-300 ${
-          collapsed ? "justify-center px-2 py-2" : "gap-2 px-2.5 py-2"
+          collapsed ? "justify-center p-2" : "gap-2 px-2.5 py-2"
         }`}
       >
-        <Search className="h-4 w-4 shrink-0" />
+        <Search className="size-4 shrink-0" />
         {!collapsed ? (
           <>
             <span className="flex-1 text-left text-sm">Find…</span>
@@ -96,7 +96,7 @@ export function WorkspaceSearch({
           placeholder="Find…"
           className="w-full border-b border-white/8 bg-transparent px-4 py-3.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
         />
-        <Command.List className="max-h-80 overflow-y-auto p-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-zinc-500 [&_[cmdk-group-heading]]:uppercase">
+        <Command.List className="max-h-80 overflow-y-auto p-2 **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:pt-2 **:[[cmdk-group-heading]]:pb-1 **:[[cmdk-group-heading]]:text-[11px] **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:text-zinc-500 **:[[cmdk-group-heading]]:uppercase">
           <Command.Empty className="py-8 text-center text-sm text-zinc-500">
             No results found.
           </Command.Empty>
@@ -107,7 +107,7 @@ export function WorkspaceSearch({
                 key={item.href}
                 value={item.label}
                 onSelect={() => go(item.href)}
-                className="flex cursor-pointer items-center rounded-md px-2 py-2 text-sm text-zinc-200 outline-none data-[selected=true]:bg-white/8 data-[selected=true]:text-zinc-100"
+                className="flex cursor-pointer items-center rounded-md p-2 text-sm text-zinc-200 outline-none data-[selected=true]:bg-white/8 data-[selected=true]:text-zinc-100"
               >
                 {item.label}
               </Command.Item>
@@ -121,9 +121,9 @@ export function WorkspaceSearch({
                   key={org.id}
                   value={`org ${org.name} ${org.slug}`}
                   onSelect={() => switchOrg(org)}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none data-[selected=true]:bg-white/8 data-[selected=true]:text-zinc-100"
+                  className="flex cursor-pointer items-center gap-2 rounded-md p-2 text-sm text-zinc-200 outline-none data-[selected=true]:bg-white/8 data-[selected=true]:text-zinc-100"
                 >
-                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded bg-teal-500/15 text-[10px] font-semibold text-teal-300">
+                  <span className="grid size-5 shrink-0 place-items-center rounded bg-teal-500/15 text-[10px] font-semibold text-teal-300">
                     {org.name.charAt(0).toUpperCase()}
                   </span>
                   {org.name}

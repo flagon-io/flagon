@@ -24,8 +24,8 @@
  */
 export function CornerMark({ className }: { className: string }) {
   return (
-    <span aria-hidden className={`absolute z-10 hidden lg:block ${className}`}>
-      <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 border border-white/30 bg-background" />
+    <span aria-hidden className={`lg:block absolute z-10 hidden ${className}`}>
+      <span className="h-1.5 w-1.5 border-white/30 bg-background absolute top-1/2 left-1/2 -translate-1/2 border" />
     </span>
   );
 }
@@ -53,19 +53,19 @@ export function BleedBand({
     // this working inside a max-w container. The scrollbar overhang it creates
     // is trimmed globally by `html { overflow-x: clip }` in the design styles.
     <div
-      className={`relative left-1/2 w-screen -translate-x-1/2 border-y border-white/10 ${outerClassName}`}
+      className={`border-white/10 relative left-1/2 w-screen -translate-x-1/2 border-y ${outerClassName}`}
     >
       <div
-        className={`relative mx-auto w-full max-w-7xl ${bordered ? "border-white/10 sm:border-x" : ""} ${className}`}
+        className={`max-w-7xl relative mx-auto w-full ${bordered ? "border-white/10 sm:border-x" : ""} ${className}`}
       >
         {/* One at each corner, which is exactly where the band's horizontal
             rules cross the content column's verticals. */}
         {marks ? (
           <>
-            <CornerMark className="-left-px -top-px" />
-            <CornerMark className="-right-px -top-px" />
+            <CornerMark className="-top-px -left-px" />
+            <CornerMark className="-top-px -right-px" />
             <CornerMark className="-bottom-px -left-px" />
-            <CornerMark className="-bottom-px -right-px" />
+            <CornerMark className="-right-px -bottom-px" />
           </>
         ) : null}
         {children}

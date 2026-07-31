@@ -154,7 +154,7 @@ function EventsBar({
         <span className="font-medium text-zinc-300">
           {bills ? "Included Events" : "Free Events"}
         </span>
-        <span className="tabular-nums text-zinc-400">
+        <span className="text-zinc-400 tabular-nums">
           <span className={over ? "text-amber-400" : "text-zinc-200"}>
             {compact(usedEvents)}
           </span>{" "}
@@ -262,7 +262,7 @@ function UsageTable({
                   <li key={s.key} className={`${ROW_GRID} border-b border-white/5 py-3`}>
                     <div className="flex min-w-0 items-center gap-3">
                       <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        className="size-2.5 shrink-0 rounded-full"
                         style={{ backgroundColor: color }}
                       />
                       <span className="truncate text-sm text-zinc-200">{s.label}</span>
@@ -283,13 +283,13 @@ function UsageTable({
                     <span className="hidden justify-end sm:flex">
                       <Sparkline values={s.points.map((p) => p.usage)} color={color} />
                     </span>
-                    <span className="text-right text-sm tabular-nums text-zinc-300">
+                    <span className="text-right text-sm text-zinc-300 tabular-nums">
                       {compact(s.usage)}
                       <span className="ml-1 text-zinc-600">
                         {s.usage === 1 ? s.unit : `${s.unit}s`}
                       </span>
                     </span>
-                    <span className="text-right text-sm tabular-nums text-zinc-400">
+                    <span className="text-right text-sm text-zinc-400 tabular-nums">
                       {s.billable && bills ? usd(s.chargeCents) : "Free"}
                     </span>
                   </li>
@@ -304,14 +304,14 @@ function UsageTable({
       <SectionHeader label="Subscription" />
       <div className={`${ROW_GRID} py-3`}>
         <div className="flex min-w-0 items-center gap-3">
-          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#3987e5]" />
+          <span className="size-2.5 shrink-0 rounded-full bg-[#3987e5]" />
           <span className="truncate text-sm text-zinc-200">{planLabel} plan</span>
         </div>
         <span className="hidden sm:block" />
-        <span className="text-right text-sm tabular-nums text-zinc-500">
+        <span className="text-right text-sm text-zinc-500 tabular-nums">
           1<span className="ml-1 text-zinc-600">/mo</span>
         </span>
-        <span className="text-right text-sm tabular-nums text-zinc-300">
+        <span className="text-right text-sm text-zinc-300 tabular-nums">
           {usd(baseCents)}
         </span>
       </div>

@@ -47,15 +47,15 @@ export function TeamsView({
         </div>
         {canCreate ? (
           <Button variant="primary" onClick={() => setOpen(true)}>
-            <Plus className="h-4 w-4" /> New Team
+            <Plus className="size-4" /> New Team
           </Button>
         ) : null}
       </div>
 
       {teams.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-white/12 bg-white/2 px-6 py-16 text-center">
-          <span className="grid h-11 w-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
-            <Users className="h-5 w-5" />
+          <span className="grid size-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
+            <Users className="size-5" />
           </span>
           <div>
             <p className="text-sm font-medium text-zinc-200">No teams yet</p>
@@ -65,7 +65,7 @@ export function TeamsView({
           </div>
           {canCreate ? (
             <Button variant="secondary" onClick={() => setOpen(true)}>
-              <Plus className="h-4 w-4" /> New Team
+              <Plus className="size-4" /> New Team
             </Button>
           ) : null}
         </div>
@@ -80,8 +80,8 @@ export function TeamsView({
               }`}
             >
               <div className="flex min-w-0 items-center gap-3">
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
-                  <Users className="h-4 w-4" />
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
+                  <Users className="size-4" />
                 </span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-zinc-100">{t.name}</p>
@@ -92,10 +92,10 @@ export function TeamsView({
               </div>
               <div className="flex shrink-0 items-center gap-4 text-xs text-zinc-500">
                 <span className="flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5" /> {t.memberCount}
+                  <Users className="size-3.5" /> {t.memberCount}
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <Boxes className="h-3.5 w-3.5" /> {t.projectCount}
+                  <Boxes className="size-3.5" /> {t.projectCount}
                 </span>
               </div>
             </Link>

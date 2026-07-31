@@ -31,7 +31,7 @@ export default async function SettingsLayout({
       <header className="flex h-14 items-center justify-between border-b border-white/8 px-6">
         <div className="flex items-center gap-3">
           <Link href="/" aria-label="Back to workspace" className="hover:opacity-80">
-            <FlagonMark className="h-7 w-7" />
+            <FlagonMark className="size-7" />
           </Link>
           <span className="text-white/15">/</span>
           <span className="text-sm font-medium text-zinc-200">Settings</span>

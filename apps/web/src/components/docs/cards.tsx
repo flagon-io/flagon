@@ -37,7 +37,7 @@ export function Card({
   const inner = (
     <>
       {eyebrow ? (
-        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-teal-400/80">
+        <div className="mb-1 text-xs font-semibold tracking-wide text-teal-400/80 uppercase">
           {eyebrow}
         </div>
       ) : null}
@@ -50,14 +50,14 @@ export function Card({
         {title}
         {badge}
         {interactive ? (
-          <ArrowRight className="h-4 w-4 -translate-x-1 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
+          <ArrowRight className="size-4 -translate-x-1 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
         ) : null}
       </div>
       {children ? (
         // A div, not a p: in MDX the description is itself wrapped in a <p>, and
         // <p> can't nest. Neutralize that inner paragraph's margin/size so the
         // card reads the same whether the child is raw text or an MDX paragraph.
-        <div className="mt-1.5 text-sm leading-6 text-zinc-500 [&>p]:my-0 [&>p]:text-sm [&>p]:leading-6 [&>p]:text-inherit">
+        <div className="mt-1.5 text-sm/6 text-zinc-500 [&>p]:my-0 [&>p]:text-sm/6 [&>p]:text-inherit">
           {children}
         </div>
       ) : null}

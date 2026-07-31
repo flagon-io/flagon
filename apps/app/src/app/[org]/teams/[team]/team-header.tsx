@@ -33,8 +33,8 @@ export function TeamHeader({
   return (
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-start gap-3">
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-white/5 text-zinc-300">
-          <Users className="h-5 w-5" />
+        <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-white/5 text-zinc-300">
+          <Users className="size-5" />
         </span>
         <div className="min-w-0">
           <h1 className="truncate text-xl font-semibold tracking-tight text-zinc-100">
@@ -48,7 +48,7 @@ export function TeamHeader({
       {canEdit ? (
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
-            <Pencil className="h-3.5 w-3.5" /> Edit
+            <Pencil className="size-3.5" /> Edit
           </Button>
           {canDelete ? <DeleteTeamButton slug={slug} teamKey={team.key} /> : null}
         </div>
@@ -137,7 +137,7 @@ function DeleteTeamButton({ slug, teamKey }: { slug: string; teamKey: string }) 
   if (!confirming) {
     return (
       <Button variant="secondary" size="sm" onClick={() => setConfirming(true)}>
-        <Trash2 className="h-3.5 w-3.5" /> Delete
+        <Trash2 className="size-3.5" /> Delete
       </Button>
     );
   }

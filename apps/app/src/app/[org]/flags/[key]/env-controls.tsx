@@ -135,7 +135,7 @@ export function EnvCard({
           className="flex min-w-0 items-center gap-2 text-left"
         >
           <ChevronDown
-            className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform ${open ? "" : "-rotate-90"}`}
+            className={`size-4 shrink-0 text-zinc-500 transition-transform ${open ? "" : "-rotate-90"}`}
           />
           <div className="min-w-0">
             <p className="font-medium text-zinc-100">{env.name}</p>
@@ -166,22 +166,22 @@ export function EnvCard({
             active={env.rules.length > 0}
             onClick={() => setOpen(true)}
           >
-            <Crosshair className="h-4 w-4" />
+            <Crosshair className="size-4" />
           </IconToggle>
           <IconToggle
             title="Percentage rollout"
             active={rollout}
             onClick={() => setOpen(true)}
           >
-            <Shuffle className="h-4 w-4" />
+            <Shuffle className="size-4" />
           </IconToggle>
         </div>
       </div>
 
       {open ? (
         <div className="border-t border-white/6 p-4">
-          <div className="mb-3 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
-            <Crosshair className="h-3.5 w-3.5" /> Targeting rules
+          <div className="mb-3 flex items-center gap-1.5 text-xs font-medium tracking-wide text-zinc-500 uppercase">
+            <Crosshair className="size-3.5" /> Targeting rules
           </div>
           <RulesEditor
             slug={slug}
@@ -224,7 +224,7 @@ function IconToggle({
       title={title}
       aria-label={title}
       onClick={onClick}
-      className={`grid h-8 w-8 shrink-0 place-items-center rounded-md border transition-colors ${
+      className={`grid size-8 shrink-0 place-items-center rounded-md border transition-colors ${
         active
           ? "border-teal-500/40 bg-teal-500/10 text-teal-300"
           : "border-white/10 text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
@@ -459,7 +459,7 @@ function RulesEditor({
             key={r.id}
             className="flex items-center gap-2.5 rounded-lg border border-white/8 bg-black/20 px-3 py-2 text-sm"
           >
-            <span className="w-14 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+            <span className="w-14 shrink-0 text-[10px] font-semibold tracking-wide text-zinc-500 uppercase">
               {i === 0 ? "If" : "Else if"}
             </span>
             <span className="min-w-0 text-zinc-400">
@@ -468,7 +468,7 @@ function RulesEditor({
           </div>
         ))}
         <div className="flex items-center gap-3 rounded-lg border border-dashed border-white/10 px-3 py-2.5 text-sm">
-          <span className="w-12 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+          <span className="w-12 shrink-0 text-[10px] font-semibold tracking-wide text-zinc-500 uppercase">
             Else
           </span>
           <span className="text-zinc-500">
@@ -577,7 +577,7 @@ function RulesEditor({
         onClick={addRule}
         className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/15 px-3 py-2.5 text-sm text-zinc-400 transition-colors hover:border-white/30 hover:bg-white/2 hover:text-zinc-200"
       >
-        <Plus className="h-4 w-4" /> Add rule
+        <Plus className="size-4" /> Add rule
       </button>
 
       {/* The single-variant default is set by the state control at the top of
@@ -615,9 +615,9 @@ function RulesEditor({
               weights: balanceWeights({}, variants),
             }))
           }
-          className="flex items-center gap-1.5 self-start rounded-md px-1 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+          className="flex items-center gap-1.5 self-start rounded-md p-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
         >
-          <Shuffle className="h-3.5 w-3.5" /> Roll out a percentage to everyone
+          <Shuffle className="size-3.5" /> Roll out a percentage to everyone
         </button>
       )}
 
@@ -657,7 +657,7 @@ function RuleCard({
   const label = index === 0 ? "If" : "Else if";
 
   const header = (
-    <span className="w-14 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+    <span className="w-14 shrink-0 text-[10px] font-semibold tracking-wide text-zinc-500 uppercase">
       {label}
     </span>
   );
@@ -666,9 +666,9 @@ function RuleCard({
       type="button"
       onClick={onRemove}
       title="Remove rule"
-      className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400"
+      className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400"
     >
-      <Trash2 className="h-4 w-4" />
+      <Trash2 className="size-4" />
     </button>
   );
 
@@ -739,7 +739,7 @@ function ServePicker({
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+        <span className="text-[11px] font-medium tracking-wide text-zinc-500 uppercase">
           Serve
         </span>
         <Select
@@ -801,7 +801,7 @@ function RolloutWeights({
 
       {variants.map((v, i) => (
         <div key={v.key} className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${colors[i % colors.length]}`} />
+          <span className={`size-2.5 shrink-0 rounded-sm ${colors[i % colors.length]}`} />
           <span className="w-28 truncate text-sm text-zinc-300">{variantLabel(v, i)}</span>
           <Input
             type="number"
@@ -826,7 +826,7 @@ function RolloutWeights({
             onClick={() => onChange({ weights: balanceWeights(draft.weights, variants) })}
             className="inline-flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300"
           >
-            <Scale className="h-3.5 w-3.5" /> Balance to 100%
+            <Scale className="size-3.5" /> Balance to 100%
           </button>
         ) : null}
       </div>

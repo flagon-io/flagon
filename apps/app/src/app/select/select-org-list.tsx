@@ -34,7 +34,7 @@ export function SelectOrgList({ orgs }: { orgs: OrgMembership[] }) {
               className="flex w-full items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/2 px-4 py-3 text-left transition-colors hover:border-white/20 hover:bg-white/5 disabled:opacity-60"
             >
               <span className="flex items-center gap-3">
-                <span className="grid h-9 w-9 place-items-center rounded-md bg-teal-500/15 text-sm font-semibold text-teal-300">
+                <span className="grid size-9 place-items-center rounded-md bg-teal-500/15 text-sm font-semibold text-teal-300">
                   {org.name.charAt(0).toUpperCase()}
                 </span>
                 <span className="flex flex-col">

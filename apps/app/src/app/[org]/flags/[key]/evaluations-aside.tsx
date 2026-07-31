@@ -74,7 +74,7 @@ export function EvaluationsAside({ usage }: { usage: FlagUsage }) {
     <div>
       <p className="text-xs font-medium text-zinc-400">Evaluations</p>
       <div className="mt-1.5 flex items-baseline justify-between">
-        <span className="text-2xl font-semibold tabular-nums text-zinc-100">
+        <span className="text-2xl font-semibold text-zinc-100 tabular-nums">
           {compact(usage.total)}
         </span>
         <span className="text-xs text-zinc-500">last {relativeTime(usage.lastSeenAt)}</span>
@@ -87,7 +87,7 @@ export function EvaluationsAside({ usage }: { usage: FlagUsage }) {
         {usage.environments.map((env) => (
           <div key={env.key} className="flex items-center justify-between gap-2 text-xs">
             <span className="truncate text-zinc-400">{env.name}</span>
-            <span className="tabular-nums text-zinc-500">{compact(env.total)}</span>
+            <span className="text-zinc-500 tabular-nums">{compact(env.total)}</span>
           </div>
         ))}
       </div>

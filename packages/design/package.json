@@ -5,6 +5,9 @@
   "description": "Flagon's shared design system: brand tokens, the logo mark, and the marketing/UI primitives every surface is built from.",
   "license": "SEE LICENSE IN ../../LICENSE",
   "type": "module",
+  "scripts": {
+    "lint": "eslint"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./styles.css": "./src/styles.css",

@@ -84,7 +84,7 @@ function ChecksCell({ usage }: { usage: FlagSummary["usage"] }) {
   return (
     <div className="hidden items-center justify-end gap-2 sm:flex">
       <MiniSparkline values={normalizeSeries(usage?.series)} />
-      <span className="w-10 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-zinc-500">
+      <span className="w-10 shrink-0 text-right text-xs whitespace-nowrap text-zinc-500 tabular-nums">
         {rate}
       </span>
     </div>
@@ -121,7 +121,7 @@ export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[]
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+          <Search className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-zinc-500" />
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -177,8 +177,8 @@ export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[]
 
       {flags.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/2 px-6 py-20 text-center">
-          <span className="grid h-11 w-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
-            <ToggleLeft className="h-5 w-5" />
+          <span className="grid size-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
+            <ToggleLeft className="size-5" />
           </span>
           <div>
             <p className="text-sm font-medium text-zinc-200">No flags found</p>
@@ -203,7 +203,7 @@ export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[]
                 }`}
               >
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <Icon className="h-4 w-4 shrink-0 text-zinc-500" />
+                  <Icon className="size-4 shrink-0 text-zinc-500" />
                   <span className="truncate font-mono text-sm text-zinc-100">{flag.key}</span>
                   {(flag.tags ?? []).slice(0, 3).map((t) => (
                     <span
@@ -225,7 +225,7 @@ export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[]
                 <div className="hidden items-center gap-1.5 sm:flex">
                   {flag.createdByName ? (
                     <>
-                      <span className="grid h-5 w-5 place-items-center rounded-full bg-teal-500/15 text-[10px] font-semibold text-teal-300">
+                      <span className="grid size-5 place-items-center rounded-full bg-teal-500/15 text-[10px] font-semibold text-teal-300">
                         {flag.createdByName.charAt(0).toUpperCase()}
                       </span>
                       <span className="max-w-32 truncate text-xs text-zinc-500">
@@ -235,7 +235,7 @@ export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[]
                   ) : null}
                 </div>
                 <ChecksCell usage={flag.usage} />
-                <span className="whitespace-nowrap text-right text-xs text-zinc-600">
+                <span className="text-right text-xs whitespace-nowrap text-zinc-600">
                   {relativeTime(flag.createdAt)}
                 </span>
               </Link>

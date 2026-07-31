@@ -39,7 +39,7 @@ export function PopoverContent({
           // Near-black to sit on the pure-black chrome (Vercel-style); the thin
           // border and shadow are what lift it off the page. collisionPadding
           // keeps a gap from the viewport edges so it never rubs the side.
-          "z-50 overflow-hidden rounded-lg border border-white/10 bg-zinc-950 shadow-2xl shadow-black/60",
+          "rounded-lg border-white/10 bg-zinc-950 shadow-2xl shadow-black/60 z-50 overflow-hidden border",
           className,
         )}
         {...props}

@@ -26,7 +26,7 @@ export function SocialButtons({ providers }: { providers: OAuthProviders }) {
       />
       <SocialButton
         label="Continue with GitHub"
-        icon={<IconGitHub className="h-4 w-4" />}
+        icon={<IconGitHub className="size-4" />}
         enabled={providers.github}
         onClick={() => go("github")}
       />

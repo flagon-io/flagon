@@ -16,12 +16,12 @@ export function CopyButton({ text }: { text: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+      className="grid size-7 shrink-0 place-items-center rounded-md text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
     >
       {copied ? (
-        <Check className="h-4 w-4 text-teal-400" />
+        <Check className="size-4 text-teal-400" />
       ) : (
-        <Copy className="h-3.5 w-3.5" />
+        <Copy className="size-3.5" />
       )}
     </button>
   );
@@ -47,12 +47,12 @@ export function CodeBlock({ raw, label }: { raw: string; label?: string }) {
   return (
     <div className="group relative my-5 overflow-hidden rounded-xl border border-white/10 bg-black/40">
       {label ? (
-        <div className="flex items-center justify-between border-b border-white/10 py-1.5 pl-4 pr-2 text-xs font-medium text-zinc-500">
+        <div className="flex items-center justify-between border-b border-white/10 py-1.5 pr-2 pl-4 text-xs font-medium text-zinc-500">
           <span>{label}</span>
           <CopyButton text={raw} />
         </div>
       ) : (
-        <div className="absolute right-2 top-2 z-10 opacity-0 transition group-hover:opacity-100">
+        <div className="absolute top-2 right-2 z-10 opacity-0 transition group-hover:opacity-100">
           <CopyButton text={raw} />
         </div>
       )}

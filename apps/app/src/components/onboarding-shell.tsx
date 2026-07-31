@@ -33,7 +33,7 @@ export function OnboardingShell({
           aria-label={brand.name}
           className="rounded-md transition-opacity hover:opacity-80"
         >
-          <FlagonMark className="h-7 w-7" />
+          <FlagonMark className="size-7" />
         </Link>
         <AccountMenu user={user} />
       </header>

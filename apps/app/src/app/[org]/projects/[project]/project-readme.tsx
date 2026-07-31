@@ -42,12 +42,12 @@ export function ProjectReadme({
     <section className="overflow-hidden rounded-xl border border-white/10 bg-white/2">
       <div className="flex items-center justify-between gap-3 border-b border-white/8 px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm text-zinc-300">
-          <BookText className="h-4 w-4 text-zinc-500" />
+          <BookText className="size-4 text-zinc-500" />
           <span className="font-mono text-xs">README.md</span>
         </div>
         {canManage ? (
           <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
-            <Pencil className="h-3.5 w-3.5" /> Edit
+            <Pencil className="size-3.5" /> Edit
           </Button>
         ) : null}
       </div>
@@ -56,8 +56,8 @@ export function ProjectReadme({
           <Markdown>{readme}</Markdown>
         ) : (
           <div className="flex flex-col items-center gap-2 py-8 text-center">
-            <span className="grid h-10 w-10 place-items-center rounded-lg bg-white/5 text-zinc-400">
-              <BookText className="h-5 w-5" />
+            <span className="grid size-10 place-items-center rounded-lg bg-white/5 text-zinc-400">
+              <BookText className="size-5" />
             </span>
             <p className="text-sm text-zinc-400">No README yet.</p>
             {canManage ? (
@@ -111,7 +111,7 @@ function ReadmeEditor({
     <section className="overflow-hidden rounded-xl border border-white/10 bg-white/2">
       <div className="flex items-center justify-between gap-3 border-b border-white/8 px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm text-zinc-300">
-          <BookText className="h-4 w-4 text-zinc-500" />
+          <BookText className="size-4 text-zinc-500" />
           <span className="font-mono text-xs">README.md</span>
         </div>
         <div className="w-48">
@@ -137,7 +137,7 @@ function ReadmeEditor({
             autoFocus
             spellCheck={false}
             placeholder="# My project&#10;&#10;What it does, how to run it, who owns it."
-            className="font-mono text-sm leading-relaxed"
+            className="font-mono text-sm/relaxed"
           />
         ) : value.trim() ? (
           <Markdown>{value}</Markdown>

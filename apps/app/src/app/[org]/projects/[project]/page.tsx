@@ -33,7 +33,7 @@ export default async function ProjectOverview({
         href={`/${slug}`}
         className="inline-flex w-fit items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-300"
       >
-        <ArrowLeft className="h-4 w-4" /> Projects
+        <ArrowLeft className="size-4" /> Projects
       </Link>
 
       <div className="flex items-start justify-between gap-3">
@@ -48,7 +48,7 @@ export default async function ProjectOverview({
             href={`/${slug}/projects/${key}/settings`}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/8 hover:text-zinc-100"
           >
-            <Settings className="h-4 w-4" /> Settings
+            <Settings className="size-4" /> Settings
           </Link>
         ) : null}
       </div>
@@ -64,7 +64,7 @@ export default async function ProjectOverview({
               href={`/${slug}/teams/${project.ownerTeam.key}`}
               className="inline-flex items-center gap-1.5 text-zinc-200 hover:text-zinc-100"
             >
-              <Users className="h-4 w-4 text-zinc-500" /> {project.ownerTeam.name}
+              <Users className="size-4 text-zinc-500" /> {project.ownerTeam.name}
             </Link>
           ) : (
             <span className="text-zinc-500">No owner</span>
@@ -100,9 +100,9 @@ export default async function ProjectOverview({
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <SoonCard icon={<Rocket className="h-4 w-4" />} title="Deployments" />
-        <SoonCard icon={<GitFork className="h-4 w-4" />} title="Dependencies" />
-        <SoonCard icon={<ShieldCheck className="h-4 w-4" />} title="Scorecards" />
+        <SoonCard icon={<Rocket className="size-4" />} title="Deployments" />
+        <SoonCard icon={<GitFork className="size-4" />} title="Dependencies" />
+        <SoonCard icon={<ShieldCheck className="size-4" />} title="Scorecards" />
       </div>
     </div>
   );
@@ -128,7 +128,7 @@ function Value({ text }: { text: string | null }) {
 function SoonCard({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-dashed border-white/12 bg-white/2 px-4 py-3.5">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/5 text-zinc-400">
+      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/5 text-zinc-400">
         {icon}
       </span>
       <div>

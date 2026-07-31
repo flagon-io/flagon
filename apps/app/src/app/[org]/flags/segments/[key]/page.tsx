@@ -44,7 +44,7 @@ export default async function SegmentDetail({
           href={`/${slug}/flags/segments`}
           className="inline-flex w-fit items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-300"
         >
-          <ArrowLeft className="h-4 w-4" /> All Segments
+          <ArrowLeft className="size-4" /> All Segments
         </Link>
         <div className="mt-2 flex items-center gap-2.5">
           <h1 className="text-xl font-semibold tracking-tight text-zinc-100">{segment.name}</h1>
@@ -55,7 +55,7 @@ export default async function SegmentDetail({
       <div className="grid gap-8 lg:grid-cols-[1fr_240px]">
         <section>
           <h2 className="text-sm font-medium text-zinc-300">Rules</h2>
-          <p className="mb-3 mt-0.5 text-sm text-zinc-500">
+          <p className="mt-0.5 mb-3 text-sm text-zinc-500">
             Define the criteria that determine which users belong to this segment.
           </p>
           <SegmentRules

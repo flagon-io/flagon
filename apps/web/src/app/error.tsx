@@ -26,7 +26,7 @@ export default function Error({
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
           Something went wrong
         </h1>
-        <p className="mx-auto max-w-sm text-sm leading-6 text-zinc-400">
+        <p className="mx-auto max-w-sm text-sm/6 text-zinc-400">
           {"An unexpected error interrupted that page. Try again, or head back home."}
         </p>
       </div>

@@ -161,7 +161,7 @@ export function DeleteProject({ slug, projectKey }: { slug: string; projectKey: 
           Permanently delete this project. This can&apos;t be undone.
         </p>
         <Button variant="danger" onClick={() => setConfirming(true)}>
-          <Trash2 className="h-4 w-4" /> Delete project
+          <Trash2 className="size-4" /> Delete project
         </Button>
       </div>
       {confirming ? (

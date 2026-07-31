@@ -28,9 +28,9 @@ export function AuthShell({
             <a
               href={WEB_URL}
               aria-label={`Back to ${brand.domain}`}
-              className="rounded-md transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+              className="rounded-md transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-teal-500/50 focus-visible:outline-none"
             >
-              <FlagonMark className="h-10 w-10" />
+              <FlagonMark className="size-10" />
             </a>
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
               {title}

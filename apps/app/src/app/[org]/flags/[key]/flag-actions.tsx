@@ -92,21 +92,21 @@ export function FlagActions({
       <Menu>
         <MenuTrigger asChild>
           <Button variant="secondary" size="icon" aria-label="Flag actions">
-            <MoreHorizontal className="h-4 w-4" />
+            <MoreHorizontal className="size-4" />
           </Button>
         </MenuTrigger>
         <MenuContent align="end">
           <MenuItem onSelect={() => setShowHistory(true)}>
-            <History className="h-4 w-4" /> Version history
+            <History className="size-4" /> Version history
           </MenuItem>
           <MenuItem onSelect={() => archive(archived ? "restore" : "archive")}>
             {archived ? (
               <>
-                <ArchiveRestore className="h-4 w-4" /> Restore flag
+                <ArchiveRestore className="size-4" /> Restore flag
               </>
             ) : (
               <>
-                <Archive className="h-4 w-4" /> Archive flag
+                <Archive className="size-4" /> Archive flag
               </>
             )}
           </MenuItem>
@@ -117,7 +117,7 @@ export function FlagActions({
                 onSelect={() => setConfirmDelete(true)}
                 className="text-red-400 data-highlighted:text-red-300"
               >
-                <Trash2 className="h-4 w-4" /> Delete flag
+                <Trash2 className="size-4" /> Delete flag
               </MenuItem>
             </>
           ) : null}

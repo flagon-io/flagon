@@ -47,14 +47,14 @@ export function EntitiesManager({
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
         <Button variant="primary" onClick={() => setCreating(true)}>
-          <Plus className="h-4 w-4" /> Add Entity
+          <Plus className="size-4" /> Add Entity
         </Button>
       </div>
 
       {entities.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/2 px-6 py-20 text-center">
-          <span className="grid h-11 w-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
-            <Users className="h-5 w-5" />
+          <span className="grid size-11 place-items-center rounded-lg bg-white/5 text-zinc-400">
+            <Users className="size-5" />
           </span>
           <div>
             <p className="text-sm font-medium text-zinc-200">No entities yet</p>
@@ -63,7 +63,7 @@ export function EntitiesManager({
             </p>
           </div>
           <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4" /> Add Entity
+            <Plus className="size-4" /> Add Entity
           </Button>
         </div>
       ) : (
@@ -81,9 +81,9 @@ export function EntitiesManager({
                     onClick={() => remove(e.key)}
                     disabled={pending}
                     title="Delete entity"
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
+                    className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="size-4" />
                   </button>
                 ) : null}
               </div>
@@ -94,7 +94,7 @@ export function EntitiesManager({
                   {e.attributes.map((a) => (
                     <div key={a.key} className="flex items-center justify-between px-4 py-2.5">
                       <span className="font-mono text-sm text-zinc-200">{a.key}</span>
-                      <span className="rounded border border-white/10 px-1.5 py-0.5 text-xs capitalize text-zinc-500">
+                      <span className="rounded border border-white/10 px-1.5 py-0.5 text-xs text-zinc-500 capitalize">
                         {a.dataType}
                       </span>
                     </div>
@@ -195,9 +195,9 @@ function CreateEntityModal({ slug, onClose }: { slug: string; onClose: () => voi
                   type="button"
                   onClick={() => setAttributes((prev) => prev.filter((_, j) => j !== i))}
                   disabled={attributes.length === 1}
-                  className="grid h-9 w-9 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400 disabled:opacity-30"
+                  className="grid size-9 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400 disabled:opacity-30"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="size-4" />
                 </button>
               </div>
             ))}
@@ -207,7 +207,7 @@ function CreateEntityModal({ slug, onClose }: { slug: string; onClose: () => voi
             onClick={() => setAttributes((prev) => [...prev, { key: "", dataType: "string" }])}
             className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-white/10"
           >
-            <Plus className="h-3.5 w-3.5" /> Add attribute
+            <Plus className="size-3.5" /> Add attribute
           </button>
         </div>
 

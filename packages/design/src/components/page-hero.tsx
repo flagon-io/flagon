@@ -58,14 +58,14 @@ export function PageHero({
   const lead = size === "lead";
   return (
     <section
-      className={`relative overflow-hidden ${rule ? "border-b border-white/10" : ""}`}
+      className={`relative overflow-hidden ${rule ? "border-white/10 border-b" : ""}`}
     >
       {hex === "none" ? null : <HexField variant={hex} />}
 
       {glow ? (
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 h-150"
+          className="inset-x-0 top-0 h-150 pointer-events-none absolute"
           style={{
             background:
               "radial-gradient(50% 40% at 50% 0%, rgba(20,184,166,0.12) 0%, rgba(20,184,166,0.04) 50%, transparent 100%)",
@@ -74,18 +74,18 @@ export function PageHero({
       ) : null}
 
       <div
-        className={`relative mx-auto w-full max-w-7xl px-6 sm:px-12 lg:px-20 ${
+        className={`max-w-7xl px-6 sm:px-12 lg:px-20 relative mx-auto w-full ${
           lead ? "pb-28 pt-28 sm:pt-32" : "pb-20 pt-20 sm:pt-28"
         }`}
       >
         {eyebrow ? (
-          <p className="font-mono text-xs uppercase tracking-[0.25em] text-teal-400/80">
+          <p className="font-mono text-xs text-teal-400/80 tracking-[0.25em] uppercase">
             {eyebrow}
           </p>
         ) : null}
 
         <h1
-          className={`max-w-3xl font-semibold leading-[1.05] tracking-tight text-zinc-100 ${
+          className={`max-w-3xl font-semibold tracking-tight text-zinc-100 leading-[1.05] ${
             eyebrow ? "mt-6" : ""
           } ${lead ? "text-5xl sm:text-6xl md:text-7xl" : "text-4xl sm:text-5xl md:text-6xl"}`}
         >
@@ -104,7 +104,7 @@ export function PageHero({
 
         {actions ? (
           <div
-            className={`flex flex-wrap items-center gap-3 ${lead ? "mt-12" : "mt-10"}`}
+            className={`gap-3 flex flex-wrap items-center ${lead ? "mt-12" : "mt-10"}`}
           >
             {actions}
           </div>
@@ -122,11 +122,11 @@ export function PageHero({
       {rule ? (
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0"
+          className="inset-x-0 bottom-0 pointer-events-none absolute"
         >
-          <div className="relative mx-auto w-full max-w-7xl">
+          <div className="max-w-7xl relative mx-auto w-full">
             <CornerMark className="-bottom-px -left-px" />
-            <CornerMark className="-bottom-px -right-px" />
+            <CornerMark className="-right-px -bottom-px" />
           </div>
         </div>
       ) : null}

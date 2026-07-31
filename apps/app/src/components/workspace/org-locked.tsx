@@ -64,8 +64,8 @@ export function OrgLocked({
 
   return (
     <div className="mx-auto flex min-h-[60vh] w-full max-w-md flex-col items-center justify-center gap-5 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-white/5">
-        <Lock className="h-5 w-5 text-zinc-300" />
+      <div className="flex size-12 items-center justify-center rounded-full border border-white/10 bg-white/5">
+        <Lock className="size-5 text-zinc-300" />
       </div>
       <div className="flex flex-col gap-2">
         <h1 className="text-lg font-semibold text-zinc-100">{heading}</h1>

@@ -128,7 +128,7 @@ export function SignupForm({ providers }: { providers: OAuthProviders }) {
           {pending ? "Creating account…" : "Create account"}
         </button>
 
-        <p className="text-xs leading-5 text-zinc-500">
+        <p className="text-xs/5 text-zinc-500">
           By creating an account, you agree to our{" "}
           <a
             href={`${WEB_URL}/terms`}

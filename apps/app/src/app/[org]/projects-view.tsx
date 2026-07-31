@@ -59,15 +59,15 @@ export function ProjectsView({
         </div>
         {canCreate ? (
           <Button variant="primary" onClick={() => setOpen(true)}>
-            <Plus className="h-4 w-4" /> New Project
+            <Plus className="size-4" /> New Project
           </Button>
         ) : null}
       </div>
 
       {projects.length === 0 ? (
         <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-white/12 bg-white/2 px-6 py-16 text-center">
-          <span className="grid h-12 w-12 place-items-center rounded-xl bg-white/5 text-zinc-300">
-            <Boxes className="h-6 w-6" />
+          <span className="grid size-12 place-items-center rounded-xl bg-white/5 text-zinc-300">
+            <Boxes className="size-6" />
           </span>
           <div>
             <p className="text-base font-medium text-zinc-100">
@@ -82,13 +82,13 @@ export function ProjectsView({
           {canCreate ? (
             <div className="flex flex-col items-center gap-2">
               <Button variant="primary" onClick={() => setOpen(true)}>
-                <Plus className="h-4 w-4" /> New Project
+                <Plus className="size-4" /> New Project
               </Button>
               <Link
                 href={`/${slug}/teams`}
                 className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300"
               >
-                <Users className="h-3.5 w-3.5" /> Or set up a team to own it first
+                <Users className="size-3.5" /> Or set up a team to own it first
               </Link>
             </div>
           ) : (
@@ -108,8 +108,8 @@ export function ProjectsView({
               }`}
             >
               <div className="flex min-w-0 items-center gap-3">
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
-                  <Boxes className="h-4 w-4" />
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
+                  <Boxes className="size-4" />
                 </span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-zinc-100">{p.name}</p>

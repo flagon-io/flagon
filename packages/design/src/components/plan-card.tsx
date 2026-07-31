@@ -96,16 +96,16 @@ export function PlanCard({
         .join(" ")}
     >
       {/* Name + status pill */}
-      <div className="flex items-center gap-2">
+      <div className="gap-2 flex items-center">
         {onSelect ? (
           <span
             aria-hidden
-            className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+            className={`h-4 w-4 grid shrink-0 place-items-center rounded-full border ${
               selected ? "border-teal-400" : "border-white/25"
             }`}
           >
             {selected ? (
-              <span className="h-2 w-2 rounded-full bg-teal-400" />
+              <span className="h-2 w-2 bg-teal-400 rounded-full" />
             ) : null}
           </span>
         ) : null}
@@ -120,7 +120,7 @@ export function PlanCard({
 
       {/* Price. "plus usage" sits right in the price so metering is never a
           surprise; the annual note appears only on the annual interval. */}
-      <div className="mt-5 flex flex-wrap items-baseline gap-x-1.5">
+      <div className="mt-5 gap-x-1.5 flex flex-wrap items-baseline">
         <span className="text-4xl font-semibold tracking-tight text-zinc-100">
           {plan.price.amount}
         </span>
@@ -139,15 +139,15 @@ export function PlanCard({
       <p className="mt-3 text-sm leading-6 text-zinc-400">{plan.description}</p>
 
       {/* Features */}
-      <div className="mt-6 border-t border-white/8 pt-5">
+      <div className="mt-6 border-white/8 pt-5 border-t">
         {plan.featuresLead ? (
           <p className="mb-3 text-xs text-zinc-400">{plan.featuresLead}</p>
         ) : null}
-        <ul className="flex flex-col gap-2.5">
+        <ul className="gap-2.5 flex flex-col">
           {plan.features.map((feature) => (
             <li
               key={feature.text}
-              className={`flex items-start gap-2.5 text-sm ${
+              className={`gap-2.5 text-sm flex items-start ${
                 feature.soon ? "text-zinc-500" : "text-zinc-300"
               }`}
             >
@@ -162,13 +162,13 @@ export function PlanCard({
       {/* Pinned to the bottom so columns align: the CTA, or (when the card is
           blocked for this account) a banner spelling out why. */}
       {disabled && disabledNote ? (
-        <div className="mt-auto pt-6">
-          <div className="rounded-md border border-white/10 bg-white/4 px-3 py-2.5 text-xs leading-5 text-zinc-400">
+        <div className="pt-6 mt-auto">
+          <div className="rounded-md border-white/10 bg-white/4 px-3 py-2.5 text-xs leading-5 text-zinc-400 border">
             {disabledNote}
           </div>
         </div>
       ) : cta ? (
-        <div className="mt-auto pt-6">{cta}</div>
+        <div className="pt-6 mt-auto">{cta}</div>
       ) : null}
     </div>
   );
@@ -183,7 +183,7 @@ function Pill({
 }) {
   return (
     <span
-      className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+      className={`rounded px-1.5 py-0.5 font-medium tracking-wide border text-[10px] uppercase ${
         accent
           ? "border-teal-500/40 text-teal-300"
           : "border-white/15 text-zinc-400"
@@ -219,7 +219,7 @@ function CheckIcon({ dim = false }: { dim?: boolean }) {
 /** Marks a feature that is on the roadmap but not shipped yet. */
 function SoonTag() {
   return (
-    <span className="shrink-0 self-center rounded border border-white/12 px-1 py-px text-[9px] font-medium leading-none tracking-wide text-zinc-500 uppercase">
+    <span className="rounded border-white/12 px-1 font-medium tracking-wide text-zinc-500 shrink-0 self-center border py-px text-[9px] leading-none uppercase">
       Soon
     </span>
   );

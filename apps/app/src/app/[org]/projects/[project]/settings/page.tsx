@@ -41,7 +41,7 @@ export default async function ProjectSettings({
         href={`/${slug}/projects/${key}`}
         className="inline-flex w-fit items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-300"
       >
-        <ArrowLeft className="h-4 w-4" /> {project.name}
+        <ArrowLeft className="size-4" /> {project.name}
       </Link>
 
       <SettingsHeader title="Project settings" description="Catalog metadata and ownership." />

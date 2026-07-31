@@ -32,16 +32,16 @@ export function LegalShell({
         </h1>
         <p className="mt-2 text-sm text-zinc-500">Last updated {updated}</p>
         {draft ? (
-          <div className="mt-6 rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm leading-6 text-amber-200">
+          <div className="mt-6 rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm/6 text-amber-200">
             <strong className="font-semibold">Draft.</strong> This is a working
             draft, not the final version. It is shared for transparency during
             the alpha and may change before launch.
           </div>
         ) : null}
         {intro ? (
-          <p className="mt-6 text-base leading-7 text-zinc-300">{intro}</p>
+          <p className="mt-6 text-base/7 text-zinc-300">{intro}</p>
         ) : null}
-        <div className="mt-8 space-y-4 text-sm leading-7 text-zinc-400 [&_a:hover]:text-teal-300 [&_a]:text-teal-400 [&_h2]:mt-10 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_strong]:text-zinc-200 [&_ul]:list-disc [&_ul]:space-y-1 [&_ul]:pl-5">
+        <div className="mt-8 space-y-4 text-sm/7 text-zinc-400 [&_a]:text-teal-400 [&_a:hover]:text-teal-300 [&_h2]:mt-10 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_strong]:text-zinc-200 [&_ul]:list-disc [&_ul]:space-y-1 [&_ul]:pl-5">
           {children}
         </div>
       </main>

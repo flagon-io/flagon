@@ -95,7 +95,7 @@ export function TeamMembersManager({
             />
           </div>
           <Button variant="secondary" onClick={add} disabled={adding || !addUser}>
-            <Plus className="h-4 w-4" /> Add
+            <Plus className="size-4" /> Add
           </Button>
         </div>
       ) : null}
@@ -131,7 +131,7 @@ export function TeamMembersManager({
                     options={TEAM_ROLES}
                   />
                 ) : (
-                  <span className="text-xs capitalize text-zinc-400">{m.role}</span>
+                  <span className="text-xs text-zinc-400 capitalize">{m.role}</span>
                 )}
                 {canManage ? (
                   <button

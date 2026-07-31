@@ -278,7 +278,7 @@ export function ConditionRows({
         const needsValue = !isSegment && c.op !== "exists" && c.op !== "not_exists";
         return (
           <div key={i} className="flex items-center gap-2 text-sm">
-            <span className="w-9 shrink-0 text-right text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <span className="w-9 shrink-0 text-right text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
               {i === 0 ? leadWord : joiner}
             </span>
             <Select
@@ -347,9 +347,9 @@ export function ConditionRows({
               onClick={() => setConds((prev) => prev.filter((_, j) => j !== i))}
               disabled={conds.length === 1}
               title="Remove condition"
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400 disabled:opacity-30"
+              className="grid size-10 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400 disabled:opacity-30"
             >
-              <X className="h-4 w-4" />
+              <X className="size-4" />
             </button>
           </div>
         );
@@ -360,7 +360,7 @@ export function ConditionRows({
         onClick={() => setConds((prev) => [...prev, emptyCond(segments)])}
         className="mt-0.5 inline-flex w-fit items-center gap-1.5 pl-11 text-sm text-zinc-400 hover:text-zinc-200"
       >
-        <Plus className="h-4 w-4" /> Add condition
+        <Plus className="size-4" /> Add condition
       </button>
     </div>
   );

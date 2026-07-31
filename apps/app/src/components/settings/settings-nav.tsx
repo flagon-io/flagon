@@ -20,7 +20,7 @@ export function SettingsNav({ items }: { items: NavItem[] }) {
           <Link
             key={item.href}
             href={item.href}
-            className={`whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors ${
+            className={`rounded-md px-3 py-2 text-sm whitespace-nowrap transition-colors ${
               active
                 ? "bg-white/8 font-medium text-zinc-100"
                 : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"

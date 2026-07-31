@@ -52,18 +52,18 @@ export default function Home() {
             }}
           />
 
-          <div className="relative mx-auto w-full max-w-7xl px-6 pb-24 pt-24 sm:px-12 sm:pt-28 lg:px-20">
-            <p className="font-mono text-xs uppercase tracking-[0.25em] text-teal-400/80">
+          <div className="relative mx-auto w-full max-w-7xl px-6 py-24 sm:px-12 sm:pt-28 lg:px-20">
+            <p className="font-mono text-xs tracking-[0.25em] text-teal-400/80 uppercase">
               {brand.eyebrow}
             </p>
 
-            <h1 className="mt-6 max-w-3xl text-5xl font-semibold leading-[1.05] tracking-tight text-zinc-100 sm:text-6xl md:text-7xl">
+            <h1 className="mt-6 max-w-3xl text-5xl leading-[1.05] font-semibold tracking-tight text-zinc-100 sm:text-6xl md:text-7xl">
               {brand.taglineLead}
               <br />
               <span className="text-zinc-500">{brand.taglineFollow}</span>
             </h1>
 
-            <p className="mt-8 max-w-xl text-lg leading-8 text-zinc-400">
+            <p className="mt-8 max-w-xl text-lg/8 text-zinc-400">
               {brand.description}
             </p>
 
@@ -72,7 +72,7 @@ export default function Home() {
                 href={SIGN_UP_URL}
                 variant="primary"
                 size="lg"
-                iconRight={<IconArrowRight className="h-4 w-4" />}
+                iconRight={<IconArrowRight className="size-4" />}
               >
                 Get started
               </Cta>
@@ -88,11 +88,11 @@ export default function Home() {
           <div className="grid grid-cols-1 divide-y divide-white/10 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
             {pillars.map(({ icon: Icon, title, body }) => (
               <div key={title} className="p-8">
-                <Icon className="h-5 w-5 text-teal-400" />
+                <Icon className="size-5 text-teal-400" />
                 <h2 className="mt-4 text-base font-semibold text-zinc-100">
                   {title}
                 </h2>
-                <p className="mt-2 text-sm leading-6 text-zinc-400">{body}</p>
+                <p className="mt-2 text-sm/6 text-zinc-400">{body}</p>
               </div>
             ))}
           </div>
@@ -104,7 +104,7 @@ export default function Home() {
             <h2 className="text-2xl font-semibold tracking-tight text-zinc-100">
               Built in the open
             </h2>
-            <p className="mt-3 text-sm leading-6 text-zinc-400">
+            <p className="mt-3 text-sm/6 text-zinc-400">
               Flagon is source-available. Read every line, run the whole
               platform on your own infrastructure, and shape where it goes. No
               cut-down community edition, no bait and switch.
@@ -116,7 +116,7 @@ export default function Home() {
             rel="noreferrer noopener"
             variant="secondary"
             size="lg"
-            iconRight={<IconArrowRight className="h-4 w-4" />}
+            iconRight={<IconArrowRight className="size-4" />}
           >
             View the source
           </Cta>

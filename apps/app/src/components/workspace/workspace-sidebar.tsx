@@ -301,7 +301,7 @@ export function WorkspaceSidebar({
             overflowing it and spawning a horizontal scrollbar. */}
         <div
           key={viewKey}
-          className={`flex flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 py-2 ${
+          className={`flex flex-1 flex-col overflow-x-hidden overflow-y-auto p-2 ${
             direction === "back" ? "nav-in-back" : "nav-in-forward"
           }`}
         >
@@ -332,9 +332,9 @@ export function WorkspaceSidebar({
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-300"
         >
           {collapsed ? (
-            <PanelLeftOpen className="h-4 w-4 shrink-0" />
+            <PanelLeftOpen className="size-4 shrink-0" />
           ) : (
-            <PanelLeftClose className="h-4 w-4 shrink-0" />
+            <PanelLeftClose className="size-4 shrink-0" />
           )}
           {!collapsed ? <span className="text-sm">Collapse</span> : null}
         </button>
@@ -386,7 +386,7 @@ function RootNav({
                   collapsed={collapsed}
                   trailing={
                     !collapsed ? (
-                      <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-zinc-600" />
+                      <ChevronRight className="ml-auto size-4 shrink-0 text-zinc-600" />
                     ) : undefined
                   }
                 />
@@ -420,7 +420,7 @@ function AreaNav({
           collapsed ? "justify-center" : ""
         }`}
       >
-        <ChevronLeft className="h-4 w-4 shrink-0 text-zinc-500" />
+        <ChevronLeft className="size-4 shrink-0 text-zinc-500" />
         {!collapsed ? <span className="truncate">{area.label}</span> : null}
       </Link>
 
@@ -493,7 +493,7 @@ function NavRow({
             : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
         } ${collapsed ? "justify-center" : ""}`}
       >
-        <Icon className="h-4 w-4 shrink-0" />
+        <Icon className="size-4 shrink-0" />
         {!collapsed ? <span className="truncate">{label}</span> : null}
         {!collapsed ? trailing : null}
       </Link>
@@ -524,11 +524,11 @@ function NavExternal({
           collapsed ? "justify-center" : ""
         }`}
       >
-        <Icon className="h-4 w-4 shrink-0" />
+        <Icon className="size-4 shrink-0" />
         {!collapsed ? (
           <>
             <span className="truncate">{label}</span>
-            <ArrowUpRight className="ml-auto h-3.5 w-3.5 shrink-0 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
+            <ArrowUpRight className="ml-auto size-3.5 shrink-0 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
           </>
         ) : null}
       </a>
@@ -555,7 +555,7 @@ function NavSoon({
           collapsed ? "justify-center" : ""
         }`}
       >
-        <Icon className="h-4 w-4 shrink-0" />
+        <Icon className="size-4 shrink-0" />
         {!collapsed ? (
           <>
             <span className="truncate">{label}</span>

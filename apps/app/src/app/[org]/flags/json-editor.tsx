@@ -77,7 +77,7 @@ export function JsonEditor({
       <div
         ref={gutterRef}
         aria-hidden
-        className="max-h-56 shrink-0 select-none overflow-hidden border-r border-white/8 bg-white/2 px-2 py-2 text-right text-zinc-600"
+        className="max-h-56 shrink-0 overflow-hidden border-r border-white/8 bg-white/2 p-2 text-right text-zinc-600 select-none"
       >
         {Array.from({ length: lineCount }, (_, i) => (
           <div key={i} className="leading-5">
@@ -90,7 +90,7 @@ export function JsonEditor({
         <pre
           ref={preRef}
           aria-hidden
-          className="pointer-events-none absolute inset-0 max-h-56 overflow-hidden whitespace-pre px-3 py-2 leading-5 text-zinc-300"
+          className="pointer-events-none absolute inset-0 max-h-56 overflow-hidden px-3 py-2 leading-5 whitespace-pre text-zinc-300"
           dangerouslySetInnerHTML={{
             __html:
               value === "" && placeholder
@@ -107,7 +107,7 @@ export function JsonEditor({
           disabled={disabled}
           spellCheck={false}
           aria-label={ariaLabel}
-          className="relative block max-h-56 min-h-24 w-full resize-none overflow-auto whitespace-pre bg-transparent px-3 py-2 leading-5 text-transparent caret-white outline-none"
+          className="relative block max-h-56 min-h-24 w-full resize-none overflow-auto bg-transparent px-3 py-2 leading-5 whitespace-pre text-transparent caret-white outline-none"
         />
       </div>
     </div>
