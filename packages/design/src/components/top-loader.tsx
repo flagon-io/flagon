@@ -6,12 +6,11 @@ import { usePathname, useSearchParams } from "next/navigation";
 /**
  * A GitHub-style top progress bar that appears on navigation.
  *
- * Dependency-free and framework-native: it STARTS on a real navigation —
- * intercepting same-tab link clicks for instant feedback, plus patching
- * history.pushState/replaceState and popstate as the authoritative App Router
- * signals — trickles toward 90% while the next route resolves, then FINISHES to
- * 100% and fades when the path or query actually changes. A safety timeout
- * completes it if a click never leads anywhere, so the bar can never get stuck.
+ * Dependency-free and framework-native: it STARTS early — intercepting same-tab
+ * link clicks (and back/forward via popstate) the moment navigation begins —
+ * trickles toward 90% while the next route resolves, then FINISHES to 100% and
+ * fades when the path or query actually changes. A safety timeout completes it if
+ * a click never leads anywhere, so the bar can never get stuck.
  *
  * Drop `<TopLoader />` once in a root layout. It reads useSearchParams, so it is
  * wrapped in Suspense here (per the app's routing rules) and renders nothing on
@@ -69,28 +68,21 @@ function TopLoaderInner() {
     safety.current = setTimeout(done, SAFETY_MS);
   }, [clearTimers, done]);
 
-  // START: the authoritative App Router signals (client nav uses pushState;
-  // back/forward fires popstate). Next 16 calls pushState from INSIDE a React
-  // insertion effect, where scheduling a state update synchronously is illegal
-  // ("useInsertionEffect must not schedule updates"). So defer start() to a
-  // microtask, which runs right after the commit, where setState is fine again.
+  // START on back/forward — popstate fires before the previous page re-renders,
+  // so its timing is right (and it's a normal event, not a React insertion
+  // effect). Forward navigation is caught by the link-click handler below.
+  //
+  // We deliberately do NOT patch history.pushState: App Router calls it at
+  // COMMIT time (when the route is already resolving), which fires too late to
+  // be a real "start" — it would restart the bar just as the page finishes and
+  // leave it hanging — and it runs inside a React insertion effect where a
+  // synchronous update is illegal. Programmatic router.push() navigations
+  // therefore don't drive the bar; those flows already show their own in-place
+  // pending state (e.g. a "Saving…" button).
   useEffect(() => {
-    const origPush = history.pushState.bind(history);
-    const origReplace = history.replaceState.bind(history);
-    history.pushState = (...args: Parameters<History["pushState"]>) => {
-      const result = origPush(...args);
-      queueMicrotask(start);
-      return result;
-    };
-    history.replaceState = (...args: Parameters<History["replaceState"]>) => {
-      // replaceState is used for shallow updates too; only signal a real one.
-      return origReplace(...args);
-    };
-    const onPop = () => queueMicrotask(start);
+    const onPop = () => start();
     window.addEventListener("popstate", onPop);
     return () => {
-      history.pushState = origPush;
-      history.replaceState = origReplace;
       window.removeEventListener("popstate", onPop);
       clearTimers();
       if (hideTimer.current) clearTimeout(hideTimer.current);
