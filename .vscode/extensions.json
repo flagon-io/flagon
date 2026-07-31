@@ -1,0 +1,9 @@
+{
+  // Shared recommendations (this is the one .vscode file the repo tracks; see
+  // .gitignore). Tailwind IntelliSense understands v4's CSS-first directives and
+  // lints class names; ESLint powers the in-editor lint that matches `npm run lint`.
+  "recommendations": [
+    "bradlc.vscode-tailwindcss",
+    "dbaeumer.vscode-eslint"
+  ]
+}
