@@ -1,20 +1,26 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 /**
  * A GitHub-style top progress bar that appears on navigation.
  *
- * Dependency-free and framework-native: it STARTS early — intercepting same-tab
- * link clicks (and back/forward via popstate) the moment navigation begins —
- * trickles toward 90% while the next route resolves, then FINISHES to 100% and
- * fades when the path or query actually changes. A safety timeout completes it if
- * a click never leads anywhere, so the bar can never get stuck.
+ * Dependency-free and framework-native, and deliberately STABLE: it uses only
+ * usePathname (which never suspends), so the component never unmounts/remounts
+ * mid-navigation the way a useSearchParams + Suspense boundary can in a
+ * production build — which is what caused a double/flickering bar. It STARTS the
+ * instant a same-tab link changes the path (or on back/forward via popstate),
+ * trickles toward 90% while the route resolves, then FINISHES to 100% and fades
+ * when the path actually changes. A safety timeout completes it if a click never
+ * lands, so it can never get stuck.
  *
- * Drop `<TopLoader />` once in a root layout. It reads useSearchParams, so it is
- * wrapped in Suspense here (per the app's routing rules) and renders nothing on
- * the server, avoiding any hydration flash.
+ * Scope: path navigations (the vast majority). Same-path query-only links (e.g.
+ * a `?range=90` filter) are intentionally skipped — they re-render in place and
+ * have no path change to finish on — as are programmatic router.push() flows,
+ * which already show their own in-place pending state.
+ *
+ * Drop `<TopLoader />` once in a root layout. It renders nothing on the server.
  */
 
 // Brand teal (accentBright over accent) with a soft glow, matching @flagon/design.
@@ -23,9 +29,8 @@ const GLOW = "#14b8a6";
 const HEIGHT = 3;
 const SAFETY_MS = 12_000;
 
-function TopLoaderInner() {
+export function TopLoader() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [progress, setProgress] = useState(0); // 0..1
   const [visible, setVisible] = useState(false);
 
@@ -55,10 +60,11 @@ function TopLoaderInner() {
   }, [clearTimers]);
 
   const start = useCallback(() => {
+    if (started.current) return; // already running for this navigation
     if (hideTimer.current) clearTimeout(hideTimer.current);
     started.current = true;
     setVisible(true);
-    setProgress((p) => (p > 0 && p < 1 ? p : 0.08));
+    setProgress(0.08);
     clearTimers();
     // Trickle toward 90%, slowing as it approaches, like a real fetch.
     trickle.current = setInterval(() => {
@@ -68,17 +74,7 @@ function TopLoaderInner() {
     safety.current = setTimeout(done, SAFETY_MS);
   }, [clearTimers, done]);
 
-  // START on back/forward — popstate fires before the previous page re-renders,
-  // so its timing is right (and it's a normal event, not a React insertion
-  // effect). Forward navigation is caught by the link-click handler below.
-  //
-  // We deliberately do NOT patch history.pushState: App Router calls it at
-  // COMMIT time (when the route is already resolving), which fires too late to
-  // be a real "start" — it would restart the bar just as the page finishes and
-  // leave it hanging — and it runs inside a React insertion effect where a
-  // synchronous update is illegal. Programmatic router.push() navigations
-  // therefore don't drive the bar; those flows already show their own in-place
-  // pending state (e.g. a "Saving…" button).
+  // START on back/forward — popstate fires before the previous page re-renders.
   useEffect(() => {
     const onPop = () => start();
     window.addEventListener("popstate", onPop);
@@ -89,8 +85,9 @@ function TopLoaderInner() {
     };
   }, [start, clearTimers]);
 
-  // START early on same-tab link clicks (instant feedback, before the route
-  // resolves). Ignore new-tab, modified, hash-only, download, and no-op clicks.
+  // START on same-tab link clicks that change the path (so the usePathname
+  // finish signal always matches). Ignore new-tab, modified, hash, download, and
+  // same-path (query-only) clicks.
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (e.defaultPrevented || e.button !== 0) return;
@@ -101,11 +98,9 @@ function TopLoaderInner() {
       if (href.startsWith("#")) return;
       try {
         const next = new URL(anchor.href, location.href);
-        const changes =
-          next.origin !== location.origin ||
-          next.pathname !== location.pathname ||
-          next.search !== location.search;
-        if (changes) start();
+        const changesPath =
+          next.origin !== location.origin || next.pathname !== location.pathname;
+        if (changesPath) start();
       } catch {
         /* malformed href — ignore */
       }
@@ -114,14 +109,14 @@ function TopLoaderInner() {
     return () => document.removeEventListener("click", onClick, true);
   }, [start]);
 
-  // FINISH: the route (path or query) has actually changed and rendered.
+  // FINISH: the path has actually changed and rendered.
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
       return;
     }
     done();
-  }, [pathname, searchParams, done]);
+  }, [pathname, done]);
 
   if (!visible && progress === 0) return null;
 
@@ -149,13 +144,5 @@ function TopLoaderInner() {
         }}
       />
     </div>
-  );
-}
-
-export function TopLoader() {
-  return (
-    <Suspense fallback={null}>
-      <TopLoaderInner />
-    </Suspense>
   );
 }
