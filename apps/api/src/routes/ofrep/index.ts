@@ -9,11 +9,9 @@ import {
 import { evaluate } from "../../flags/evaluate.js";
 import { recordEvaluations, type UsageEntry } from "../../flags/usage.js";
 import { compactUsageEvents, ingestEvents } from "../../usage/events.js";
-import {
-  eventsAllowanceStatus,
-  eventsEnforcement,
-  isIngestCapped,
-} from "../../usage/allowance.js";
+import { notifyUsageThresholds } from "../../usage/notify.js";
+import { eventsAllowanceStatus, isIngestCapped } from "../../usage/allowance.js";
+import { anyPlanHardCaps, planHardCaps } from "../../lib/plans.js";
 import { withOrg } from "../../db/tenant.js";
 import { orgPlan } from "../../lib/org-context.js";
 import { createDurableEvalLimiter } from "../../lib/durable-eval-limiter.js";
@@ -339,26 +337,30 @@ ofrep.post("/v1/exposures", async (c) => {
 
   if (events.length === 0) return c.json({ recorded: 0, duplicate: false }, 202);
 
-  // Plan-cap enforcement, GATED. Off by default (EVENTS_ENFORCEMENT=off): we only
-  // MEASURE against the allowance (surfaced on the usage page) and never block, so
-  // a Hobby org past its cap keeps recording. When flipped to "enforce", a hard-cap
-  // plan over its allowance is refused here. Skipped entirely when off, so there is
-  // no hot-path cost until billing is actually turned on.
-  if (eventsEnforcement() === "enforce") {
+  // Plan-cap enforcement, GATED by the plan's hardCap policy (lib/plans.ts). Today
+  // every plan is warn-first (hardCap:false): we only MEASURE against the allowance
+  // (the counter increments below, surfaced on the usage page) and never block, so
+  // a Hobby org past its cap keeps recording. Flip a plan's hardCap to true and an
+  // over-allowance org is refused here. `anyPlanHardCaps()` is a static short-circuit
+  // so while every plan is warn-first this loads no plan and touches no DB — zero
+  // hot-path cost until a cap is deliberately turned on.
+  if (anyPlanHardCaps()) {
     const plan = await orgPlan(identity.organizationId);
-    const status = await withOrg(identity.organizationId, (tx) =>
-      eventsAllowanceStatus(tx, plan),
-    );
-    if (isIngestCapped(status)) {
-      return c.json(
-        {
-          errorCode: "PLAN_LIMIT_REACHED",
-          errorDetails: `This organization has used its ${status.includedEvents.toLocaleString()} included events for the current period. Upgrade to record more.`,
-          includedEvents: status.includedEvents,
-          usedEvents: status.usedEvents,
-        },
-        403,
+    if (planHardCaps(plan)) {
+      const status = await withOrg(identity.organizationId, (tx) =>
+        eventsAllowanceStatus(tx, plan),
       );
+      if (isIngestCapped(status)) {
+        return c.json(
+          {
+            errorCode: "PLAN_LIMIT_REACHED",
+            errorDetails: `This organization has used its ${status.includedEvents.toLocaleString()} included events for the current period. Upgrade to record more.`,
+            includedEvents: status.includedEvents,
+            usedEvents: status.usedEvents,
+          },
+          403,
+        );
+      }
     }
   }
 
@@ -371,9 +373,18 @@ ofrep.post("/v1/exposures", async (c) => {
     idempotencyKey,
   });
 
-  // Fold the new receipt into the daily rollups off the hot path; if it slips
-  // (instance dies), the receipt stays uncompacted and the next ingest picks it up.
-  if (!result.duplicate) await defer(c, compactUsageEvents(identity.organizationId));
+  // Off the hot path, for a genuinely new receipt: fold it into the daily rollups
+  // (if this slips, the receipt stays uncompacted and the next ingest picks it up)
+  // and send any warn-first threshold email. notifyUsageThresholds never throws.
+  if (!result.duplicate) {
+    await defer(
+      c,
+      Promise.all([
+        compactUsageEvents(identity.organizationId),
+        notifyUsageThresholds(identity.organizationId),
+      ]),
+    );
+  }
 
   return c.json({ recorded: result.recorded, duplicate: result.duplicate }, 202);
 });

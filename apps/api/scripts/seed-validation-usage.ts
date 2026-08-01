@@ -18,7 +18,7 @@
  */
 import { withOrg } from "../src/db/tenant.js";
 import { environments, flags, flagEvalRollups } from "../src/db/schema.js";
-import { recordEvents } from "../src/usage/events.js";
+import { ingestEvents, compactUsageEvents } from "../src/usage/events.js";
 import { resolveValidationOrg, scrubOrgUsage } from "../src/usage/validation-org.js";
 import { sql } from "drizzle-orm";
 
@@ -109,13 +109,23 @@ async function main() {
     }
   });
 
-  // Billable events: ~25k-55k/day -> roughly 1M-1.6M/month, under the Hobby 2M
-  // cap so the free-tier bar shows meaningful (not over) usage.
-  for (const { ms } of daysList) {
+  // Billable events through the REAL durable path: one idempotent receipt per day
+  // (usage_events, keyed so a re-run after scrub is clean), then a single
+  // exactly-once compaction folds them into the rollups — the same pipeline
+  // POST /ofrep/v1/exposures drives. So the seeded rollups are backed by receipts
+  // and reconcile cleanly, instead of being written straight into the rollup table.
+  // ~25k-55k/day -> roughly 1M-1.6M/month, under the Hobby 2M cap so the free-tier
+  // bar shows meaningful (not over) usage.
+  for (const { day, ms } of daysList) {
     const n = randInt(25_000, 55_000);
     totalEvents += n;
-    await recordEvents(org.id, n, { source: "flags.exposure", atMs: ms });
+    await ingestEvents(org.id, n, {
+      source: "flags.exposure",
+      idempotencyKey: `seed-${day}`,
+      atMs: ms,
+    });
   }
+  await compactUsageEvents(org.id);
 
   console.log(
     `seeded ${days} days: ${totalChecks.toLocaleString()} flag checks (free), ${totalEvents.toLocaleString()} events`,

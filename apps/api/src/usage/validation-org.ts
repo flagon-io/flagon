@@ -2,7 +2,12 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations } from "../db/auth-tables.js";
 import { withOrg } from "../db/tenant.js";
-import { flagEvalRollups, usageEventRollups } from "../db/schema.js";
+import {
+  flagEvalRollups,
+  usageCounters,
+  usageEventRollups,
+  usageEvents,
+} from "../db/schema.js";
 
 /**
  * The fixed organization that local validation + usage seeding run against.
@@ -37,13 +42,19 @@ export async function resolveValidationOrg(): Promise<ValidationOrg> {
 }
 
 /**
- * Delete an org's usage rollups (free flag checks + billable events), returning
- * it to a clean baseline. Config — flags, environments, keys — is left untouched.
- * Runs inside withOrg so RLS scopes the delete to this org.
+ * Delete an org's usage rollups, the durable event receipts behind them, AND the
+ * atomic monthly counter (free flag checks + billable events + the usage_events log
+ * + org_usage_counters), returning it to a clean baseline. The receipts and counter
+ * must go too: seeding re-ingests through the durable path (which increments the
+ * counter), so leaving either would double-count on the next seed. Config — flags,
+ * environments, keys — is left untouched. Runs inside withOrg so RLS scopes the
+ * delete to this org.
  */
 export async function scrubOrgUsage(orgId: string): Promise<void> {
   await withOrg(orgId, async (tx) => {
     await tx.delete(flagEvalRollups).where(eq(flagEvalRollups.organizationId, orgId));
     await tx.delete(usageEventRollups).where(eq(usageEventRollups.organizationId, orgId));
+    await tx.delete(usageEvents).where(eq(usageEvents.organizationId, orgId));
+    await tx.delete(usageCounters).where(eq(usageCounters.organizationId, orgId));
   });
 }

@@ -200,8 +200,9 @@ export type OrgUsage = {
 /**
  * The events-allowance picture for the CURRENT month (not the chart range): what
  * the plan includes, what's used, and whether the org is over. Drives the
- * allowance bar. `enforcement` is "off" until billing turns on, so `isOver` is a
- * signal to SEE, not a block.
+ * allowance bar. `hardCap` is true for Hobby (over the cap, event ingest is refused)
+ * and false for Pro/Enterprise (they meter/true-up), which the usage page uses to
+ * choose "sending is paused" vs "upgrade to raise your limit" copy.
  */
 export type Entitlement = {
   plan: string;
@@ -213,7 +214,7 @@ export type Entitlement = {
   overageEvents: number;
   isOver: boolean;
   overageCents: number;
-  enforcement: "off" | "enforce";
+  hardCap: boolean;
 };
 
 export type OrgUsageResult = { usage: OrgUsage; entitlement: Entitlement };
@@ -399,6 +400,33 @@ export async function revokeSdkKey(slug: string, id: string) {
 }
 
 // --- Billing (Stripe lives in the API; the console just calls it) -----------
+/**
+ * The org's live subscription summary. `discount` is what makes a comp
+ * unmistakable: a comped org carries a 100%-off coupon here, which the billing
+ * page reads to say "on Pro at no charge". null summary = no Stripe subscription.
+ */
+export type BillingSummary = {
+  status: string;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  discount: {
+    name: string | null;
+    percentOff: number | null;
+    amountOffCents: number | null;
+    endsAt: string | null;
+  } | null;
+};
+
+/** The org's Stripe subscription summary (status + any active discount), or null. */
+export async function getBillingSummary(
+  slug: string,
+): Promise<BillingSummary | null> {
+  const res = await apiFetch(`/v1/orgs/${slug}/billing/summary`);
+  if (!res.ok) return null;
+  const body = (await res.json()) as { summary: BillingSummary | null };
+  return body.summary;
+}
+
 /** Start Pro checkout (or portal, if already subscribed). Returns a Stripe URL. */
 export async function startBillingCheckout(slug: string) {
   return unwrap<{ url: string }>(

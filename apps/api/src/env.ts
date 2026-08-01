@@ -40,12 +40,6 @@ const schema = z
     // for bulk-import workloads.
     MGMT_WRITE_RATE_LIMIT: z.coerce.number().int().positive().default(120),
     MGMT_WRITE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
-    // Events-allowance enforcement. "off" (default) MEASURES usage against each
-    // plan's included allowance and surfaces over/under on the usage page, but
-    // never blocks: a Hobby org past its cap keeps ingesting. "enforce" activates
-    // the hard cap (a capped plan over its allowance gets 429 on exposure ingest).
-    // Off until billing/Stripe is turned on, so no one is cut off pre-billing.
-    EVENTS_ENFORCEMENT: z.enum(["off", "enforce"]).default("off"),
     // Billing (Stripe) is OPTIONAL: the API boots and serves without it. When
     // present the values are shape-checked so a paste error fails fast at boot
     // rather than as a confusing Stripe 401 mid-checkout. The Pro price is

@@ -1,19 +1,26 @@
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
-import { usageEventRollups } from "../db/schema.js";
-import { env } from "../env.js";
-import { planIncludedEvents, planOverage, type OverageMode } from "../lib/plans.js";
+import { usageCounters } from "../db/schema.js";
+import {
+  planHardCaps,
+  planIncludedEvents,
+  planOverage,
+  type OverageMode,
+} from "../lib/plans.js";
 import { EVENTS_METER, chargeCents } from "./meters.js";
 
 /**
  * The events-allowance PICTURE: how a plan's monthly included events compare to
  * what an org has actually used this period. This is what lets us SEE that a
- * Hobby org is over its 2M cap (or a Pro org into overage) without billing or
- * blocking anyone — enforcement is a separate, env-gated switch (see
- * `eventsEnforcement`). Usage is derived from the durable rollups
- * (usage_event_rollups), not a separate counter, which is exact and enough while
- * enforcement is off; a hot-path atomic counter is only needed once we actually
- * cut orgs off.
+ * Hobby org is over its 2M cap (or a Pro org into overage) whether or not we
+ * block anyone — whether ingest is actually REFUSED is the plan's `hardCap`
+ * policy (see lib/plans.ts `planHardCaps`), which replaced the old
+ * EVENTS_ENFORCEMENT env flag.
+ *
+ * Usage is read from the atomic monthly counter (org_usage_counters, migration
+ * 0019): exact, O(1), and incremented in the same transaction as each durable
+ * receipt, so it is consistent-by-construction with the receipts and cheap enough
+ * to consult on the ingest hot path once a cap is turned on.
  *
  * The period is the current CALENDAR MONTH (UTC). Stripe metered billing (not on
  * yet) would anchor the period to the subscription instead; when it lands, swap
@@ -33,20 +40,24 @@ export function currentBillingPeriod(atMs?: number): BillingPeriod {
   return { from, to };
 }
 
-/** Total billable events an org recorded within a period (from the rollups). */
+/** The 'YYYY-MM' counter bucket for a billing period (its calendar month). */
+function periodKey(period: BillingPeriod): string {
+  return period.from.slice(0, 7);
+}
+
+/**
+ * Total billable events an org recorded within a period — read from the atomic
+ * monthly counter (org_usage_counters). One indexed row lookup, exact. Zero when
+ * the org has no counter row yet (no events this month).
+ */
 export async function eventsUsedInPeriod(
   tx: TenantTx,
   period: BillingPeriod,
 ): Promise<number> {
   const [row] = await tx
-    .select({ total: sql<string>`coalesce(sum(${usageEventRollups.count}), 0)` })
-    .from(usageEventRollups)
-    .where(
-      and(
-        gte(usageEventRollups.day, period.from),
-        lte(usageEventRollups.day, period.to),
-      ),
-    );
+    .select({ total: usageCounters.count })
+    .from(usageCounters)
+    .where(eq(usageCounters.period, periodKey(period)));
   return Number(row?.total ?? 0);
 }
 
@@ -66,8 +77,13 @@ export type AllowanceStatus = {
   isOver: boolean;
   /** Projected overage charge in cents — only for "bill" plans; 0 otherwise. */
   overageCents: number;
-  /** Current enforcement mode; "off" means over-allowance never blocks. */
-  enforcement: "off" | "enforce";
+  /**
+   * Whether this plan HARD-CAPS: refuses ingest once over its allowance. When
+   * false (today, for every plan) going over is measured + warned, never blocked.
+   * The console uses this to choose "sending is paused" vs "upgrade to raise your
+   * limit" copy.
+   */
+  hardCap: boolean;
 };
 
 /** Compute an org's events-allowance status for the current period. */
@@ -100,24 +116,19 @@ export async function eventsAllowanceStatus(
     overageEvents,
     isOver,
     overageCents,
-    enforcement: env.EVENTS_ENFORCEMENT,
+    hardCap: planHardCaps(plan),
   };
 }
 
-/** The configured enforcement mode. "off" never blocks; "enforce" activates caps. */
-export function eventsEnforcement(): "off" | "enforce" {
-  return env.EVENTS_ENFORCEMENT;
-}
-
 /**
- * Whether ingest should be REFUSED for this status: only when enforcement is on
- * AND the plan is a hard cap AND it's over. "bill"/"contract" plans are never
- * refused (they meter/true-up instead), and with enforcement off nothing is ever
- * refused. This is the one predicate the exposures route consults.
+ * Whether ingest should be REFUSED for this status: only when the plan hard-caps
+ * AND it's a "cap" plan AND it's over. "bill"/"contract" plans are never refused
+ * (they meter/true-up instead), and a plan with hardCap off is never refused
+ * (warn-first). This is the one predicate the exposures route consults.
  */
 export function isIngestCapped(status: AllowanceStatus): boolean {
   return (
-    status.enforcement === "enforce" &&
+    status.hardCap &&
     status.overageMode === "cap" &&
     status.isOver
   );

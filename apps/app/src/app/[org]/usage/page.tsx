@@ -116,7 +116,7 @@ export default async function UsagePage({
           includedEvents={entitlement.includedEvents}
           overageEvents={entitlement.overageEvents}
           bills={entitlement.overageMode === "bill"}
-          enforcing={entitlement.enforcement === "enforce"}
+          enforcing={entitlement.hardCap}
         />
       ) : null}
 

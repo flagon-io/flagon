@@ -22,15 +22,30 @@ const PLAN_AVAILABILITY: Record<PlanId, boolean> = {
 };
 
 /**
- * The monthly included analytics-events allowance and overage mode per plan. These
- * MIRROR the source of truth in packages/design/src/plans.ts (the API deliberately
- * doesn't import @flagon/design); the events overage RATE lives in the meter
- * registry (usage/meters.ts). Keep the numbers in sync with that file.
+ * The monthly included analytics-events allowance and overage mode per plan. The
+ * `included`/`overage` numbers MIRROR the source of truth in
+ * packages/design/src/plans.ts (the API deliberately doesn't import @flagon/design);
+ * the events overage RATE lives in the meter registry (usage/meters.ts). Keep those
+ * in sync with that file.
+ *
+ * `hardCap` is an API-only ENFORCEMENT policy (not display, so not mirrored to
+ * design): when true, a "cap" plan over its allowance is refused ingest (a 403 on
+ * POST /ofrep/v1/exposures); when false the overage is only measured + warned. It
+ * replaces the old EVENTS_ENFORCEMENT env flag: the policy lives with the plan, so
+ * turning a cap on/off is one reviewed line here, not an ops toggle.
+ *
+ * Hobby hard-caps: past its 2M included events a Hobby org is refused further event
+ * ingest (flag EVALUATION is always free and unaffected — only metering stops). The
+ * warn-first emails (usage/notify.ts) still fire at 80% and 100%, so the cap never
+ * arrives unannounced: an org gets both the heads-up and the ceiling.
  */
-const PLAN_EVENTS: Record<PlanId, { included: number; overage: OverageMode }> = {
-  hobby: { included: 2_000_000, overage: "cap" },
-  pro: { included: 5_000_000, overage: "bill" },
-  enterprise: { included: 0, overage: "contract" },
+const PLAN_EVENTS: Record<
+  PlanId,
+  { included: number; overage: OverageMode; hardCap: boolean }
+> = {
+  hobby: { included: 2_000_000, overage: "cap", hardCap: true },
+  pro: { included: 5_000_000, overage: "bill", hardCap: false },
+  enterprise: { included: 0, overage: "contract", hardCap: false },
 };
 
 /** The monthly included events allowance for a plan; 0 for unknown/contracted. */
@@ -41,6 +56,25 @@ export function planIncludedEvents(id: string): number {
 /** How a plan treats events past its allowance; unknown plans fail safe to "cap". */
 export function planOverage(id: string): OverageMode {
   return PLAN_EVENTS[id as PlanId]?.overage ?? "cap";
+}
+
+/**
+ * Whether a plan HARD-CAPS ingest once over its allowance (refuse events past the
+ * ceiling). Unknown plans fail safe to false — never cut off a plan we don't model.
+ * Only meaningful together with overage === "cap".
+ */
+export function planHardCaps(id: string): boolean {
+  return PLAN_EVENTS[id as PlanId]?.hardCap ?? false;
+}
+
+/**
+ * Whether ANY plan hard-caps. A static compile-time fact used to keep the ingest
+ * hot path free: while every plan is warn-first (all hardCap:false today), the
+ * enforcement check is skipped before it ever loads a plan or touches the DB. The
+ * moment a plan's hardCap flips true, enforcement starts consulting per org.
+ */
+export function anyPlanHardCaps(): boolean {
+  return Object.values(PLAN_EVENTS).some((p) => p.hardCap);
 }
 
 export const DEFAULT_PLAN: PlanId = "hobby";

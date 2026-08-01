@@ -38,6 +38,7 @@ describe.skipIf(!DATABASE_URL)("durable usage meter (integration)", () => {
     await withOrg(orgId, async (tx) => {
       await tx.delete(t.usageEvents).where(eq(t.usageEvents.organizationId, orgId));
       await tx.delete(t.usageEventRollups).where(eq(t.usageEventRollups.organizationId, orgId));
+      await tx.delete(t.usageCounters).where(eq(t.usageCounters.organizationId, orgId));
     });
   });
 
@@ -45,6 +46,12 @@ describe.skipIf(!DATABASE_URL)("durable usage meter (integration)", () => {
     withOrg(orgId, (tx) =>
       tx.select().from(t.usageEvents).where(eq(t.usageEvents.organizationId, orgId)),
     ).then((rows) => rows.length);
+
+  // The atomic counter's total across the org's period buckets (all "now", so one).
+  const counterTotal = () =>
+    withOrg(orgId, (tx) =>
+      tx.select().from(t.usageCounters).where(eq(t.usageCounters.organizationId, orgId)),
+    ).then((rows) => rows.reduce((sum, r) => sum + Number(r.count), 0));
 
   it("records a batch as one durable receipt", async () => {
     expect(await ingestEvents(orgId, 5, { idempotencyKey: "batch-1" })).toEqual({
@@ -81,6 +88,12 @@ describe.skipIf(!DATABASE_URL)("durable usage meter (integration)", () => {
     expect(await receiptCount()).toBe(4);
   });
 
+  it("the atomic counter tracks distinct receipts, not retries", async () => {
+    // 5 (batch-1) + 3 (batch-2) + 1 + 1 = 10; the two batch-1 retries added nothing,
+    // so the counter stays consistent with sum(receipt quantity) for the period.
+    expect(await counterTotal()).toBe(10);
+  });
+
   it("compacts every receipt into the rollups exactly once", async () => {
     // 5 (batch-1) + 3 (batch-2) + 1 + 1 across 4 receipts.
     expect(await compactUsageEvents(orgId)).toEqual({ compacted: 4, quantity: 10 });
@@ -94,6 +107,7 @@ describe.skipIf(!DATABASE_URL)("durable usage meter (integration)", () => {
 
   it("a late receipt compacts on the next run and still reconciles", async () => {
     await ingestEvents(orgId, 7, { idempotencyKey: "batch-3" });
+    expect(await counterTotal()).toBe(17); // the counter moved with the new receipt
     expect(await compactUsageEvents(orgId)).toEqual({ compacted: 1, quantity: 7 });
     expect(await reconcileUsage(orgId)).toEqual({ ok: true, discrepancies: [] });
   });

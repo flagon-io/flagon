@@ -4,12 +4,55 @@ import { Check } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { PLANS, planName } from "@/lib/plans";
+import { getBillingSummary, type BillingSummary } from "@/lib/flags-api";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { BillingActionButton } from "./billing-actions";
 
 export const metadata: Metadata = { title: "Billing · Organization settings" };
 
 const PRO = PLANS.find((p) => p.id === "pro");
+
+/** Format an ISO date as e.g. "Jan 5, 2027" (UTC), for discount end dates. */
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * The clear, in-console signal that a comped org is not being charged. A comp is a
+ * real Stripe subscription carrying a 100%-off coupon; when a discount is present we
+ * say so plainly (fully comped, or the partial discount). null when there's no
+ * discount (paying the full rate) — nothing to show.
+ */
+function DiscountBanner({ discount }: { discount: BillingSummary["discount"] }) {
+  if (!discount) return null;
+  const fully = discount.percentOff === 100;
+  const name = discount.name ? ` (${discount.name})` : "";
+  const until = discount.endsAt ? ` through ${shortDate(discount.endsAt)}` : "";
+
+  const headline = fully
+    ? `On Pro at no charge${name}.`
+    : discount.percentOff != null
+      ? `${discount.percentOff}% off applied${name}.`
+      : discount.amountOffCents != null
+        ? `$${(discount.amountOffCents / 100).toFixed(2)} off applied${name}.`
+        : `A discount is applied${name}.`;
+
+  const detail = fully
+    ? `You won't be billed while this applies${until}.`
+    : `Your Pro subscription is discounted${until}.`;
+
+  return (
+    <div className="mb-6 rounded-lg border border-teal-500/25 bg-teal-500/10 px-4 py-3 text-sm">
+      <p className="font-medium text-teal-200">{headline}</p>
+      <p className="mt-0.5 text-teal-200/70">{detail}</p>
+    </div>
+  );
+}
 
 /** A friendly label for a raw Stripe subscription status. */
 function statusLabel(status: string | null): string | null {
@@ -46,12 +89,20 @@ export default async function OrgBillingPage({
   const isEnterprise = membership.plan === "enterprise";
   const status = statusLabel(membership.subscriptionStatus);
 
+  // Only Stripe-backed Pro orgs have a subscription to summarize; skip the Stripe
+  // round-trip for Hobby and null-status (manually-granted) Pro. Surfaces the comp
+  // coupon so a comped org can plainly see it isn't being charged.
+  const summary =
+    isPro && membership.stripeCustomerId ? await getBillingSummary(slug) : null;
+
   return (
     <div>
       <SettingsHeader
         title="Billing"
         description="Your organization's plan and subscription."
       />
+
+      <DiscountBanner discount={summary?.discount ?? null} />
 
       <SettingsSection
         title="Current plan"

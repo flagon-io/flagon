@@ -20,7 +20,7 @@ const API_VERSION = "2026-06-24.dahlia" satisfies Stripe.StripeConfig["apiVersio
  * "lookup key"); the code resolves it to the live price id at runtime, so no
  * environment-specific `price_...` id is ever hardcoded or configured.
  */
-export const PRO_PRICE_LOOKUP_KEY = "pro_monthly";
+export const PRO_PRICE_LOOKUP_KEY = "flagon_pro_monthly";
 
 /** Signing secret for the Stripe webhook endpoint (raw-body verification). */
 export const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;

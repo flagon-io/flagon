@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   date,
   index,
@@ -584,6 +585,36 @@ export const usageEvents = pgTable(
   ],
 );
 
+/**
+ * Atomic per-org monthly usage counter (migration 0019). The exact "events used
+ * this period" number, incremented in the same transaction as each durable
+ * receipt (see usage/events.ts), so it stays consistent-by-construction with
+ * sum(usageEvents.quantity) for the period. `period` is the UTC calendar month
+ * 'YYYY-MM' (matches usage/allowance.ts currentBillingPeriod). The notified_*
+ * stamps dedup warn-first threshold emails. Tenant data — org-scoped, RLS.
+ */
+export const usageCounters = pgTable(
+  "org_usage_counters",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    /** UTC calendar month, 'YYYY-MM'. */
+    period: text("period").notNull(),
+    /** Exact events metered for this org in this period. */
+    count: bigint("count", { mode: "number" }).notNull().default(0),
+    /** Set the first time the org crosses 80% of a capped plan's allowance. */
+    notified80At: timestamp("notified_80_at", { withTimezone: true }),
+    /** Set the first time the org crosses 100% of a capped plan's allowance. */
+    notified100At: timestamp("notified_100_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("org_usage_counters_bucket_key").on(t.organizationId, t.period),
+  ],
+);
+
 export type Flag = typeof flags.$inferSelect;
 export type NewFlag = typeof flags.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
@@ -599,6 +630,7 @@ export type TeamMember = typeof teamMembers.$inferSelect;
 export type ProjectAccess = typeof projectAccess.$inferSelect;
 export type UsageEvent = typeof usageEvents.$inferSelect;
 export type NewUsageEvent = typeof usageEvents.$inferInsert;
+export type UsageCounter = typeof usageCounters.$inferSelect;
 
 /** Everything the migrator and query layer should know about. */
 export const schema = {
@@ -619,6 +651,7 @@ export const schema = {
   flagEvalRollups,
   usageEventRollups,
   usageEvents,
+  usageCounters,
 };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm

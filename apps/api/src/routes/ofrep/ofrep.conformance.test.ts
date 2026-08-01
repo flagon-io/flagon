@@ -111,6 +111,7 @@ describe.skipIf(!DATABASE_URL)("OFREP conformance (HTTP)", () => {
       await tx.delete(t.flagEvalRollups).where(eq(t.flagEvalRollups.organizationId, orgId));
       await tx.delete(t.usageEvents).where(eq(t.usageEvents.organizationId, orgId));
       await tx.delete(t.usageEventRollups).where(eq(t.usageEventRollups.organizationId, orgId));
+      await tx.delete(t.usageCounters).where(eq(t.usageCounters.organizationId, orgId));
     });
   });
 
@@ -214,5 +215,34 @@ describe.skipIf(!DATABASE_URL)("OFREP conformance (HTTP)", () => {
     expect(await first.json()).toEqual({ recorded: 2, duplicate: false });
     const retry = await req("/ofrep/v1/exposures", { body, headers });
     expect(await retry.json()).toEqual({ recorded: 0, duplicate: true });
+  });
+
+  it("hard-caps: refuses exposures once a Hobby org is over its allowance", async () => {
+    // This org has no organizations row, so its plan defaults to Hobby (2M cap,
+    // hardCap on). Push the current period's counter past the cap, then a fresh
+    // exposure batch must be refused with 403 PLAN_LIMIT_REACHED. Evaluation is a
+    // separate path and stays available (covered by the tests above).
+    const period = new Date().toISOString().slice(0, 7);
+    await withOrg(orgId, (tx) =>
+      tx
+        .insert(t.usageCounters)
+        .values({ organizationId: orgId, period, count: 2_500_000 })
+        .onConflictDoUpdate({
+          target: [t.usageCounters.organizationId, t.usageCounters.period],
+          set: { count: 2_500_000 },
+        }),
+    );
+
+    const res = await req("/ofrep/v1/exposures", {
+      body: JSON.stringify({ events: [{ key: "checkout" }] }),
+      headers: { "idempotency-key": "conf-over-cap" },
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json()).errorCode).toBe("PLAN_LIMIT_REACHED");
+
+    // Clean the counter so it doesn't bleed into other assertions.
+    await withOrg(orgId, (tx) =>
+      tx.delete(t.usageCounters).where(eq(t.usageCounters.organizationId, orgId)),
+    );
   });
 });

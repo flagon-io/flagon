@@ -116,6 +116,35 @@ export function changeEmailTemplate(verifyUrl: string): Template {
   };
 }
 
+export function usageThresholdTemplate(opts: {
+  organizationName: string;
+  threshold: number; // 80 or 100
+  usedEvents: number;
+  includedEvents: number;
+  usageUrl: string;
+}): Template {
+  const { organizationName, threshold, usedEvents, includedEvents, usageUrl } = opts;
+  const atCap = threshold >= 100;
+  const fmt = (n: number) => n.toLocaleString("en-US");
+  return {
+    subject: atCap
+      ? `${organizationName} has used all its included events this month`
+      : `${organizationName} is at ${threshold}% of its included events`,
+    html: layout({
+      heading: atCap
+        ? "You've used all your included events"
+        : `You're at ${threshold}% of your included events`,
+      // Warn-first: nothing is blocked today, so the copy is a heads-up, not a
+      // shutoff notice. Flag evaluation is always free and unaffected either way.
+      intro: atCap
+        ? `${organizationName} has used all ${fmt(includedEvents)} events included in your plan this month. Nothing is blocked and your flags keep serving, but to raise your limit, upgrade to Pro.`
+        : `${organizationName} has used ${fmt(usedEvents)} of its ${fmt(includedEvents)} included events this month (${threshold}%). Upgrade to Pro to raise your limit before you reach it.`,
+      cta: { label: "See usage", href: usageUrl },
+      footnote: `You are receiving this because you manage ${organizationName} on ${name}.`,
+    }),
+  };
+}
+
 export function invitationTemplate(opts: {
   organizationName: string;
   inviterName: string;

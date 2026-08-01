@@ -133,6 +133,76 @@ export async function createPortalUrl(org: BillingOrg): Promise<string> {
   return session.url;
 }
 
+export type BillingSummary = {
+  /** The Stripe subscription status ("active", "trialing", "past_due", ...). */
+  status: string;
+  /** Current period end, ISO; null if unknown. */
+  currentPeriodEnd: string | null;
+  /** Whether the subscription is set to end at the current period. */
+  cancelAtPeriodEnd: boolean;
+  /**
+   * The active discount, if any. A comped org carries a 100%-off coupon here, which
+   * is exactly what the console reads to say "on Pro at no charge". null = paying
+   * the full rate.
+   */
+  discount: {
+    name: string | null;
+    /** 0-100; 100 means fully comped. Null when the coupon is a fixed amount. */
+    percentOff: number | null;
+    /** Fixed amount off in cents; null when the coupon is a percentage. */
+    amountOffCents: number | null;
+    /** When a `repeating` discount ends, ISO; null for a `forever`/`once` coupon. */
+    endsAt: string | null;
+  } | null;
+};
+
+/**
+ * The org's live subscription summary, read from Stripe for the billing page. This
+ * is how the console can be UNMISTAKABLE that a comped org isn't being charged: the
+ * comp is a real subscription carrying a 100%-off coupon, and this surfaces that
+ * discount. Returns null when the org has no Stripe subscription (free Hobby, or a
+ * manually-granted null-status Pro). In this API version `current_period_end` lives
+ * on the subscription items and each discount's coupon at `discount.source.coupon`,
+ * so we expand and read accordingly.
+ */
+export async function getBillingSummary(
+  org: BillingOrg,
+): Promise<BillingSummary | null> {
+  if (!org.stripeSubscriptionId) return null;
+
+  const stripe = getStripe();
+  const sub = await stripe.subscriptions.retrieve(org.stripeSubscriptionId, {
+    expand: ["discounts.source.coupon"],
+  });
+
+  const iso = (unix: number | null | undefined) =>
+    typeof unix === "number" ? new Date(unix * 1000).toISOString() : null;
+
+  // The first coupon-backed discount. A comp is a single 100%-off coupon; each
+  // discount's coupon lives at discount.source.coupon in this API version.
+  let discount: BillingSummary["discount"] = null;
+  for (const d of sub.discounts) {
+    if (typeof d === "string") continue; // unexpanded id — skip defensively
+    const coupon = d.source?.coupon;
+    if (coupon && typeof coupon !== "string") {
+      discount = {
+        name: coupon.name,
+        percentOff: coupon.percent_off,
+        amountOffCents: coupon.amount_off,
+        endsAt: iso(d.end),
+      };
+      break;
+    }
+  }
+
+  return {
+    status: sub.status,
+    currentPeriodEnd: iso(sub.items.data[0]?.current_period_end),
+    cancelAtPeriodEnd: sub.cancel_at_period_end,
+    discount,
+  };
+}
+
 /** Resolve a customer id from Stripe's `string | Customer | DeletedCustomer`. */
 function customerIdOf(
   customer: string | Stripe.Customer | Stripe.DeletedCustomer | null,

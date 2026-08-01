@@ -8,6 +8,7 @@ import {
   createCheckoutUrl,
   createPortalUrl,
   getBillingOrgById,
+  getBillingSummary,
 } from "../../lib/billing.js";
 import { isBillingConfigured } from "../../lib/stripe.js";
 import { statusEntitlesPro } from "../../lib/entitlement.js";
@@ -34,6 +35,28 @@ registerComponentSchema(
   z.object({ url: z.string().url().describe("The Stripe URL to redirect to.") }),
 );
 
+registerComponentSchema(
+  "BillingSummaryResponse",
+  z.object({
+    summary: z
+      .object({
+        status: z.string(),
+        currentPeriodEnd: z.string().nullable(),
+        cancelAtPeriodEnd: z.boolean(),
+        discount: z
+          .object({
+            name: z.string().nullable(),
+            percentOff: z.number().nullable(),
+            amountOffCents: z.number().nullable(),
+            endsAt: z.string().nullable(),
+          })
+          .nullable(),
+      })
+      .nullable()
+      .describe("The subscription summary, or null when there is no subscription."),
+  }),
+);
+
 registerRoute({
   method: "post",
   path: "/v1/orgs/{org}/billing/checkout",
@@ -49,6 +72,24 @@ registerRoute({
       schemaName: "BillingSessionResponse",
     },
     403: { description: "Only owners and admins can manage billing." },
+    503: { description: "Billing is not configured on this deployment." },
+  },
+});
+
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/billing/summary",
+  summary: "Get the billing summary",
+  description:
+    "The organization's live subscription summary (status, period end, and any active discount) read from Stripe. Any member may read it; it powers the billing page, including the clear indication that a comped organization carrying a 100%-off coupon is not being charged. Returns null when the organization has no Stripe subscription.",
+  tags: [BILLING_TAG],
+  auth: true,
+  paramDescriptions: billingParams,
+  responses: {
+    200: {
+      description: "The subscription summary (or null).",
+      schemaName: "BillingSummaryResponse",
+    },
     503: { description: "Billing is not configured on this deployment." },
   },
 });
@@ -100,6 +141,26 @@ billing_.post("/checkout", async (c) => {
   } catch (err) {
     console.error("[billing] checkout failed:", err);
     return jsonError(c, 502, "Could not start checkout. Please try again.");
+  }
+});
+
+billing_.get("/summary", async (c) => {
+  // A read any member can make (the billing page shows it). allowLocked so a locked
+  // or comped org can still see why. No billing-manager gate — it exposes no secret,
+  // just the plan's public-to-the-org state.
+  const ctx = await resolveOrg(c, { allowLocked: true });
+  if (ctx instanceof Response) return ctx;
+  if (!isBillingConfigured())
+    return jsonError(c, 503, "Billing is not available on this deployment.");
+
+  const org = await getBillingOrgById(ctx.orgId);
+  if (!org) return jsonError(c, 404, "Organization not found.");
+
+  try {
+    return c.json({ summary: await getBillingSummary(org) });
+  } catch (err) {
+    console.error("[billing] summary failed:", err);
+    return jsonError(c, 502, "Could not load the billing summary. Please try again.");
   }
 });
 

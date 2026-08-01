@@ -5,8 +5,8 @@ import { isIngestCapped, type AllowanceStatus } from "./allowance.js";
 
 /**
  * The events-allowance status: proves we correctly SEE when an org is over its
- * plan's included events, and that the enforcement predicate only blocks under the
- * exact conditions we intend. The status math runs against the real rollups
+ * plan's included events, and that the refuse predicate only blocks under the
+ * exact conditions we intend. The status math runs against the real atomic counter
  * (DB-gated); the block predicate is pure and always runs.
  */
 
@@ -22,14 +22,14 @@ describe("isIngestCapped", () => {
     overageEvents: 1_000_000,
     isOver: true,
     overageCents: 0,
-    enforcement: "enforce",
+    hardCap: true,
   };
 
-  it("blocks only an enforced, over, hard-cap plan", () => {
+  it("blocks only a hard-cap 'cap' plan that is over", () => {
     expect(isIngestCapped(base)).toBe(true);
   });
-  it("never blocks while enforcement is off (the default)", () => {
-    expect(isIngestCapped({ ...base, enforcement: "off" })).toBe(false);
+  it("never blocks a warn-first plan (hardCap off — every plan today)", () => {
+    expect(isIngestCapped({ ...base, hardCap: false })).toBe(false);
   });
   it("never blocks a billing plan (it meters overage instead)", () => {
     expect(isIngestCapped({ ...base, overageMode: "bill" })).toBe(false);
@@ -61,17 +61,17 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
   afterEach(async () => {
     if (!db) return;
     await withOrg(orgId, (tx) =>
-      tx.delete(t.usageEventRollups).where(eq(t.usageEventRollups.organizationId, orgId)),
+      tx.delete(t.usageCounters).where(eq(t.usageCounters.organizationId, orgId)),
     );
   });
 
-  // Seed events dated within the current period, so the period sum picks them up.
+  // Seed the atomic counter for the current period — the source eventsUsedInPeriod
+  // now reads (usageEventRollups is only the per-day picture).
   const seed = (count: number) =>
     withOrg(orgId, (tx) =>
-      tx.insert(t.usageEventRollups).values({
+      tx.insert(t.usageCounters).values({
         organizationId: orgId,
-        day: currentBillingPeriod().to,
-        source: "flags.exposure",
+        period: currentBillingPeriod().from.slice(0, 7),
         count,
       }),
     );
@@ -89,11 +89,13 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
       isOver: false,
       overageCents: 0,
       overageMode: "cap",
-      enforcement: "off",
+      hardCap: true,
     });
+    // Under the cap: not over, so ingest is not refused even though Hobby hard-caps.
+    expect(isIngestCapped(s)).toBe(false);
   });
 
-  it("hobby over the cap is over, but never charged (cap)", async () => {
+  it("hobby over the cap is over, never charged, and refuses ingest (hard cap)", async () => {
     await seed(3_000_000);
     const s = await statusFor("hobby");
     expect(s).toMatchObject({
@@ -102,7 +104,11 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
       overageEvents: 1_000_000,
       isOver: true,
       overageCents: 0,
+      hardCap: true,
     });
+    // Hobby hard-caps: over the allowance, event ingest is refused (a 403 on the
+    // exposures route). Flag evaluation is unaffected — only metering stops.
+    expect(isIngestCapped(s)).toBe(true);
   });
 
   it("pro over 5M projects an overage charge at the events rate", async () => {

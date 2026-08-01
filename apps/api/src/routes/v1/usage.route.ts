@@ -71,7 +71,7 @@ const usageResponseSchema = z.object({
   }),
   // The events-allowance picture for the CURRENT month (independent of the chart
   // range above): what the plan includes, what's used, and whether the org is over.
-  // Measured always; enforced only when `entitlement.enforcement` is "enforce".
+  // Measured always; ingest is only refused when `entitlement.hardCap` is true.
   entitlement: z.object({
     plan: z.string(),
     overageMode: z.enum(["cap", "bill", "contract"]),
@@ -82,7 +82,7 @@ const usageResponseSchema = z.object({
     overageEvents: z.number(),
     isOver: z.boolean(),
     overageCents: z.number(),
-    enforcement: z.enum(["off", "enforce"]),
+    hardCap: z.boolean(),
   }),
 });
 
