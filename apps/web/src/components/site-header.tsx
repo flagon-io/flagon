@@ -16,9 +16,9 @@ const NAV_ITEMS: readonly {
   /** Render inert with a "Soon" badge (a surface we are building toward). */
   soon?: boolean;
 }[] = [
-  { label: "Products", soon: true },
+  { label: "Products", href: "/products" },
   { label: "Pricing", href: "/pricing" },
-  { label: "Enterprise", soon: true },
+  { label: "Enterprise", href: "/enterprise" },
   { label: "Docs", href: "/docs" },
 ];
 

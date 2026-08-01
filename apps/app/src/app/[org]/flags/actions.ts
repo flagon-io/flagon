@@ -3,13 +3,11 @@
 import { revalidatePath } from "next/cache";
 import {
   archiveFlag,
-  createEntity,
   createFlag,
   createRule,
   createSdkKey,
   createSegment,
   createVariant,
-  deleteEntity,
   deleteFlag,
   deleteRule,
   deleteSegment,
@@ -333,22 +331,3 @@ export async function deleteSegmentAction(
   return {};
 }
 
-export async function createEntityAction(
-  slug: string,
-  body: { key: string; label: string; attributes: { key: string; dataType: string }[] },
-): Promise<{ error?: string }> {
-  const res = await createEntity(slug, body);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/flags/entities`);
-  return {};
-}
-
-export async function deleteEntityAction(
-  slug: string,
-  key: string,
-): Promise<{ error?: string }> {
-  const res = await deleteEntity(slug, key);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/flags/entities`);
-  return {};
-}

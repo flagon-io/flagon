@@ -585,54 +585,6 @@ export async function deleteSegment(slug: string, key: string) {
   );
 }
 
-// --- Entities ----------------------------------------------------------------
-export type EntityAttribute = { key: string; dataType: string; labels: string[] | null };
-
-export type Entity = {
-  id: string;
-  key: string;
-  label: string;
-  attributes: EntityAttribute[];
-  createdAt: string;
-};
-
-export async function listEntities(slug: string): Promise<Entity[]> {
-  const res = await apiFetch(`/v1/orgs/${slug}/entities`);
-  if (!res.ok) return [];
-  return (await res.json()) as Entity[];
-}
-
-/**
- * Distinct attribute names across an org's entities, sorted, for autocompleting
- * the targeting-rule attribute field. This is what makes Entities pay off: the
- * attributes you define show up as suggestions when you build rules.
- */
-export function entityAttributeNames(entities: Entity[]): string[] {
-  const names = new Set<string>();
-  for (const entity of entities) {
-    for (const attr of entity.attributes) names.add(attr.key);
-  }
-  return [...names].sort();
-}
-
-export async function createEntity(
-  slug: string,
-  body: { key: string; label: string; attributes: { key: string; dataType: string }[] },
-) {
-  return unwrap<{ entity: Entity }>(
-    await apiFetch(`/v1/orgs/${slug}/entities`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  );
-}
-
-export async function deleteEntity(slug: string, key: string) {
-  return unwrap<{ ok: true }>(
-    await apiFetch(`/v1/orgs/${slug}/entities/${key}`, { method: "DELETE" }),
-  );
-}
-
 export async function createRule(
   slug: string,
   key: string,

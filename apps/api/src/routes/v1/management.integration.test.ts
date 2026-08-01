@@ -57,7 +57,6 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
     await db.delete(schema.sdkKeys).where(eq(schema.sdkKeys.organizationId, orgId));
     await db.delete(schema.flags).where(eq(schema.flags.organizationId, orgId));
     await db.delete(schema.segments).where(eq(schema.segments.organizationId, orgId));
-    await db.delete(schema.entities).where(eq(schema.entities.organizationId, orgId));
     await db.delete(schema.environments).where(eq(schema.environments.organizationId, orgId));
     await db.delete(authTables.accessTokens).where(eq(authTables.accessTokens.organizationId, orgId));
     await db.delete(authTables.organizations).where(eq(authTables.organizations.id, orgId));

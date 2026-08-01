@@ -95,7 +95,6 @@ export type RateLimitRow = typeof rateLimits.$inferSelect;
  *          ├─ flag_environments ──── flag_rules   (per-env config + targeting)
  *          └─ flag_revisions         (audit log)
  *   environments ── sdk_keys         (per-env client credentials)
- *   entities ── entity_attributes    (the targeting-context schema)
  *   segments                          (reusable targeting condition groups)
  */
 
@@ -234,50 +233,9 @@ export const flagEnvironments = pgTable(
 );
 
 /**
- * The targeting-context schema: the kinds of subject a flag can be evaluated for
- * (user, team, ...) and their typed attributes. Rules and segments reference
- * these; an SDK sends a matching evaluation context.
- */
-export const entities = pgTable(
-  "entities",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    key: text("key").notNull(),
-    label: text("label").notNull(),
-    ...timestamps,
-  },
-  (t) => [
-    uniqueIndex("entities_org_key_key").on(t.organizationId, t.key),
-    index("entities_org_idx").on(t.organizationId),
-  ],
-);
-
-export const entityAttributes = pgTable(
-  "entity_attributes",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    entityId: uuid("entity_id")
-      .notNull()
-      .references(() => entities.id, { onDelete: "cascade" }),
-    key: text("key").notNull(),
-    dataType: text("data_type").notNull().default("string"),
-    /** Optional enum labels for the attribute's known values. */
-    labels: jsonb("labels"),
-    sortOrder: integer("sort_order").notNull().default(0),
-    ...timestamps,
-  },
-  (t) => [
-    uniqueIndex("entity_attributes_entity_key_key").on(t.entityId, t.key),
-    index("entity_attributes_org_idx").on(t.organizationId),
-  ],
-);
-
-/**
  * Reusable targeting condition groups. A rule can reference a segment instead of
  * inlining conditions, so "beta users" is defined once and reused across flags.
- * `conditions` is a jsonb predicate tree over entity attributes.
+ * `conditions` is a jsonb predicate tree over context attributes an SDK sends.
  */
 export const segments = pgTable(
   "segments",
@@ -631,8 +589,6 @@ export type NewFlag = typeof flags.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
 export type FlagVariant = typeof flagVariants.$inferSelect;
 export type FlagEnvironment = typeof flagEnvironments.$inferSelect;
-export type Entity = typeof entities.$inferSelect;
-export type EntityAttribute = typeof entityAttributes.$inferSelect;
 export type Segment = typeof segments.$inferSelect;
 export type FlagRule = typeof flagRules.$inferSelect;
 export type SdkKey = typeof sdkKeys.$inferSelect;
@@ -652,8 +608,6 @@ export const schema = {
   environments,
   flagVariants,
   flagEnvironments,
-  entities,
-  entityAttributes,
   segments,
   flagRules,
   sdkKeys,

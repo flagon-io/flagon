@@ -16,7 +16,6 @@ const meta: Meta<typeof EnvCard> = {
     variants: boolVariants,
     segments,
     isBoolean: true,
-    attributeSuggestions: ["plan", "accountId", "country"],
     allEnvironments,
   },
 };

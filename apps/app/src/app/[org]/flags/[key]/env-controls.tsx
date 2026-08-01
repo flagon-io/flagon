@@ -92,7 +92,6 @@ export function EnvCard({
   segments,
   isBoolean,
   readOnly = false,
-  attributeSuggestions,
   allEnvironments,
 }: {
   slug: string;
@@ -102,8 +101,6 @@ export function EnvCard({
   segments: Segment[];
   isBoolean: boolean;
   readOnly?: boolean;
-  /** Attribute names to autocomplete in targeting rules, from the org's Entities. */
-  attributeSuggestions?: string[];
   /** Every environment (for the Reuse-source picker); the current one is filtered out. */
   allEnvironments: { key: string; name: string }[];
 }) {
@@ -289,7 +286,6 @@ export function EnvCard({
               isBoolean={isBoolean}
               enabled={env.enabled}
               readOnly={readOnly}
-              attributeSuggestions={attributeSuggestions}
               onSaved={applyEnv}
             />
           ) : (
@@ -470,7 +466,6 @@ function RulesEditor({
   isBoolean,
   enabled,
   readOnly = false,
-  attributeSuggestions,
   onSaved,
 }: {
   slug: string;
@@ -485,7 +480,6 @@ function RulesEditor({
   /** The env's current enabled state, so a multivariate save can self-enable. */
   enabled: boolean;
   readOnly?: boolean;
-  attributeSuggestions?: string[];
   onSaved: (env?: FlagEnvConfig) => void;
 }) {
   const [pending, start] = useTransition();
@@ -657,7 +651,6 @@ function RulesEditor({
           variants={variants}
           segments={segments}
           isBoolean={isBoolean}
-          attributeSuggestions={attributeSuggestions}
           onChange={(patch) => updateDraft(d.uid, patch)}
           onRemove={() => removeDraft(d.uid)}
         />
@@ -741,7 +734,6 @@ function RuleCard({
   variants,
   segments,
   isBoolean,
-  attributeSuggestions,
   onChange,
   onRemove,
 }: {
@@ -750,7 +742,6 @@ function RuleCard({
   variants: FlagVariant[];
   segments: Segment[];
   isBoolean: boolean;
-  attributeSuggestions?: string[];
   onChange: (patch: Partial<RuleDraft>) => void;
   onRemove: () => void;
 }) {
@@ -811,7 +802,6 @@ function RuleCard({
           segments={segments}
           joiner="And"
           leadWord=""
-          attributeSuggestions={attributeSuggestions}
         />
       </div>
       <div className="border-t border-white/8 p-3">

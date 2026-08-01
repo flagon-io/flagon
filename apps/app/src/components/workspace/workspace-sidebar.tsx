@@ -14,7 +14,6 @@ import {
   ChevronRight,
   CreditCard,
   FileCog,
-  Flag,
   FlaskConical,
   Globe,
   KeyRound,
@@ -32,6 +31,7 @@ import {
   SlidersHorizontal,
   Split,
   SquareCode,
+  ToggleRight,
   Users,
   Workflow,
   type LucideIcon,
@@ -91,17 +91,16 @@ function buildNav(base: string): {
   const flags: NavArea = {
     key: "flags",
     label: "Flags",
-    icon: Flag,
+    icon: ToggleRight,
     href: `${base}/flags`,
     groups: [
       {
         // The flag-tied surfaces (flags, plus the segments and experiments built
         // on them) and Entities, the subjects they evaluate against.
         items: [
-          { label: "Flags", icon: Flag, href: `${base}/flags` },
+          { label: "Flags", icon: ToggleRight, href: `${base}/flags` },
           { label: "Segments", icon: Split, href: `${base}/flags/segments` },
           { label: "Experiments", icon: FlaskConical, soon: true },
-          { label: "Entities", icon: Users, href: `${base}/flags/entities` },
         ],
       },
       {
@@ -128,7 +127,7 @@ function buildNav(base: string): {
           },
           {
             label: "OpenFeature",
-            icon: ArrowUpRight,
+            icon: ToggleRight,
             href: "https://openfeature.dev",
             external: true,
           },
@@ -528,7 +527,7 @@ function NavExternal({
         {!collapsed ? (
           <>
             <span className="truncate">{label}</span>
-            <ArrowUpRight className="ml-auto size-3.5 shrink-0 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
+            <ArrowUpRight className="ml-auto size-3.5 shrink-0 text-zinc-600 transition-colors group-hover:text-zinc-400" />
           </>
         ) : null}
       </a>

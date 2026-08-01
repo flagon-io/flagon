@@ -4,10 +4,8 @@ import { ArrowLeft } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import {
-  entityAttributeNames,
   getFlag,
   getFlagUsage,
-  listEntities,
   listMembers,
   listSegments,
 } from "@/lib/flags-api";
@@ -35,16 +33,14 @@ export default async function FlagDetail({
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
 
-  const [detail, segments, members, usage, entities] = await Promise.all([
+  const [detail, segments, members, usage] = await Promise.all([
     getFlag(slug, key),
     listSegments(slug),
     listMembers(slug),
     getFlagUsage(slug, key),
-    listEntities(slug),
   ]);
   if (!detail) notFound();
 
-  const attributeSuggestions = entityAttributeNames(entities);
   const isBoolean = detail.flag.type === "boolean";
   const archived = Boolean(detail.flag.archivedAt);
 
@@ -118,7 +114,6 @@ export default async function FlagDetail({
                   segments={segments}
                   isBoolean={isBoolean}
                   readOnly={archived}
-                  attributeSuggestions={attributeSuggestions}
                   allEnvironments={detail.environments.map((e) => ({
                     key: e.key,
                     name: e.name,

@@ -127,6 +127,13 @@
       "when": 1786400000000,
       "tag": "0017_flag_env_reuse",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786500000000,
+      "tag": "0018_drop_entities",
+      "breakpoints": true
     }
   ]
 }
