@@ -23,7 +23,7 @@ function AlignedRowDemo() {
   const [seg, setSeg] = useState("on");
   const [sel, setSel] = useState("red");
   return (
-    <div className="flex w-[520px] flex-col gap-4">
+    <div className="flex w-130 flex-col gap-4">
       <div className="flex items-center gap-2">
         <Input placeholder="Text input" className="flex-1" />
         <Select
@@ -52,8 +52,16 @@ function AlignedRowDemo() {
         options={[
           { value: "off", label: "Off" },
           { value: "on", label: "On" },
-          { value: "rules", label: <Crosshair className="size-4" />, title: "Rules" },
-          { value: "reuse", label: <RefreshCw className="size-4" />, title: "Reuse" },
+          {
+            value: "rules",
+            label: <Crosshair className="size-4" />,
+            title: "Rules",
+          },
+          {
+            value: "reuse",
+            label: <RefreshCw className="size-4" />,
+            title: "Reuse",
+          },
         ]}
       />
     </div>
@@ -63,7 +71,7 @@ function AlignedRowDemo() {
 function TagsDemo() {
   const [tags, setTags] = useState<string[]>(["pro", "enterprise"]);
   return (
-    <div className="w-[420px]">
+    <div className="w-105">
       <TagsInput value={tags} onChange={setTags} placeholder="Add a value…" />
     </div>
   );
@@ -78,7 +86,7 @@ export const AlignedRow: Story = { render: () => <AlignedRowDemo /> };
 
 export const Inputs: Story = {
   render: () => (
-    <div className="flex w-[420px] flex-col gap-4">
+    <div className="flex w-105 flex-col gap-4">
       <Field label="Name">
         <Input placeholder="my-flag" />
       </Field>

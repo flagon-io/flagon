@@ -2,7 +2,7 @@
 
 Flagon is one API with a couple of thin visual layers on top of it.
 
-```
+```sh
 apps/
   web/   Next.js marketing site      → flagon.io / www.flagon.io
   app/   Next.js product app         → app.flagon.io
