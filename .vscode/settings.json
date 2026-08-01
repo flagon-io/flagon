@@ -1,0 +1,35 @@
+{
+  // --- Tailwind v4 -----------------------------------------------------------
+  // Tailwind v4 is CSS-first: @theme / @tailwind / @source / @apply / @utility /
+  // @custom-variant are real directives that VS Code's built-in CSS/SCSS/LESS
+  // linter does not recognize, so it flags every one as "Unknown at rule". These
+  // are false positives; silence them (the Tailwind CSS IntelliSense extension
+  // understands the directives and still validates them properly).
+  "css.lint.unknownAtRules": "ignore",
+  "scss.lint.unknownAtRules": "ignore",
+  "less.lint.unknownAtRules": "ignore",
+  // Autocomplete Tailwind classes inside className strings and template literals.
+  "editor.quickSuggestions": {
+    "strings": "on"
+  },
+
+  // --- Tailwind lint severity ------------------------------------------------
+  // Surface Tailwind class problems as ERRORS in-editor, not soft hints
+  // (provided by the Tailwind CSS IntelliSense extension). Note: the canonical-
+  // class *suggestion* (data-[x]: -> data-x:) is a code action, not a diagnostic,
+  // so it has no severity — but these real lint rules do, and become errors.
+  "tailwindCSS.lint.cssConflict": "error",
+  "tailwindCSS.lint.recommendedVariantOrder": "error",
+  "tailwindCSS.lint.invalidTailwindDirective": "error",
+  "tailwindCSS.lint.invalidApply": "error",
+  "tailwindCSS.lint.invalidVariant": "error",
+  "tailwindCSS.lint.invalidConfigPath": "error",
+  "tailwindCSS.lint.invalidScreen": "error",
+
+  // --- TypeScript ------------------------------------------------------------
+  // Use the repo's PINNED TypeScript (6.x — see the version-pin note) instead of
+  // VS Code's bundled compiler, so the editor's type errors match the CLI (tsc)
+  // and the production build exactly, with no phantom in-editor-only diagnostics.
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "js/ts.tsdk.promptToUseWorkspaceVersion": true
+}

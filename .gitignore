@@ -29,6 +29,7 @@ npm-debug.log*
 # editor
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
 
 # local working notes (not for the repo)
 .notes/
