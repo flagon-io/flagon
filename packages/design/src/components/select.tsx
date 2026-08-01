@@ -1,6 +1,7 @@
 "use client";
 
 import { Select as S } from "radix-ui";
+import { cn } from "../cn";
 
 /**
  * A styled, accessible select built on Radix. Replaces the native <select> so
@@ -30,12 +31,12 @@ export function Select({
     <S.Root value={value} onValueChange={onValueChange} disabled={disabled}>
       <S.Trigger
         aria-label={ariaLabel}
-        className={[
-          "flex h-10 items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 px-3 text-sm text-zinc-100 outline-none transition-colors",
-          "focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20",
-          "disabled:cursor-not-allowed disabled:opacity-60 data-placeholder:text-zinc-500",
-          className ?? "",
-        ].join(" ")}
+        className={cn(
+          "h-10 gap-2 rounded-md border-white/10 bg-white/5 px-3 text-sm text-zinc-100 flex items-center justify-between border transition-colors outline-none",
+          "focus:border-teal-500/50 focus:ring-teal-500/20 focus:ring-2",
+          "data-placeholder:text-zinc-500 disabled:cursor-not-allowed disabled:opacity-60",
+          className,
+        )}
       >
         <S.Value placeholder={placeholder} />
         <S.Icon className="text-zinc-500">

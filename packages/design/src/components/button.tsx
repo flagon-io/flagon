@@ -2,6 +2,7 @@
 
 import { forwardRef } from "react";
 import type { ButtonHTMLAttributes } from "react";
+import { cn } from "../cn";
 
 /**
  * The one button. Its default height (`h-10`, 40px) matches the form primitives
@@ -39,14 +40,14 @@ export const Button = forwardRef<
     <button
       ref={ref}
       type={type ?? "button"}
-      className={[
-        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md outline-none transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-teal-500/30",
+      className={cn(
+        "gap-1.5 rounded-md inline-flex shrink-0 items-center justify-center transition-colors outline-none",
+        "focus-visible:ring-teal-500/30 focus-visible:ring-2",
         "disabled:cursor-not-allowed disabled:opacity-50",
         SIZES[size],
         VARIANTS[variant],
-        className ?? "",
-      ].join(" ")}
+        className,
+      )}
       {...props}
     />
   );

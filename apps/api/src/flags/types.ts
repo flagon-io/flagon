@@ -68,12 +68,36 @@ export type Predicate =
 export type RolloutEntry = { variant: string; weight: number };
 
 /**
- * What a matched rule serves: a single variant, or a weighted split across
- * variants bucketed deterministically by `bucketBy` (defaults to targetingKey).
+ * A progressive (scheduled) rollout: over time, `variant` is served to a growing
+ * percentage of subjects (the rest get `fallback`), bucketed deterministically so a
+ * subject already rolled in stays in. The current percentage is read from `steps`
+ * against the elapsed time since `start` — hold `percent`% for `durationMs`, then
+ * step to the next; past the final step it's fully rolled out (100%). Evaluated
+ * purely from the context's injected `$currentTime`, so it stays deterministic.
+ */
+export type ProgressiveRollout = {
+  variant: string;
+  fallback: string;
+  bucketBy?: string;
+  /** Epoch ms the rollout began (or begins — a future start serves 0% until then). */
+  start: number;
+  steps: { percent: number; durationMs: number }[];
+};
+
+/**
+ * What a matched rule (or the default) serves: a single variant, a weighted split
+ * across variants, or a progressive rollout — all bucketed deterministically by
+ * `bucketBy` (defaults to targetingKey).
+ *
+ * `fallback` on a rollout is the variant served when the subject can't be bucketed
+ * (a non-default `bucketBy` attribute is absent from the context) — otherwise every
+ * un-attributed subject would hash to the same slice. Omitted → legacy behavior
+ * (bucket on the missing value).
  */
 export type Serve =
   | { variant: string }
-  | { rollout: RolloutEntry[]; bucketBy?: string };
+  | { rollout: RolloutEntry[]; bucketBy?: string; fallback?: string }
+  | { progressive: ProgressiveRollout };
 
 export type RuleConfig = {
   id?: string;

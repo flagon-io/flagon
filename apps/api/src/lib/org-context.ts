@@ -47,6 +47,21 @@ export async function orgIdBySlug(slug: string): Promise<string | null> {
   return row?.id ?? null;
 }
 
+/**
+ * The org's current plan (hobby | pro | enterprise), or the default when unknown.
+ * organizations is an auth-layer table (no RLS), safe to read on the bare client.
+ */
+export async function orgPlan(orgId: string): Promise<string> {
+  const row = (
+    await db
+      .select({ plan: organizations.plan })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1)
+  )[0];
+  return row?.plan ?? "hobby";
+}
+
 const MANAGER_ROLES = new Set(["owner", "admin"]);
 
 // Read-only org roles: they can SEE everything in the org but change nothing.

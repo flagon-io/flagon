@@ -99,6 +99,9 @@ const envConfig = z
     // percentage rollout. A single-variant serve is mirrored to defaultVariantId
     // and clears the rollout; a rollout is stored as default_serve.
     defaultServe: serveSchema.optional(),
+    // The "Reuse" mode: an environment key whose config this env inherits, or null
+    // to stop reusing and go back to this env's own config.
+    reuseSourceEnvironmentKey: z.string().nullable().optional(),
   })
   .strict();
 
@@ -404,6 +407,7 @@ registerComponentSchema(
         defaultVariantKey: z.string().nullable(),
         defaultServe: z.unknown(),
         offVariantKey: z.string().nullable(),
+        reuseSourceEnvironmentKey: z.string().nullable(),
         rules: z.array(
           z.object({
             id: z.string(),
@@ -741,6 +745,8 @@ flags_.get("/:key", async (c) => {
 
   const keyOf = (id: string | null) =>
     id ? (data.variants.find((v) => v.id === id)?.key ?? null) : null;
+  // Resolve an environment id back to its key, for the "Reuse" mode's source.
+  const envKeyById = new Map(data.envs.map((e) => [e.id, e.key]));
 
   return c.json({
     flag: {
@@ -777,6 +783,11 @@ flags_.get("/:key", async (c) => {
         // default variant. The console renders its default ServePicker from this.
         defaultServe: fe?.defaultServe ?? null,
         offVariantKey: keyOf(fe?.offVariantId ?? null),
+        // The "Reuse" mode's source environment (this env inherits its config),
+        // or null when this env uses its own config.
+        reuseSourceEnvironmentKey: fe?.reuseSourceEnvironmentId
+          ? (envKeyById.get(fe.reuseSourceEnvironmentId) ?? null)
+          : null,
         rules: rules.map((r) => ({
           id: r.id,
           priority: r.priority,
@@ -964,6 +975,19 @@ flags_.patch("/:key/environments/:envKey", async (c) => {
         patch.defaultServe = serve as JsonValue;
       }
     }
+    if (parsed.data.reuseSourceEnvironmentKey !== undefined) {
+      const src = parsed.data.reuseSourceEnvironmentKey;
+      if (src === null) {
+        patch.reuseSourceEnvironmentId = null;
+      } else {
+        const srcEnv = (
+          await tx.select({ id: environments.id }).from(environments).where(eq(environments.key, src)).limit(1)
+        )[0];
+        // Must be a real, different environment — an env can't reuse itself.
+        if (!srcEnv || srcEnv.id === env.id) return "bad-reuse" as const;
+        patch.reuseSourceEnvironmentId = srcEnv.id;
+      }
+    }
 
     const [row] = await tx
       .update(flagEnvironments)
@@ -1007,6 +1031,16 @@ flags_.patch("/:key/environments/:envKey", async (c) => {
     ) {
       changes.push("Default: percentage rollout");
     }
+    if (
+      parsed.data.reuseSourceEnvironmentKey !== undefined &&
+      patch.reuseSourceEnvironmentId !== oldFe?.reuseSourceEnvironmentId
+    ) {
+      changes.push(
+        parsed.data.reuseSourceEnvironmentKey
+          ? `Reuse: ${parsed.data.reuseSourceEnvironmentKey}`
+          : "Reuse: off",
+      );
+    }
 
     await recordRevision(tx, {
       organizationId: ctx.orgId,
@@ -1025,5 +1059,7 @@ flags_.patch("/:key/environments/:envKey", async (c) => {
     return jsonError(c, 404, "Environment not found for this flag.");
   if (outcome === "bad-variant")
     return jsonError(c, 422, "Referenced variant does not exist on this flag.");
+  if (outcome === "bad-reuse")
+    return jsonError(c, 422, "Reuse source must be a different, existing environment.");
   return c.json({ ok: true });
 });

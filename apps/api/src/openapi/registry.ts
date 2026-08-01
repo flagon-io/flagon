@@ -58,6 +58,12 @@ export type RouteSpec = {
    * never drift from the route; this only supplies nicer text.
    */
   paramDescriptions?: Record<string, string>;
+  /**
+   * Request header parameters the operation reads (e.g. `Idempotency-Key`). Path
+   * parameters are derived from the path; headers can't be, so they're declared
+   * here. All are string-typed; `required` defaults to false.
+   */
+  headerParams?: { name: string; description?: string; required?: boolean }[];
   request?: { body?: z.ZodType };
   responses: Partial<Record<number, RouteResponse>>;
 };
@@ -264,10 +270,10 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
       for (const tag of route.tags) usedTags.add(tag);
     }
 
-    // Path parameters are derived from the path so they can't drift from it.
-    const params = pathParams(route.path);
-    if (params.length) {
-      operation.parameters = params.map((name) => ({
+    // Path parameters are derived from the path so they can't drift from it;
+    // header parameters (which can't be) are declared explicitly.
+    const parameters: Record<string, unknown>[] = pathParams(route.path).map(
+      (name) => ({
         name,
         in: "path",
         required: true,
@@ -275,8 +281,18 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
         ...(route.paramDescriptions?.[name]
           ? { description: route.paramDescriptions[name] }
           : {}),
-      }));
+      }),
+    );
+    for (const h of route.headerParams ?? []) {
+      parameters.push({
+        name: h.name,
+        in: "header",
+        required: h.required ?? false,
+        schema: { type: "string" },
+        ...(h.description ? { description: h.description } : {}),
+      });
     }
+    if (parameters.length) operation.parameters = parameters;
 
     const scheme: SecurityName | undefined =
       route.security === "sdkKey"

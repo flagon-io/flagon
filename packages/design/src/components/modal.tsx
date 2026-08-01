@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
+import { cn } from "../cn";
 
 /**
  * The house modal. Structure is fixed on purpose: a header and a footer, each
@@ -44,11 +45,11 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
-        className={[
-          "flex max-h-[84vh] w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-zinc-950 shadow-2xl",
+        className={cn(
+          "rounded-xl border-white/10 bg-zinc-950 shadow-2xl flex max-h-[84vh] w-full flex-col overflow-hidden border",
           SIZES[size],
-          className ?? "",
-        ].join(" ")}
+          className,
+        )}
       >
         {children}
       </div>
@@ -93,7 +94,7 @@ export function ModalBody({
   className?: string;
 }) {
   return (
-    <div className={["flex-1 overflow-y-auto px-6 py-5", className ?? ""].join(" ")}>
+    <div className={cn("px-6 py-5 flex-1 overflow-y-auto", className)}>
       {children}
     </div>
   );

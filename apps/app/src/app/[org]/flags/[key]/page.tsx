@@ -119,6 +119,10 @@ export default async function FlagDetail({
                   isBoolean={isBoolean}
                   readOnly={archived}
                   attributeSuggestions={attributeSuggestions}
+                  allEnvironments={detail.environments.map((e) => ({
+                    key: e.key,
+                    name: e.name,
+                  }))}
                 />
               ))}
             </div>

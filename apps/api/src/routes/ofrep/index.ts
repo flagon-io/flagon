@@ -8,7 +8,14 @@ import {
 } from "../../flags/eval-cache.js";
 import { evaluate } from "../../flags/evaluate.js";
 import { recordEvaluations, type UsageEntry } from "../../flags/usage.js";
-import { recordEvents } from "../../usage/events.js";
+import { compactUsageEvents, ingestEvents } from "../../usage/events.js";
+import {
+  eventsAllowanceStatus,
+  eventsEnforcement,
+  isIngestCapped,
+} from "../../usage/allowance.js";
+import { withOrg } from "../../db/tenant.js";
+import { orgPlan } from "../../lib/org-context.js";
 import { createDurableEvalLimiter } from "../../lib/durable-eval-limiter.js";
 import { rateLimit, tooManyRequests } from "../../lib/rate-limit.js";
 import { clientIp } from "../../lib/http.js";
@@ -288,12 +295,19 @@ const MAX_EXPOSURES_PER_REQUEST = 1000;
  *
  * A flag CHECK is free (that is the wedge); an EXPOSURE is the analytics event a
  * customer chooses to send when they want usage or experiment analysis on a
- * check. Same SDK-key auth and rate limiter as
- * evaluation; the body is a batch of exposures and we count them into the daily
- * rollups (usage_event_rollups) off the hot path. We store only the count, not
- * the exposure detail. Best-effort: recording never fails the request.
+ * check. Same client-key auth and rate limiter as evaluation; the body is a batch
+ * of exposures.
+ *
+ * Because this is the money meter it is DURABLE, not best-effort: the batch is
+ * written in-band as one immutable, idempotent receipt (usage_events), so a
+ * network retry never double-counts and a failed write surfaces as an error the
+ * client can safely retry. Send an `Idempotency-Key` header to make retries
+ * exactly-once; without one each request is a distinct batch. We store only the
+ * count, not the exposure detail. Compaction into the daily rollups runs off the
+ * hot path.
  *
  *   POST /ofrep/v1/exposures   body: { "events": [ { "key": "my-flag", ... } ] }
+ *   Header (optional):         Idempotency-Key: <stable per-batch id>
  */
 ofrep.post("/v1/exposures", async (c) => {
   const identity = await requireSdkKey(c);
@@ -323,11 +337,45 @@ ofrep.post("/v1/exposures", async (c) => {
     );
   }
 
-  if (events.length > 0) {
-    await defer(c, recordEvents(identity.organizationId, events.length, { source: "flags.exposure" }));
+  if (events.length === 0) return c.json({ recorded: 0, duplicate: false }, 202);
+
+  // Plan-cap enforcement, GATED. Off by default (EVENTS_ENFORCEMENT=off): we only
+  // MEASURE against the allowance (surfaced on the usage page) and never block, so
+  // a Hobby org past its cap keeps recording. When flipped to "enforce", a hard-cap
+  // plan over its allowance is refused here. Skipped entirely when off, so there is
+  // no hot-path cost until billing is actually turned on.
+  if (eventsEnforcement() === "enforce") {
+    const plan = await orgPlan(identity.organizationId);
+    const status = await withOrg(identity.organizationId, (tx) =>
+      eventsAllowanceStatus(tx, plan),
+    );
+    if (isIngestCapped(status)) {
+      return c.json(
+        {
+          errorCode: "PLAN_LIMIT_REACHED",
+          errorDetails: `This organization has used its ${status.includedEvents.toLocaleString()} included events for the current period. Upgrade to record more.`,
+          includedEvents: status.includedEvents,
+          usedEvents: status.usedEvents,
+        },
+        403,
+      );
+    }
   }
 
-  return c.json({ recorded: events.length }, 202);
+  // Durable + idempotent: awaited in-band so a write failure becomes an error the
+  // client retries safely. `Idempotency-Key` (if sent) is the batch's retry
+  // identity; a repeat collapses to a no-op.
+  const idempotencyKey = c.req.header("idempotency-key")?.trim() || undefined;
+  const result = await ingestEvents(identity.organizationId, events.length, {
+    source: "flags.exposure",
+    idempotencyKey,
+  });
+
+  // Fold the new receipt into the daily rollups off the hot path; if it slips
+  // (instance dies), the receipt stays uncompacted and the next ingest picks it up.
+  if (!result.duplicate) await defer(c, compactUsageEvents(identity.organizationId));
+
+  return c.json({ recorded: result.recorded, duplicate: result.duplicate }, 202);
 });
 
 // --- OpenAPI registration ----------------------------------------------------
@@ -420,16 +468,33 @@ const exposuresRequestSchema = z.object({
     .describe("A batch of exposure events; the count is metered."),
 });
 registerComponentSchema("ExposuresRequest", exposuresRequestSchema);
-registerComponentSchema("ExposuresResponse", z.object({ recorded: z.number() }));
+registerComponentSchema(
+  "ExposuresResponse",
+  z.object({
+    recorded: z
+      .number()
+      .describe("Events durably recorded by this request; 0 if it was a duplicate."),
+    duplicate: z
+      .boolean()
+      .describe("True when this batch's Idempotency-Key was already seen; the request was a no-op."),
+  }),
+);
 
 registerRoute({
   method: "post",
   path: "/ofrep/v1/exposures",
   summary: "Record flag exposures",
   description:
-    "Record a batch of flag exposures for analytics. A flag check is free; an exposure is the billable analytics event you send when you want usage or experiment analysis on a check. Authenticated by the same client key as evaluation. Flagon meters the number of events; the batch is capped per request, so chunk larger volumes. Best-effort: a 202 means the batch was accepted for rollup.",
+    "Record a batch of flag exposures for analytics. A flag check is free; an exposure is the billable analytics event you send when you want usage or experiment analysis on a check. Authenticated by the same client key as evaluation. Flagon meters the number of events; the batch is capped per request, so chunk larger volumes. Recording is durable: send an `Idempotency-Key` header so a network retry of the same batch is counted exactly once (a repeat returns `duplicate: true` and records nothing further).",
   tags: [OFREP_TAG],
   security: "sdkKey",
+  headerParams: [
+    {
+      name: "Idempotency-Key",
+      description:
+        "A stable, unique id for this batch. A retry with the same key is counted once; omit it and each request is a distinct batch.",
+    },
+  ],
   request: { body: exposuresRequestSchema },
   responses: {
     202: { description: "The exposures were accepted for metering.", schemaName: "ExposuresResponse" },

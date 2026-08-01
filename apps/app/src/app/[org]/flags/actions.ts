@@ -14,6 +14,7 @@ import {
   deleteRule,
   deleteSegment,
   deleteVariant,
+  getFlag,
   replaceRules,
   revokeSdkKey,
   setFlagEnvironment,
@@ -21,10 +22,27 @@ import {
   updateSdkKey,
   updateSegment,
   updateVariant,
+  type FlagEnvConfig,
   type FlagType,
   type Predicate,
   type Serve,
 } from "@/lib/flags-api";
+
+/**
+ * After an environment mutation, fetch just the updated env config so the caller
+ * can patch it into client state WITHOUT triggering a full-page revalidate (which
+ * re-fetches the flag AND segments/members/entities/usage — five requests for a
+ * one-field change). One targeted read instead. Returns undefined if the read
+ * fails, in which case the client falls back to router.refresh().
+ */
+async function envAfter(
+  slug: string,
+  key: string,
+  envKey: string,
+): Promise<FlagEnvConfig | undefined> {
+  const detail = await getFlag(slug, key);
+  return detail?.environments.find((e) => e.key === envKey);
+}
 
 /**
  * Server actions for the flags UI. Each is a thin wrapper over the API client
@@ -77,11 +95,11 @@ export async function setDefaultServeAction(
   key: string,
   envKey: string,
   defaultServe: Serve,
-): Promise<{ error?: string }> {
+): Promise<{ env?: FlagEnvConfig; error?: string }> {
   const res = await setFlagEnvironment(slug, key, envKey, { defaultServe });
   if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/flags/${key}`);
-  return {};
+  revalidatePath(`/${slug}/flags`);
+  return { env: await envAfter(slug, key, envKey) };
 }
 
 /**
@@ -94,11 +112,40 @@ export async function setFeatureStateAction(
   key: string,
   envKey: string,
   body: { enabled: boolean; defaultServe?: Serve },
-): Promise<{ error?: string }> {
+): Promise<{ env?: FlagEnvConfig; error?: string }> {
   const res = await setFlagEnvironment(slug, key, envKey, body);
   if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/flags/${key}`);
-  return {};
+  revalidatePath(`/${slug}/flags`);
+  return { env: await envAfter(slug, key, envKey) };
+}
+
+/**
+ * Switch an environment's evaluation MODE in one shot: a static value (Off / On /
+ * a variant), Custom Rules, or Reuse-another-environment. These are the four
+ * mutually-exclusive ways a flag can evaluate in an env. Switching to a static
+ * value or to Reuse clears any targeting rules (they no longer apply); pass
+ * `clearRules` for that. `reuseSourceEnvironmentKey` is a key to start reusing, or
+ * null to stop.
+ */
+export async function setEnvModeAction(
+  slug: string,
+  key: string,
+  envKey: string,
+  patch: {
+    enabled?: boolean;
+    defaultServe?: Serve;
+    reuseSourceEnvironmentKey?: string | null;
+  },
+  opts: { clearRules?: boolean } = {},
+): Promise<{ env?: FlagEnvConfig; error?: string }> {
+  if (opts.clearRules) {
+    const cleared = await replaceRules(slug, key, envKey, []);
+    if (cleared.error) return { error: cleared.error };
+  }
+  const res = await setFlagEnvironment(slug, key, envKey, patch);
+  if (res.error) return { error: res.error };
+  revalidatePath(`/${slug}/flags`);
+  return { env: await envAfter(slug, key, envKey) };
 }
 
 export async function createVariantAction(
@@ -247,12 +294,12 @@ export async function saveRulesAction(
   slug: string,
   key: string,
   envKey: string,
-  rules: { conditions: Predicate[]; serve: Serve }[],
-): Promise<{ error?: string }> {
+  rules: { conditions: Predicate[]; serve: Serve; description?: string | null }[],
+): Promise<{ env?: FlagEnvConfig; error?: string }> {
   const res = await replaceRules(slug, key, envKey, rules);
   if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/flags/${key}`);
-  return {};
+  revalidatePath(`/${slug}/flags`);
+  return { env: await envAfter(slug, key, envKey) };
 }
 
 export async function createSegmentAction(

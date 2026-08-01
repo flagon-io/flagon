@@ -168,6 +168,42 @@ describe("evaluate — rollout bucketBy", () => {
     expect(a.variant).toBe(b.variant);
     expect(a.reason).toBe("SPLIT");
   });
+
+  it("serves the fallback when the bucketBy attribute is absent", () => {
+    const flag = boolFlag(true, [
+      {
+        priority: 0,
+        conditions: [],
+        serve: {
+          rollout: [{ variant: "on", weight: 50 }, { variant: "off", weight: 50 }],
+          bucketBy: "accountId",
+          fallback: "off",
+        },
+      },
+    ]);
+    // No accountId in context → can't bucket → the explicit fallback, deterministically.
+    const r = evaluate(flag, { targetingKey: "user-1" }, noSegments);
+    expect(r.variant).toBe("off");
+    expect(r.reason).toBe("SPLIT");
+  });
+
+  it("still buckets normally when the attribute is present despite a fallback", () => {
+    const flag = boolFlag(true, [
+      {
+        priority: 0,
+        conditions: [],
+        serve: {
+          rollout: [{ variant: "on", weight: 100 }, { variant: "off", weight: 0 }],
+          bucketBy: "accountId",
+          fallback: "off",
+        },
+      },
+    ]);
+    // Attribute present → normal bucketing (100% on), the fallback is not consulted.
+    expect(evaluate(flag, { targetingKey: "u", accountId: "acct-1" }, noSegments).variant).toBe(
+      "on",
+    );
+  });
 });
 
 describe("evaluate — multivariate", () => {
@@ -205,5 +241,76 @@ describe("evaluate — error handling", () => {
     broken.defaultVariantKey = "ghost";
     const r = evaluate(broken, { targetingKey: "u" }, noSegments);
     expect(r).toMatchObject({ value: null, reason: "ERROR", errorCode: "GENERAL" });
+  });
+});
+
+describe("evaluate — progressive rollout", () => {
+  const START = 1_000_000;
+  const H = 3_600_000;
+  const progFlag = (steps: { percent: number; durationMs: number }[]): FlagConfig => ({
+    id: "f",
+    key: "color",
+    type: "string",
+    variants: [
+      { id: "1", key: "red", value: "red" },
+      { id: "2", key: "green", value: "green" },
+    ],
+    enabled: true,
+    defaultVariantKey: "red",
+    defaultServe: null,
+    offVariantKey: "red",
+    rules: [
+      {
+        priority: 0,
+        conditions: [],
+        serve: { progressive: { variant: "green", fallback: "red", start: START, steps } },
+      },
+    ],
+  });
+
+  it("serves the fallback before the rollout starts", () => {
+    const flag = progFlag([{ percent: 100, durationMs: H }]);
+    expect(
+      evaluate(flag, { targetingKey: "u1", $currentTime: START - 1 }, noSegments).variant,
+    ).toBe("red");
+  });
+
+  it("serves the rolled-out variant to everyone past the schedule (100%)", () => {
+    const flag = progFlag([
+      { percent: 5, durationMs: H },
+      { percent: 50, durationMs: H },
+    ]);
+    const r = evaluate(flag, { targetingKey: "whoever", $currentTime: START + 3 * H }, noSegments);
+    expect(r.variant).toBe("green");
+    expect(r.reason).toBe("SPLIT");
+  });
+
+  it("a 0% step serves the fallback within its window", () => {
+    const flag = progFlag([{ percent: 0, durationMs: H }]);
+    expect(
+      evaluate(flag, { targetingKey: "u1", $currentTime: START + H / 2 }, noSegments).variant,
+    ).toBe("red");
+  });
+
+  it("advances the percentage across steps", () => {
+    const flag = progFlag([
+      { percent: 0, durationMs: H },
+      { percent: 100, durationMs: H },
+    ]);
+    expect(
+      evaluate(flag, { targetingKey: "k", $currentTime: START + H / 2 }, noSegments).variant,
+    ).toBe("red"); // 0% window
+    expect(
+      evaluate(flag, { targetingKey: "k", $currentTime: START + H + H / 2 }, noSegments).variant,
+    ).toBe("green"); // 100% window
+  });
+
+  it("is deterministic (sticky) for the same subject and time", () => {
+    const flag = progFlag([{ percent: 50, durationMs: H }]);
+    const ctx = { targetingKey: "sticky-user", $currentTime: START + H / 2 };
+    const a = evaluate(flag, ctx, noSegments).variant;
+    const b = evaluate(flag, ctx, noSegments).variant;
+    expect(a).toBe(b);
+    expect(["red", "green"]).toContain(a);
   });
 });

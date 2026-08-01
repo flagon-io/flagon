@@ -2,6 +2,7 @@
 
 import type { ComponentPropsWithoutRef } from "react";
 import { DropdownMenu as DM } from "radix-ui";
+import { cn } from "../cn";
 
 /**
  * Styled dropdown-menu primitives built on Radix. Composable like Radix itself
@@ -25,10 +26,6 @@ export function Menu({
   return <DM.Root modal={modal} {...props} />;
 }
 export const MenuTrigger = DM.Trigger;
-
-function cn(...parts: (string | undefined)[]) {
-  return parts.filter(Boolean).join(" ");
-}
 
 export function MenuContent({
   className,

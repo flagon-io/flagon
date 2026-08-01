@@ -3,8 +3,9 @@ import { z } from "zod";
 import { withOrg } from "../../db/tenant.js";
 import { authContext } from "../../lib/auth-context.js";
 import { validationError } from "../../lib/http.js";
-import { resolveOrg } from "../../lib/org-context.js";
+import { resolveOrg, orgPlan } from "../../lib/org-context.js";
 import { orgUsage } from "../../usage/org-usage.js";
+import { eventsAllowanceStatus } from "../../usage/allowance.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
@@ -68,6 +69,21 @@ const usageResponseSchema = z.object({
       chargeCents: z.number(),
     }),
   }),
+  // The events-allowance picture for the CURRENT month (independent of the chart
+  // range above): what the plan includes, what's used, and whether the org is over.
+  // Measured always; enforced only when `entitlement.enforcement` is "enforce".
+  entitlement: z.object({
+    plan: z.string(),
+    overageMode: z.enum(["cap", "bill", "contract"]),
+    period: z.object({ from: z.string(), to: z.string() }),
+    includedEvents: z.number(),
+    usedEvents: z.number(),
+    remainingEvents: z.number().nullable(),
+    overageEvents: z.number(),
+    isOver: z.boolean(),
+    overageCents: z.number(),
+    enforcement: z.enum(["off", "enforce"]),
+  }),
 });
 
 registerComponentSchema("OrgUsageResponse", usageResponseSchema);
@@ -105,9 +121,11 @@ usage_.get("/", async (c) => {
   const to = parsed.data.to ?? dayString(0);
   const from = parsed.data.from ?? dayString(29);
 
-  const usage = await withOrg(ctx.orgId, (tx) =>
-    orgUsage(tx, { from, to, groupBy: parsed.data.groupBy }),
-  );
+  const plan = await orgPlan(ctx.orgId);
+  const { usage, entitlement } = await withOrg(ctx.orgId, async (tx) => ({
+    usage: await orgUsage(tx, { from, to, groupBy: parsed.data.groupBy }),
+    entitlement: await eventsAllowanceStatus(tx, plan),
+  }));
 
-  return c.json({ usage });
+  return c.json({ usage, entitlement });
 });

@@ -64,7 +64,43 @@ export async function loadEvaluationData(
       ),
   ]);
 
-  const feIds = feRows.map((fe) => fe.id);
+  // Resolve the "Reuse" mode: a row with reuse_source_environment_id INHERITS the
+  // source environment's config for the same flag. One level only — a source that
+  // itself reuses is not chained (its own stored config is used) — so this can't
+  // loop. Null source (the common case) means the row uses its own config, so
+  // evaluation is unchanged for every flag not explicitly put in Reuse mode.
+  const reuseSourceEnvIds = [
+    ...new Set(
+      feRows.map((fe) => fe.reuseSourceEnvironmentId).filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const sourceFeByFlagEnv = new Map<string, (typeof feRows)[number]>();
+  if (reuseSourceEnvIds.length) {
+    const sourceRows = await tx
+      .select()
+      .from(flagEnvironments)
+      .where(
+        and(
+          inArray(flagEnvironments.environmentId, reuseSourceEnvIds),
+          inArray(flagEnvironments.flagId, flagIds),
+        ),
+      );
+    for (const fe of sourceRows) {
+      sourceFeByFlagEnv.set(`${fe.flagId}:${fe.environmentId}`, fe);
+    }
+  }
+
+  // The EFFECTIVE config row per flag: the source row when reusing (falling back to
+  // the flag's own row if the source isn't configured), else its own row.
+  const effectiveFeByFlag = new Map<string, (typeof feRows)[number]>();
+  for (const fe of feRows) {
+    const source = fe.reuseSourceEnvironmentId
+      ? sourceFeByFlagEnv.get(`${fe.flagId}:${fe.reuseSourceEnvironmentId}`)
+      : undefined;
+    effectiveFeByFlag.set(fe.flagId, source ?? fe);
+  }
+
+  const feIds = [...new Set([...effectiveFeByFlag.values()].map((fe) => fe.id))];
   const ruleRows = feIds.length
     ? await tx
         .select()
@@ -73,7 +109,7 @@ export async function loadEvaluationData(
     : [];
 
   const variantsByFlag = groupBy(variantRows, (v) => v.flagId);
-  const feByFlag = new Map(feRows.map((fe) => [fe.flagId, fe]));
+  const feByFlag = effectiveFeByFlag;
   const rulesByFe = groupBy(ruleRows, (r) => r.flagEnvironmentId);
 
   const configs: FlagConfig[] = [];

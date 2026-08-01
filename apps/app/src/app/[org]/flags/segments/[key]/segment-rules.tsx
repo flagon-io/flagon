@@ -108,14 +108,17 @@ export function SegmentRules({
 
       {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
 
-      {dirty ? (
-        <div className="mt-4 flex items-center gap-2 border-t border-white/8 pt-4">
-          <Button variant="primary" onClick={save} disabled={pending}>
-            {pending ? "Saving…" : "Save changes"}
-          </Button>
-          <span className="text-xs text-zinc-500">Unsaved changes</span>
-        </div>
-      ) : null}
+      {/* Always-present action bar, flush to the card edges (mirrors the settings
+          footer): the Save button disables when there's nothing staged rather than
+          appearing and disappearing, so the card never jumps as you edit. */}
+      <div className="-mx-4 mt-4 -mb-4 flex flex-wrap items-center justify-end gap-3 border-t border-white/8 px-4 py-3">
+        {dirty ? (
+          <span className="mr-auto text-xs text-zinc-500">Unsaved changes</span>
+        ) : null}
+        <Button variant="primary" onClick={save} disabled={pending || !dirty}>
+          {pending ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
     </div>
   );
 }

@@ -2,9 +2,11 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@flagon/design";
 import { authClient } from "@/lib/auth-client";
-import { Field, submitButtonClass } from "@/components/field";
+import { Field } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
+import { SettingsFooter } from "@/components/settings/section";
 import { isReserved } from "@/lib/reserved";
 
 const USERNAME_RE = /^[a-z0-9](?:[a-z0-9-]{1,37}[a-z0-9])?$/i;
@@ -70,40 +72,44 @@ export function ProfileForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex max-w-md flex-col gap-4">
-      <Field
-        id="name"
-        label="Name"
-        name="name"
-        type="text"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        autoComplete="name"
-      />
-      <Field
-        id="username"
-        label="Username"
-        name="username"
-        type="text"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        autoComplete="off"
-        aria-invalid={formatHint !== null}
-        aside={
-          formatHint ? (
-            <span className="text-xs font-medium text-amber-400">
-              {formatHint}
-            </span>
-          ) : null
-        }
-      />
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <div className="flex max-w-md flex-col gap-4">
+        <Field
+          id="name"
+          label="Name"
+          name="name"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoComplete="name"
+        />
+        <Field
+          id="username"
+          label="Username"
+          name="username"
+          type="text"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          autoComplete="off"
+          aria-invalid={formatHint !== null}
+          aside={
+            formatHint ? (
+              <span className="text-xs font-medium text-amber-400">
+                {formatHint}
+              </span>
+            ) : null
+          }
+        />
 
-      {error ? <FormError>{error}</FormError> : null}
-      {saved ? <FormNotice>Profile saved.</FormNotice> : null}
+        {error ? <FormError>{error}</FormError> : null}
+        {saved ? <FormNotice>Profile saved.</FormNotice> : null}
+      </div>
 
-      <button type="submit" className={submitButtonClass} disabled={pending}>
-        {pending ? "Saving…" : "Save"}
-      </button>
+      <SettingsFooter>
+        <Button type="submit" variant="primary" disabled={pending}>
+          {pending ? "Saving…" : "Save"}
+        </Button>
+      </SettingsFooter>
     </form>
   );
 }

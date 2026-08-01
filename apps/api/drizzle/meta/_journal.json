@@ -113,6 +113,20 @@
       "when": 1786200000000,
       "tag": "0015_events_source_namespace",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786300000000,
+      "tag": "0016_usage_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786400000000,
+      "tag": "0017_flag_env_reuse",
+      "breakpoints": true
     }
   ]
 }

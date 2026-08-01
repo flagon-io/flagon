@@ -61,7 +61,7 @@ export default async function OrgLayout({
         ) : null}
         <div className="flex-1 overflow-y-auto">
           <main className="px-6 py-8">
-            <div className="mx-auto w-full max-w-5xl">
+            <div className="mx-auto w-full max-w-7xl">
               {isOrgLocked(membership) ? (
                 <OrgLocked
                   slug={slug}

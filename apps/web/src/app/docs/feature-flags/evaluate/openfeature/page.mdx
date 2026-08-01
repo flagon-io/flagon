@@ -150,11 +150,16 @@ echo $flag["variant"]; // "on"` },
 For a web front end, use the OpenFeature **Web** SDK with the OFREP web provider
 (`@openfeature/web-sdk` + `@openfeature/ofrep-web-provider`).
 
-<Callout tone="warning" title="Don't ship a Production key to the browser">
-Anything in a browser bundle is public. A Production client key in front-end code
-lets anyone read your full flag configuration. For untrusted clients, evaluate on
-your own server and send only the resulting values to the browser, or use a key
-scoped to a low-risk environment.
+<Callout tone="note" title="A client key is public by design">
+Client keys are meant to ship in browser and mobile bundles. That is the point:
+they only evaluate flags, never manage them, so unlike an API key there is nothing
+to protect by hiding one. The tradeoff is that anyone holding the key can evaluate
+every flag in its environment and read the resolved values, and by varying the
+context, infer who gets what. So don't put secrets in a flag's value or gate
+genuinely sensitive logic on a flag a public key can reach, scope the key to its
+environment (a Production key reads Production), and rotate it if it leaks. When a
+flag's very existence or value must stay private, evaluate it on your own server
+and send only the result to the client.
 </Callout>
 
 ## Other languages

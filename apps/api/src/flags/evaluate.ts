@@ -54,6 +54,9 @@ export function evaluate(
     variantReason: EvaluationReason,
   ): EvaluationResult | null => {
     if ("variant" in serve) return serveVariant(serve.variant, variantReason);
+    if ("progressive" in serve) {
+      return serveVariant(pickProgressive(serve.progressive, flag.key, context), "SPLIT");
+    }
     const chosen = pickRollout(serve, flag.key, context);
     return chosen ? serveVariant(chosen, "SPLIT") : null;
   };
@@ -82,6 +85,44 @@ export function evaluate(
   return serveVariant(flag.defaultVariantKey, variantReason);
 }
 
+/**
+ * The percentage a progressive rollout is currently serving, from the elapsed time
+ * since `start` against its stepped schedule. Before start → 0; within step i → its
+ * percent; past the whole schedule → 100 (fully rolled out).
+ */
+function progressivePercent(
+  p: Extract<Serve, { progressive: unknown }>["progressive"],
+  now: number,
+): number {
+  const elapsed = now - p.start;
+  if (elapsed < 0) return 0;
+  let acc = 0;
+  for (const step of p.steps) {
+    acc += Math.max(0, step.durationMs);
+    if (elapsed < acc) return Math.max(0, Math.min(100, step.percent));
+  }
+  return 100;
+}
+
+/**
+ * Resolve a progressive rollout: compute the current percentage from the injected
+ * clock, then bucket the subject — inside the percentage gets `variant`, the rest
+ * `fallback`. Deterministic: same `$currentTime` + identity → same result.
+ */
+function pickProgressive(
+  p: Extract<Serve, { progressive: unknown }>["progressive"],
+  flagKey: string,
+  context: EvaluationContext,
+): string {
+  const now = typeof context.$currentTime === "number" ? context.$currentTime : p.start;
+  const percent = progressivePercent(p, now);
+  if (percent <= 0) return p.fallback;
+  if (percent >= 100) return p.variant;
+  const identity = p.bucketBy ? resolvePath(context, p.bucketBy) : context.targetingKey;
+  const point = bucket(rolloutSeed(flagKey, identity));
+  return point < percent / 100 ? p.variant : p.fallback;
+}
+
 /** Choose a variant from a weighted rollout, deterministically by identity. */
 function pickRollout(
   serve: Extract<Serve, { rollout: unknown }>,
@@ -94,6 +135,11 @@ function pickRollout(
   const identity = serve.bucketBy
     ? resolvePath(context, serve.bucketBy)
     : context.targetingKey;
+  // Can't bucket the subject (a custom bucketBy attribute is absent): serve the
+  // explicit fallback rather than hashing every un-attributed subject to one slice.
+  if (serve.bucketBy && (identity === undefined || identity === null) && serve.fallback) {
+    return serve.fallback;
+  }
   const point = bucket(rolloutSeed(flagKey, identity));
 
   let cumulative = 0;

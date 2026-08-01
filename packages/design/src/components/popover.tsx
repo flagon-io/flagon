@@ -2,6 +2,7 @@
 
 import type { ComponentPropsWithoutRef } from "react";
 import { Popover as RP } from "radix-ui";
+import { cn } from "../cn";
 
 /**
  * Styled popover primitives built on Radix. Composable like Radix itself
@@ -17,10 +18,6 @@ export const Popover = RP.Root;
 export const PopoverTrigger = RP.Trigger;
 export const PopoverClose = RP.Close;
 export const PopoverAnchor = RP.Anchor;
-
-function cn(...parts: (string | undefined)[]) {
-  return parts.filter(Boolean).join(" ");
-}
 
 export function PopoverContent({
   className,

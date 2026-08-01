@@ -41,7 +41,11 @@ function describePredicate(p: Predicate): string {
 
 export function describeServe(serve: Serve, label: (key: string) => string): string {
   if ("rollout" in serve) {
-    return serve.rollout.map((r) => `${label(r.variant)} ${r.weight}%`).join(", ");
+    const split = serve.rollout.map((r) => `${label(r.variant)} ${r.weight}%`).join(", ");
+    return serve.fallback ? `${split} (else ${label(serve.fallback)})` : split;
+  }
+  if ("progressive" in serve) {
+    return `${label(serve.progressive.variant)} (progressive rollout, else ${label(serve.progressive.fallback)})`;
   }
   return label(serve.variant);
 }

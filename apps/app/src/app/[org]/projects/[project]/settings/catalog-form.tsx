@@ -14,6 +14,7 @@ import {
   Select,
   Textarea,
 } from "@flagon/design";
+import { SettingsFooter } from "@/components/settings/section";
 import { LIFECYCLES, TIERS } from "@/lib/catalog";
 import type { Project } from "@/lib/projects-api";
 import { deleteProjectAction, updateProjectAction } from "../../actions";
@@ -127,13 +128,13 @@ export function CatalogForm({
         />
       </Field>
 
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
-      <div className="flex items-center gap-3">
+      <SettingsFooter>
+        {error ? <p className="mr-auto text-sm text-red-400">{error}</p> : null}
+        {saved ? <span className="text-sm text-teal-400">Saved.</span> : null}
         <Button variant="primary" onClick={save} disabled={pending || !name.trim()}>
           {pending ? "Saving…" : "Save changes"}
         </Button>
-        {saved ? <span className="text-sm text-teal-400">Saved.</span> : null}
-      </div>
+      </SettingsFooter>
     </div>
   );
 }

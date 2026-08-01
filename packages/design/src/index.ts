@@ -5,6 +5,7 @@
  * surface is built from. Import the pieces from here; import the stylesheet
  * once per app with `import "@flagon/design/styles.css"`.
  */
+export { cn } from "./cn";
 export { brand } from "./brand";
 export {
   FlagonMark,
@@ -24,6 +25,7 @@ export {
   type SegmentedSize,
 } from "./components/segmented-control";
 export { Input, Textarea } from "./components/input";
+export { TagsInput } from "./components/tags-input";
 export { Field } from "./components/field";
 export { TopLoader } from "./components/top-loader";
 export { Button, type ButtonVariant } from "./components/button";

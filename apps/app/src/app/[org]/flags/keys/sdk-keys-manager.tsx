@@ -102,7 +102,7 @@ export function SdkKeysManager({
                   ))}
                   {canManage ? (
                     <div className="border-t border-white/6 px-2.5 py-2">
-                      <Button variant="ghost" size="sm" onClick={() => setModalEnv(env.key)}>
+                      <Button variant="secondary" size="sm" onClick={() => setModalEnv(env.key)}>
                         <Plus className="size-3.5" /> Create Client Key
                       </Button>
                     </div>

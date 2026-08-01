@@ -68,6 +68,8 @@ export type FlagEnvConfig = {
    * else the single defaultVariantKey. */
   defaultServe: Serve | null;
   offVariantKey: string | null;
+  /** The "Reuse" mode: an environment key whose config this env inherits, or null. */
+  reuseSourceEnvironmentKey: string | null;
   rules: {
     id: string;
     priority: number;
@@ -196,6 +198,27 @@ export type OrgUsage = {
 };
 
 /**
+ * The events-allowance picture for the CURRENT month (not the chart range): what
+ * the plan includes, what's used, and whether the org is over. Drives the
+ * allowance bar. `enforcement` is "off" until billing turns on, so `isOver` is a
+ * signal to SEE, not a block.
+ */
+export type Entitlement = {
+  plan: string;
+  overageMode: "cap" | "bill" | "contract";
+  period: { from: string; to: string };
+  includedEvents: number;
+  usedEvents: number;
+  remainingEvents: number | null;
+  overageEvents: number;
+  isOver: boolean;
+  overageCents: number;
+  enforcement: "off" | "enforce";
+};
+
+export type OrgUsageResult = { usage: OrgUsage; entitlement: Entitlement };
+
+/**
  * Org-wide evaluation usage for the usage page, priced through the API's meter
  * registry. `from`/`to` are YYYY-MM-DD (default the trailing 30 days server-side);
  * `groupBy` splits the series by environment (default) or flag.
@@ -203,7 +226,7 @@ export type OrgUsage = {
 export async function getOrgUsage(
   slug: string,
   opts?: { from?: string; to?: string; groupBy?: UsageGroupBy },
-): Promise<OrgUsage | null> {
+): Promise<OrgUsageResult | null> {
   const q = new URLSearchParams();
   if (opts?.from) q.set("from", opts.from);
   if (opts?.to) q.set("to", opts.to);
@@ -211,7 +234,8 @@ export async function getOrgUsage(
   const qs = q.toString();
   const res = await apiFetch(`/v1/orgs/${slug}/usage${qs ? `?${qs}` : ""}`);
   if (!res.ok) return null;
-  return (await res.json()).usage as OrgUsage;
+  const body = (await res.json()) as OrgUsageResult;
+  return { usage: body.usage, entitlement: body.entitlement };
 }
 
 export async function listSdkKeys(slug: string): Promise<SdkKey[]> {
@@ -260,6 +284,7 @@ export async function setFlagEnvironment(
     defaultVariantKey?: string;
     offVariantKey?: string;
     defaultServe?: Serve;
+    reuseSourceEnvironmentKey?: string | null;
   },
 ) {
   return unwrap<{ ok: true }>(
@@ -493,9 +518,19 @@ export type Predicate =
   | { all: Predicate[] }
   | { any: Predicate[] };
 
+/** A progressive (scheduled) rollout — ramps `variant` to 100% over `steps`. */
+export type ProgressiveServe = {
+  variant: string;
+  fallback: string;
+  bucketBy?: string;
+  start: number;
+  steps: { percent: number; durationMs: number }[];
+};
+
 export type Serve =
   | { variant: string }
-  | { rollout: { variant: string; weight: number }[]; bucketBy?: string };
+  | { rollout: { variant: string; weight: number }[]; bucketBy?: string; fallback?: string }
+  | { progressive: ProgressiveServe };
 
 export type Segment = {
   id: string;

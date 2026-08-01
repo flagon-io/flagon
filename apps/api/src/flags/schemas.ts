@@ -74,6 +74,27 @@ export const serveSchema = z.union([
       .min(1)
       .max(64),
     bucketBy: z.string().min(1).max(200).optional(),
+    // Variant for subjects that can't be bucketed (bucketBy attribute absent).
+    fallback: z.string().min(1).optional(),
+  }),
+  // A progressive (scheduled) rollout: variant vs. fallback, ramped over a stepped
+  // schedule and bucketed by identity. See flags/types.ts ProgressiveRollout.
+  z.object({
+    progressive: z.object({
+      variant: z.string().min(1),
+      fallback: z.string().min(1),
+      bucketBy: z.string().min(1).max(200).optional(),
+      start: z.number(),
+      steps: z
+        .array(
+          z.object({
+            percent: z.number().min(0).max(100),
+            durationMs: z.number().min(0).max(3_650 * 24 * 60 * 60 * 1000),
+          }),
+        )
+        .min(1)
+        .max(50),
+    }),
   }),
 ]);
 
@@ -85,9 +106,9 @@ export type ServeInput = z.infer<typeof serveSchema>;
  * all exist on the flag before storing the rule.
  */
 export function variantKeysInServe(serve: ServeInput): string[] {
-  return "variant" in serve
-    ? [serve.variant]
-    : serve.rollout.map((r) => r.variant);
+  if ("variant" in serve) return [serve.variant];
+  if ("progressive" in serve) return [serve.progressive.variant, serve.progressive.fallback];
+  return [...serve.rollout.map((r) => r.variant), ...(serve.fallback ? [serve.fallback] : [])];
 }
 
 /** Collect every segment key referenced by a set of conditions, recursing into

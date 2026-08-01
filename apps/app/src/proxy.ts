@@ -23,6 +23,9 @@ const AUTH_PAGES = new Set([
   "/signup",
   "/forgot-password",
   "/reset-password",
+  // The email verification landing must work before you're signed in — it's the
+  // click target of the verification email, then it signs you in.
+  "/verify-email",
 ]);
 
 // Prefixes that are always reachable, signed in or out. `/sign-out` must work

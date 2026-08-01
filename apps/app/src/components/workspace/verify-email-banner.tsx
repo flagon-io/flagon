@@ -25,7 +25,7 @@ export function VerifyEmailBanner({ email }: { email: string }) {
 
   return (
     <div className="border-b border-amber-500/20 bg-amber-500/[0.07] px-6 py-2.5">
-      <div className="mx-auto flex w-full max-w-5xl items-center gap-3 text-sm">
+      <div className="mx-auto flex w-full max-w-7xl items-center gap-3 text-sm">
         <MailIcon />
         <p className="flex-1 text-amber-100">
           {state === "sent" ? (

@@ -2,7 +2,7 @@
 
 import { useId } from "react";
 import { Plus, X } from "lucide-react";
-import { Input, Select } from "@flagon/design";
+import { Input, Select, TagsInput } from "@flagon/design";
 import type { Predicate, Segment } from "@/lib/flags-api";
 
 /**
@@ -264,7 +264,7 @@ export function ConditionRows({
   };
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2.5">
       {hasSuggestions ? (
         <datalist id={attrListId}>
           {attributeSuggestions!.map((a) => (
@@ -276,81 +276,100 @@ export function ConditionRows({
         const crit = criterionById(c.criterion);
         const isSegment = crit.kind === "segment";
         const needsValue = !isSegment && c.op !== "exists" && c.op !== "not_exists";
+        const isMultiValue = c.op === "in" || c.op === "nin";
+        // The joiner is a divider ABOVE each row (Statsig-style): the first row
+        // carries the caller's lead word (blank for flag rules, whose card header
+        // already says "If"; blank for segments too), the rest an "And"/"Or".
+        const label = i === 0 ? leadWord : joiner;
         return (
-          <div key={i} className="flex items-center gap-2 text-sm">
-            <span className="w-9 shrink-0 text-right text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
-              {i === 0 ? leadWord : joiner}
-            </span>
-            <Select
-              value={c.criterion}
-              onValueChange={(v) => setCriterion(i, v)}
-              ariaLabel="Criteria"
-              className="w-40 shrink-0"
-              options={CRITERIA.map((x) => ({ value: x.id, label: x.label }))}
-            />
-            {crit.id === "custom" ? (
-              <Input
-                value={c.attribute}
-                onChange={(e) => setCond(i, { attribute: e.target.value })}
-                placeholder="attribute"
-                aria-label="Attribute"
-                list={hasSuggestions ? attrListId : undefined}
-                className="min-w-0 flex-1 font-mono"
-              />
+          <div key={i} className="flex flex-col gap-1.5">
+            {label ? (
+              <span className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">
+                {label}
+              </span>
             ) : null}
-            {isSegment ? (
-              segments.length === 0 ? (
-                <span className="flex-1 text-xs text-zinc-500">No segments yet</span>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Select
+                value={c.criterion}
+                onValueChange={(v) => setCriterion(i, v)}
+                ariaLabel="Criteria"
+                className="w-40 shrink-0"
+                options={CRITERIA.map((x) => ({ value: x.id, label: x.label }))}
+              />
+              {crit.id === "custom" ? (
+                <Input
+                  value={c.attribute}
+                  onChange={(e) => setCond(i, { attribute: e.target.value })}
+                  placeholder="attribute"
+                  aria-label="Attribute"
+                  list={hasSuggestions ? attrListId : undefined}
+                  className="min-w-32 flex-1 font-mono"
+                />
+              ) : null}
+              {isSegment ? (
+                segments.length === 0 ? (
+                  <span className="flex-1 text-xs text-zinc-500">No segments yet</span>
+                ) : (
+                  <Select
+                    value={c.segment}
+                    onValueChange={(v) => setCond(i, { segment: v })}
+                    ariaLabel="Segment"
+                    className="min-w-32 flex-1"
+                    options={segments.map((s) => ({ value: s.key, label: s.name }))}
+                  />
+                )
               ) : (
-                <Select
-                  value={c.segment}
-                  onValueChange={(v) => setCond(i, { segment: v })}
-                  ariaLabel="Segment"
-                  className="min-w-0 flex-1"
-                  options={segments.map((s) => ({ value: s.key, label: s.name }))}
-                />
-              )
-            ) : (
-              <>
-                <Select
-                  value={c.op}
-                  onValueChange={(v) => setCond(i, { op: v })}
-                  ariaLabel="Operator"
-                  className="shrink-0"
-                  options={crit.ops.map((op) => ({ value: op, label: OP_LABELS[op] ?? op }))}
-                />
-                {needsValue ? (
-                  crit.input === "datetime" ? (
-                    <Input
-                      type="datetime-local"
-                      value={c.value}
-                      onChange={(e) => setCond(i, { value: e.target.value })}
-                      aria-label="Value"
-                      className="min-w-0 flex-1"
-                    />
-                  ) : (
-                    <Input
-                      value={c.value}
-                      onChange={(e) => setCond(i, { value: e.target.value })}
-                      placeholder={
-                        c.op === "in" || c.op === "nin" ? "value 1, value 2, …" : "value"
-                      }
-                      aria-label="Value"
-                      className="min-w-0 flex-1 font-mono"
-                    />
-                  )
-                ) : null}
-              </>
-            )}
-            <button
-              type="button"
-              onClick={() => setConds((prev) => prev.filter((_, j) => j !== i))}
-              disabled={conds.length === 1}
-              title="Remove condition"
-              className="grid size-10 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400 disabled:opacity-30"
-            >
-              <X className="size-4" />
-            </button>
+                <>
+                  <Select
+                    value={c.op}
+                    onValueChange={(v) => setCond(i, { op: v })}
+                    ariaLabel="Operator"
+                    className="shrink-0"
+                    options={crit.ops.map((op) => ({ value: op, label: OP_LABELS[op] ?? op }))}
+                  />
+                  {needsValue ? (
+                    isMultiValue ? (
+                      <TagsInput
+                        value={
+                          c.value
+                            ? c.value.split(",").map((s) => s.trim()).filter(Boolean)
+                            : []
+                        }
+                        onChange={(vals) => setCond(i, { value: vals.join(", ") })}
+                        placeholder="add a value…"
+                        ariaLabel="Values"
+                        className="min-w-40 flex-1"
+                      />
+                    ) : crit.input === "datetime" ? (
+                      <Input
+                        type="datetime-local"
+                        value={c.value}
+                        onChange={(e) => setCond(i, { value: e.target.value })}
+                        aria-label="Value"
+                        className="min-w-40 flex-1"
+                      />
+                    ) : (
+                      <Input
+                        value={c.value}
+                        onChange={(e) => setCond(i, { value: e.target.value })}
+                        placeholder="value"
+                        aria-label="Value"
+                        className="min-w-32 flex-1 font-mono"
+                      />
+                    )
+                  ) : null}
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setConds((prev) => prev.filter((_, j) => j !== i))}
+                disabled={conds.length === 1}
+                title="Remove condition"
+                className="ml-auto grid size-10 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400 disabled:opacity-30"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
           </div>
         );
       })}
@@ -358,7 +377,7 @@ export function ConditionRows({
       <button
         type="button"
         onClick={() => setConds((prev) => [...prev, emptyCond(segments)])}
-        className="mt-0.5 inline-flex w-fit items-center gap-1.5 pl-11 text-sm text-zinc-400 hover:text-zinc-200"
+        className="inline-flex w-fit items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200"
       >
         <Plus className="size-4" /> Add condition
       </button>

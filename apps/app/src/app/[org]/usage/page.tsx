@@ -68,7 +68,11 @@ export default async function UsagePage({
   const from = dayString(days - 1);
   const to = dayString(0);
 
-  const usage = await getOrgUsage(slug, { from, to, groupBy });
+  const result = await getOrgUsage(slug, { from, to, groupBy });
+  const usage = result?.usage ?? null;
+  // The events-allowance status is for the CURRENT month (independent of the
+  // chart range), so the bar reflects the real monthly cap whatever range is shown.
+  const entitlement = result?.entitlement ?? null;
 
   const plan = membership.plan;
   const includedEvents = planIncludedEvents(plan);
@@ -106,11 +110,13 @@ export default async function UsagePage({
         <UsageFilters base={`/${slug}/usage`} range={range} groupBy={groupBy} />
       </div>
 
-      {includedEvents > 0 ? (
+      {entitlement && entitlement.includedEvents > 0 ? (
         <EventsBar
-          usedEvents={usedEvents}
-          includedEvents={includedEvents}
-          bills={bills}
+          usedEvents={entitlement.usedEvents}
+          includedEvents={entitlement.includedEvents}
+          overageEvents={entitlement.overageEvents}
+          bills={entitlement.overageMode === "bill"}
+          enforcing={entitlement.enforcement === "enforce"}
         />
       ) : null}
 
@@ -133,18 +139,24 @@ export default async function UsagePage({
 }
 
 /**
- * The monthly event allowance burn-down. On a billing plan it is the "Included
- * Events" you draw down before overage; on a cap plan (free tier) it is the "Free
- * Events" ceiling, and reaching it means upgrade, not a bill.
+ * The monthly event allowance burn-down for the CURRENT month. On a billing plan
+ * it is the "Included Events" you draw down before overage; on a cap plan (free
+ * tier) it is the "Free Events" ceiling, and reaching it means upgrade, not a bill.
+ * `enforcing` tells whether the cap is actually blocking yet (it is off until
+ * billing turns on); until then, going over is a signal, not a stop.
  */
 function EventsBar({
   usedEvents,
   includedEvents,
+  overageEvents,
   bills,
+  enforcing,
 }: {
   usedEvents: number;
   includedEvents: number;
+  overageEvents: number;
   bills: boolean;
+  enforcing: boolean;
 }) {
   const pct = Math.min(1, usedEvents / includedEvents);
   const over = usedEvents > includedEvents;
@@ -158,7 +170,7 @@ function EventsBar({
           <span className={over ? "text-amber-400" : "text-zinc-200"}>
             {compact(usedEvents)}
           </span>{" "}
-          / {compact(includedEvents)} per month
+          / {compact(includedEvents)} this month
         </span>
       </div>
       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8">
@@ -170,9 +182,14 @@ function EventsBar({
       {over ? (
         <p className="mt-2 text-xs text-amber-400/90">
           {bills
-            ? `${compact(usedEvents - includedEvents)} events beyond your monthly allowance, billed at the usage rate.`
-            : `You've reached your ${compact(includedEvents)} free events for the month. Upgrade to Pro to send more.`}{" "}
-          Enforcement is not on yet, this is a projection.
+            ? `${compact(overageEvents)} events beyond your monthly allowance.${
+                enforcing ? " Billed at the usage rate." : " Enforcement is off, so this is a projection."
+              }`
+            : `You've reached your ${compact(includedEvents)} free events this month.${
+                enforcing
+                  ? " Sending is paused until you upgrade to Pro."
+                  : " Enforcement is off, so sending continues; upgrade to Pro to raise your limit."
+              }`}
         </p>
       ) : null}
     </section>

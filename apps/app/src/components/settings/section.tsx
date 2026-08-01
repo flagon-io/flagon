@@ -28,6 +28,22 @@ export function SettingsSection({
   );
 }
 
+/**
+ * The flush action bar for the bottom of a settings card: a full-width top border
+ * with actions right-aligned, mirroring the design system's ModalFooter "house
+ * shape". Render it as the LAST child of a SettingsSection body — the negative
+ * margins bleed it to the card edges (kept in sync with the body's `px-5 py-4`
+ * padding above), and the parent's own gap provides the space above it. Put any
+ * left-aligned status or hint first with `mr-auto`; the primary button goes last.
+ */
+export function SettingsFooter({ children }: { children: ReactNode }) {
+  return (
+    <div className="-mx-5 -mb-4 flex flex-wrap items-center justify-end gap-3 border-t border-white/8 px-5 py-3">
+      {children}
+    </div>
+  );
+}
+
 /** The page heading above a group of settings sections. */
 export function SettingsHeader({
   title,

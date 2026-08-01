@@ -2,9 +2,11 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@flagon/design";
 import { authClient } from "@/lib/auth-client";
-import { Field, submitButtonClass } from "@/components/field";
+import { Field } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
+import { SettingsFooter } from "@/components/settings/section";
 
 export function ChangePasswordForm() {
   const router = useRouter();
@@ -50,42 +52,46 @@ export function ChangePasswordForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex max-w-md flex-col gap-4">
-      <Field
-        id="current"
-        label="Current password"
-        name="current"
-        type="password"
-        required
-        autoComplete="current-password"
-      />
-      <Field
-        id="new"
-        label="New password"
-        name="new"
-        type="password"
-        required
-        minLength={8}
-        autoComplete="new-password"
-      />
-      <Field
-        id="confirm"
-        label="Confirm new password"
-        name="confirm"
-        type="password"
-        required
-        minLength={8}
-        autoComplete="new-password"
-      />
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <div className="flex max-w-md flex-col gap-4">
+        <Field
+          id="current"
+          label="Current password"
+          name="current"
+          type="password"
+          required
+          autoComplete="current-password"
+        />
+        <Field
+          id="new"
+          label="New password"
+          name="new"
+          type="password"
+          required
+          minLength={8}
+          autoComplete="new-password"
+        />
+        <Field
+          id="confirm"
+          label="Confirm new password"
+          name="confirm"
+          type="password"
+          required
+          minLength={8}
+          autoComplete="new-password"
+        />
 
-      {error ? <FormError>{error}</FormError> : null}
-      {saved ? (
-        <FormNotice>Password changed. Other sessions were signed out.</FormNotice>
-      ) : null}
+        {error ? <FormError>{error}</FormError> : null}
+        {saved ? (
+          <FormNotice>Password changed. Other sessions were signed out.</FormNotice>
+        ) : null}
+      </div>
 
-      <button type="submit" className={submitButtonClass} disabled={pending}>
-        {pending ? "Saving…" : "Change password"}
-      </button>
+      <SettingsFooter>
+        <Button type="submit" variant="primary" disabled={pending}>
+          {pending ? "Saving…" : "Change password"}
+        </Button>
+      </SettingsFooter>
     </form>
   );
 }

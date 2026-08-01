@@ -86,3 +86,8 @@ jobs:
         env:
           APP_DATABASE_URL: postgres://flagon_app:flagon_app@localhost:5432/flagon
         run: npm test -- --no-file-parallelism
+
+      # Build Storybook so broken stories (design system + flag/targeting editors)
+      # fail CI. Vite build, no DB/env needed; output is discarded.
+      - name: Build Storybook
+        run: npm run build-storybook -w apps/app

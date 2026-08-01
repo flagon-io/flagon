@@ -214,6 +214,13 @@ export const flagEnvironments = pgTable(
     // Serve — either { variant } or a { rollout } — so the default can itself be a
     // percentage rollout ("serve X% to everyone"). Variant references are keys.
     defaultServe: jsonb("default_serve"),
+    // When set, this (flag, environment) INHERITS its evaluation config from the
+    // named source environment (the "Reuse" mode). Null = the row uses its own
+    // config. Resolved in flags/config.ts at load time; the engine is unaffected.
+    reuseSourceEnvironmentId: uuid("reuse_source_environment_id").references(
+      () => environments.id,
+      { onDelete: "set null" },
+    ),
     ...timestamps,
   },
   (t) => [
@@ -578,6 +585,47 @@ export const usageEventRollups = pgTable(
   ],
 );
 
+/**
+ * The durable, billing-grade usage log underneath usage_event_rollups.
+ *
+ * The rollups are a best-effort daily counter (fine for the picture, wrong to
+ * invoice on). This is the AUDITABLE TRUTH: one immutable receipt per ingest
+ * batch, deduplicated by `idempotencyKey` so a client retry never double-counts,
+ * then compacted EXACTLY-ONCE into the rollups (see usage/events.ts). Billing
+ * reconciles to this log. Rows are never deleted and only ever change to stamp
+ * `compactedAt`. Tenant data — RLS-scoped by organization (migration 0016).
+ */
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    /** What produced the batch, namespaced by product; matches the rollup source. */
+    source: text("source").notNull().default("flags.exposure"),
+    /** The client's retry identity for this batch; unique per (org, source). */
+    idempotencyKey: text("idempotency_key").notNull(),
+    /** Events in the batch, folded into the rollup count at compaction. */
+    quantity: integer("quantity").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** UTC day of occurredAt; the rollup bucket this compacts into. */
+    day: date("day").notNull(),
+    /** NULL until folded into the rollups; the stamp that makes compaction exactly-once. */
+    compactedAt: timestamp("compacted_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("usage_events_idempotency_key").on(
+      t.organizationId,
+      t.source,
+      t.idempotencyKey,
+    ),
+    index("usage_events_uncompacted_idx")
+      .on(t.organizationId)
+      .where(sql`${t.compactedAt} is null`),
+  ],
+);
+
 export type Flag = typeof flags.$inferSelect;
 export type NewFlag = typeof flags.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
@@ -593,6 +641,8 @@ export type Project = typeof projects.$inferSelect;
 export type Team = typeof teams.$inferSelect;
 export type TeamMember = typeof teamMembers.$inferSelect;
 export type ProjectAccess = typeof projectAccess.$inferSelect;
+export type UsageEvent = typeof usageEvents.$inferSelect;
+export type NewUsageEvent = typeof usageEvents.$inferInsert;
 
 /** Everything the migrator and query layer should know about. */
 export const schema = {
@@ -614,6 +664,7 @@ export const schema = {
   projectAccess,
   flagEvalRollups,
   usageEventRollups,
+  usageEvents,
 };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm

@@ -72,11 +72,31 @@ requests.post(
   ]}
 />
 
-A `202` means the batch was accepted for metering:
+A `202` means the batch was recorded. `recorded` is how many events this request
+counted; `duplicate` is `true` when the batch was a retry Flagon had already seen
+(see below):
 
 ```json
-{ "recorded": 2 }
+{ "recorded": 2, "duplicate": false }
 ```
+
+## Idempotent retries
+
+Exposures are billable, so recording is durable, not fire-and-forget: a failed
+request is safe to retry. To make a retry count **exactly once**, send an
+`Idempotency-Key` header with a stable, unique id for the batch. Flagon treats two
+requests with the same key as the same batch, so a network retry never
+double-counts:
+
+```http
+POST /ofrep/v1/exposures
+Authorization: Bearer flagon_client_...
+Idempotency-Key: 6f9c2b1e-8a3d-4c77-b0a1-2f5e9d4c1a20
+```
+
+A repeat of a key Flagon has seen returns `202` with `{ "recorded": 0, "duplicate": true }`
+and records nothing further. Omit the header and each request is a distinct batch
+(still durable, but a retry would count twice).
 
 ## A batching helper
 
@@ -94,11 +114,15 @@ export function createExposureRecorder(clientKey, { flushMs = 5000 } = {}) {
   async function flush() {
     if (queue.length === 0) return;
     const events = queue.splice(0, MAX_BATCH);
+    // One id per batch: if this flush fails and you retry it, reuse the SAME key
+    // so the retry is counted once, not twice.
+    const idempotencyKey = crypto.randomUUID();
     await fetch(`${FLAGON_API}/ofrep/v1/exposures`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${clientKey}`,
         "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
       },
       body: JSON.stringify({ events }),
       keepalive: true, // let an in-flight flush finish during unload
@@ -145,14 +169,20 @@ exposures.record("new-checkout", { value });
 
 ## Notes on behavior
 
-- **Recording is best-effort.** A `202` means accepted for rollup; exposures are
-  analytics, so a dropped batch is never worth failing your request over. Do not
-  block a user path on the flush.
+- **Recording is durable and idempotent.** A `202` means the batch was recorded,
+  not just queued. Because exposures are billable, a failed request is safe to
+  retry; send an `Idempotency-Key` so a retry counts exactly once. Still, do not
+  block a user path on the flush: buffer and send it in the background.
 - **Only the count is metered.** Flagon stores per-day counts, not the exposure
   detail, so extra fields you attach do not change your bill.
 - **Checks stay free.** Evaluating flags never counts against your plan — only the
   exposures you choose to send do. See [pricing](/pricing) for each plan's
   included events.
+- **Allowance is measured, not enforced (for now).** Each plan includes a monthly
+  events allowance (Hobby 2M, Pro 5M). Going over is shown on your usage page but
+  is not currently blocked or billed. When enforcement turns on, a free-plan org
+  past its cap will get a `403` here (upgrade to continue); paid plans meter the
+  overage instead.
 
 ## Next
 

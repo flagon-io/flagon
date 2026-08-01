@@ -24,5 +24,15 @@ export default defineConfig({
     environment: "node",
     include: ["apps/*/src/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/.next/**", "**/dist/**"],
+    // The DB-backed integration suites (OFREP routes, usage, management) all share
+    // ONE local Postgres and each stand up ephemeral HTTP servers; running their
+    // files in parallel contends on connections and starves teardown hooks (the
+    // OpenFeature SDK e2e afterAll timed out at 10s). Serial file execution makes
+    // the whole suite deterministic without callers needing --no-file-parallelism.
+    // The pure unit tests are fast enough that the cost is negligible.
+    fileParallelism: false,
+    // Give DB setup/teardown (seed via withOrg, server.close, OpenFeature.close)
+    // headroom so a slow local Postgres can't flake a hook.
+    hookTimeout: 20_000,
   },
 });

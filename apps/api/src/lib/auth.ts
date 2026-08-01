@@ -54,6 +54,31 @@ const SELF_URL =
 // apex). Set AUTH_COOKIE_DOMAIN=".flagon.io" in prod; unset locally.
 const cookieDomain = process.env.AUTH_COOKIE_DOMAIN;
 
+/**
+ * Point a BetterAuth email-action link back at the CONSOLE.
+ *
+ * The verify-email / reset-password handlers only redirect when their link carries
+ * a `callbackURL`; BetterAuth defaults it to a RELATIVE "/" (or empty), which now
+ * resolves to the API's own origin — so the link renders JSON instead of returning
+ * the user to the app. Since auth moved here, we rewrite a missing or relative
+ * callback to an absolute app URL (a trusted origin, so originCheck passes). An
+ * already-absolute callback is left untouched, so an explicit client redirect still
+ * wins. `fallbackPath` is where a bare link should land (e.g. "/reset-password").
+ */
+function withAppCallback(url: string, fallbackPath: string): string {
+  try {
+    const u = new URL(url);
+    const cb = u.searchParams.get("callbackURL");
+    if (!cb || cb.startsWith("/")) {
+      const path = cb && cb !== "/" ? cb : fallbackPath;
+      u.searchParams.set("callbackURL", `${APP_URL}${path}`);
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 export const auth = betterAuth({
   appName: "Flagon",
   secret: env.BETTER_AUTH_SECRET,
@@ -68,7 +93,7 @@ export const auth = betterAuth({
     minPasswordLength: 8,
     requireEmailVerification: false,
     sendResetPassword: async ({ user, url }: { user: { email: string }; url: string }) => {
-      const { subject, html } = resetPasswordTemplate(url);
+      const { subject, html } = resetPasswordTemplate(withAppCallback(url, "/reset-password"));
       await email.send({ to: user.email, subject, html });
     },
   },
@@ -76,8 +101,19 @@ export const auth = betterAuth({
   emailVerification: {
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
-    sendVerificationEmail: async ({ user, url }: { user: { email: string }; url: string }) => {
-      const { subject, html } = verifyEmailTemplate(url);
+    sendVerificationEmail: async ({
+      user,
+      token,
+    }: {
+      user: { email: string };
+      token: string;
+    }) => {
+      // Link to the CONSOLE, not the API: the app's /verify-email page calls the
+      // API to verify (see apps/app), so the user lands in the product and never
+      // sees an API response. (BetterAuth's own `url` points at this API's
+      // verify-email endpoint, which we deliberately don't use here.)
+      const verifyUrl = `${APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
+      const { subject, html } = verifyEmailTemplate(verifyUrl);
       await email.send({ to: user.email, subject, html });
     },
   },
