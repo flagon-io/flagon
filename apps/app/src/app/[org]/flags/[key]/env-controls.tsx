@@ -169,16 +169,26 @@ export function EnvCard({
 
   // Write a static value (Off / On / a variant): the flag is active, that value is
   // the default, no reuse. Any targeting rules are cleared — they no longer apply.
+  // Sending a single-variant defaultServe also RESETS the stored default_serve
+  // (the API clears it for a {variant} serve), so a split/rollout left over from a
+  // previous Rules session doesn't linger, get evaluated, or reappear as the
+  // assumed default when you switch back to Rules. For a boolean the on/off tokens
+  // aren't variant keys, so resolve the true variant to send as the clean default.
   function serveValue(value: string) {
     setError(null);
     setOptimistic(value);
+    const onVariantKey = variants.find((v) => v.value === true)?.key ?? variants[0]?.key;
     start(async () => {
       const res = await setEnvModeAction(
         slug,
         flagKey,
         env.key,
         isBoolean
-          ? { enabled: value === "on", reuseSourceEnvironmentKey: null }
+          ? {
+              enabled: value === "on",
+              reuseSourceEnvironmentKey: null,
+              ...(onVariantKey ? { defaultServe: { variant: onVariantKey } } : {}),
+            }
           : { enabled: true, defaultServe: { variant: value }, reuseSourceEnvironmentKey: null },
         { clearRules: env.rules.length > 0 },
       );
