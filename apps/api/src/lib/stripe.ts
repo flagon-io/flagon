@@ -22,6 +22,16 @@ const API_VERSION = "2026-06-24.dahlia" satisfies Stripe.StripeConfig["apiVersio
  */
 export const PRO_PRICE_LOOKUP_KEY = "flagon_pro_monthly";
 
+/**
+ * The metered events price + its Billing Meter. Created by scripts/setup-metered.ts:
+ * a Billing Meter named `flagon_events` and a metered per-unit price with lookup key
+ * `flagon_events_metered` (at $0.02/1K) attached to the Pro product. Usage is reported
+ * to the meter (billing.meterEvents.create with event_name = the meter name) and the
+ * price turns it into an invoice line; the $20 credit grant offsets it.
+ */
+export const EVENTS_METER_EVENT_NAME = "flagon_events";
+export const EVENTS_METERED_PRICE_LOOKUP_KEY = "flagon_events_metered";
+
 /** Signing secret for the Stripe webhook endpoint (raw-body verification). */
 export const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -71,5 +81,29 @@ export async function getProPriceId(): Promise<string> {
     );
   }
   cachedPriceId = price.id;
+  return price.id;
+}
+
+let cachedMeteredPriceId: string | null = null;
+
+/**
+ * Resolve the metered events price id from its `lookup_key`. Same caching/behavior as
+ * `getProPriceId`. Throws if setup-metered.ts hasn't created the meter + price yet.
+ */
+export async function getMeteredPriceId(): Promise<string> {
+  if (cachedMeteredPriceId) return cachedMeteredPriceId;
+  const stripe = getStripe();
+  const prices = await stripe.prices.list({
+    lookup_keys: [EVENTS_METERED_PRICE_LOOKUP_KEY],
+    active: true,
+    limit: 1,
+  });
+  const price = prices.data[0];
+  if (!price) {
+    throw new Error(
+      `No active Stripe price with lookup_key "${EVENTS_METERED_PRICE_LOOKUP_KEY}". Run scripts/setup-metered.ts to create the events meter + metered price.`,
+    );
+  }
+  cachedMeteredPriceId = price.id;
   return price.id;
 }

@@ -33,3 +33,24 @@ export function isOrgLocked(org: {
   if (org.subscriptionStatus === null) return false;
   return !statusEntitlesPro(org.subscriptionStatus);
 }
+
+/**
+ * Whether an org's usage should be REPORTED to Stripe for metered billing. The single
+ * gate the reporting sweep consults (invariant: never meter a dead subscription):
+ * Pro + an entitling Stripe status + a linked customer. This deliberately excludes
+ * canceled/locked orgs (status not entitling), Hobby/Enterprise (not Pro), and
+ * null-status manual comps (no Stripe subscription/customer to report to). A
+ * coupon-comped Pro org passes and reports — its usage nets $0 via the 100%-off
+ * coupon, keeping the tie-out uniform.
+ */
+export function isMeteredReportable(org: {
+  plan: string;
+  subscriptionStatus: string | null;
+  stripeCustomerId: string | null;
+}): boolean {
+  return (
+    org.plan === "pro" &&
+    statusEntitlesPro(org.subscriptionStatus) &&
+    Boolean(org.stripeCustomerId)
+  );
+}

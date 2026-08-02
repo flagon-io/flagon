@@ -83,6 +83,8 @@ const usageResponseSchema = z.object({
     isOver: z.boolean(),
     overageCents: z.number(),
     hardCap: z.boolean(),
+    creditCents: z.number(),
+    creditUsedCents: z.number(),
   }),
 });
 

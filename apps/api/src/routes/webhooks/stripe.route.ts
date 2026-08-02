@@ -1,11 +1,34 @@
 import { Hono } from "hono";
 import type Stripe from "stripe";
-import { getStripe, STRIPE_WEBHOOK_SECRET } from "../../lib/stripe.js";
 import {
+  getStripe,
+  isBillingConfigured,
+  STRIPE_WEBHOOK_SECRET,
+} from "../../lib/stripe.js";
+import {
+  ensureMeteredItem,
   handleSubscriptionDeleted,
+  orgForSubscription,
   syncSubscription,
 } from "../../lib/billing.js";
+import { handleInvoicePaidCredit } from "../../lib/billing-credits.js";
+import { statusEntitlesPro } from "../../lib/entitlement.js";
+import { reportOrgUsage } from "../../usage/report.js";
 import { logger } from "../../lib/logger.js";
+
+/**
+ * Best-effort: add the metered events item to an entitled sub that lacks it (self-heal
+ * subs predating metered billing). Never breaks the plan sync — a missing metered
+ * price (setup-metered not run) or Stripe error is logged and swallowed.
+ */
+async function selfHealMeteredItem(subscription: Stripe.Subscription): Promise<void> {
+  if (!isBillingConfigured() || !statusEntitlesPro(subscription.status)) return;
+  try {
+    await ensureMeteredItem(subscription);
+  } catch (err) {
+    logger.warn("[stripe:webhook] ensureMeteredItem failed", { err });
+  }
+}
 
 /**
  * Stripe webhook. Mounted at /webhooks/stripe — deliberately OUTSIDE /v1, with
@@ -61,10 +84,28 @@ stripeWebhook.post("/", async (c) => {
       case "customer.subscription.updated": {
         const subscription = event.data.object as Stripe.Subscription;
         logResult(event.type, await syncSubscription(subscription), subscription.id);
+        await selfHealMeteredItem(subscription);
+        break;
+      }
+      case "invoice.paid":
+      case "invoice.payment_succeeded": {
+        // Grant the period's $20 usage credit at creation + each renewal, idempotently.
+        await handleInvoicePaidCredit(event.data.object as Stripe.Invoice);
         break;
       }
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
+        // Final flush: report the sub-5-min tail of usage BEFORE the status flip, while
+        // the org still passes the metered-reportable gate. After the flip the sweep
+        // skips the org forever — no metering against a dead subscription.
+        const org = await orgForSubscription(subscription);
+        if (org) {
+          try {
+            await reportOrgUsage(org);
+          } catch (err) {
+            logger.warn("[stripe:webhook] final usage flush failed", { err });
+          }
+        }
         logResult(
           event.type,
           await handleSubscriptionDeleted(subscription),

@@ -64,12 +64,12 @@ export const METERS = {
     unit: "event",
     billable: true, // THE money meter — exposures / analytics events, any product
     tracked: true, // recorded in usage_event_rollups (POST /ofrep/v1/exposures)
-    // $0.05 / 1K = $50 / 1M: the going market rate for analytics events. We meter
-    // per event at the market rate (our per-event compute is light, so it stays
-    // comfortably profitable) and compete on breadth of products, not on price.
-    // The free allowance is per-plan (Hobby 2M / Pro 5M) and lives with the plans;
-    // this is the overage rate applied beyond it.
-    pricePerMillionCents: 5000,
+    // $0.02 / 1K = $20 / 1M: 60% under the market leader (Statsig $0.05/1K). An
+    // exposure is a batched DB write, so per-unit infra is a fraction of a cent — the
+    // rate is positioning, not cost recovery, and stays ~99.9% margin. We compete on
+    // breadth of products + price. Pro's $20/mo is a usage credit ($20 buys 1M at this
+    // rate); Hobby's 500K free ceiling lives with the plans. This is the overage rate.
+    pricePerMillionCents: 2000,
     includedQuantity: 0,
   },
 } satisfies Record<MeterId, Meter>;
@@ -78,6 +78,36 @@ export const METERS = {
 export const CHECKS_METER = METERS["flag.checks"];
 /** The billable events meter — the platform-wide money meter (usage_event_rollups). */
 export const EVENTS_METER = METERS.events;
+
+/**
+ * The billing registry that maps a durable-event `source` to its Stripe meter + price
+ * + invoice product. This is THE extension point: a future product bills usage by
+ * adding a row here (a new source namespace + its own Stripe meter/price) — the
+ * reporting sweep, the shared $20 credit (scoped to all metered prices), and the
+ * tie-out all work unchanged. `eventName` is the Stripe Billing Meter's event_name;
+ * `priceLookupKey` resolves the metered price at runtime (like the flat Pro price).
+ */
+export type SourceMeter = {
+  /** Stripe Billing Meter event_name (reported via billing.meterEvents.create). */
+  eventName: string;
+  /** Lookup key of the metered Stripe price attached to that meter. */
+  priceLookupKey: string;
+  /** Invoice/UI product label this source rolls up under. */
+  product: string;
+};
+
+export const SOURCE_METERS: Record<string, SourceMeter> = {
+  "flags.exposure": {
+    eventName: "flagon_events",
+    priceLookupKey: "flagon_events_metered",
+    product: "Feature Flags",
+  },
+};
+
+/** The meter config for a durable-event source, or null if that source isn't billed. */
+export function sourceMeter(source: string): SourceMeter | null {
+  return SOURCE_METERS[source] ?? null;
+}
 
 /**
  * Charge in cents for a raw quantity on a meter, above its included amount. Free

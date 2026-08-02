@@ -10,7 +10,7 @@ import { and, eq } from "drizzle-orm";
  * the console adapter in tests (no RESEND key), so it just logs.
  */
 const DATABASE_URL = process.env.DATABASE_URL ?? process.env.APP_DATABASE_URL;
-const HOBBY_INCLUDED = 2_000_000;
+const HOBBY_INCLUDED = 500_000;
 
 describe.skipIf(!DATABASE_URL)("usage threshold notifications (integration)", () => {
   let db: typeof import("../db/client.js")["db"];

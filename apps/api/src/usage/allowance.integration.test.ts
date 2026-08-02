@@ -78,13 +78,13 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
   const statusFor = (plan: string) =>
     withOrg(orgId, (tx) => eventsAllowanceStatus(tx, plan));
 
-  it("hobby under the 2M cap is not over", async () => {
-    await seed(1_000_000);
+  it("hobby under the 500K cap is not over", async () => {
+    await seed(250_000);
     const s = await statusFor("hobby");
     expect(s).toMatchObject({
-      includedEvents: 2_000_000,
-      usedEvents: 1_000_000,
-      remainingEvents: 1_000_000,
+      includedEvents: 500_000,
+      usedEvents: 250_000,
+      remainingEvents: 250_000,
       overageEvents: 0,
       isOver: false,
       overageCents: 0,
@@ -96,12 +96,12 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
   });
 
   it("hobby over the cap is over, never charged, and refuses ingest (hard cap)", async () => {
-    await seed(3_000_000);
+    await seed(750_000);
     const s = await statusFor("hobby");
     expect(s).toMatchObject({
-      usedEvents: 3_000_000,
+      usedEvents: 750_000,
       remainingEvents: 0,
-      overageEvents: 1_000_000,
+      overageEvents: 250_000,
       isOver: true,
       overageCents: 0,
       hardCap: true,
@@ -111,16 +111,18 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
     expect(isIngestCapped(s)).toBe(true);
   });
 
-  it("pro over 5M projects an overage charge at the events rate", async () => {
-    await seed(6_000_000);
+  it("pro over its $20 credit (1M) projects an overage charge at the events rate", async () => {
+    await seed(2_000_000);
     const s = await statusFor("pro");
-    // 1M over * $0.05/1K = $50.00 = 5000 cents.
+    // 1M over * $0.02/1K = $20.00 = 2000 cents. The $20 credit shows fully used.
     expect(s).toMatchObject({
-      includedEvents: 5_000_000,
+      includedEvents: 1_000_000,
       overageEvents: 1_000_000,
       isOver: true,
       overageMode: "bill",
-      overageCents: 5000,
+      overageCents: 2000,
+      creditCents: 2000,
+      creditUsedCents: 2000,
     });
   });
 

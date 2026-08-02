@@ -572,6 +572,10 @@ export const usageEvents = pgTable(
     day: date("day").notNull(),
     /** NULL until folded into the rollups; the stamp that makes compaction exactly-once. */
     compactedAt: timestamp("compacted_at", { withTimezone: true }),
+    /** NULL until reported to the Stripe meter; the stamp that makes REPORTING exactly-once. */
+    reportedAt: timestamp("reported_at", { withTimezone: true }),
+    /** The usage_meter_reports row that carried this receipt's quantity to Stripe. */
+    reportId: uuid("report_id"),
   },
   (t) => [
     uniqueIndex("usage_events_idempotency_key").on(
@@ -582,6 +586,73 @@ export const usageEvents = pgTable(
     index("usage_events_uncompacted_idx")
       .on(t.organizationId)
       .where(sql`${t.compactedAt} is null`),
+    index("usage_events_unreported_idx")
+      .on(t.organizationId)
+      .where(sql`${t.reportedAt} is null`),
+  ],
+);
+
+/**
+ * The Stripe-reporting ledger for metered billing (migration 0020). One row per
+ * (claim, source): `id` is the Stripe meter-event `identifier` (its 24h dedup key),
+ * paired with our own `status` so reporting is exactly-once across crashes — a row is
+ * created 'pending' in the claim transaction, then flipped to 'sent' once
+ * billing.meterEvents.create succeeds. Tenant data — org-scoped, RLS.
+ */
+export const usageMeterReports = pgTable(
+  "usage_meter_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    /** The durable-event source this report covers (e.g. 'flags.exposure'). */
+    source: text("source").notNull(),
+    /** The Stripe Billing Meter event_name usage was reported under. */
+    eventName: text("event_name").notNull(),
+    /** The customer the meter event was attributed to. */
+    stripeCustomerId: text("stripe_customer_id").notNull(),
+    /** Exposures in this report (summed from the claimed receipts). */
+    quantity: bigint("quantity", { mode: "number" }).notNull(),
+    /** 'pending' (claimed, not yet sent), 'sent' (accepted), 'skipped'. */
+    status: text("status").notNull().default("pending"),
+    /** The 'YYYY-MM' the reported receipts fell in (for the tie-out). */
+    periodKey: text("period_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    /** Stamped when a Stripe MeterEventSummary has confirmed this send landed. */
+    stripeSummaryVerifiedAt: timestamp("stripe_summary_verified_at", {
+      withTimezone: true,
+    }),
+  },
+  (t) => [
+    index("usage_meter_reports_pending_idx")
+      .on(t.organizationId)
+      .where(sql`${t.status} = 'pending'`),
+  ],
+);
+
+/**
+ * The idempotent $20-credit ledger (migration 0020). One row per (org, period); the
+ * UNIQUE(org, period) constraint is the idempotency key — the single INSERT ... ON
+ * CONFLICT DO NOTHING that returns a row is the sole caller allowed to create the
+ * Stripe credit grant for that period, so a webhook redelivery never double-grants.
+ * Tenant data — org-scoped, RLS (written inside withOrg from the webhook/backfill).
+ */
+export const billingCreditGrants = pgTable(
+  "billing_credit_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    periodKey: text("period_key").notNull(),
+    /** Stripe credit grant id; NULL means "row claimed, Stripe create still owed". */
+    stripeGrantId: text("stripe_grant_id"),
+    amountCents: integer("amount_cents").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("billing_credit_grants_org_period_key").on(
+      t.organizationId,
+      t.periodKey,
+    ),
   ],
 );
 
@@ -631,6 +702,8 @@ export type ProjectAccess = typeof projectAccess.$inferSelect;
 export type UsageEvent = typeof usageEvents.$inferSelect;
 export type NewUsageEvent = typeof usageEvents.$inferInsert;
 export type UsageCounter = typeof usageCounters.$inferSelect;
+export type UsageMeterReport = typeof usageMeterReports.$inferSelect;
+export type BillingCreditGrant = typeof billingCreditGrants.$inferSelect;
 
 /** Everything the migrator and query layer should know about. */
 export const schema = {
@@ -652,6 +725,8 @@ export const schema = {
   usageEventRollups,
   usageEvents,
   usageCounters,
+  usageMeterReports,
+  billingCreditGrants,
 };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm

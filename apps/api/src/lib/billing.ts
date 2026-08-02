@@ -2,7 +2,7 @@ import type Stripe from "stripe";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations } from "../db/auth-tables.js";
-import { getStripe, getProPriceId } from "./stripe.js";
+import { getStripe, getProPriceId, getMeteredPriceId } from "./stripe.js";
 import { statusEntitlesPro } from "./entitlement.js";
 
 /**
@@ -99,13 +99,16 @@ export async function createCheckoutUrl(
 ): Promise<string> {
   const stripe = getStripe();
   const priceId = await getProPriceId();
+  const meteredPriceId = await getMeteredPriceId();
   const customerId = await ensureCustomer(org, actor);
   const base = `${appUrl()}/${org.slug}/settings/billing`;
 
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
+    // The flat $20 base + the metered events price. A metered item carries NO
+    // quantity (usage is reported to its meter); the $20 credit grant offsets it.
+    line_items: [{ price: priceId, quantity: 1 }, { price: meteredPriceId }],
     client_reference_id: org.id,
     subscription_data: {
       metadata: { flagon_org_id: org.id, flagon_org_slug: org.slug },
@@ -118,6 +121,27 @@ export async function createCheckoutUrl(
 
   if (!session.url) throw new Error("Stripe did not return a Checkout URL.");
   return session.url;
+}
+
+/**
+ * Ensure a subscription carries the metered events item, adding it if absent
+ * (idempotent). New checkouts include it already; this self-heals subscriptions that
+ * predate metered billing (the flat-price + comped subs backfilled at launch, or any
+ * that somehow lost it). Metered items carry no quantity — usage flows via the meter.
+ */
+export async function ensureMeteredItem(
+  subscription: Stripe.Subscription,
+): Promise<void> {
+  const meteredPriceId = await getMeteredPriceId();
+  const alreadyHas = subscription.items.data.some(
+    (it) => it.price?.id === meteredPriceId,
+  );
+  if (alreadyHas) return;
+  const stripe = getStripe();
+  await stripe.subscriptionItems.create({
+    subscription: subscription.id,
+    price: meteredPriceId,
+  });
 }
 
 /** Create a Billing Portal session and return its URL. */
@@ -217,6 +241,13 @@ function customerIdOf(
  * matching the stored customer id, which is how a subscription created OUTSIDE
  * our checkout (a pre-existing dashboard one) attaches after backfill.
  */
+/** Resolve the org a Stripe subscription belongs to (metadata, then customer id). */
+export function orgForSubscription(
+  subscription: Stripe.Subscription,
+): Promise<BillingOrg | null> {
+  return resolveOrg(subscription);
+}
+
 async function resolveOrg(
   subscription: Stripe.Subscription,
 ): Promise<BillingOrg | null> {

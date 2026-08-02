@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
 import { usageCounters } from "../db/schema.js";
 import {
+  planCreditCents,
   planHardCaps,
   planIncludedEvents,
   planOverage,
@@ -84,6 +85,10 @@ export type AllowanceStatus = {
    * limit" copy.
    */
   hardCap: boolean;
+  /** The plan's monthly usage credit in cents ($20 = 2000 for Pro; 0 otherwise). */
+  creditCents: number;
+  /** How much of the credit this period's usage has drawn down (capped at creditCents). */
+  creditUsedCents: number;
 };
 
 /** Compute an org's events-allowance status for the current period. */
@@ -106,6 +111,13 @@ export async function eventsAllowanceStatus(
   const overageCents =
     overageMode === "bill" ? chargeCents(EVENTS_METER, overageEvents) : 0;
 
+  // The Vercel-style credit drawdown: how much of the $20 this month's usage has
+  // spent, capped at the credit. Gross usage priced at the meter rate; the console
+  // renders "$X of $20 used".
+  const creditCents = planCreditCents(plan);
+  const grossUsageCents = chargeCents(EVENTS_METER, usedEvents);
+  const creditUsedCents = Math.min(Math.round(grossUsageCents), creditCents);
+
   return {
     plan,
     overageMode,
@@ -117,6 +129,8 @@ export async function eventsAllowanceStatus(
     isOver,
     overageCents,
     hardCap: planHardCaps(plan),
+    creditCents,
+    creditUsedCents,
   };
 }
 
