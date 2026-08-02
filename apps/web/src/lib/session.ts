@@ -1,16 +1,16 @@
 import "server-only";
 import { cache } from "react";
 import { headers } from "next/headers";
-import { API_URL } from "./api";
+import { APP_URL } from "./urls";
 
 /**
  * Login awareness for the marketing site.
  *
- * The API (api.flagon.io) owns auth; the marketing site does not run BetterAuth.
- * But it can still tell whether the visitor is signed in: the session cookie is
- * shared across surfaces (scoped to `.flagon.io` in production, and to
+ * The console (app.flagon.io) owns auth; the marketing site does not run
+ * BetterAuth. But it can still tell whether the visitor is signed in: the session
+ * cookie is shared across surfaces (scoped to `.flagon.io` in production, and to
  * `localhost` across ports in dev), so we forward the incoming cookie to the
- * API's /api/auth/get-session and trust its answer. Wrapped in `cache()` so a
+ * console's /api/auth/get-session and trust its answer. Wrapped in `cache()` so a
  * single render resolves it once.
  *
  * This makes the marketing pages render dynamically (they read the cookie),
@@ -31,7 +31,7 @@ export const getMarketingSession = cache(async (): Promise<MarketingUser> => {
   if (!cookie || !cookie.includes("session_token")) return null;
 
   try {
-    const res = await fetch(`${API_URL}/api/auth/get-session`, {
+    const res = await fetch(`${APP_URL}/api/auth/get-session`, {
       headers: { cookie },
       cache: "no-store",
     });
