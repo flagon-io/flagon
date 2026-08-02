@@ -65,10 +65,22 @@ You flipped the flag in the console but your app still sees the old value.
 
 ## `429 Too Many Requests`
 
-You're evaluating faster than the per-key limit. Back off using the
-`Retry-After` header. If your app evaluates one flag at a time in a loop, switch
-to **[bulk evaluation](/docs/feature-flags/evaluate/rest#evaluate-every-flag-bulk)**: fetch every
-flag in one request and read from the result in memory.
+Evaluating flags is free and unlimited. What has a fair-use limit is the number
+of network **requests** your SDK makes to the API, so a `429` means you're
+*fetching* config too often, not that you're checking flags too much. Back off
+with the `Retry-After` header, then remove the cause:
+
+- **Fetch once, evaluate from memory.** Hydrate every flag with
+  **[bulk evaluation](/docs/feature-flags/evaluate/rest#evaluate-every-flag-bulk)** and read
+  results from memory, refreshing on an interval, instead of calling the API on
+  every check. A well-cached app makes a small, near-constant number of requests
+  no matter how many flags it checks, and never approaches the limit.
+- **Never evaluate per flag in a loop.** One bulk request replaces N single-flag
+  calls, and the single-flag endpoint has no caching headers, so a loop is the
+  most expensive way to evaluate.
+
+Free (Hobby) keys have a lower request ceiling than paid plans. If a genuinely
+well-cached app still hits it, that's the signal to upgrade, not to add retries.
 
 ## The provider never becomes ready
 
