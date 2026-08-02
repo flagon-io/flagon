@@ -5,8 +5,10 @@ import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { getProject, listProjectAccess } from "@/lib/projects-api";
 import { listTeams } from "@/lib/teams-api";
+import { getUploadConfig } from "@/lib/uploads-api";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { CatalogForm, DeleteProject } from "./catalog-form";
+import { ProjectIconUpload } from "./project-icon-upload";
 import { ProjectAccessManager } from "./project-access";
 
 /**
@@ -26,10 +28,11 @@ export default async function ProjectSettings({
   if (!membership) redirect("/");
   if (!canManageOrg(membership.role)) redirect(`/${slug}/projects/${key}`);
 
-  const [project, teams, access] = await Promise.all([
+  const [project, teams, access, uploadConfig] = await Promise.all([
     getProject(slug, key),
     listTeams(slug),
     listProjectAccess(slug, key),
+    getUploadConfig(slug),
   ]);
   if (!project) notFound();
 
@@ -48,6 +51,22 @@ export default async function ProjectSettings({
 
       <SettingsSection title="Catalog" description="How this project shows up in the catalog.">
         <CatalogForm slug={slug} project={project} teams={teamOptions} />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Icon"
+        description="Shown in the catalog. Defaults to a monogram from the stack."
+      >
+        <ProjectIconUpload
+          slug={slug}
+          projectKey={project.key}
+          framework={project.framework}
+          initialImage={project.image}
+          canManage
+          uploadsEnabled={uploadConfig.enabled}
+          maxSizeBytes={uploadConfig.maxSizeBytes}
+          acceptedTypes={uploadConfig.acceptedTypes}
+        />
       </SettingsSection>
 
       <SettingsSection

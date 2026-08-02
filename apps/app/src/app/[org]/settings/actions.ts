@@ -1,7 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { renameOrg, setProjectCreationPolicy } from "@/lib/flags-api";
+import { renameOrg, setProjectCreationPolicy, updateOrgLogo } from "@/lib/flags-api";
+import {
+  completeUpload,
+  requestUpload,
+  type UploadTicket,
+} from "@/lib/uploads-api";
 
 type Result = { error?: string; ok?: string; newSlug?: string };
 
@@ -24,6 +29,51 @@ export async function updateOrgAction(formData: FormData): Promise<Result> {
     ok: "Organization updated.",
     newSlug: newSlug && newSlug !== currentSlug ? newSlug : undefined,
   };
+}
+
+/**
+ * Step 1 of a logo change: ask the API for a presigned upload ticket. The client
+ * then PUTs the bytes straight to the store and calls finishLogoUploadAction.
+ * Returns the ticket (or an error, e.g. 503 when uploads aren't configured).
+ */
+export async function startLogoUploadAction(
+  slug: string,
+  body: { contentType: string; size: number },
+): Promise<{ ticket?: UploadTicket; error?: string }> {
+  const { data, error } = await requestUpload(slug, { purpose: "org-logo", ...body });
+  if (error) return { error };
+  return { ticket: data };
+}
+
+/**
+ * Step 2: confirm the upload landed, then point the org's logo at it. The API
+ * verifies the object exists (HEAD) before we set the logo, so a failed upload
+ * never leaves a broken URL on the org.
+ */
+export async function finishLogoUploadAction(
+  slug: string,
+  assetId: string,
+): Promise<{ url?: string; error?: string }> {
+  const done = await completeUpload(slug, assetId);
+  if (done.error) return { error: done.error };
+  const url = done.data?.asset.url;
+  if (!url) return { error: "The upload has no public URL." };
+
+  const set = await updateOrgLogo(slug, url);
+  if (set.error) return { error: set.error };
+
+  revalidatePath(`/${slug}/settings`);
+  revalidatePath(`/${slug}`);
+  return { url };
+}
+
+/** Clear the org's logo (falls back to the default mark). Owner/admin. */
+export async function removeOrgLogoAction(slug: string): Promise<{ error?: string }> {
+  const { error } = await updateOrgLogo(slug, null);
+  if (error) return { error };
+  revalidatePath(`/${slug}/settings`);
+  revalidatePath(`/${slug}`);
+  return {};
 }
 
 /**

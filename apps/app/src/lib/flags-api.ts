@@ -462,7 +462,18 @@ type OrgSettings = {
   slug: string;
   plan: string;
   projectCreationPolicy: string;
+  logo: string | null;
 };
+
+/** Set (or clear, with null) the org's logo URL. Owner/admin. */
+export async function updateOrgLogo(slug: string, logo: string | null) {
+  return unwrap<{ org: OrgSettings }>(
+    await apiFetch(`/v1/orgs/${slug}`, {
+      method: "PATCH",
+      body: JSON.stringify({ logo }),
+    }),
+  );
+}
 
 /** Rename an organization (name + slug). Owner/admin. */
 export async function renameOrg(slug: string, body: { name: string; slug: string }) {

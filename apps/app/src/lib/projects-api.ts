@@ -34,6 +34,8 @@ export type Project = {
   ownerTeam: ProjectOwnerTeam | null;
   lifecycle: string | null;
   tier: string | null;
+  framework: string | null;
+  image: string | null;
   tags: string[];
   readme: string | null;
   createdAt: string;
@@ -46,6 +48,8 @@ export type ProjectCatalog = {
   ownerTeamKey?: string | null;
   lifecycle?: string | null;
   tier?: string | null;
+  framework?: string | null;
+  image?: string | null;
   tags?: string[];
   readme?: string | null;
 };
@@ -119,7 +123,16 @@ export async function getProject(slug: string, key: string): Promise<Project | n
 
 export async function createProject(
   slug: string,
-  body: { name: string; key: string },
+  body: {
+    name: string;
+    key: string;
+    description?: string;
+    framework?: string;
+    ownerTeamKey?: string;
+    lifecycle?: string;
+    tier?: string;
+    tags?: string[];
+  },
 ) {
   return unwrap<{ project: Project }>(
     await apiFetch(`/v1/orgs/${slug}/projects`, {

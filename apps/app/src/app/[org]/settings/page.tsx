@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
+import { getUploadConfig } from "@/lib/uploads-api";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { OrgGeneralForm } from "./general-form";
+import { LogoUpload } from "./logo-upload";
 import { ProjectCreationForm } from "./project-creation-form";
 
 export const metadata: Metadata = { title: "General · Organization settings" };
@@ -20,6 +22,7 @@ export default async function OrgGeneralSettingsPage({
   if (!membership) notFound();
 
   const canManage = canManageOrg(membership.role);
+  const uploadConfig = await getUploadConfig(slug);
 
   return (
     <div className="flex flex-col gap-6">
@@ -40,6 +43,21 @@ export default async function OrgGeneralSettingsPage({
           initialName={membership.name}
           initialPlan={membership.plan}
           canManage={canManage}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Logo"
+        description="Shown across the console wherever your organization appears."
+      >
+        <LogoUpload
+          slug={membership.slug}
+          orgName={membership.name}
+          initialLogo={membership.logo}
+          canManage={canManage}
+          uploadsEnabled={uploadConfig.enabled}
+          maxSizeBytes={uploadConfig.maxSizeBytes}
+          acceptedTypes={uploadConfig.acceptedTypes}
         />
       </SettingsSection>
 

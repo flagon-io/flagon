@@ -15,6 +15,7 @@ import { orgTokens_ } from "./tokens.route.js";
 import { emailVerify_ } from "./emails.route.js";
 import { projects_ } from "./projects.route.js";
 import { teams_ } from "./teams.route.js";
+import { uploads_ } from "./uploads.route.js";
 import { managementWriteLimit } from "../../lib/management-rate-limit.js";
 
 export const v1 = new Hono();
@@ -43,6 +44,7 @@ orgs.route("/:org/usage", usage_);
 orgs.route("/:org/tokens", orgTokens_);
 orgs.route("/:org/projects", projects_);
 orgs.route("/:org/teams", teams_);
+orgs.route("/:org/uploads", uploads_);
 // The org resource itself (PATCH /:org rename). Registered last so the more
 // specific sub-resource routes above take precedence.
 orgs.route("/:org", org_);

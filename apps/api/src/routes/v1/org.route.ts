@@ -26,10 +26,16 @@ const updateOrg = z
     name: z.string().trim().min(1).max(120).optional(),
     slug: z.string().trim().min(1).max(48).optional(),
     projectCreationPolicy: z.enum(["managers", "members"]).optional(),
+    // The org's logo, a URL (typically an uploaded asset's public URL). null
+    // clears it. Bounded to keep an arbitrary paste from bloating the row.
+    logo: z.string().url().max(2048).nullable().optional(),
   })
   .refine(
     (d) =>
-      d.name !== undefined || d.slug !== undefined || d.projectCreationPolicy !== undefined,
+      d.name !== undefined ||
+      d.slug !== undefined ||
+      d.projectCreationPolicy !== undefined ||
+      d.logo !== undefined,
     { message: "Provide at least one field to update." },
   );
 
@@ -42,6 +48,7 @@ registerComponentSchema(
       slug: z.string(),
       plan: z.string(),
       projectCreationPolicy: z.string(),
+      logo: z.string().nullable(),
     }),
   }),
 );
@@ -79,9 +86,12 @@ org_.patch("/", async (c) => {
     name?: string;
     slug?: string;
     projectCreationPolicy?: "managers" | "members";
+    logo?: string | null;
   } = {};
 
   if (parsed.data.name !== undefined) updates.name = parsed.data.name.trim();
+
+  if (parsed.data.logo !== undefined) updates.logo = parsed.data.logo;
 
   if (parsed.data.slug !== undefined) {
     const slug = parsed.data.slug.trim().toLowerCase();
@@ -112,6 +122,7 @@ org_.patch("/", async (c) => {
       slug: organizations.slug,
       plan: organizations.plan,
       projectCreationPolicy: organizations.projectCreationPolicy,
+      logo: organizations.logo,
     });
 
   return c.json({ org: row });

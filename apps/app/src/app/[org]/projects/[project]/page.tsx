@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { getProject } from "@/lib/projects-api";
 import { LIFECYCLES, TIERS, labelFor } from "@/lib/catalog";
+import { FrameworkBadge, ProjectIcon } from "@/components/framework-badge";
 import { ProjectReadme } from "./project-readme";
 
 /**
@@ -37,11 +38,14 @@ export default async function ProjectOverview({
       </Link>
 
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
-            {project.name}
-          </h1>
-          <p className="mt-1 font-mono text-sm text-zinc-500">{project.key}</p>
+        <div className="flex min-w-0 items-center gap-3">
+          <ProjectIcon image={project.image} framework={project.framework} size="lg" />
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
+              {project.name}
+            </h1>
+            <p className="mt-1 font-mono text-sm text-zinc-500">{project.key}</p>
+          </div>
         </div>
         {canManage ? (
           <Link
@@ -57,7 +61,7 @@ export default async function ProjectOverview({
         <p className="max-w-2xl text-sm text-zinc-400">{project.description}</p>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <InfoCard label="Owner">
           {project.ownerTeam ? (
             <Link
@@ -69,6 +73,9 @@ export default async function ProjectOverview({
           ) : (
             <span className="text-zinc-500">No owner</span>
           )}
+        </InfoCard>
+        <InfoCard label="Stack">
+          <FrameworkBadge framework={project.framework} />
         </InfoCard>
         <InfoCard label="Lifecycle">
           <Value text={labelFor(LIFECYCLES, project.lifecycle)} />

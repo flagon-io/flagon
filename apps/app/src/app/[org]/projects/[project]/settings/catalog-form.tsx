@@ -15,7 +15,8 @@ import {
   Textarea,
 } from "@flagon/design";
 import { SettingsFooter } from "@/components/settings/section";
-import { LIFECYCLES, TIERS } from "@/lib/catalog";
+import { FRAMEWORKS, LIFECYCLES, TIERS } from "@/lib/catalog";
+import { FrameworkIcon } from "@/components/framework-badge";
 import type { Project } from "@/lib/projects-api";
 import { deleteProjectAction, updateProjectAction } from "../../actions";
 
@@ -45,6 +46,7 @@ export function CatalogForm({
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description ?? "");
   const [ownerTeam, setOwnerTeam] = useState(project.ownerTeam?.key ?? NONE);
+  const [framework, setFramework] = useState(project.framework ?? NONE);
   const [lifecycle, setLifecycle] = useState(project.lifecycle ?? NONE);
   const [tier, setTier] = useState(project.tier ?? NONE);
   const [tags, setTags] = useState(project.tags.join(", "));
@@ -66,6 +68,7 @@ export function CatalogForm({
         name: name.trim(),
         description: description.trim() ? description.trim() : null,
         ownerTeamKey: ownerTeam === NONE ? null : ownerTeam,
+        framework: framework === NONE ? null : framework,
         lifecycle: lifecycle === NONE ? null : lifecycle,
         tier: tier === NONE ? null : tier,
         tags: parsedTags,
@@ -77,17 +80,63 @@ export function CatalogForm({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex max-w-2xl flex-col gap-4">
+      <Field label="Project name">
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+
+      <Field label="Stack" hint="What this project is built on.">
+        <div className="flex items-center gap-3">
+          <FrameworkIcon framework={framework === NONE ? null : framework} size="md" />
+          <Select
+            ariaLabel="Stack"
+            value={framework}
+            onValueChange={setFramework}
+            className="flex-1"
+            options={withNone(
+              FRAMEWORKS.map((f) => ({ value: f.value, label: f.label })),
+              "No stack",
+            )}
+          />
+        </div>
+      </Field>
+
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Project name">
-          <Input value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label="Owning team" hint="The team responsible for this project.">
+        <Field label="Owning team" hint="Who's responsible.">
           <Select
             ariaLabel="Owning team"
             value={ownerTeam}
             onValueChange={setOwnerTeam}
+            className="w-full"
             options={withNone(teams.map((t) => ({ value: t.key, label: t.name })), "No owner")}
+          />
+        </Field>
+        <Field label="Lifecycle">
+          <Select
+            ariaLabel="Lifecycle"
+            value={lifecycle}
+            onValueChange={setLifecycle}
+            className="w-full"
+            options={withNone(LIFECYCLES)}
+          />
+        </Field>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Tier">
+          <Select
+            ariaLabel="Tier"
+            value={tier}
+            onValueChange={setTier}
+            className="w-full"
+            options={withNone(TIERS)}
+          />
+        </Field>
+        <Field label="Tags" hint="Comma-separated.">
+          <Input
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="payments, go, pci"
           />
         </Field>
       </div>
@@ -98,33 +147,6 @@ export function CatalogForm({
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
           placeholder="A short summary of what this project does."
-        />
-      </Field>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Lifecycle">
-          <Select
-            ariaLabel="Lifecycle"
-            value={lifecycle}
-            onValueChange={setLifecycle}
-            options={withNone(LIFECYCLES)}
-          />
-        </Field>
-        <Field label="Tier">
-          <Select
-            ariaLabel="Tier"
-            value={tier}
-            onValueChange={setTier}
-            options={withNone(TIERS)}
-          />
-        </Field>
-      </div>
-
-      <Field label="Tags" hint="Comma-separated.">
-        <Input
-          value={tags}
-          onChange={(e) => setTags(e.target.value)}
-          placeholder="payments, go, pci"
         />
       </Field>
 

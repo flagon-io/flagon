@@ -57,6 +57,21 @@ const schema = z
     // Email (verification / reset / invites now send from the API).
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
+    // Object storage (Cloudflare R2 / any S3-compatible store) is OPTIONAL: the
+    // API boots and serves without it; upload endpoints return 503 until it's
+    // configured. Provider-neutral by design, so the SAME vars point at ministack
+    // locally (http://localhost:4566, path-style, dummy creds) and R2 in prod
+    // (https://<account>.r2.cloudflarestorage.com, region "auto"). The public
+    // bucket's objects are served from STORAGE_PUBLIC_BASE_URL (the ministack
+    // path-style URL locally; cdn.flagon.io in prod). All-or-nothing: if any
+    // storage var is set, the core set must be (checked below).
+    STORAGE_ENDPOINT: z.string().url().optional(),
+    STORAGE_REGION: z.string().optional(),
+    STORAGE_ACCESS_KEY_ID: z.string().optional(),
+    STORAGE_SECRET_ACCESS_KEY: z.string().optional(),
+    STORAGE_FORCE_PATH_STYLE: z.enum(["true", "false"]).optional(),
+    STORAGE_PUBLIC_BUCKET: z.string().optional(),
+    STORAGE_PUBLIC_BASE_URL: z.string().url().optional(),
   })
   .refine((e) => Boolean(e.DATABASE_URL || e.APP_DATABASE_URL), {
     message:
@@ -70,6 +85,33 @@ const schema = z
       message:
         "BETTER_AUTH_SECRET is still the dev placeholder in production. Generate a real secret.",
       path: ["BETTER_AUTH_SECRET"],
+    },
+  )
+  .refine(
+    (e) => {
+      // If storage is touched at all, the core set must be complete so we never
+      // half-configure it (a signed URL to a bucket with no public base is a
+      // silent 404 later). "Touched" = any storage var present.
+      const anySet = Boolean(
+        e.STORAGE_ENDPOINT ||
+          e.STORAGE_ACCESS_KEY_ID ||
+          e.STORAGE_SECRET_ACCESS_KEY ||
+          e.STORAGE_PUBLIC_BUCKET ||
+          e.STORAGE_PUBLIC_BASE_URL,
+      );
+      if (!anySet) return true;
+      return Boolean(
+        e.STORAGE_ENDPOINT &&
+          e.STORAGE_ACCESS_KEY_ID &&
+          e.STORAGE_SECRET_ACCESS_KEY &&
+          e.STORAGE_PUBLIC_BUCKET &&
+          e.STORAGE_PUBLIC_BASE_URL,
+      );
+    },
+    {
+      message:
+        "Object storage is partially configured. Set STORAGE_ENDPOINT, STORAGE_ACCESS_KEY_ID, STORAGE_SECRET_ACCESS_KEY, STORAGE_PUBLIC_BUCKET, and STORAGE_PUBLIC_BASE_URL together (or none).",
+      path: ["STORAGE_ENDPOINT"],
     },
   );
 

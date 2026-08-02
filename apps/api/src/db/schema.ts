@@ -378,6 +378,13 @@ export const projects = pgTable(
     }),
     lifecycle: text("lifecycle"),
     tier: text("tier"),
+    // The primary stack/framework (Vercel-style preset), a slug from the fixed
+    // registry the API validates. A catalog hint today; the deploy preset when
+    // Deployments lands.
+    framework: text("framework"),
+    // The project's icon/logo URL (an uploaded asset), shown in the catalog in
+    // place of the generated monogram. Null = fall back to the monogram.
+    image: text("image"),
     tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
     // The project's README (Markdown). Manually managed today; when a repository
     // is linked in the future it syncs from the repo's README.md.
@@ -686,6 +693,37 @@ export const usageCounters = pgTable(
   ],
 );
 
+/**
+ * An uploaded object (org logo today; project screenshots, avatars later).
+ * Tenant data (org-scoped, RLS). Stores the LOGICAL bucket id + key (see
+ * lib/storage.ts), never a physical bucket name, so introducing a second bucket
+ * needs no backfill — every asset already records where it lives. Bytes go
+ * straight to the store via a presigned PUT; the row is created `pending` at
+ * presign time and flipped to `ready` once the object is confirmed by HEAD.
+ */
+export const assets = pgTable(
+  "assets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    bucket: text("bucket").notNull(),
+    key: text("key").notNull(),
+    visibility: text("visibility").notNull().default("public"),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    // What the asset is for (e.g. "org-logo"), so a surface can locate its asset.
+    purpose: text("purpose"),
+    // pending (presigned, not yet uploaded) | ready (object confirmed present).
+    status: text("status").notNull().default("pending"),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    index("assets_org_idx").on(t.organizationId),
+    uniqueIndex("assets_bucket_key_key").on(t.bucket, t.key),
+  ],
+);
+
 export type Flag = typeof flags.$inferSelect;
 export type NewFlag = typeof flags.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
@@ -704,6 +742,7 @@ export type NewUsageEvent = typeof usageEvents.$inferInsert;
 export type UsageCounter = typeof usageCounters.$inferSelect;
 export type UsageMeterReport = typeof usageMeterReports.$inferSelect;
 export type BillingCreditGrant = typeof billingCreditGrants.$inferSelect;
+export type Asset = typeof assets.$inferSelect;
 
 /** Everything the migrator and query layer should know about. */
 export const schema = {
@@ -727,6 +766,7 @@ export const schema = {
   usageCounters,
   usageMeterReports,
   billingCreditGrants,
+  assets,
 };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm

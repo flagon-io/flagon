@@ -47,5 +47,44 @@ services:
             --forward-to host.docker.internal:3002/webhooks/stripe;
         fi
 
+  # Local S3-compatible object storage (ministack, a LocalStack alternative) so
+  # uploads work end-to-end without a real Cloudflare R2 bucket. Single port 4566,
+  # dummy creds. The API talks to it via STORAGE_* (see apps/api/.env.example)
+  # pointing at http://localhost:4566 with path-style addressing; in prod those
+  # same vars point at R2 instead.
+  ministack:
+    image: ministackorg/ministack
+    restart: unless-stopped
+    ports:
+      - "${STORAGE_PORT:-4566}:4566"
+
+  # One-shot: create the public bucket, make it world-readable (objects are served
+  # publicly, like an R2 bucket bound to cdn.flagon.io), and allow browser PUTs
+  # (CORS) so presigned direct-to-bucket uploads work from the console origin.
+  # Idempotent and best-effort, so `docker compose up` always succeeds.
+  ministack-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      - ministack
+    environment:
+      AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:-test}
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        B="${STORAGE_PUBLIC_BUCKET:-flagon-public}"
+        E="http://ministack:4566"
+        echo "[ministack-init] waiting for ministack...";
+        i=0; until aws --endpoint-url "$$E" s3 ls >/dev/null 2>&1; do
+          i=$$((i+1)); [ "$$i" -gt 60 ] && echo "[ministack-init] ministack never came up" && exit 0; sleep 1;
+        done
+        aws --endpoint-url "$$E" s3 mb "s3://$$B" 2>/dev/null || true
+        aws --endpoint-url "$$E" s3api put-bucket-policy --bucket "$$B" --policy \
+          '{"Version":"2012-10-17","Statement":[{"Sid":"PublicRead","Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::'"$$B"'/*"}]}' || true
+        aws --endpoint-url "$$E" s3api put-bucket-cors --bucket "$$B" --cors-configuration \
+          '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3600}]}' || true
+        echo "[ministack-init] public bucket '$$B' ready"
+
 volumes:
   flagon-postgres:

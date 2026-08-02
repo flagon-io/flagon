@@ -30,6 +30,21 @@ const TAG = "Projects";
 // a fixed picker; nullable everywhere so a project can stay bare.
 const LIFECYCLES = ["planning", "in_development", "alpha", "beta", "ga", "deprecated"] as const;
 const TIERS = ["1", "2", "3", "4"] as const;
+// The project's primary stack/framework (Vercel-style preset). A fixed registry
+// so the console can render a picker and the API can validate; the labels/colors
+// the UI renders live in apps/app/src/lib/catalog.ts and MUST stay in lockstep
+// with these slugs. "other" is the catch-all. Additive to a future Deployments
+// product (the deploy preset).
+const FRAMEWORKS = [
+  // Web / frontend
+  "nextjs", "react", "vue", "nuxt", "svelte", "remix", "astro", "angular", "solid", "gatsby",
+  // Backend / API
+  "node", "express", "nestjs", "go", "rails", "django", "flask", "fastapi", "laravel", "spring", "dotnet", "phoenix", "rust",
+  // Mobile
+  "reactnative", "flutter", "expo",
+  // Other
+  "static", "other",
+] as const;
 // GitHub-repository-style access levels a team can hold on a project.
 const ACCESS_ROLES = ["read", "triage", "write", "maintain", "admin"] as const;
 const tagsField = z.array(z.string().trim().min(1).max(40)).max(20);
@@ -38,6 +53,13 @@ const createBody = z.object({
   name: z.string().trim().min(1).max(100),
   key: z.string().trim().min(1).max(100),
   description: z.string().trim().max(500).optional(),
+  framework: z.enum(FRAMEWORKS).optional(),
+  // Catalog metadata can be set at creation too (mirrors the update body), so the
+  // console's New Project modal captures it up front instead of a follow-up edit.
+  ownerTeamKey: z.string().trim().min(1).max(100).optional(),
+  lifecycle: z.enum(LIFECYCLES).optional(),
+  tier: z.enum(TIERS).optional(),
+  tags: tagsField.optional(),
 });
 const updateBody = z
   .object({
@@ -47,6 +69,10 @@ const updateBody = z
     ownerTeamKey: z.string().trim().min(1).max(100).nullable().optional(),
     lifecycle: z.enum(LIFECYCLES).nullable().optional(),
     tier: z.enum(TIERS).nullable().optional(),
+    // The primary stack/framework preset (null clears it).
+    framework: z.enum(FRAMEWORKS).nullable().optional(),
+    // The project's icon URL, typically an uploaded asset (null clears it).
+    image: z.string().url().max(2048).nullable().optional(),
     tags: tagsField.optional(),
     // The project README, Markdown. Generous cap to bound abuse.
     readme: z.string().max(100_000).nullable().optional(),
@@ -61,6 +87,8 @@ const projectSchema = z.object({
   ownerTeam: ownerTeamSchema,
   lifecycle: z.string().nullable(),
   tier: z.string().nullable(),
+  framework: z.string().nullable(),
+  image: z.string().nullable(),
   tags: z.array(z.string()),
   readme: z.string().nullable(),
   createdAt: z.string(),
@@ -81,6 +109,8 @@ function serialize(
     ownerTeam: ownerTeamKey && ownerTeamName ? { key: ownerTeamKey, name: ownerTeamName } : null,
     lifecycle: p.lifecycle,
     tier: p.tier,
+    framework: p.framework,
+    image: p.image,
     tags: p.tags,
     readme: p.readme,
     createdAt: p.createdAt.toISOString(),
@@ -113,7 +143,7 @@ registerRoute({
   method: "post",
   path: "/v1/orgs/{org}/projects",
   summary: "Create a project",
-  description: "Create a project by name and key, optionally with a description.",
+  description: "Create a project by name and key, optionally with a description and stack.",
   tags: [TAG],
   auth: true,
   paramDescriptions: pParams,
@@ -129,7 +159,7 @@ registerRoute({
   method: "patch",
   path: "/v1/orgs/{org}/projects/{key}",
   summary: "Update a project",
-  description: "Rename a project or edit its catalog metadata (description, owning team, type, lifecycle, tier, tags).",
+  description: "Rename a project or edit its catalog metadata (description, owning team, stack, lifecycle, tier, tags).",
   tags: [TAG],
   auth: true,
   paramDescriptions: { ...pParams, key: "The project key." },
@@ -198,7 +228,7 @@ projects_.post("/", async (c) => {
 
   const parsed = createBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
-  const { name, key, description } = parsed.data;
+  const { name, key, description, framework, ownerTeamKey, lifecycle, tier, tags } = parsed.data;
 
   if (!isValidSlug(key) || isReserved(key)) {
     return jsonError(c, 400, "Choose a different project key (letters, numbers, dashes).");
@@ -213,6 +243,21 @@ projects_.post("/", async (c) => {
       .then((r) => r[0]);
     if (existing) return "conflict" as const;
 
+    // Resolve the (optional) owning team by key, so the response carries its name.
+    let ownerTeamId: string | null = null;
+    let owner: { key: string; name: string } | null = null;
+    if (ownerTeamKey) {
+      const team = await tx
+        .select({ id: teams.id, key: teams.key, name: teams.name })
+        .from(teams)
+        .where(eq(teams.key, ownerTeamKey))
+        .limit(1)
+        .then((r) => r[0]);
+      if (!team) return "unknown_team" as const;
+      ownerTeamId = team.id;
+      owner = { key: team.key, name: team.name };
+    }
+
     const [row] = await tx
       .insert(projects)
       .values({
@@ -220,12 +265,18 @@ projects_.post("/", async (c) => {
         key,
         name,
         description: description ?? null,
+        framework: framework ?? null,
+        ownerTeamId,
+        lifecycle: lifecycle ?? null,
+        tier: tier ?? null,
+        tags: tags ?? [],
         createdByUserId: ctx.actorUserId,
       })
       .returning();
-    return serialize(row, null, null);
+    return serialize(row, owner?.key ?? null, owner?.name ?? null);
   });
   if (result === "conflict") return jsonError(c, 409, `A project named "${key}" already exists.`);
+  if (result === "unknown_team") return jsonError(c, 400, "That team does not exist.");
   return c.json({ project: result }, 201);
 });
 
