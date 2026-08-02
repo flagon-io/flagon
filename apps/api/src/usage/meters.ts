@@ -64,12 +64,14 @@ export const METERS = {
     unit: "event",
     billable: true, // THE money meter — exposures / analytics events, any product
     tracked: true, // recorded in usage_event_rollups (POST /ofrep/v1/exposures)
-    // $0.02 / 1K = $20 / 1M: 60% under the market leader (Statsig $0.05/1K). An
-    // exposure is a batched DB write, so per-unit infra is a fraction of a cent — the
-    // rate is positioning, not cost recovery, and stays ~99.9% margin. We compete on
-    // breadth of products + price. Pro's $20/mo is a usage credit ($20 buys 1M at this
-    // rate); Hobby's 500K free ceiling lives with the plans. This is the overage rate.
-    pricePerMillionCents: 2000,
+    // $0.05 / 1K = $50 / 1M: at parity with Statsig's exposure rate ($0.05/1K), the
+    // closest peer on this axis — we match the marginal rate but undercut on the base
+    // fee and never charge per-seat. An exposure is a batched DB write, so per-unit
+    // infra is a fraction of a cent — the rate is positioning, not cost recovery, and
+    // stays ~99.9% margin. We compete on breadth of products + a lower entry price.
+    // Pro's $50/mo is a usage credit ($50 buys 1M at this rate); Hobby's 500K free
+    // ceiling lives with the plans. This is the overage rate.
+    pricePerMillionCents: 5000,
     includedQuantity: 0,
   },
 } satisfies Record<MeterId, Meter>;
@@ -83,7 +85,7 @@ export const EVENTS_METER = METERS.events;
  * The billing registry that maps a durable-event `source` to its Stripe meter + price
  * + invoice product. This is THE extension point: a future product bills usage by
  * adding a row here (a new source namespace + its own Stripe meter/price) — the
- * reporting sweep, the shared $20 credit (scoped to all metered prices), and the
+ * reporting sweep, the shared $50 credit (scoped to all metered prices), and the
  * tie-out all work unchanged. `eventName` is the Stripe Billing Meter's event_name;
  * `priceLookupKey` resolves the metered price at runtime (like the flat Pro price).
  */

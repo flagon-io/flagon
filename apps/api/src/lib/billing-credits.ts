@@ -7,9 +7,9 @@ import { PRO_CREDIT_CENTS } from "./plans.js";
 import { orgForSubscription, type BillingOrg } from "./billing.js";
 
 /**
- * The $20 usage-credit lifecycle. Each billing period a Pro org is granted a $20
+ * The $50 usage-credit lifecycle. Each billing period a Pro org is granted a $50
  * Stripe credit scoped to metered prices — the shared pool every metered product
- * draws from (invoice math: $20 base + max(0, usage − $20)). Grants do NOT auto-recur
+ * draws from (invoice math: $50 base + max(0, usage − $50)). Grants do NOT auto-recur
  * in Stripe, so we issue one per period, driven by the subscription's renewal webhook.
  *
  * Idempotency (invariant: never double-grant on webhook redelivery) is enforced by
@@ -41,10 +41,10 @@ async function createStripeGrant(
   const grant = await stripe.billing.creditGrants.create({
     customer: org.stripeCustomerId!,
     amount: { type: "monetary", monetary: { currency: "usd", value: PRO_CREDIT_CENTS } },
-    // Scope to ALL metered prices (price_type), so the one $20 credit is the shared
+    // Scope to ALL metered prices (price_type), so the one $50 credit is the shared
     // pool across every product's meter — not tied to a single price id.
     applicability_config: { scope: { price_type: "metered" } },
-    // Paid: the customer funds it via the $20 base line. (Tracking only.)
+    // Paid: the customer funds it via the $50 base line. (Tracking only.)
     category: "paid",
     // effective_at defaults to now (Stripe rejects a past timestamp; on renewal the
     // grant fires just after period start). expires_at = period end + grace so the
@@ -55,7 +55,7 @@ async function createStripeGrant(
 }
 
 /**
- * Ensure the org's $20 credit exists for the given billing period, exactly once.
+ * Ensure the org's $50 credit exists for the given billing period, exactly once.
  * No-ops (no Stripe call) if the period was already granted. Requires a Stripe
  * customer; a comped org gets the grant too (harmless — the 100%-off coupon zeroes
  * the invoice before credits apply).
@@ -130,7 +130,7 @@ export function subscriptionPeriod(
 }
 
 /**
- * Grant the period's $20 credit when a subscription invoice is PAID — at creation and
+ * Grant the period's $50 credit when a subscription invoice is PAID — at creation and
  * each renewal — so the credit exists before that period's arrears usage finalizes.
  * Idempotent per period (grantPeriodCredit). Fired from the webhook on
  * invoice.paid / invoice.payment_succeeded. In this API version the invoice's

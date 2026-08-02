@@ -89,7 +89,7 @@ stripeWebhook.post("/", async (c) => {
       }
       case "invoice.paid":
       case "invoice.payment_succeeded": {
-        // Grant the period's $20 usage credit at creation + each renewal, idempotently.
+        // Grant the period's $50 usage credit at creation + each renewal, idempotently.
         await handleInvoicePaidCredit(event.data.object as Stripe.Invoice);
         break;
       }

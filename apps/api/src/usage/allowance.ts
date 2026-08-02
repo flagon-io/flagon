@@ -13,7 +13,7 @@ import { EVENTS_METER, chargeCents } from "./meters.js";
 /**
  * The events-allowance PICTURE: how a plan's monthly included events compare to
  * what an org has actually used this period. This is what lets us SEE that a
- * Hobby org is over its 2M cap (or a Pro org into overage) whether or not we
+ * Hobby org is over its 500K cap (or a Pro org into overage) whether or not we
  * block anyone — whether ingest is actually REFUSED is the plan's `hardCap`
  * policy (see lib/plans.ts `planHardCaps`), which replaced the old
  * EVENTS_ENFORCEMENT env flag.
@@ -85,7 +85,7 @@ export type AllowanceStatus = {
    * limit" copy.
    */
   hardCap: boolean;
-  /** The plan's monthly usage credit in cents ($20 = 2000 for Pro; 0 otherwise). */
+  /** The plan's monthly usage credit in cents ($50 = 5000 for Pro; 0 otherwise). */
   creditCents: number;
   /** How much of the credit this period's usage has drawn down (capped at creditCents). */
   creditUsedCents: number;
@@ -111,9 +111,9 @@ export async function eventsAllowanceStatus(
   const overageCents =
     overageMode === "bill" ? chargeCents(EVENTS_METER, overageEvents) : 0;
 
-  // The Vercel-style credit drawdown: how much of the $20 this month's usage has
+  // The Vercel-style credit drawdown: how much of the $50 this month's usage has
   // spent, capped at the credit. Gross usage priced at the meter rate; the console
-  // renders "$X of $20 used".
+  // renders "$X of $50 used".
   const creditCents = planCreditCents(plan);
   const grossUsageCents = chargeCents(EVENTS_METER, usedEvents);
   const creditUsedCents = Math.min(Math.round(grossUsageCents), creditCents);

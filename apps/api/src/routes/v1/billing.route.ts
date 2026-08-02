@@ -62,7 +62,7 @@ registerRoute({
   path: "/v1/orgs/{org}/billing/checkout",
   summary: "Start a Pro checkout",
   description:
-    "Create a Stripe Checkout session to start the $20/mo Pro subscription (or, when a subscription is already active, a portal session to manage it) and return its URL. Owner/admin only.",
+    "Create a Stripe Checkout session to start the $50/mo Pro subscription (or, when a subscription is already active, a portal session to manage it) and return its URL. Owner/admin only.",
   tags: [BILLING_TAG],
   auth: true,
   paramDescriptions: billingParams,

@@ -160,8 +160,8 @@ export function NewOrgForm({ hasHobby }: { hasHobby: boolean }) {
         </div>
         <p className="text-xs text-zinc-500">
           {hasHobby
-            ? "You already have a Hobby organization (limited to one). Pro is $20/mo and lifts that limit; you'll set up billing right after creating."
-            : "Hobby is free and limited to one user. Pro is $20/mo, with team members and no org limit; you'll set up billing right after creating."}{" "}
+            ? "You already have a Hobby organization (limited to one). Pro is $50/mo and lifts that limit; you'll set up billing right after creating."
+            : "Hobby is free and limited to one user. Pro is $50/mo, with team members and no org limit; you'll set up billing right after creating."}{" "}
           {SELF_HOST_NOTE}
         </p>
       </fieldset>

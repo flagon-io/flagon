@@ -5,7 +5,7 @@
  * It ALWAYS scrubs the org's usage first (clean baseline), then fills the trailing
  * N days with free flag checks (spread across the org's flags, environments and a
  * couple of OFREP reasons, so every lens has something to show) and billable
- * events (kept comfortably under the Hobby 2M cap, so the free-tier bar reads
+ * events (landing around the Pro credit's 1M, so the usage bar reads
  * "partly used", not "over"). Config — flags, keys — is never touched.
  *
  * Asserts the validation org exists and fails loudly if not. Runs as the OWNER DB
@@ -114,8 +114,8 @@ async function main() {
   // exactly-once compaction folds them into the rollups — the same pipeline
   // POST /ofrep/v1/exposures drives. So the seeded rollups are backed by receipts
   // and reconcile cleanly, instead of being written straight into the rollup table.
-  // ~25k-55k/day -> roughly 1M-1.6M/month, under the Hobby 2M cap so the free-tier
-  // bar shows meaningful (not over) usage.
+  // ~25k-55k/day -> roughly 1M-1.6M/month, around the Pro $50 credit (1M) so the
+  // usage bar shows a meaningful credit drawdown into light overage.
   for (const { day, ms } of daysList) {
     const n = randInt(25_000, 55_000);
     totalEvents += n;

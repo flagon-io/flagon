@@ -11,7 +11,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { PricingTable } from "./pricing-table";
 
 // Rendered from the shared catalog so the marketing copy can never drift from
-// what the app actually meters. "2M" / "5M" and the per-1K overage rate.
+// what the app actually meters. "0.5M" / "1M" and the per-1K overage rate.
 const millions = (n: number) => `${n / 1_000_000}M`;
 const HOBBY_EVENTS = millions(planIncludedEvents("hobby"));
 const PRO_EVENTS = millions(planIncludedEvents("pro"));

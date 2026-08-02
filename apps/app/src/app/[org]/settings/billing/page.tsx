@@ -155,7 +155,7 @@ export default async function OrgBillingPage({
             description={
               isPro
                 ? "Update your card, download invoices, or cancel."
-                : `${PRO?.price.amount ?? "$20"} per month plus usage, billed monthly. Cancel anytime.`
+                : `${PRO?.price.amount ?? "$50"} per month plus usage, billed monthly. Cancel anytime.`
             }
           >
             {!canManage ? (

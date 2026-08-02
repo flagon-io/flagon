@@ -3,8 +3,8 @@
  * to fast-forward full billing cycles and FINALIZE real invoices. Proves the whole
  * money matrix — under the credit, over the credit, and fully comped:
  *
- *   usage < $20  -> invoice $20  (base minimum; credit covers usage)
- *   usage > $20  -> invoice $20 + (usage − $20)
+ *   usage < $50  -> invoice $50  (base minimum; credit covers usage)
+ *   usage > $50  -> invoice $50 + (usage − $50)
  *   comped 100%  -> invoice $0   (coupon zeroes everything)
  *
  *   node --env-file=.env --import tsx scripts/validate-metered.ts
@@ -21,7 +21,7 @@ import {
 } from "../src/lib/stripe.js";
 import { PRO_CREDIT_CENTS } from "../src/lib/plans.js";
 
-const RATE_PER_EXPOSURE = 0.02 / 1000;
+const RATE_PER_EXPOSURE = 0.05 / 1000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const nowUnix = () => Math.floor(Date.now() / 1000);
@@ -105,8 +105,8 @@ async function main() {
   const coupon = await stripe.coupons.create({ percent_off: 100, duration: "forever" });
 
   const scenarios: Scenario[] = [
-    { name: "under the credit", exposures: 500_000, expectedCents: 2000 }, // $10 usage -> $20
-    { name: "over the credit", exposures: 1_500_000, expectedCents: 3000 }, // $30 usage -> $30
+    { name: "under the credit", exposures: 500_000, expectedCents: 5000 }, // $25 usage -> $50
+    { name: "over the credit", exposures: 1_500_000, expectedCents: 7500 }, // $75 usage -> $75
     { name: "comped (100% off)", exposures: 1_500_000, comped: true, expectedCents: 0 },
   ];
 

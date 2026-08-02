@@ -178,11 +178,11 @@ exposures.record("new-checkout", { value });
 - **Checks stay free.** Evaluating flags never counts against your plan — only the
   exposures you choose to send do. See [pricing](/pricing) for each plan's
   included events.
-- **Allowance is measured, not enforced (for now).** Each plan includes a monthly
-  events allowance (Hobby 2M, Pro 5M). Going over is shown on your usage page but
-  is not currently blocked or billed. When enforcement turns on, a free-plan org
-  past its cap will get a `403` here (upgrade to continue); paid plans meter the
-  overage instead.
+- **Allowances are enforced.** Each plan includes a monthly exposure allowance
+  (Hobby 500K, Pro 1M). A free-plan org past its cap gets a `403` here and needs to
+  upgrade to continue. Flag evaluation stays free and unaffected: only metering
+  stops. Pro meters the overage at $0.05 per 1,000 exposures instead of blocking.
+  See [pricing](/pricing) for current numbers.
 
 ## Next
 

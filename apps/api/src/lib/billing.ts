@@ -88,7 +88,7 @@ export async function ensureCustomer(
 
 /**
  * Create a Checkout Session to start (or, when a live subscription exists,
- * manage) a $20/mo Pro subscription, and return its URL. The price is resolved
+ * manage) a $50/mo Pro subscription, and return its URL. The price is resolved
  * from its stable lookup key, so no price id is configured. The org id rides on
  * `client_reference_id` and the subscription metadata for unambiguous webhook
  * attribution.
@@ -106,8 +106,8 @@ export async function createCheckoutUrl(
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    // The flat $20 base + the metered events price. A metered item carries NO
-    // quantity (usage is reported to its meter); the $20 credit grant offsets it.
+    // The flat $50 base + the metered events price. A metered item carries NO
+    // quantity (usage is reported to its meter); the $50 credit grant offsets it.
     line_items: [{ price: priceId, quantity: 1 }, { price: meteredPriceId }],
     client_reference_id: org.id,
     subscription_data: {

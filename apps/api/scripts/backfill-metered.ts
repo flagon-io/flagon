@@ -1,6 +1,6 @@
 /**
  * Backfill existing Pro subscriptions for metered billing: add the metered events
- * item and grant the current period's $20 credit. Run ONCE at launch for every
+ * item and grant the current period's $50 credit. Run ONCE at launch for every
  * subscription created before metered billing (the flat-price subs + the comped
  * flagon sub). Metering starts here — NO historical usage is reported, so there is
  * no surprise back-bill. Idempotent: re-running adds nothing (ensureMeteredItem and
@@ -37,7 +37,7 @@ async function processOrg(org: BillingOrg, apply: boolean): Promise<void> {
   const sub = await stripe.subscriptions.retrieve(org.stripeSubscriptionId);
   console.log(`  ${org.slug}: subscription ${sub.id} (${sub.status})`);
   if (!apply) {
-    console.log("    would: add metered item (if missing) + grant this period's $20 credit");
+    console.log("    would: add metered item (if missing) + grant this period's $50 credit");
     return;
   }
   await ensureMeteredItem(sub);

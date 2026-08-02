@@ -215,7 +215,7 @@ export type Entitlement = {
   isOver: boolean;
   overageCents: number;
   hardCap: boolean;
-  /** The plan's monthly usage credit in cents ($20 = 2000 for Pro; 0 otherwise). */
+  /** The plan's monthly usage credit in cents ($50 = 5000 for Pro; 0 otherwise). */
   creditCents: number;
   /** How much of the credit this period's usage has drawn down (capped at creditCents). */
   creditUsedCents: number;

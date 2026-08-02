@@ -243,7 +243,7 @@ function ProjectRow({
 /**
  * The usage-overview sidebar. Mirrors the /usage page's credit/events bars in a
  * compact form, off the same Entitlement (the CURRENT month). Pro draws down a
- * $20 credit; Hobby burns a free-events ceiling. No invented numbers.
+ * $50 credit; Hobby burns a free-events ceiling. No invented numbers.
  */
 function UsagePanel({
   slug,

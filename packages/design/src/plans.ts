@@ -3,24 +3,24 @@
  * marketing pricing page and the in-app create-organization picker so the two
  * can never drift.
  *
- * Hobby is free (one per account). Pro is a paid, Stripe-backed plan ($20/mo,
+ * Hobby is free (one per account). Pro is a paid, Stripe-backed plan ($50/mo,
  * flat) — creating a Pro org routes through Checkout and the org is locked
  * until the subscription is active. Enterprise stays defined-but-unavailable
  * (Contact Sales), never self-serve.
  *
  * Pricing model (Vercel-shaped): flag & config checks are free and unlimited on every
- * plan (the wedge); the billable meter is analytics EXPOSURES at $0.02/1K. Hobby is a
+ * plan (the wedge); the billable meter is analytics EXPOSURES at $0.05/1K. Hobby is a
  * hard CAP: 500K exposures/mo free, then sending stops (upgrade, never billed). Pro's
- * $20/mo base is a $20 USAGE CREDIT — a shared, monetary pool ALL metered products draw
- * from — which at $0.02/1K covers 1M exposures; overage bills at
+ * $50/mo base is a $50 USAGE CREDIT — a shared, monetary pool ALL metered products draw
+ * from — which at $0.05/1K covers 1M exposures; overage bills at
  * EVENT_OVERAGE_PER_MILLION_CENTS. Enterprise trues up against a contracted envelope.
- * A future product adds its own meter/rate and draws the same $20 credit. The dollar
+ * A future product adds its own meter/rate and draws the same $50 credit. The dollar
  * figures move the moment these numbers do.
  */
 export type PlanId = "hobby" | "pro" | "enterprise";
 
 export type PlanPrice = {
-  /** The monthly figure, e.g. "$0", "$20", "Custom". */
+  /** The monthly figure, e.g. "$0", "$50", "Custom". */
   amount: string;
   /** Unit after the figure, e.g. "per month". Omit for Custom pricing. */
   unit?: string;
@@ -43,12 +43,12 @@ export type Plan = {
   price: PlanPrice;
   /**
    * The flat monthly subscription fee, in cents (the "Subscription License" line
-   * on the usage invoice). Pro is $20; Hobby is free; Enterprise is contracted.
+   * on the usage invoice). Pro is $50; Hobby is free; Enterprise is contracted.
    */
   baseCents: number;
   /**
    * The monthly included exposures a plan covers before overage. Hobby 500K is the
-   * hard free cap; Pro 1M is CREDIT-DERIVED ($20 credit ÷ $0.02/1K). Drives the usage
+   * hard free cap; Pro 1M is CREDIT-DERIVED ($50 credit ÷ $0.05/1K). Drives the usage
    * page's credit-drawdown bar. A pricing lever — change it here and the console
    * reprices. Enterprise is 0 (contracted volumes, shown as usage against a term
    * envelope, not an allowance).
@@ -103,17 +103,17 @@ export const PLANS: Plan[] = [
     id: "pro",
     name: "Pro",
     description: "Everything you need to build and scale with a team.",
-    price: { amount: "$20", unit: "per month", plus: "plus usage" },
-    baseCents: 2000,
+    price: { amount: "$50", unit: "per month", plus: "plus usage" },
+    baseCents: 5000,
     includedEvents: 1_000_000,
     overage: "bill",
-    // The $20 is a usage credit, not a seat charge: it covers 1M exposures a month
+    // The $50 is a usage credit, not a seat charge: it covers 1M exposures a month
     // (a shared credit across all products), and you are only billed past that.
-    note: "$20/mo is a usage credit — 1M exposures. Pay more only past it.",
+    note: "$50/mo is a usage credit — 1M exposures. Pay more only past it.",
     featuresLead: "All Hobby features, plus:",
     features: [
       { text: "Unlimited team members and roles" },
-      { text: "$20/mo usage credit — about 1M exposures" },
+      { text: "$50/mo usage credit — about 1M exposures" },
       { text: "Usage-based pricing, never per-seat" },
       { text: "Priority support" },
       { text: "SSO with SAML and SCIM", soon: true },
@@ -182,15 +182,15 @@ export function planOverage(id: string): "cap" | "bill" | "contract" {
 
 /**
  * Overage rate for analytics exposures beyond a plan's included allowance, in cents
- * per 1,000,000 exposures ($0.02/1K = $20/1M = 2000). MIRRORS the meter registry's
+ * per 1,000,000 exposures ($0.05/1K = $50/1M = 5000). MIRRORS the meter registry's
  * events rate in the API (apps/api/src/usage/meters.ts) — the API is the source of
  * truth for billing; this copy is for marketing/pricing surfaces that can't import
  * it. Keep the two in sync.
  */
-export const EVENT_OVERAGE_PER_MILLION_CENTS = 2000;
+export const EVENT_OVERAGE_PER_MILLION_CENTS = 5000;
 
-/** The Pro plan's monthly usage credit, in cents ($20). Mirrors the API's PRO_CREDIT_CENTS. */
-export const PRO_CREDIT_CENTS = 2000;
+/** The Pro plan's monthly usage credit, in cents ($50). Mirrors the API's PRO_CREDIT_CENTS. */
+export const PRO_CREDIT_CENTS = 5000;
 
 /** The monthly usage credit (cents) for a plan; 0 for free/contracted. */
 export function planCreditCents(id: string): number {

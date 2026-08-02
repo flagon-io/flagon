@@ -39,9 +39,9 @@ const PLAN_AVAILABILITY: Record<PlanId, boolean> = {
  * The warn-first emails (usage/notify.ts) still fire at 80% and 100%, so the cap never
  * arrives unannounced: an org gets both the heads-up and the ceiling.
  *
- * Pro's `included` (1M) is CREDIT-DERIVED, not a hard allowance: the $20/mo base is a
- * $20 usage credit and, at the $0.02/1K meter rate, $20 buys 1M exposures. It drives
- * the usage page's "$X of $20 used" bar; real billing runs through Stripe meters +
+ * Pro's `included` (1M) is CREDIT-DERIVED, not a hard allowance: the $50/mo base is a
+ * $50 usage credit and, at the $0.05/1K meter rate, $50 buys 1M exposures. It drives
+ * the usage page's "$X of $50 used" bar; real billing runs through Stripe meters +
  * the credit grant (see lib/billing-credits.ts, usage/report.ts).
  */
 const PLAN_EVENTS: Record<
@@ -54,12 +54,12 @@ const PLAN_EVENTS: Record<
 };
 
 /**
- * The monthly usage credit (cents) a plan's base fee converts into. Pro's $20 base is
- * a $20 credit that all metered products draw from (a shared, monetary pool). This is
+ * The monthly usage credit (cents) a plan's base fee converts into. Pro's $50 base is
+ * a $50 credit that all metered products draw from (a shared, monetary pool). This is
  * the amount granted per period in Stripe (lib/billing-credits.ts) and the denominator
- * of the usage page's "$X of $20 used" bar. Free/contracted plans have no credit.
+ * of the usage page's "$X of $50 used" bar. Free/contracted plans have no credit.
  */
-export const PRO_CREDIT_CENTS = 2000;
+export const PRO_CREDIT_CENTS = 5000;
 
 /** The monthly usage credit (cents) for a plan; 0 for free/contracted. */
 export function planCreditCents(id: string): number {

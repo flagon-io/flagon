@@ -111,7 +111,7 @@ export default async function UsagePage({
       </div>
 
       {entitlement && entitlement.creditCents > 0 ? (
-        // Pro: the Vercel-style usage-credit drawdown ($X of $20 used, then overage).
+        // Pro: the Vercel-style usage-credit drawdown ($X of $50 used, then overage).
         <CreditBar
           creditCents={entitlement.creditCents}
           creditUsedCents={entitlement.creditUsedCents}
@@ -147,9 +147,9 @@ export default async function UsagePage({
 }
 
 /**
- * The Pro usage-credit drawdown (Vercel-style): how much of the $20/mo credit this
- * month's usage has spent, then overage. The $20 covers the first $20 of usage
- * (~1M exposures at $0.02/1K); past that you pay only the difference.
+ * The Pro usage-credit drawdown (Vercel-style): how much of the $50/mo credit this
+ * month's usage has spent, then overage. The $50 covers the first $50 of usage
+ * (~1M exposures at $0.05/1K); past that you pay only the difference.
  */
 function CreditBar({
   creditCents,
@@ -182,7 +182,7 @@ function CreditBar({
       </div>
       <p className="mt-2 text-xs text-zinc-500">
         {over
-          ? `Your $${dollars} credit is used up. Usage beyond it bills at $0.02 per 1,000 exposures — ${usd(overageCents)} so far this month.`
+          ? `Your $${dollars} credit is used up. Usage beyond it bills at $0.05 per 1,000 exposures. That's ${usd(overageCents)} so far this month.`
           : `Your $${dollars}/mo includes ${usd(creditCents)} of usage. You're billed only past it.`}
       </p>
     </section>

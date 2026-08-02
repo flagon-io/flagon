@@ -16,7 +16,7 @@ const API_VERSION = "2026-06-24.dahlia" satisfies Stripe.StripeConfig["apiVersio
 
 /**
  * The stable business identifier for the Pro plan's recurring price. Create a
- * $20/mo price in Stripe with this `lookup_key` (Product > add a price >
+ * $50/mo price in Stripe with this `lookup_key` (Product > add a price >
  * "lookup key"); the code resolves it to the live price id at runtime, so no
  * environment-specific `price_...` id is ever hardcoded or configured.
  */
@@ -25,9 +25,9 @@ export const PRO_PRICE_LOOKUP_KEY = "flagon_pro_monthly";
 /**
  * The metered events price + its Billing Meter. Created by scripts/setup-metered.ts:
  * a Billing Meter named `flagon_events` and a metered per-unit price with lookup key
- * `flagon_events_metered` (at $0.02/1K) attached to the Pro product. Usage is reported
+ * `flagon_events_metered` (at $0.05/1K) attached to the Pro product. Usage is reported
  * to the meter (billing.meterEvents.create with event_name = the meter name) and the
- * price turns it into an invoice line; the $20 credit grant offsets it.
+ * price turns it into an invoice line; the $50 credit grant offsets it.
  */
 export const EVENTS_METER_EVENT_NAME = "flagon_events";
 export const EVENTS_METERED_PRICE_LOOKUP_KEY = "flagon_events_metered";
@@ -77,7 +77,7 @@ export async function getProPriceId(): Promise<string> {
   const price = prices.data[0];
   if (!price) {
     throw new Error(
-      `No active Stripe price with lookup_key "${PRO_PRICE_LOOKUP_KEY}". Create a $20/mo recurring price with that lookup key in Stripe.`,
+      `No active Stripe price with lookup_key "${PRO_PRICE_LOOKUP_KEY}". Create a $50/mo recurring price with that lookup key in Stripe.`,
     );
   }
   cachedPriceId = price.id;

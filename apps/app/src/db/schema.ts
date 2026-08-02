@@ -140,7 +140,7 @@ export const organizations = pgTable("organizations", {
   // Pro is now a paid, Stripe-backed plan; this column is set by the billing
   // webhook, not by users. It stays the fast, local read every gate consults.
   plan: text("plan").notNull().default("hobby"),
-  // Stripe mapping for flat $20/mo Pro. `stripe_customer_id` is the org's
+  // Stripe mapping for flat $50/mo Pro. `stripe_customer_id` is the org's
   // Stripe Customer (one per org, unique); `stripe_subscription_id` its active
   // Pro subscription; `subscription_status` mirrors the Stripe subscription
   // status. All three are written by the webhook / billing actions, never by

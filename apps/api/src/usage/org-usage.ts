@@ -202,7 +202,7 @@ export async function orgUsage(
   // The billable Events meter belongs to the billing (meter) view. Real data now
   // (usage_event_rollups, fed by POST /ofrep/v1/exposures), summed per day across
   // sources. Priced at the full per-unit rate here; the per-plan free allowance
-  // (Hobby 2M / Pro 5M) is applied by the usage page, which knows the plan.
+  // (Hobby 500K / Pro 1M) is applied by the usage page, which knows the plan.
   if (groupBy === "meter") {
     const evRows = await tx
       .select({ day: usageEventRollups.day, count: sql<string>`sum(${usageEventRollups.count})` })

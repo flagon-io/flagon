@@ -638,7 +638,7 @@ export const usageMeterReports = pgTable(
 );
 
 /**
- * The idempotent $20-credit ledger (migration 0020). One row per (org, period); the
+ * The idempotent $50-credit ledger (migration 0020). One row per (org, period); the
  * UNIQUE(org, period) constraint is the idempotency key — the single INSERT ... ON
  * CONFLICT DO NOTHING that returns a row is the sole caller allowed to create the
  * Stripe credit grant for that period, so a webhook redelivery never double-grants.

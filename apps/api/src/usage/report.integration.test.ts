@@ -140,7 +140,7 @@ describe.skipIf(!DATABASE_URL)("credit grant ledger (integration)", () => {
       withOrg(orgId, (tx) =>
         tx
           .insert(t.billingCreditGrants)
-          .values({ organizationId: orgId, periodKey: "2026-08-01", amountCents: 2000 })
+          .values({ organizationId: orgId, periodKey: "2026-08-01", amountCents: 5000 })
           .onConflictDoNothing({
             target: [t.billingCreditGrants.organizationId, t.billingCreditGrants.periodKey],
           })

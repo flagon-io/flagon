@@ -111,18 +111,18 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
     expect(isIngestCapped(s)).toBe(true);
   });
 
-  it("pro over its $20 credit (1M) projects an overage charge at the events rate", async () => {
+  it("pro over its $50 credit (1M) projects an overage charge at the events rate", async () => {
     await seed(2_000_000);
     const s = await statusFor("pro");
-    // 1M over * $0.02/1K = $20.00 = 2000 cents. The $20 credit shows fully used.
+    // 1M over * $0.05/1K = $50.00 = 5000 cents. The $50 credit shows fully used.
     expect(s).toMatchObject({
       includedEvents: 1_000_000,
       overageEvents: 1_000_000,
       isOver: true,
       overageMode: "bill",
-      overageCents: 2000,
-      creditCents: 2000,
-      creditUsedCents: 2000,
+      overageCents: 5000,
+      creditCents: 5000,
+      creditUsedCents: 5000,
     });
   });
 
