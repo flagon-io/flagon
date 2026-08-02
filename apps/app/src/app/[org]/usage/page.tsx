@@ -56,9 +56,9 @@ export default async function UsagePage({
   if (!membership) notFound();
 
   const range = sp.range && RANGE_DAYS[sp.range] ? sp.range : "30";
-  // "meter" is the default (the billing view: one Evaluations series, mirroring
+  // "meter" is the default (the billing view: per-product usage lines, mirroring
   // Vercel's by-product structure). flag/environment/reason are exploratory lenses
-  // that slice the same evaluations. Project isn't a dimension — evaluations aren't
+  // that slice flag evaluations. Project isn't a dimension — evaluations aren't
   // attributed to a project in the schema (flags/envs are org-level, global).
   const GROUP_BY: UsageGroupBy[] = ["meter", "flag", "environment", "reason"];
   const groupBy: UsageGroupBy = GROUP_BY.includes(sp.groupBy as UsageGroupBy)
@@ -82,15 +82,16 @@ export default async function UsagePage({
   const overageMode = planOverage(plan);
   const bills = overageMode === "bill";
 
-  // The billable meter is Events; the free Flag checks meter never charges. Pull
-  // the events line to drive the allowance bar and the invoice: usage counts the
-  // events, chargeCents is the GROSS charge (every event priced). On a billing
-  // plan the allowance offsets the first `includedEvents` and the rest is overage;
-  // on a cap plan nothing is charged (the ceiling limits access instead).
-  const eventsSeries = usage?.series.find((s) => s.billable) ?? null;
-  const usedEvents = eventsSeries?.usage ?? 0;
-  const grossEventCents = eventsSeries?.chargeCents ?? 0;
-  const eventRate = eventsSeries?.pricePerMillionCents ?? EVENT_OVERAGE_PER_MILLION_CENTS;
+  // Billable usage is metered in events (free checks never charge). Sum ACROSS every
+  // billable line — there is one per product/source now, so the allowance and invoice
+  // are on total billable events however many products produced them. usage counts
+  // the events, chargeCents is the GROSS charge (every event priced); on a billing
+  // plan the allowance offsets the first `includedEvents` and the rest is overage, on
+  // a cap plan nothing is charged (the ceiling limits access instead).
+  const billableSeries = usage?.series.filter((s) => s.billable) ?? [];
+  const usedEvents = billableSeries.reduce((sum, s) => sum + s.usage, 0);
+  const grossEventCents = billableSeries.reduce((sum, s) => sum + s.chargeCents, 0);
+  const eventRate = billableSeries[0]?.pricePerMillionCents ?? EVENT_OVERAGE_PER_MILLION_CENTS;
   const overageEvents = Math.max(0, usedEvents - includedEvents);
   const overageCents = bills ? (overageEvents / 1_000_000) * eventRate : 0;
   const includedAppliedCents = bills ? grossEventCents - overageCents : 0;
@@ -103,7 +104,7 @@ export default async function UsagePage({
             {planName(plan)} Plan Usage
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
-            {rangeLabel(from, to)} · usage across your organization. Flag checks
+            {rangeLabel(from, to)} · usage across every product. Reads and checks
             are free.
           </p>
         </div>
@@ -149,7 +150,7 @@ export default async function UsagePage({
 /**
  * The Pro usage-credit drawdown (Vercel-style): how much of the $50/mo credit this
  * month's usage has spent, then overage. The $50 covers the first $50 of usage
- * (~1M exposures at $0.05/1K); past that you pay only the difference.
+ * (~1M events at $0.05/1K); past that you pay only the difference.
  */
 function CreditBar({
   creditCents,
@@ -182,7 +183,7 @@ function CreditBar({
       </div>
       <p className="mt-2 text-xs text-zinc-500">
         {over
-          ? `Your $${dollars} credit is used up. Usage beyond it bills at $0.05 per 1,000 exposures. That's ${usd(overageCents)} so far this month.`
+          ? `Your $${dollars} credit is used up. Usage beyond it bills at $0.05 per 1,000 events. That's ${usd(overageCents)} so far this month.`
           : `Your $${dollars}/mo includes ${usd(creditCents)} of usage. You're billed only past it.`}
       </p>
     </section>
@@ -411,8 +412,8 @@ function UsageTable({
             ? `Your plan includes ${compact(includedEvents)} events a month; you only pay for events beyond it.`
             : `Your plan includes up to ${compact(includedEvents)} events a month, free. Past that, sending pauses until you upgrade to Pro, we never bill you on the free plan.`
           : "Events are billed against your contracted volume."}{" "}
-        Flag &amp; config checks are always free. Billing is not enforced yet,
-        this invoice is a projection.
+        Reads and checks are always free. This is your running total for the
+        period; the final invoice is issued monthly.
       </p>
     </section>
   );

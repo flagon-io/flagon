@@ -40,9 +40,9 @@ export default function PricingPage() {
             Simple, usage-based pricing
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-base/7 text-zinc-400">
-            Flag checks are free and unlimited. Every plan includes a monthly pool
-            of analytics events, and you pay for usage, never for seats, so adding
-            a teammate never changes the bill. Start free and self-host any time.
+            One bill for everything you build on Flagon. Every product meters into a
+            shared monthly usage pool, and you pay for usage, never for seats, so
+            adding a teammate never changes the bill. Start free and self-host any time.
           </p>
         </div>
 
@@ -52,10 +52,10 @@ export default function PricingPage() {
             width so it sits on one line instead of wrapping for no reason. */}
         <BleedBand>
           <p className="mx-auto max-w-3xl px-6 py-4 text-center text-sm text-zinc-500">
-            Flag &amp; config checks are always free and unlimited. Hobby includes{" "}
-            {HOBBY_EVENTS} analytics events a month and simply pauses there, never
-            a surprise bill. Pro includes {PRO_EVENTS} and bills ${PER_1K} per
-            1,000 events beyond it.
+            Reads and checks are always free; you pay only for the usage events your
+            products generate. Hobby includes {HOBBY_EVENTS} events a month and simply
+            pauses there, never a surprise bill. Pro includes {PRO_EVENTS} events, then
+            ${PER_1K} per 1,000 beyond it.
           </p>
         </BleedBand>
 

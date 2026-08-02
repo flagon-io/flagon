@@ -94,8 +94,10 @@ export type SourceMeter = {
   eventName: string;
   /** Lookup key of the metered Stripe price attached to that meter. */
   priceLookupKey: string;
-  /** Invoice/UI product label this source rolls up under. */
+  /** Invoice/UI product label this source rolls up under (its per-product band). */
   product: string;
+  /** Display name for this source's line on the usage page (e.g. "Flag exposures"). */
+  label: string;
 };
 
 export const SOURCE_METERS: Record<string, SourceMeter> = {
@@ -103,6 +105,7 @@ export const SOURCE_METERS: Record<string, SourceMeter> = {
     eventName: "flagon_events",
     priceLookupKey: "flagon_events_metered",
     product: "Feature Flags",
+    label: "Flag exposures",
   },
 };
 

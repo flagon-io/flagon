@@ -1,7 +1,14 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
 import { environments, flagEvalRollups, flags, usageEventRollups } from "../db/schema.js";
-import { CHECKS_METER, EVENTS_METER, chargeCents, type Meter } from "./meters.js";
+import {
+  CHECKS_METER,
+  EVENTS_METER,
+  SOURCE_METERS,
+  chargeCents,
+  sourceMeter,
+  type Meter,
+} from "./meters.js";
 
 /**
  * Org-wide usage for the console usage page — a BILLING view.
@@ -199,24 +206,54 @@ export async function orgUsage(
     .map((s) => toSeries(CHECKS_METER, s.key, s.label, s.counts, periods))
     .sort((a, b) => b.usage - a.usage);
 
-  // The billable Events meter belongs to the billing (meter) view. Real data now
-  // (usage_event_rollups, fed by POST /ofrep/v1/exposures), summed per day across
-  // sources. Priced at the full per-unit rate here; the per-plan free allowance
-  // (Hobby 500K / Pro 1M) is applied by the usage page, which knows the plan.
+  // The billable Events meter belongs to the billing (meter) view. Broken down BY
+  // SOURCE so the usage table shows per-product bands: flag exposures under Feature
+  // Flags today, and each future product's events under its own band. The meter,
+  // rate, and shared credit stay unified — only the DISPLAY attributes each line to
+  // the product that produced it. Priced at the full per-unit rate here; the per-plan
+  // free allowance (Hobby 500K / Pro 1M) is applied by the usage page (it knows the plan).
   if (groupBy === "meter") {
     const evRows = await tx
-      .select({ day: usageEventRollups.day, count: sql<string>`sum(${usageEventRollups.count})` })
+      .select({
+        day: usageEventRollups.day,
+        source: usageEventRollups.source,
+        count: sql<string>`sum(${usageEventRollups.count})`,
+      })
       .from(usageEventRollups)
       .where(and(gte(usageEventRollups.day, from), lte(usageEventRollups.day, to)))
-      .groupBy(usageEventRollups.day);
-    const eventCounts = zero();
+      .groupBy(usageEventRollups.day, usageEventRollups.source);
+
+    // Seed every KNOWN billable source at zero so its line is always visible (a
+    // billing view should show what you're metered on, even before any usage),
+    // mirroring the always-present free checks line. New sources appear on data.
+    const bySource = new Map<string, number[]>(
+      Object.keys(SOURCE_METERS).map((src) => [src, zero()]),
+    );
     for (const r of evRows) {
       const i = periodIndex.get(r.day);
-      if (i !== undefined) eventCounts[i] += Number(r.count);
+      if (i === undefined) continue;
+      let counts = bySource.get(r.source);
+      if (!counts) {
+        counts = zero();
+        bySource.set(r.source, counts);
+      }
+      counts[i] += Number(r.count);
     }
-    series.push(
-      toSeries(EVENTS_METER, EVENTS_METER.id, EVENTS_METER.label, eventCounts, periods),
-    );
+
+    for (const [source, counts] of bySource) {
+      const sm = sourceMeter(source);
+      const line = toSeries(
+        EVENTS_METER,
+        `events:${source}`,
+        sm?.label ?? EVENTS_METER.label,
+        counts,
+        periods,
+      );
+      // Attribute to the producing product (the meter is platform-level; the source
+      // carries the product). This is what gives the table its per-product bands.
+      line.product = sm?.product ?? EVENTS_METER.product;
+      series.push(line);
+    }
   }
 
   const totalUsage = series.reduce((sum, s) => sum + s.usage, 0);

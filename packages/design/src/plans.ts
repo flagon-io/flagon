@@ -92,8 +92,8 @@ export const PLANS: Plan[] = [
     note: "One user. More usage and team members need Pro.",
     features: [
       { text: "All core products, at hobby scale" },
-      { text: "Unlimited flag checks, always free" },
-      { text: "Up to 500K analytics exposures a month" },
+      { text: "Unlimited reads and checks, always free" },
+      { text: "500K usage events a month, across every product" },
       { text: "Community support" },
     ],
     available: true,
@@ -107,13 +107,13 @@ export const PLANS: Plan[] = [
     baseCents: 5000,
     includedEvents: 1_000_000,
     overage: "bill",
-    // The $50 is a usage credit, not a seat charge: it covers 1M exposures a month
+    // The $50 is a usage credit, not a seat charge: it covers ~1M events a month
     // (a shared credit across all products), and you are only billed past that.
-    note: "$50/mo is a usage credit — 1M exposures. Pay more only past it.",
+    note: "$50/mo is a shared usage credit, about 1M events across every product. Pay more only past it.",
     featuresLead: "All Hobby features, plus:",
     features: [
       { text: "Unlimited team members and roles" },
-      { text: "$50/mo usage credit — about 1M exposures" },
+      { text: "$50/mo usage credit, about 1M events across every product" },
       { text: "Usage-based pricing, never per-seat" },
       { text: "Priority support" },
       { text: "SSO with SAML and SCIM", soon: true },
