@@ -56,6 +56,17 @@ const evalLimiter = createDurableEvalLimiter({
   chunk: env.EVAL_RATE_RESERVE_CHUNK,
 });
 
+/**
+ * The per-key eval-REQUEST ceiling for a plan. Hobby (free) gets a tighter
+ * fair-use limit; paid plans get the full default. Logical checks stay free and
+ * unlimited — this bounds only the network requests behind them (the real infra
+ * cost), so uncached/abusive polling is throttled while a well-cached SDK, which
+ * fetches once and evaluates from memory, never comes close.
+ */
+function evalRateLimitForPlan(plan: string): number {
+  return plan === "hobby" ? env.EVAL_RATE_LIMIT_HOBBY : env.EVAL_RATE_LIMIT;
+}
+
 async function authenticate(c: Context): Promise<SdkKeyIdentity | null> {
   const authorization = c.req.header("authorization");
   if (!authorization?.startsWith("Bearer ")) return null;
@@ -199,7 +210,7 @@ ofrep.post("/v1/evaluate/flags/:key", async (c) => {
   const identity = await requireSdkKey(c);
   if (identity instanceof Response) return identity;
 
-  const limited = await evalLimiter.check(identity.keyId);
+  const limited = await evalLimiter.check(identity.keyId, evalRateLimitForPlan(identity.plan));
   if (!limited.ok) return tooManyRequests(c, limited);
 
   const parsed = await readContext(c);
@@ -251,7 +262,7 @@ ofrep.post("/v1/evaluate/flags", async (c) => {
   const identity = await requireSdkKey(c);
   if (identity instanceof Response) return identity;
 
-  const limited = await evalLimiter.check(identity.keyId);
+  const limited = await evalLimiter.check(identity.keyId, evalRateLimitForPlan(identity.plan));
   if (!limited.ok) return tooManyRequests(c, limited);
 
   const parsed = await readContext(c);
@@ -311,7 +322,7 @@ ofrep.post("/v1/exposures", async (c) => {
   const identity = await requireSdkKey(c);
   if (identity instanceof Response) return identity;
 
-  const limited = await evalLimiter.check(identity.keyId);
+  const limited = await evalLimiter.check(identity.keyId, evalRateLimitForPlan(identity.plan));
   if (!limited.ok) return tooManyRequests(c, limited);
 
   const text = await c.req.text().catch(() => "");

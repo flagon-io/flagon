@@ -129,6 +129,56 @@ describe("createDurableEvalLimiter", () => {
     expect((await rl.check("a")).ok).toBe(false);
   });
 
+  it("honors a per-call limit override (plan-scoped ceiling)", async () => {
+    const clock = () => 1000;
+    // An inline reserve that enforces the PER-CALL limit (and records it), so the
+    // test proves the override is threaded through to the durable layer, not just
+    // reflected in the result.
+    const counts = new Map<string, number>();
+    let lastLimitSeen = 0;
+    const reserve = async ({
+      key,
+      amount,
+      limit,
+      windowSeconds,
+    }: {
+      key: string;
+      amount: number;
+      limit: number;
+      windowSeconds: number;
+    }): Promise<ReserveResult> => {
+      lastLimitSeen = limit;
+      const before = counts.get(key) ?? 0;
+      counts.set(key, before + amount);
+      const granted = Math.max(0, Math.min(amount, limit - before));
+      return {
+        granted,
+        limit,
+        resetAtMs: clock() + windowSeconds * 1000,
+        retryAfterSeconds: granted > 0 ? 0 : windowSeconds,
+      };
+    };
+    const rl = createDurableEvalLimiter({
+      limit: 999, // the paid default; the override should win
+      windowSeconds: 60,
+      chunk: 1,
+      now: clock,
+      reserve,
+    });
+
+    // A tight Hobby-style ceiling of 2 for this key.
+    expect((await rl.check("hobby-key", 2)).ok).toBe(true);
+    expect((await rl.check("hobby-key", 2)).ok).toBe(true);
+    const blocked = await rl.check("hobby-key", 2);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.limit).toBe(2); // the effective (overridden) limit, not 999
+    expect(lastLimitSeen).toBe(2); // the override reached the reserve layer
+
+    // A different key with no override still gets the full default.
+    expect((await rl.check("paid-key")).ok).toBe(true);
+    expect(lastLimitSeen).toBe(999);
+  });
+
   it("fails open when the durable store errors (grants the batch)", async () => {
     const clock = () => 1000;
     const rl = createDurableEvalLimiter({

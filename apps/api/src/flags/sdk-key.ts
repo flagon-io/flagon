@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { sdkKeys } from "../db/schema.js";
+import { organizations } from "../db/auth-tables.js";
 import { hashToken } from "../lib/token-hash.js";
 
 /**
@@ -24,6 +25,9 @@ export type SdkKeyIdentity = {
   keyId: string;
   organizationId: string;
   environmentId: string;
+  /** The org's plan, joined at resolve time so the eval hot path can apply a
+   *  plan-scoped fair-use limit without a second lookup. */
+  plan: string;
 };
 
 /** Mint a new SDK key: returns the one-time plaintext plus the columns to store. */
@@ -51,8 +55,13 @@ export async function resolveSdkKey(
       organizationId: sdkKeys.organizationId,
       environmentId: sdkKeys.environmentId,
       revokedAt: sdkKeys.revokedAt,
+      plan: organizations.plan,
     })
     .from(sdkKeys)
+    // LEFT join: a valid key always has an org in production, but resolution must
+    // not depend on the join (an unexpected miss should still resolve the key, not
+    // 401 the eval hot path). A null plan falls back to the tightest tier below.
+    .leftJoin(organizations, eq(organizations.id, sdkKeys.organizationId))
     .where(eq(sdkKeys.keyHash, hashToken(presented)))
     .limit(1);
 
@@ -69,6 +78,9 @@ export async function resolveSdkKey(
     keyId: key.id,
     organizationId: key.organizationId,
     environmentId: key.environmentId,
+    // Default to the tightest tier if the plan couldn't be read (join miss); a real
+    // org always supplies its plan (the column is NOT NULL, defaulting to "hobby").
+    plan: key.plan ?? "hobby",
   };
 }
 

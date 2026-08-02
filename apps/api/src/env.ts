@@ -28,6 +28,12 @@ const schema = z
     // instance. Defaults suit a single pilot customer; raise for scale.
     EVAL_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(15_000),
     EVAL_RATE_LIMIT: z.coerce.number().int().positive().default(6_000),
+    // Hobby (free) plans get a tighter per-key eval-REQUEST ceiling. Proper OFREP
+    // caching (bulk fetch + poll on an interval) stays far under it; naive per-check
+    // polling that would run up Vercel invocations is throttled (429 — the SDK backs
+    // off, the customer caches or upgrades). Logical checks stay free + unlimited —
+    // this caps only the network requests behind them, the one thing with real cost.
+    EVAL_RATE_LIMIT_HOBBY: z.coerce.number().int().positive().default(600),
     EVAL_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
     // Tokens the durable eval limiter reserves per database round-trip. Larger
     // means fewer writes per high-QPS key but a larger bounded over-count; the
