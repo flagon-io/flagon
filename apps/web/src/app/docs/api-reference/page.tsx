@@ -240,6 +240,30 @@ function securityLabel(op: Operation): string | null {
   return null;
 }
 
+/** A chevron that rotates when its parent <details> is open. */
+function Chevron() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className="size-4 shrink-0 text-zinc-500 transition-transform group-open:rotate-90"
+    >
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+/**
+ * One endpoint, collapsed by default. The summary row (method, path, one-line
+ * summary, auth) is what you scan; expanding reveals parameters, request body,
+ * and responses. A native <details> so it needs no client JS and stays keyboard-
+ * and search-accessible.
+ */
 function OperationBlock({
   method,
   path,
@@ -256,103 +280,108 @@ function OperationBlock({
   const responses = Object.entries(op.responses ?? {});
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/2 p-4 sm:p-5">
-      <div className="flex flex-wrap items-center gap-2">
+    <details className="group overflow-hidden rounded-xl border border-white/10 bg-white/2 transition-colors open:bg-white/3">
+      <summary className="flex cursor-pointer list-none items-center gap-2.5 p-4 hover:bg-white/2 sm:px-5 [&::-webkit-details-marker]:hidden">
         <MethodBadge method={method} />
         <code className="font-mono text-sm break-all text-zinc-200">
           {path}
         </code>
+        <span className="ml-1 hidden min-w-0 flex-1 truncate text-sm text-zinc-500 md:block">
+          {op.summary}
+        </span>
         {auth ? (
-          <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-400 ring-1 ring-white/10 ring-inset">
+          <span className="ml-auto shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-400 ring-1 ring-white/10 ring-inset">
             Auth: {auth}
           </span>
         ) : (
-          <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-500 ring-1 ring-white/10 ring-inset">
+          <span className="ml-auto shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-500 ring-1 ring-white/10 ring-inset">
             Public
           </span>
         )}
-      </div>
+        <Chevron />
+      </summary>
 
-      {op.summary ? (
-        <p className="mt-3 text-sm font-medium text-zinc-100">{op.summary}</p>
-      ) : null}
-      {op.description ? (
-        <p className="mt-1 text-sm text-zinc-400">{op.description}</p>
-      ) : null}
+      <div className="flex flex-col gap-4 border-t border-white/10 p-4 sm:px-5">
+        {op.description ? (
+          <p className="text-sm text-zinc-400">{op.description}</p>
+        ) : null}
 
-      {op.parameters && op.parameters.length ? (
-        <div className="mt-4">
-          <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
-            Path parameters
-          </h4>
-          <ul className="mt-2 flex flex-col gap-1.5">
-            {op.parameters.map((p) => (
-              <li
-                key={p.name}
-                className="flex flex-wrap items-baseline gap-x-2"
-              >
-                <code className="font-mono text-[13px] text-teal-300">
-                  {p.name}
-                </code>
-                <span className="font-mono text-xs text-zinc-500">
-                  {p.schema ? typeLabel(p.schema, schemas) : "string"}
-                </span>
-                {p.description ? (
-                  <span className="text-xs text-zinc-400">{p.description}</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {reqBody?.schema ? (
-        <div className="mt-4">
-          <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
-            Request body
-          </h4>
-          <div className="mt-2">
-            <SchemaTree schema={reqBody.schema} schemas={schemas} />
-          </div>
-        </div>
-      ) : null}
-
-      {responses.length ? (
-        <div className="mt-4">
-          <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
-            Responses
-          </h4>
-          <div className="mt-2 flex flex-col gap-3">
-            {responses.map(([status, res]) => {
-              const body = jsonBody(res.content);
-              const ok = status.startsWith("2");
-              return (
-                <div key={status}>
-                  <div className="flex items-baseline gap-2">
-                    <span
-                      className={
-                        "font-mono text-xs font-semibold " +
-                        (ok ? "text-emerald-300" : "text-zinc-400")
-                      }
-                    >
-                      {status}
-                    </span>
+        {op.parameters && op.parameters.length ? (
+          <div>
+            <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+              Path parameters
+            </h4>
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {op.parameters.map((p) => (
+                <li
+                  key={p.name}
+                  className="flex flex-wrap items-baseline gap-x-2"
+                >
+                  <code className="font-mono text-[13px] text-teal-300">
+                    {p.name}
+                  </code>
+                  <span className="font-mono text-xs text-zinc-500">
+                    {p.schema ? typeLabel(p.schema, schemas) : "string"}
+                  </span>
+                  {p.description ? (
                     <span className="text-xs text-zinc-400">
-                      {res.description}
+                      {p.description}
                     </span>
-                  </div>
-                  {ok && body?.schema ? (
-                    <div className="mt-2 border-l border-white/10 pl-3">
-                      <SchemaTree schema={body.schema} schemas={schemas} />
-                    </div>
                   ) : null}
-                </div>
-              );
-            })}
+                </li>
+              ))}
+            </ul>
           </div>
-        </div>
-      ) : null}
-    </div>
+        ) : null}
+
+        {reqBody?.schema ? (
+          <div>
+            <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+              Request body
+            </h4>
+            <div className="mt-2">
+              <SchemaTree schema={reqBody.schema} schemas={schemas} />
+            </div>
+          </div>
+        ) : null}
+
+        {responses.length ? (
+          <div>
+            <h4 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+              Responses
+            </h4>
+            <div className="mt-2 flex flex-col gap-3">
+              {responses.map(([status, res]) => {
+                const body = jsonBody(res.content);
+                const ok = status.startsWith("2");
+                return (
+                  <div key={status}>
+                    <div className="flex items-baseline gap-2">
+                      <span
+                        className={
+                          "font-mono text-xs font-semibold " +
+                          (ok ? "text-emerald-300" : "text-zinc-400")
+                        }
+                      >
+                        {status}
+                      </span>
+                      <span className="text-xs text-zinc-400">
+                        {res.description}
+                      </span>
+                    </div>
+                    {ok && body?.schema ? (
+                      <div className="mt-2 border-l border-white/10 pl-3">
+                        <SchemaTree schema={body.schema} schemas={schemas} />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </details>
   );
 }
 

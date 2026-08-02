@@ -1,3 +1,5 @@
+import { brand } from "@flagon/design";
+
 // Cross-surface URLs the marketing site links out to.
 //
 // The application (console) lives on its own origin: the app dev server on
@@ -14,3 +16,6 @@ export const SIGN_IN_URL = `${APP_URL}/login`;
 
 /** Sign-up on the app (the pricing page's "create a free organization" CTA). */
 export const SIGN_UP_URL = `${APP_URL}/signup`;
+
+/** Community support and product discussion. Canonical value lives in `brand`. */
+export const DISCORD_URL = brand.discord;

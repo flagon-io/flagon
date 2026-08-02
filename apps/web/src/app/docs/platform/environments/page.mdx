@@ -41,10 +41,19 @@ Same code, different key, different answers.
 
 ## Promoting a change
 
-There is no automatic promotion between environments, and that is deliberate:
+There is no *automatic* promotion between environments, and that is deliberate:
 each environment is a separate switch, so turning a flag on in Development can
 never turn it on in Production by accident. When you are ready, open the flag and
 flip the next environment yourself.
+
+### Reusing another environment's config
+
+When you *don't* want to configure an environment separately, point it at another
+one. Set an environment to **reuse** a source environment, and it serves that
+source's evaluation config instead of keeping its own, so a change in the source
+flows through automatically. It's the opt-in inverse of the default: keep config
+separate where environments should differ, and reuse it where they shouldn't (for
+example, a Preview environment that should always mirror Production).
 
 ## Next
 

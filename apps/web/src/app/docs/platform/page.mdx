@@ -6,10 +6,12 @@ export const metadata = {
 
 # What is Flagon
 
-Flagon is a self-hostable developer platform. Instead of stitching together a
-separate vendor for every capability, each with its own login, billing, and
-model of your world, Flagon puts the products you'd otherwise buy or build on one
-foundation: one organization, one login, one set of environments and teams.
+Flagon is a developer platform. Instead of stitching together a separate vendor
+for every capability, each with its own login, billing, and model of your world,
+Flagon puts the products you'd otherwise buy or build on one foundation: one
+organization, one login, one set of environments and teams. Start on the hosted
+service at [flagon.io](https://flagon.io), or run the same platform on your own
+infrastructure.
 
 The **[Catalog](/docs/catalog)** is the centerpiece the platform is built around:
 a live map of your services, their owners, and the products attached to them.
@@ -20,7 +22,8 @@ an environment or a team role, carries across everything you add.
 ## The foundation
 
 Every product is built on the same handful of primitives. Learn these and you
-understand how the whole platform fits together.
+understand how the whole platform fits together. For how the pieces connect
+under the hood, see the [architecture overview](/docs/platform/architecture).
 
 <CardGrid cols={2}>
   <Card href="/docs/platform/organizations" title="Organizations & teams">
@@ -59,7 +62,7 @@ they show up everywhere in these docs.
   remote protocol (OFREP), so you use standard SDKs and could point them
   elsewhere. You're never trapped.
 - **Usage, never seats.** Pricing is about what you use, not how many teammates
-  you add, so inviting your whole team is free.
+  you add, so growing your team never grows the bill.
 - **Always self-hostable.** Flagon is source-available and runs entirely on your
   own infrastructure. See [Run Flagon](/docs/self-hosting).
 

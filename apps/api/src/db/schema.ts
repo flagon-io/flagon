@@ -95,7 +95,7 @@ export type RateLimitRow = typeof rateLimits.$inferSelect;
  *   flags ─┬─ flag_variants          (the values a flag can resolve to)
  *          ├─ flag_environments ──── flag_rules   (per-env config + targeting)
  *          └─ flag_revisions         (audit log)
- *   environments ── sdk_keys         (per-env client credentials)
+ *   environments ── client_keys         (per-env client credentials)
  *   segments                          (reusable targeting condition groups)
  */
 
@@ -111,7 +111,7 @@ const timestamps = {
 
 /**
  * Deployment environments (Production / Preview / Development, seeded per org,
- * extensible). Every per-environment concept — flag config, targeting, SDK keys
+ * extensible). Every per-environment concept — flag config, targeting, client keys
  * — hangs off one of these.
  */
 export const environments = pgTable(
@@ -292,8 +292,8 @@ export const flagRules = pgTable(
  * still authenticates OFREP calls by hashing the presented key (`keyHash`) and
  * looking it up.
  */
-export const sdkKeys = pgTable(
-  "sdk_keys",
+export const clientKeys = pgTable(
+  "client_keys",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     organizationId: uuid("organization_id").notNull(),
@@ -317,8 +317,8 @@ export const sdkKeys = pgTable(
       .defaultNow(),
   },
   (t) => [
-    index("sdk_keys_org_idx").on(t.organizationId),
-    index("sdk_keys_env_idx").on(t.environmentId),
+    index("client_keys_org_idx").on(t.organizationId),
+    index("client_keys_env_idx").on(t.environmentId),
   ],
 );
 
@@ -731,7 +731,7 @@ export type FlagVariant = typeof flagVariants.$inferSelect;
 export type FlagEnvironment = typeof flagEnvironments.$inferSelect;
 export type Segment = typeof segments.$inferSelect;
 export type FlagRule = typeof flagRules.$inferSelect;
-export type SdkKey = typeof sdkKeys.$inferSelect;
+export type ClientKey = typeof clientKeys.$inferSelect;
 export type FlagRevision = typeof flagRevisions.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type Team = typeof teams.$inferSelect;
@@ -754,7 +754,7 @@ export const schema = {
   flagEnvironments,
   segments,
   flagRules,
-  sdkKeys,
+  clientKeys,
   flagRevisions,
   projects,
   teams,

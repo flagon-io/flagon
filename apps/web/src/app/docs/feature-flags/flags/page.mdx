@@ -63,6 +63,27 @@ flag to stop evaluation entirely.
 Archived flags are frozen. Restore a flag before editing its configuration
 again.
 
+## Owners, tags, and permanence
+
+Beyond its values, a flag carries a little metadata to keep a growing set
+organized:
+
+- A **maintainer**: the person responsible for the flag, so anyone can see who to
+  ask about it.
+- **Tags**: free-form labels for grouping and filtering, by team, feature, or
+  cleanup status.
+- A **permanent** marker for flags meant to live indefinitely, like an
+  operational kill switch or a license gate, rather than a temporary rollout.
+  Marking a flag permanent keeps it out of stale-flag cleanup prompts.
+
+## History and rollback
+
+Every change to a flag, creating it, toggling it, editing a variant or a rule, is
+recorded as a **revision**: who made it, when, and a full snapshot of the
+configuration at that point. A flag's history is fully reconstructable, and you
+can **roll back** to an earlier revision if a change misbehaves. Nothing about a
+flag's configuration is ever lost.
+
 ## Next
 
 - **[Environments](/docs/platform/environments)**: the same flag, configured

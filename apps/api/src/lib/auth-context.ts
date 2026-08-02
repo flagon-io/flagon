@@ -1,8 +1,9 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { eq } from "drizzle-orm";
+import { getCookieCache } from "better-auth/cookies";
 import { db } from "../db/client.js";
 import { accessTokens, organizations, users } from "../db/auth-tables.js";
-import { auth } from "./auth.js";
+import { env } from "../env.js";
 import { clientIp } from "./http.js";
 import { rateLimit, tooManyRequests } from "./rate-limit.js";
 import { hashToken } from "./token-hash.js";
@@ -16,10 +17,11 @@ import { hashToken } from "./token-hash.js";
  *   1. `Authorization: Bearer flagon_pat_...` / `flagon_oat_...` — a personal or
  *      organization access token. We hash it (sha256, exactly as the console
  *      stored it) and look it up. This is the primary, first-class path.
- *   2. The session cookie — for "just browse the API while I'm logged in". We
- *      cannot verify BetterAuth's signed cookie without BetterAuth, so we ask
- *      the console's own /api/auth/get-session to resolve it, forwarding the
- *      cookie. Secondary and best-effort.
+ *   2. The session cookie — for "just browse the API while I'm logged in". The
+ *      console owns BetterAuth and signs the cookie; the API verifies the signed
+ *      cookie CACHE in-process with the shared secret (no database, no hop), and
+ *      falls back to the console's /api/auth/get-session only when that cache has
+ *      lapsed. Secondary and best-effort.
  *
  * The resolved identity is either a user (personal token or cookie) or an
  * organization (org token), or null when unauthenticated.
@@ -93,33 +95,70 @@ async function fromToken(token: string): Promise<AuthIdentity> {
   return null;
 }
 
-async function fromCookie(c: Context): Promise<AuthIdentity> {
-  const cookie = c.req.header("cookie");
-  // Cheap pre-filter before touching BetterAuth: does the header even carry a
-  // session cookie? The custom cookie prefix ("flagon", see lib/auth.ts) means we
-  // must NOT look for BetterAuth's default "better-auth" name — match the stable
-  // session-cookie base name (prefix-independent, survives the "__Secure-" variant).
-  if (!cookie || !cookie.includes("session_token")) return null;
+// The console's origin, for the cache-miss fallback below.
+const CONSOLE_URL = env.APP_URL ?? "http://localhost:3001";
 
+/** A user identity from a cookie-cache payload or a get-session body. */
+type CookieUser = {
+  id: string;
+  name: string;
+  email: string;
+  username?: string | null;
+};
+function userIdentity(user: CookieUser): AuthIdentity {
+  return {
+    kind: "user",
+    via: "cookie",
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      username: user.username ?? null,
+    },
+  };
+}
+
+/**
+ * Cache-miss fallback: the console OWNS BetterAuth, so ask it to resolve the
+ * cookie. Only reached when the signed cookie-cache has lapsed (~every 5 min),
+ * so it is rare. Best-effort and fails closed: any failure -> null -> 401.
+ */
+async function fromConsoleSession(c: Context): Promise<AuthIdentity> {
   try {
-    // The API HOSTS BetterAuth now, so validate the signed cookie IN-PROCESS —
-    // no cross-service hop to the console (which the API used to fetch). Fails
-    // closed: any error -> null -> 401.
-    const result = await auth.api.getSession({ headers: c.req.raw.headers });
-    if (!result?.user) return null;
-    return {
-      kind: "user",
-      via: "cookie",
-      user: {
-        id: result.user.id,
-        name: result.user.name,
-        email: result.user.email,
-        username: result.user.username ?? null,
-      },
-    };
+    const res = await fetch(`${CONSOLE_URL}/api/auth/get-session`, {
+      headers: { cookie: c.req.header("cookie") ?? "" },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { user?: CookieUser } | null;
+    return data?.user ? userIdentity(data.user) : null;
   } catch {
     return null;
   }
+}
+
+async function fromCookie(c: Context): Promise<AuthIdentity> {
+  const cookie = c.req.header("cookie");
+  // Cheap pre-filter: does the header even carry a session cookie? The custom
+  // cookie prefix ("flagon", see the console's lib/auth.ts) means we match the
+  // stable session-cookie base name (prefix-independent, survives "__Secure-").
+  if (!cookie || !cookie.includes("session_token")) return null;
+
+  // Fast path: verify BetterAuth's SIGNED cookie cache in-process with the shared
+  // secret — no database, no cross-service hop. Covers the common case, since the
+  // cache is a signed ~5-minute snapshot. Fails closed (decode error -> fallback).
+  try {
+    const cached = (await getCookieCache(c.req.raw, {
+      cookiePrefix: "flagon",
+      secret: env.BETTER_AUTH_SECRET,
+      isSecure: env.NODE_ENV === "production",
+    })) as { user?: CookieUser } | null;
+    if (cached?.user) return userIdentity(cached.user);
+  } catch {
+    // Fall through to the console on any decode error.
+  }
+
+  return fromConsoleSession(c);
 }
 
 /** Whether the caller presented a Flagon bearer token (valid or not). */

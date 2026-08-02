@@ -1,0 +1,79 @@
+export const metadata = {
+  title: "Permissions & roles",
+  description:
+    "How access works in a Flagon organization: the member roles, what each can do, who can create projects, and how the API enforces it in one place.",
+};
+
+# Permissions & roles
+
+Access in Flagon is organization-scoped. Every person is a **member** of an
+organization with a **role**, and that role decides what they can do. There are no
+per-resource ACLs to reason about: learn the roles once and they apply everywhere.
+
+## The roles
+
+| Role | Can do | Assignable |
+| --- | --- | --- |
+| **Owner** | Everything, plus transfer ownership and delete the organization. | Transferred, not assigned |
+| **Admin** | Manage the organization, members, billing, and every project. | Yes |
+| **Member** | Create and manage flags, projects, and the catalog. | Yes |
+| **Viewer** | View projects and the catalog. Read-only everywhere. | Yes |
+| **Billing** | Manage billing and invoices. Read-only everywhere else. | Yes |
+
+**Owner** and **admin** are the *manager* roles: the privileged actions, minting
+or revoking credentials and destructive deletes, require one of them.
+
+<Callout tone="note" title="One owner, transferred not assigned">
+An organization has exactly one owner. You don't assign the owner role from the
+member picker; the current owner **transfers** it, and drops to admin in the same
+move. See [Organization ownership](/docs/platform/organizations).
+</Callout>
+
+## Read-only roles
+
+**Viewer** and **billing** are read-only across the organization. A viewer can see
+everything and change nothing. Billing is the same, except it can manage the
+billing surface (checkout, the customer portal, invoices). Any write attempt from
+a read-only role, on any endpoint, is refused with a `403`, so these roles can
+never reach a write path, present or future.
+
+## Who can create projects
+
+Project creation is governed by an organization-wide setting, so you can open it up
+without handing out admin:
+
+- **Managers only** (the default): owners and admins create projects.
+- **Members**: any member can create a project.
+
+Owners and admins can always create projects regardless of the setting. Change it
+in the organization's settings; it is enforced by the API on every create.
+
+## How it's enforced
+
+Authorization is centralized, not sprinkled across handlers. Every management
+request funnels through one gate (`resolveOrg`) that:
+
+1. Confirms the caller is authorized for the organization in the path, an
+   [organization token](/docs/platform/authentication) issued for it, or a user
+   (session or personal token) who is a **member**.
+2. Resolves their role, and applies the read-only and manager gates above.
+3. Refuses a caller who isn't a member with a uniform **`404`**, identical to an
+   organization that doesn't exist, so an outsider can't probe which
+   organizations or memberships exist from the status code.
+
+Because the gate is one place, a new endpoint inherits the rules automatically;
+there's no per-route guard to forget. An [organization
+token](/docs/platform/authentication) acts with the organization's full authority
+(it resolves as an owner), which is why a shared automation credential should be
+minted deliberately and kept server-side.
+
+## Related
+
+<CardGrid cols={2}>
+  <Card href="/docs/platform/authentication" title="Authentication & tokens">
+    The credentials behind these roles: sessions, access tokens, and client keys.
+  </Card>
+  <Card href="/docs/platform/security/isolation" title="Tenant isolation">
+    The database-level boundary that backs authorization as defense in depth.
+  </Card>
+</CardGrid>

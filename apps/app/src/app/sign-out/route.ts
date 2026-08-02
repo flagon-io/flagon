@@ -1,4 +1,4 @@
-import { API_URL, APP_URL, WEB_URL } from "@/lib/urls";
+import { APP_URL, WEB_URL } from "@/lib/urls";
 
 /**
  * Cross-surface sign-out.
@@ -44,13 +44,13 @@ function hostScopedClear(setCookie: string): string | null {
 export async function GET(request: Request) {
   const returnTo = safeReturn(new URL(request.url).searchParams.get("returnTo"));
 
-  // Auth is hosted by the API now. Ask IT to end the session (POST /sign-out) and
-  // carry the Set-Cookie(s) it returns onto our redirect. The Origin header names
-  // this console (a trusted origin) so BetterAuth's CSRF check passes for this
-  // server-to-server call.
+  // The console hosts BetterAuth. Ask our OWN /api/auth/sign-out to end the
+  // session (POST /sign-out) and carry the Set-Cookie(s) it returns onto our
+  // redirect. Same-origin server-to-server call; the Origin header names this
+  // console (a trusted origin) so BetterAuth's CSRF check passes.
   const redirect = new Response(null, { status: 303, headers: { Location: returnTo } });
   try {
-    const signedOut = await fetch(`${API_URL}/api/auth/sign-out`, {
+    const signedOut = await fetch(`${APP_URL}/api/auth/sign-out`, {
       method: "POST",
       headers: {
         // BetterAuth's POST endpoints require a JSON content-type + a parseable

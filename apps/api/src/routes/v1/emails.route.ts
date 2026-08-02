@@ -80,6 +80,25 @@ registerRoute({
   request: { body },
   responses: { 200: { description: "Primary updated.", schemaName: "DeleteAck" }, 400: { description: "Not on your account, or not verified." } },
 });
+registerRoute({
+  method: "post",
+  path: "/v1/me/emails/resend",
+  summary: "Resend a confirmation",
+  description: "Resend the confirmation link for an unverified secondary address on your account.",
+  tags: [TAG],
+  auth: true,
+  request: { body },
+  responses: { 200: { description: "Confirmation link resent.", schemaName: "DeleteAck" }, 422: { description: "Invalid email." } },
+});
+registerRoute({
+  method: "delete",
+  path: "/v1/me/emails",
+  summary: "Remove an email",
+  description: "Remove a secondary address from your account, passed as `?email=`. You cannot remove your primary; set another primary first.",
+  tags: [TAG],
+  auth: true,
+  responses: { 200: { description: "Email removed.", schemaName: "DeleteAck" }, 400: { description: "Cannot remove your primary email." }, 404: { description: "Not an address on your account." } },
+});
 
 function requireUserId(c: Context): string | Response {
   const auth = getAuth(c);

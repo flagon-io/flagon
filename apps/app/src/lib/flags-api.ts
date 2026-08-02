@@ -1,6 +1,7 @@
 import "server-only";
 import { headers } from "next/headers";
 import { API_URL } from "./urls";
+import { listFromResponse } from "./response-list";
 
 /**
  * Server-side client for the Flagon API's flags surface.
@@ -246,7 +247,7 @@ export async function getOrgUsage(
 export async function listSdkKeys(slug: string): Promise<SdkKey[]> {
   const res = await apiFetch(`/v1/orgs/${slug}/client-keys`);
   if (!res.ok) return [];
-  return (await res.json()) as SdkKey[];
+  return listFromResponse<SdkKey>(await res.json(), "keys");
 }
 
 export type Environment = { key: string; name: string };

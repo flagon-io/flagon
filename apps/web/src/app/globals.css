@@ -40,6 +40,34 @@ body {
 }
 
 /*
+ * A slim, theme-matched scrollbar for scrolling panels like the docs sidebar:
+ * thin, rounded, and subtle, and it never chains its scroll to the page. Beats
+ * the chunky OS default without pulling in a scrollbar library.
+ */
+.docs-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+  overscroll-behavior: contain;
+}
+.docs-scroll::-webkit-scrollbar {
+  width: 9px;
+}
+.docs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.docs-scroll::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 0.12);
+  border-radius: 9999px;
+  /* Transparent border + content-box clip makes the thumb read as a slim,
+     inset pill rather than a full-width bar. */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.docs-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 0.22);
+}
+
+/*
  * Syntax-highlighting token colors for sugar-high (the docs code blocks). A
  * calm dark palette on the near-black surface: teal/green strings, pink
  * keywords, blue functions, amber numbers, muted comments.

@@ -21,7 +21,7 @@ describe.skipIf(!DATABASE_URL)("OFREP via the OpenFeature SDK (e2e)", () => {
   let db: typeof import("../../db/client.js")["db"];
   let t: typeof import("../../db/schema.js");
   let withOrg: typeof import("../../db/tenant.js")["withOrg"];
-  let generateSdkKey: typeof import("../../flags/sdk-key.js")["generateSdkKey"];
+  let generateClientKey: typeof import("../../flags/client-key.js")["generateClientKey"];
 
   const orgId = randomUUID();
   let envId: string;
@@ -33,7 +33,7 @@ describe.skipIf(!DATABASE_URL)("OFREP via the OpenFeature SDK (e2e)", () => {
     ({ db } = await import("../../db/client.js"));
     t = await import("../../db/schema.js");
     ({ withOrg } = await import("../../db/tenant.js"));
-    ({ generateSdkKey } = await import("../../flags/sdk-key.js"));
+    ({ generateClientKey } = await import("../../flags/client-key.js"));
     const { ofrep } = await import("./index.js");
 
     await withOrg(orgId, async (tx) => {
@@ -74,9 +74,9 @@ describe.skipIf(!DATABASE_URL)("OFREP via the OpenFeature SDK (e2e)", () => {
       });
     });
 
-    const gen = generateSdkKey();
+    const gen = generateClientKey();
     token = gen.token;
-    await db.insert(t.sdkKeys).values({
+    await db.insert(t.clientKeys).values({
       organizationId: orgId,
       environmentId: envId,
       name: "e2e key",
@@ -105,7 +105,7 @@ describe.skipIf(!DATABASE_URL)("OFREP via the OpenFeature SDK (e2e)", () => {
     await OpenFeature.close();
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     if (!db) return;
-    await db.delete(t.sdkKeys).where(eq(t.sdkKeys.organizationId, orgId));
+    await db.delete(t.clientKeys).where(eq(t.clientKeys.organizationId, orgId));
     await withOrg(orgId, async (tx) => {
       await tx.delete(t.flags).where(eq(t.flags.organizationId, orgId));
       await tx.delete(t.environments).where(eq(t.environments.organizationId, orgId));

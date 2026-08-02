@@ -3,18 +3,18 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db/client.js";
 import { withOrg } from "../../db/tenant.js";
-import { environments, sdkKeys } from "../../db/schema.js";
+import { environments, clientKeys } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
 import { resolveOrg, requireManager } from "../../lib/org-context.js";
 import { ensureEnvironments } from "../../flags/environments.js";
-import { generateSdkKey } from "../../flags/sdk-key.js";
+import { generateClientKey } from "../../flags/client-key.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
  * Client-key management. Mounted under /v1/orgs/:org/client-keys.
  *
- * sdk_keys is an auth-layer table (see the migration): the eval path must
+ * client_keys is an auth-layer table (see the migration): the eval path must
  * resolve a key to its org BEFORE any org context exists, so it can't be
  * RLS-gated. Management here therefore scopes by organization_id in the query
  * (app layer), exactly as the console does for access tokens. The environment a
@@ -22,9 +22,9 @@ import { registerRoute, registerComponentSchema } from "../../openapi/registry.j
  * one of the caller's own environments. Client keys are publishable, so the
  * plaintext is stored and stays retrievable; the hash is the auth lookup path.
  */
-export const sdkKeys_ = new Hono();
+export const clientKeys_ = new Hono();
 
-sdkKeys_.use("*", authContext);
+clientKeys_.use("*", authContext);
 
 const createKey = z.object({
   // The label is optional; an unlabelled key is valid and shows as "Unlabelled".
@@ -111,7 +111,7 @@ registerRoute({
 });
 
 function serializeKey(
-  k: typeof sdkKeys.$inferSelect,
+  k: typeof clientKeys.$inferSelect,
   environmentKey: string | null,
 ) {
   return {
@@ -154,7 +154,7 @@ registerComponentSchema("ClientKeyCreatedResponse", z.object({ key: clientKeySch
 registerComponentSchema("ClientKeyListResponse", z.array(clientKeySchema));
 
 // --- Create ------------------------------------------------------------------
-sdkKeys_.post("/", async (c) => {
+clientKeys_.post("/", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
   const denied = requireManager(c, ctx);
@@ -176,9 +176,9 @@ sdkKeys_.post("/", async (c) => {
   });
   if (!env) return jsonError(c, 404, "Environment not found.");
 
-  const gen = generateSdkKey();
+  const gen = generateClientKey();
   const [row] = await db
-    .insert(sdkKeys)
+    .insert(clientKeys)
     .values({
       organizationId: ctx.orgId,
       environmentId: env.id,
@@ -196,7 +196,7 @@ sdkKeys_.post("/", async (c) => {
 });
 
 // --- List (retrievable) ------------------------------------------------------
-sdkKeys_.get("/", async (c) => {
+clientKeys_.get("/", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
 
@@ -205,9 +205,9 @@ sdkKeys_.get("/", async (c) => {
 
   const rows = await db
     .select()
-    .from(sdkKeys)
-    .where(eq(sdkKeys.organizationId, ctx.orgId))
-    .orderBy(desc(sdkKeys.createdAt));
+    .from(clientKeys)
+    .where(eq(clientKeys.organizationId, ctx.orgId))
+    .orderBy(desc(clientKeys.createdAt));
 
   return c.json(
     rows.map((k) => serializeKey(k, envKeyById.get(k.environmentId) ?? null)),
@@ -215,7 +215,7 @@ sdkKeys_.get("/", async (c) => {
 });
 
 // --- Revoke ------------------------------------------------------------------
-sdkKeys_.post("/:id/revoke", async (c) => {
+clientKeys_.post("/:id/revoke", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
   const denied = requireManager(c, ctx);
@@ -223,17 +223,17 @@ sdkKeys_.post("/:id/revoke", async (c) => {
 
   const id = c.req.param("id");
   const [row] = await db
-    .update(sdkKeys)
+    .update(clientKeys)
     .set({ revokedAt: new Date() })
-    .where(and(eq(sdkKeys.id, id), eq(sdkKeys.organizationId, ctx.orgId)))
+    .where(and(eq(clientKeys.id, id), eq(clientKeys.organizationId, ctx.orgId)))
     .returning();
 
-  if (!row) return jsonError(c, 404, "SDK key not found.");
+  if (!row) return jsonError(c, 404, "Client key not found.");
   return c.json({ ok: true });
 });
 
 // --- Rename ------------------------------------------------------------------
-sdkKeys_.patch("/:id", async (c) => {
+clientKeys_.patch("/:id", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
   const denied = requireManager(c, ctx);
@@ -243,9 +243,9 @@ sdkKeys_.patch("/:id", async (c) => {
   if (!parsed.success) return validationError(c, parsed.error);
 
   const [row] = await db
-    .update(sdkKeys)
+    .update(clientKeys)
     .set({ name: parsed.data.name })
-    .where(and(eq(sdkKeys.id, c.req.param("id")), eq(sdkKeys.organizationId, ctx.orgId)))
+    .where(and(eq(clientKeys.id, c.req.param("id")), eq(clientKeys.organizationId, ctx.orgId)))
     .returning();
   if (!row) return jsonError(c, 404, "Client key not found.");
 

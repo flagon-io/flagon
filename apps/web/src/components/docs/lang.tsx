@@ -82,31 +82,9 @@ export function useLang() {
 /**
  * Passthrough wrapper so the docs layout can mark the docs subtree as
  * language-aware; the preference itself is module-global (see the store above).
+ * Language selection surfaces inline on each code sample (see CodeGroup), so
+ * there is no global page-level switcher.
  */
 export function LangProvider({ children }: { children: ReactNode }) {
   return <>{children}</>;
-}
-
-/** A compact segmented control for the preferred language. */
-export function LangSwitcher() {
-  const { lang, setLang } = useLang();
-  return (
-    <div className="inline-flex items-center gap-0.5 rounded-lg border border-white/10 bg-white/2 p-0.5">
-      {LANGS.map((l) => (
-        <button
-          key={l.id}
-          type="button"
-          onClick={() => setLang(l.id)}
-          className={
-            "rounded-md px-2.5 py-1 text-xs font-medium transition " +
-            (l.id === lang
-              ? "bg-teal-400/15 text-teal-300"
-              : "text-zinc-400 hover:text-zinc-200")
-          }
-        >
-          {l.label}
-        </button>
-      ))}
-    </div>
-  );
 }

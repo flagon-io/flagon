@@ -1,0 +1,70 @@
+export const metadata = {
+  title: "Errors",
+  description:
+    "The Flagon API error format: one JSON envelope with a message and status, per-field validation details, and what each HTTP status means.",
+};
+
+# Errors
+
+Every response from the Flagon API is JSON, success and failure alike, so a client
+parses a failure the same way it parses a success. Errors use one consistent
+envelope, and you can handle them uniformly.
+
+## The error envelope
+
+A failed request returns an HTTP error status and a body with a human-readable
+`message` and the numeric `status`:
+
+```json
+{
+  "message": "Authentication required. Send a Bearer access token or a valid session cookie.",
+  "status": 401
+}
+```
+
+## Validation errors
+
+When a request body fails validation, the response is **`422`** and adds a
+per-field `errors` map, so you can attach messages to the right inputs:
+
+```json
+{
+  "message": "The given data was invalid.",
+  "status": 422,
+  "errors": {
+    "name": ["Name is required."],
+    "key": ["Key must be lowercase and hyphenated."]
+  }
+}
+```
+
+Each key is a field path; each value is the list of problems with that field.
+
+## Status codes
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Malformed request, for example a missing path parameter. |
+| `401` | Missing or invalid credentials. [Authenticate](/docs/platform/authentication) the request. |
+| `403` | Authenticated, but not allowed, an insufficient [role](/docs/platform/security/permissions), a read-only role on a write, or a locked organization. |
+| `404` | No such resource. Also returned for an organization you're not a member of, so membership can't be probed. |
+| `422` | The request body failed validation (see above). |
+| `429` | [Rate limited](/docs/platform/api/rate-limits). Honor the `Retry-After` header. |
+
+<Callout tone="note" title="Why a 404 for “no access”">
+Asking for an organization you don't belong to returns `404`, identical to one
+that doesn't exist, rather than `403`. That's deliberate: it stops an outsider from
+using the status code to discover which organizations or memberships exist. See
+[Tenant isolation](/docs/platform/security/isolation).
+</Callout>
+
+## Related
+
+<CardGrid cols={2}>
+  <Card href="/docs/platform/api/rate-limits" title="Rate limits">
+    The `429` response and how to back off.
+  </Card>
+  <Card href="/docs/platform/authentication" title="Authentication & tokens">
+    Resolve `401` and `403` by sending the right credential.
+  </Card>
+</CardGrid>

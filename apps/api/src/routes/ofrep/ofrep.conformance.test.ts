@@ -22,14 +22,14 @@ describe.skipIf(!DATABASE_URL)("OFREP conformance (HTTP)", () => {
   let db: typeof import("../../db/client.js")["db"];
   let t: typeof import("../../db/schema.js");
   let withOrg: typeof import("../../db/tenant.js")["withOrg"];
-  let generateSdkKey: typeof import("../../flags/sdk-key.js")["generateSdkKey"];
+  let generateClientKey: typeof import("../../flags/client-key.js")["generateClientKey"];
   let app: Hono;
 
   const orgId = randomUUID();
   let envId: string;
   let token: string;
 
-  // Small helper: make an OFREP request with the SDK key and JSON body.
+  // Small helper: make an OFREP request with the client key and JSON body.
   const req = (path: string, init: RequestInit = {}, auth = true) =>
     app.request(path, {
       method: "POST",
@@ -45,7 +45,7 @@ describe.skipIf(!DATABASE_URL)("OFREP conformance (HTTP)", () => {
     ({ db } = await import("../../db/client.js"));
     t = await import("../../db/schema.js");
     ({ withOrg } = await import("../../db/tenant.js"));
-    ({ generateSdkKey } = await import("../../flags/sdk-key.js"));
+    ({ generateClientKey } = await import("../../flags/client-key.js"));
     const { ofrep } = await import("./index.js");
     app = new Hono();
     app.route("/ofrep", ofrep);
@@ -90,9 +90,9 @@ describe.skipIf(!DATABASE_URL)("OFREP conformance (HTTP)", () => {
       });
     });
 
-    const gen = generateSdkKey();
+    const gen = generateClientKey();
     token = gen.token;
-    await db.insert(t.sdkKeys).values({
+    await db.insert(t.clientKeys).values({
       organizationId: orgId,
       environmentId: envId,
       name: "conformance key",
@@ -104,7 +104,7 @@ describe.skipIf(!DATABASE_URL)("OFREP conformance (HTTP)", () => {
 
   afterAll(async () => {
     if (!db) return;
-    await db.delete(t.sdkKeys).where(eq(t.sdkKeys.organizationId, orgId));
+    await db.delete(t.clientKeys).where(eq(t.clientKeys.organizationId, orgId));
     await withOrg(orgId, async (tx) => {
       await tx.delete(t.flags).where(eq(t.flags.organizationId, orgId));
       await tx.delete(t.environments).where(eq(t.environments.organizationId, orgId));

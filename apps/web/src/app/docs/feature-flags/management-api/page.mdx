@@ -42,9 +42,10 @@ an access token to evaluate, or a client key to manage.
 | `POST` | `/flags` | Create a flag (with variants). |
 | `GET` | `/flags` | List flags. |
 | `GET` | `/flags/{key}` | Flag detail, per environment. |
-| `PATCH` | `/flags/{key}` | Edit name, description, tags. |
+| `PATCH` | `/flags/{key}` | Edit name, description, tags, maintainer, and the permanent (kill-switch) marker. |
 | `POST` | `/flags/{key}/archive` · `/restore` | Retire or bring back a flag. |
 | `DELETE` | `/flags/{key}` | Permanently delete (stops evaluation). |
+| `GET` | `/flags/{key}/usage` | Per-flag usage: checks, pass rate, staleness. |
 | `PATCH` | `/flags/{key}/environments/{env}` | Enable/disable; set default and off variants. |
 
 Create a boolean flag:
@@ -95,7 +96,7 @@ console.
 
 <Callout tone="note" title="OpenAPI">
 The API serves a machine-readable OpenAPI 3.1 document at
-[`/openapi.json`](https://api.flagon.io/openapi.json). Coverage of the
-management surface is expanding; the endpoints above are the current source of
-truth.
+[`/openapi.json`](https://api.flagon.io/openapi.json), and every management
+endpoint is registered in it. The [REST reference](/docs/api-reference) is the
+full generated list.
 </Callout>

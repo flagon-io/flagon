@@ -3,7 +3,7 @@ import { brand } from "@flagon/design";
 import { LegalShell } from "@/components/legal-shell";
 
 export const metadata: Metadata = {
-  title: `Terms of Service (Draft) · ${brand.name}`,
+  title: `Terms of Service · ${brand.name}`,
   description: `Draft terms that will govern your use of ${brand.name}.`,
 };
 
@@ -17,9 +17,16 @@ export default function TermsPage() {
     >
       <h2>1. The service</h2>
       <p>
-        {brand.name} is a developer platform. During the current alpha it is
-        offered as-is while we build it in the open. Features may change,
-        break, or be removed, and availability is not guaranteed.
+        {brand.name} is a developer platform that hosts a growing set of products
+        on shared foundations. During the current alpha it is offered as-is while
+        we build it in the open. Features may change, break, or be removed, and
+        availability is not guaranteed.
+      </p>
+      <p>
+        These terms govern the <strong>managed service</strong> we operate at
+        flagon.io. {brand.name} is also source-available: if you run it on your
+        own infrastructure, your use of the source is governed by the license in
+        our source repository, not by these terms.
       </p>
 
       <h2>2. Your account</h2>

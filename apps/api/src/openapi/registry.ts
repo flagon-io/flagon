@@ -49,7 +49,7 @@ export type RouteSpec = {
   /**
    * Which credential the operation takes. "bearer" (access token, the default
    * when `auth` is true) authenticates the management API; "sdkKey" is the
-   * environment-scoped SDK key used by OFREP evaluation.
+   * environment-scoped client key used for flag evaluation.
    */
   security?: "bearer" | "sdkKey";
   /**
@@ -146,6 +146,7 @@ const TAG_DEFS: { name: string; description: string }[] = [
   { name: "Teams", description: "Groups of people that own projects, with their own membership and roles." },
   { name: "Members", description: "People in an organization." },
   { name: "Account", description: "The authenticated caller." },
+  { name: "Emails", description: "The email addresses on your account (GitHub-style multi-email)." },
   { name: "Waitlist", description: "Public early-access intake." },
   { name: "Health", description: "Liveness and readiness probes." },
 ];
@@ -161,7 +162,7 @@ const API_DESCRIPTION = `The Flagon control plane. Everything the product does t
 Two credentials, never interchangeable:
 
 - **Access token** (\`flagon_oat_...\`) authenticates the **management API** under \`/v1\`. Send it as \`Authorization: Bearer <token>\`.
-- **SDK key** (\`flagon_sdk_...\`), scoped to one environment, authenticates **OFREP evaluation** under \`/ofrep\`.
+- **Client key** (\`flagon_client_...\`), scoped to one environment, authenticates **flag evaluation** under \`/ofrep\`. Publishable; safe in a browser or app.
 
 ## Conventions
 

@@ -1,0 +1,79 @@
+export const metadata = {
+  title: "Quickstart",
+  description:
+    "From zero to your first feature flag: create an organization, add a project to your catalog, and ship a flag on Flagon in about five minutes.",
+};
+
+# Quickstart
+
+This is the fastest path onto Flagon: create an organization, add a project, and
+ship your first feature flag. It takes about five minutes, and along the way you
+meet the pieces every product is built on, so the next product you add already
+feels familiar.
+
+<Callout tone="note" title="Hosted or self-hosted">
+These steps use the hosted service at [flagon.io](https://flagon.io). Running your
+own instance? [Run Flagon](/docs/self-hosting) first; everything below is then
+identical against your own URL.
+</Callout>
+
+## 1. Create your organization
+
+Sign up at [flagon.io](https://flagon.io) and create an **organization**. An
+organization is your workspace: its members, their roles, and the billing
+boundary. Pricing is usage-based, not per-seat, so on a paid plan your whole team
+is free to add. (The free Hobby tier is a single user.)
+
+Everything you build lives inside this organization, and every product shares it.
+See [Organizations & teams](/docs/platform/organizations) for roles and
+membership.
+
+## 2. Add a project
+
+Create a **project** for a service you run. A project is the unit of your
+[catalog](/docs/catalog): a description of a system, an owning team, and the
+products attached to it. Give it a name and an owner.
+
+Your project comes with the standard **environments**, Production, Preview, and
+Development, so configuration stays separated by stage from the start. See
+[Environments](/docs/platform/environments).
+
+## 3. Ship your first flag
+
+Feature Flags is available today. From your project, add a flag and evaluate it
+from your app over the open OpenFeature protocol.
+
+The [Feature Flags quickstart](/docs/feature-flags/quickstart) walks the flag
+end to end: create the flag, mint a [client key](/docs/feature-flags/client-keys)
+for an environment, and read it from your code with a standard SDK. Here's the
+shape of the evaluation call it builds up to:
+
+<CodeGroup examples={{
+  typescript: {
+    code: `import { OpenFeature } from "@openfeature/server-sdk";\nimport { OFREPProvider } from "@openfeature/ofrep-provider";\n\nOpenFeature.setProvider(\n  new OFREPProvider({\n    baseUrl: "https://api.flagon.io",\n    headers: [["Authorization", \`Bearer \${process.env.FLAGON_CLIENT_KEY}\`]],\n  }),\n);\n\nconst client = OpenFeature.getClient();\nconst enabled = await client.getBooleanValue("new-checkout", false);`,
+    caption: "Evaluate a flag with the standard OpenFeature SDK",
+  },
+  curl: {
+    code: `curl https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout \\\n  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"context":{"targetingKey":"user-123"}}'`,
+    caption: "Or evaluate directly over REST (OFREP)",
+  },
+}} />
+
+## What you just learned
+
+Those three pieces, an **organization**, a **project** in your catalog, and the
+**environments** under it, are the foundation every product uses. Add the next
+product and you're not starting over: it plugs into the same organization,
+projects, and environments you set up here.
+
+## Where to go next
+
+<CardGrid>
+  <Card href="/docs/feature-flags" title="Feature Flags" cta="Go deeper">
+    Targeting rules, reusable segments, percentage splits, and progressive
+    rollouts.
+  </Card>
+  <Card href="/docs/platform" title="What is Flagon" cta="Understand the platform">
+    The substrate every product shares, and the principles behind it.
+  </Card>
+</CardGrid>

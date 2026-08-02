@@ -22,10 +22,12 @@ import {
   Network,
   Package,
   Rocket,
+  Siren,
   Split,
   ToggleRight,
   TrendingUp,
   Users,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
@@ -76,6 +78,13 @@ const products: Product[] = [
     body: "Change what your app does without a deploy. Target with rules and rollouts, evaluate over OpenFeature in any language.",
   },
   {
+    icon: FlaskConical,
+    name: "Experiments",
+    tone: "soon",
+    label: "Coming soon",
+    body: "Measure the impact of a rollout with metrics tied directly to the flags serving it.",
+  },
+  {
     icon: Rocket,
     name: "Deployments",
     tone: "soon",
@@ -90,11 +99,18 @@ const products: Product[] = [
     body: "A private registry for your artifacts, wired straight into your projects and environments.",
   },
   {
-    icon: FlaskConical,
-    name: "Experiments",
+    icon: Workflow,
+    name: "Automations",
     tone: "soon",
     label: "Coming soon",
-    body: "Measure the impact of a rollout with metrics tied directly to the flags serving it.",
+    body: "Trigger actions from events across the platform: rules that promote a rollout, open an incident, or ping a channel.",
+  },
+  {
+    icon: Siren,
+    name: "Incidents & on-call",
+    tone: "soon",
+    label: "Coming soon",
+    body: "Declare incidents, run on-call schedules, and keep a status page, tied to the services in your catalog.",
   },
 ];
 

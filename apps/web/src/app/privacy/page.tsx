@@ -3,7 +3,7 @@ import { brand } from "@flagon/design";
 import { LegalShell } from "@/components/legal-shell";
 
 export const metadata: Metadata = {
-  title: `Privacy Policy (Draft) · ${brand.name}`,
+  title: `Privacy Policy · ${brand.name}`,
   description: `Draft policy for how ${brand.name} collects, uses, and protects your data.`,
 };
 
@@ -15,6 +15,15 @@ export default function PrivacyPage() {
       draft
       intro={`This policy explains what ${brand.legalName} collects when you use ${brand.name}, why, and the choices you have.`}
     >
+      <h2>The managed service and self-hosting</h2>
+      <p>
+        {brand.name} is source-available and can run on your own infrastructure.
+        This policy covers the <strong>managed service</strong> at flagon.io that{" "}
+        {brand.legalName} operates. If you self-host {brand.name}, you control the
+        data in your own instance and are its data controller; this policy does
+        not govern it.
+      </p>
+
       <h2>Information we collect</h2>
       <ul>
         <li>
@@ -23,8 +32,9 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Organization and content data</strong> you create in the
-          product, such as organizations, members, settings, and the flags,
-          segments, and other configuration you define.
+          product: organizations, teams, members, projects, and the configuration
+          you define across products (such as flags and segments). This includes
+          images you upload, like organization logos and project icons.
         </li>
         <li>
           <strong>Payment information</strong> when you subscribe to a paid plan.
@@ -68,11 +78,19 @@ export default function PrivacyPage() {
 
       <h2>Sharing</h2>
       <p>
-        We do not sell your personal data. We share it only with service
-        providers who help us run {brand.name} (such as hosting, email delivery,
-        and payment processing via Stripe) under appropriate confidentiality
-        obligations, with members of your organization as the product requires,
-        or where the law requires it.
+        We do not sell your personal data. We share it only with the service
+        providers that help us run the managed {brand.name} service, across
+        categories such as cloud hosting and databases, object storage for
+        uploads, email delivery, error monitoring, and payment processing. Card
+        payments are handled by a third-party payment processor (currently
+        Stripe); we never receive or store full card numbers. These providers act
+        under appropriate confidentiality obligations. We also share data with
+        members of your organization as the product requires, or where the law
+        requires it.
+      </p>
+      <p>
+        Our specific list of sub-processors is still being finalized and will be
+        published here.
       </p>
 
       <h2>Cookies</h2>

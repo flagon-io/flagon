@@ -1,4 +1,9 @@
-import { SiGithub, SiGitlab, SiBitbucket } from "@icons-pack/react-simple-icons";
+import {
+  SiDiscord,
+  SiGithub,
+  SiGitlab,
+  SiBitbucket,
+} from "@icons-pack/react-simple-icons";
 
 /**
  * The icon set.
@@ -40,4 +45,9 @@ export function IconGitLab({ className }: { className?: string }) {
 /** The Bitbucket mark (simple-icons). Inherits theme color, like {@link IconGitHub}. */
 export function IconBitbucket({ className }: { className?: string }) {
   return <SiBitbucket color="currentColor" className={className} />;
+}
+
+/** The Discord mark (simple-icons). Inherits the surrounding text color. */
+export function IconDiscord({ className }: { className?: string }) {
+  return <SiDiscord color="currentColor" className={className} />;
 }

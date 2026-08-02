@@ -142,6 +142,7 @@ per flag.
 
 | Status | `errorCode` | Meaning |
 | --- | --- | --- |
+| `400` | `PARSE_ERROR` · `INVALID_CONTEXT` | The body was not valid JSON, or the evaluation context was malformed. |
 | `401` | `AUTHENTICATION_ERROR` | Missing, malformed, or revoked client key. |
 | `404` | `FLAG_NOT_FOUND` | No flag with that key is configured in this environment. |
 | `429` | None | Too many requests; back off. A `Retry-After` header says for how long. |

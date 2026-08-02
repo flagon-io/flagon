@@ -1,14 +1,22 @@
 export const metadata = {
   title: "Client keys",
   description:
-    "How client keys authenticate evaluation, how they are scoped, and how to rotate them.",
+    "The publishable, environment-scoped credential your app carries at runtime. Today it authenticates flag evaluation; how it's scoped, and how to rotate it.",
 };
 
 # Client keys
 
-A **client key** authenticates flag evaluation. Your app sends it as a bearer
-token on every OFREP request, and it tells Flagon two things: which organization
-you are, and which environment to evaluate against.
+A **client key** is Flagon's **publishable, environment-scoped** credential for
+runtime access from your app. It's the counterpart to an
+[access token](/docs/platform/authentication): an access token is a secret for
+managing your account server-side, while a client key is safe to ship in a client
+and does read-only runtime work.
+
+Today a client key's one capability is **flag evaluation**. Your app sends it as a
+bearer token on every OFREP request, and it tells Flagon two things: which
+organization you are, and which environment to evaluate against. As more products
+add runtime features, the same client key carries their scopes too, so your app
+holds one key, not one per product.
 
 ```bash
 Authorization: Bearer flagon_client_...

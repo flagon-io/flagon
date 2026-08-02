@@ -24,7 +24,7 @@ const schema = z
     SENTRY_DSN: z.string().url().optional(),
     // OFREP eval hot path. The cache serves projected flag config for up to this
     // long before reloading (staleness bound; a flag change propagates within
-    // it). The burst limiter caps evaluations per SDK key per window, per
+    // it). The burst limiter caps evaluations per client key per window, per
     // instance. Defaults suit a single pilot customer; raise for scale.
     EVAL_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(15_000),
     EVAL_RATE_LIMIT: z.coerce.number().int().positive().default(6_000),
@@ -52,11 +52,12 @@ const schema = z
     // resolved from a lookup key at runtime, so there is no price id to set.
     STRIPE_SECRET_KEY: z.string().startsWith("sk_").optional(),
     STRIPE_WEBHOOK_SECRET: z.string().startsWith("whsec_").optional(),
-    // Auth (BetterAuth is hosted here now). The secret signs every session cookie
-    // and token; it is REQUIRED and must equal the console's value byte-for-byte
-    // (a mismatch invalidates every existing session cookie). BETTER_AUTH_URL is
-    // this API's own origin (defaults to the local port). AUTH_COOKIE_DOMAIN is
-    // ".flagon.io" in prod (shared apex cookie), unset locally.
+    // Auth: BetterAuth is hosted by the CONSOLE, not here. The API still needs the
+    // shared secret to VERIFY the signed session cookie the console issues (see
+    // lib/auth-context.ts, getCookieCache); it must equal the console's value
+    // byte-for-byte or every session cookie fails to verify. BETTER_AUTH_URL and
+    // AUTH_COOKIE_DOMAIN are the console's concern now (it issues cookies); kept
+    // optional here for parity but unused by the API.
     BETTER_AUTH_SECRET: z.string().min(32),
     BETTER_AUTH_URL: z.string().url().optional(),
     AUTH_COOKIE_DOMAIN: z.string().optional(),

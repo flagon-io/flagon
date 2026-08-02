@@ -102,7 +102,7 @@ export function requireBillingManager(c: Context, ctx: OrgContext): Response | n
  * Org tokens resolve to "owner" (see resolveOrg), so they always pass — a shared
  * org credential is minted by a manager and acts with the org's full authority.
  *
- * Apply AFTER resolveOrg to the handful of endpoints that mint/revoke SDK keys
+ * Apply AFTER resolveOrg to the handful of endpoints that mint/revoke client keys
  * or hard-delete a resource; ordinary member reads/writes stay ungated.
  */
 export function requireManager(c: Context, ctx: OrgContext): Response | null {

@@ -34,7 +34,9 @@ export default async function SecuritySettingsPage() {
         <SessionsList
           sessions={sessions.map((s) => ({
             token: s.token,
-            createdAt: s.createdAt,
+            // listSessions returns Date objects (in-process); the row renders an
+            // ISO string, matching what the old over-HTTP path produced.
+            createdAt: new Date(s.createdAt).toISOString(),
             userAgent: s.userAgent ?? null,
             ipAddress: s.ipAddress ?? null,
             current: s.token === session.session.token,

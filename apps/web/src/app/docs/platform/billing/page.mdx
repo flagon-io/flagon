@@ -1,0 +1,88 @@
+export const metadata = {
+  title: "Usage & billing",
+  description:
+    "How Flagon prices the managed service: usage-based, never per-seat. What counts as a billable event, the plans and their allowances, and how the shared usage credit works.",
+};
+
+# Usage & billing
+
+Flagon's managed service is priced on **what you use, not how many people use
+it**. Adding teammates never changes the bill. You pay for the billable events
+your usage generates, drawn against a single credit shared across every product.
+
+<Callout tone="note" title="This is the managed service">
+Billing applies to the hosted service at [flagon.io](https://flagon.io).
+[Self-hosting](/docs/self-hosting) is free, source-available, and has no user
+limit or usage metering: you run it on your own infrastructure.
+</Callout>
+
+## What you're billed for
+
+Each product meters its own **billable event**, and only the billable event
+counts. For **Feature Flags**, that event is an **[exposure](/docs/feature-flags/exposures)**:
+a record that a real user was served a flag. Evaluating a flag (a "check") is
+always **free and unlimited**, whether you evaluate one flag or run millions of
+checks a second. You're billed only for the exposures you record, never for the
+checks behind them.
+
+As more products land, each brings its own billable event, and they all meter
+into the same credit.
+
+## Plans
+
+| Plan | Base | Included | Past the allowance |
+| --- | --- | --- | --- |
+| **Hobby** | Free | 500K events / month | Metering stops (events are refused); a single user, a single organization |
+| **Pro** | $50 / month | A $50 usage credit (about 1M events) | Overage billed at the metered rate |
+| **Enterprise** | Contract | A negotiated envelope | Trued up against the contract |
+
+Events meter at **$0.05 per 1,000**. Pro's $50 base is a **$50 usage credit**, so
+at that rate it covers roughly **one million events** before any overage. The
+credit is monetary and shared: every product's usage draws from the same $50, so
+you're never rationing per-product allowances.
+
+<Callout tone="warning" title="Hobby is a hard cap">
+The free Hobby tier stops metering once you pass **500K events** in a cycle:
+further exposure ingest is refused with a `403`. Flag **evaluation keeps working**
+(checks are always free), only the recording of new exposures stops. You get
+warning emails at 80% and 100%, so the cap never arrives unannounced. Upgrade to
+Pro to keep recording.
+</Callout>
+
+## Watching your usage
+
+The console's **Usage** page shows the current cycle: a breakdown by product,
+flag, environment, and evaluation reason, plus where you stand against your
+allowance. Read the same numbers from the API:
+
+```http
+GET /v1/orgs/{org}/usage
+```
+
+It returns the usage breakdown and an `entitlement` object with your plan, the
+included and used events, any overage, and the credit burn-down (`$X of $50
+used`). Any member can read it.
+
+## Managing your plan
+
+| Action | Endpoint |
+| --- | --- |
+| Start a Pro checkout | `POST /v1/orgs/{org}/billing/checkout` |
+| Read the billing summary | `GET /v1/orgs/{org}/billing/summary` |
+| Open the billing portal | `POST /v1/orgs/{org}/billing/portal` |
+
+Checkout and the billing portal are handled by our payment processor; Flagon
+never sees full card numbers. A lapsed Pro subscription **locks** the
+organization's management surface (with a reactivation prompt) rather than
+silently downgrading it, so nothing is lost while you sort out billing.
+
+## Related
+
+<CardGrid cols={2}>
+  <Card href="/docs/feature-flags/exposures" title="Record exposures">
+    The billable event for Feature Flags, and how to record it.
+  </Card>
+  <Card href="/docs/self-hosting" title="Run Flagon" cta="Self-host free">
+    Run the whole platform yourself, with no usage metering.
+  </Card>
+</CardGrid>

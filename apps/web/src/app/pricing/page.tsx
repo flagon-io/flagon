@@ -52,10 +52,10 @@ export default function PricingPage() {
             width so it sits on one line instead of wrapping for no reason. */}
         <BleedBand>
           <p className="mx-auto max-w-3xl px-6 py-4 text-center text-sm text-zinc-500">
-            Reads and checks are always free; you pay only for the usage events your
-            products generate. Hobby includes {HOBBY_EVENTS} events a month and simply
-            pauses there, never a surprise bill. Pro includes {PRO_EVENTS} events, then
-            ${PER_1K} per 1,000 beyond it.
+            You pay for the usage events your products generate. Hobby includes{" "}
+            {HOBBY_EVENTS} events a month and simply pauses there, never a surprise
+            bill. Pro includes {PRO_EVENTS} events, then ${PER_1K} per 1,000 beyond
+            it.
           </p>
         </BleedBand>
 

@@ -21,7 +21,7 @@ the API.
 
 ## Prerequisites
 
-- **Node.js 22** or newer.
+- **Node.js 24** or newer.
 - **PostgreSQL 17.** Managed (Neon, RDS, Cloud SQL) or your own.
 - **Docker** (optional) if you want to run Postgres locally with the bundled
   compose file.
@@ -59,7 +59,7 @@ The essentials:
 | Variable | App | What it is |
 | --- | --- | --- |
 | `DATABASE_URL` | api, app | Postgres connection string. |
-| `BETTER_AUTH_SECRET` | app | A long random secret that signs sessions. Generate one. |
+| `BETTER_AUTH_SECRET` | app, api | A long random secret. The console signs sessions with it and the API verifies them, so it must be **identical** on both. Generate one. |
 | `NEXT_PUBLIC_API_URL` | app | Where the API is reachable. |
 | `NEXT_PUBLIC_APP_URL` · `APP_URL` | app · api | The console's public URL (also used for CORS). |
 
@@ -73,6 +73,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 The example ships `BETTER_AUTH_SECRET=dev-secret-change-me`. A production build
 refuses to start with that placeholder. Set a real, random secret, and keep it
 stable, rotating it signs everyone out.
+</Callout>
+
+<Callout tone="note" title="Uploads are optional">
+Organization logos and project icons upload to S3-compatible object storage
+(Cloudflare R2, MinIO, or any compatible store). It's optional: leave the
+`STORAGE_*` variables unset and uploads are cleanly disabled (the console shows
+the feature present but off). Set them together to turn it on, see
+`apps/api/.env.example` for the full set.
 </Callout>
 
 ## 4. Run the migrations

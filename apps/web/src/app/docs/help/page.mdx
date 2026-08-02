@@ -1,0 +1,54 @@
+export const metadata = {
+  title: "Getting help",
+  description:
+    "Where to get help with Flagon: talk it through on Discord, search and file GitHub issues, find product troubleshooting guides, and report bugs or security issues.",
+};
+
+# Getting help
+
+Whether something's broken or you just want to talk an approach through, here's
+where to go.
+
+## Talk it through
+
+<CardGrid cols={2}>
+  <Card href="https://discord.gg/dtYQs6rPXN" title="Discord" cta="Join the community">
+    The fastest way to get help, compare notes with other builders, and reach the
+    Flagon team. Best for "how do I..." and "is this expected?"
+  </Card>
+  <Card href="https://github.com/flagon-io/flagon/issues" title="GitHub issues" cta="Search or open an issue">
+    Search existing issues first to see if something is already known or fixed,
+    then open a new one if it isn't.
+  </Card>
+</CardGrid>
+
+## Troubleshooting guides
+
+Product-specific troubleshooting lives with each product:
+
+- **[Feature Flags troubleshooting](/docs/feature-flags/troubleshooting)** —
+  evaluation, client keys, and OFREP gotchas.
+
+More troubleshooting guides land as each product grows. If you hit something
+that isn't covered yet, Discord is the quickest way to get unblocked, and it
+tells us what to write next.
+
+## Reporting a bug
+
+Found a real bug? [Open a GitHub issue](https://github.com/flagon-io/flagon/issues/new)
+with:
+
+- what you did, what you expected, and what actually happened;
+- the smallest steps to reproduce it;
+- any error message, status code, or `reason` from the response.
+
+<Callout tone="warning" title="Security issues are different">
+Never report a security vulnerability in a public issue. Email
+**security@flagon.io** privately instead. See [SECURITY.md](https://github.com/flagon-io/flagon/blob/main/SECURITY.md).
+</Callout>
+
+## Self-hosting
+
+Running Flagon yourself? The [Run Flagon](/docs/self-hosting) guide covers setup,
+environment, and the production notes, and Discord is the place to ask about your
+own deployment.

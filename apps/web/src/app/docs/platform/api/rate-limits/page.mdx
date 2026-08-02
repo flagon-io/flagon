@@ -1,0 +1,76 @@
+export const metadata = {
+  title: "Rate limits",
+  description:
+    "How Flagon rate-limits the API: what's limited, the 429 response and its headers, and how to back off. Flag evaluation is limited separately from management writes.",
+};
+
+# Rate limits
+
+Flagon rate-limits the API to keep one caller from degrading it for everyone.
+Limits are applied per caller and per window, and the two surfaces of the API are
+limited **independently**, so heavy flag evaluation never competes with someone
+editing configuration in the console.
+
+## What's limited
+
+| Surface | What it covers | Keyed by |
+| --- | --- | --- |
+| **Management writes** | `POST` / `PUT` / `PATCH` / `DELETE` under `/v1/orgs/{org}/...` | Organization + caller |
+| **Evaluation** | `/ofrep/v1/...` flag evaluation | Client key |
+
+Reads on the management API (`GET`) are cheap and pass through; the write path is
+what's capped, because each write is a transaction plus bookkeeping. Evaluation is
+the high-volume hot path, so it has its own limiter tuned for throughput.
+
+## The 429 response
+
+When a limit is exceeded, the API responds with **`429 Too Many Requests`** in the
+[standard error envelope](/docs/platform/api/errors):
+
+```json
+{
+  "message": "Too many requests. Slow down and try again shortly.",
+  "status": 429
+}
+```
+
+Along with headers that tell you how to back off:
+
+| Header | Meaning |
+| --- | --- |
+| `Retry-After` | Seconds to wait before retrying. |
+| `RateLimit-Limit` | The ceiling for the current window. |
+| `RateLimit-Remaining` | Requests left in the current window. |
+
+## Backing off
+
+Honor `Retry-After`: on a `429`, wait that many seconds before retrying, and
+prefer exponential backoff with jitter if you retry repeatedly. Watch
+`RateLimit-Remaining` and slow down as it approaches zero rather than sprinting
+into the limit.
+
+<Callout tone="tip" title="Evaluate at the edge, not per request">
+The OpenFeature SDKs cache flag configuration and evaluate locally, so a busy
+service makes very few evaluation calls no matter how much traffic it serves. If
+you're calling [evaluation](/docs/feature-flags/evaluate/rest) directly over REST,
+cache the response and respect its `ETag` instead of re-fetching per request.
+</Callout>
+
+## Self-hosting
+
+The limiter is backed by Postgres, so it works out of the box on a self-hosted
+instance with no extra infrastructure, and it **fails open**: if the limiter
+itself errors, the request is allowed rather than dropped. The window sizes and
+ceilings are configurable through environment variables. See
+[Run Flagon](/docs/self-hosting).
+
+## Related
+
+<CardGrid cols={2}>
+  <Card href="/docs/platform/api/errors" title="Errors">
+    The error envelope shared by every failure, including `429`.
+  </Card>
+  <Card href="/docs/platform/api" title="API overview" cta="Back to the API">
+    Base URL, organization scope, and how requests are shaped.
+  </Card>
+</CardGrid>

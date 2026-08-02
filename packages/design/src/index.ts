@@ -7,11 +7,7 @@
  */
 export { cn } from "./cn";
 export { brand } from "./brand";
-export {
-  FlagonMark,
-  tankardPaths,
-  tankardStrokeWidth,
-} from "./logo";
+export { FlagonMark, tankardPaths, tankardStrokeWidth } from "./logo";
 export { GridBackdrop } from "./components/grid-backdrop";
 export { HexField } from "./components/hex-field";
 export { BleedBand, CornerMark } from "./components/bleed-band";
@@ -37,12 +33,7 @@ export {
   type ToastTone,
   type ToastItem,
 } from "./components/toast";
-export {
-  Modal,
-  ModalHeader,
-  ModalBody,
-  ModalFooter,
-} from "./components/modal";
+export { Modal, ModalHeader, ModalBody, ModalFooter } from "./components/modal";
 export {
   Menu,
   MenuTrigger,
@@ -80,4 +71,5 @@ export {
   IconGitHub,
   IconGitLab,
   IconBitbucket,
+  IconDiscord,
 } from "./components/icons";

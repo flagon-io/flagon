@@ -20,7 +20,6 @@ import { ofrep } from "./routes/ofrep/index.js";
 import { v1 } from "./routes/v1/index.js";
 import { stripeWebhook } from "./routes/webhooks/stripe.route.js";
 import { internal } from "./routes/internal/cron.route.js";
-import { auth } from "./lib/auth.js";
 
 // The API is the control plane: everything that matters (today: the waitlist;
 // soon: projects, flags, auth) lives behind /v1/* and both Next.js apps talk
@@ -90,7 +89,7 @@ app.get("/favicon.png", (c) =>
 app.route("/v1", v1);
 
 // OFREP: the OpenFeature Remote Evaluation Protocol. The flag-evaluation hot
-// path, authenticated by SDK key rather than the control-plane token/cookie.
+// path, authenticated by client key rather than the control-plane token/cookie.
 app.route("/ofrep", ofrep);
 
 // Stripe webhook: authenticated by request signature, not a token/cookie, so it
@@ -101,12 +100,9 @@ app.route("/webhooks/stripe", stripeWebhook);
 // shared CRON_SECRET bearer token that Vercel Cron injects. See the route.
 app.route("/internal", internal);
 
-// Authentication: the API hosts BetterAuth. Its generic handler is a Web
-// Request -> Response, which Hono provides via c.req.raw and returns verbatim
-// (Set-Cookie included). Global openCors already grants credentialed CORS to the
-// console + marketing origins, which is what the browser auth calls need. See
-// lib/auth.ts.
-app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+// NOTE: authentication is NOT hosted here. The console (app.flagon.io) owns
+// BetterAuth and mounts /api/auth/*; the API validates the session cookie it
+// signs (see lib/auth-context.ts) and never runs BetterAuth itself.
 
 // Everything this API returns is JSON, failures included: a client parses an
 // error exactly the way it parses a success.

@@ -1,123 +1,295 @@
 import "server-only";
-import { cache } from "react";
 import { headers } from "next/headers";
-import { API_URL } from "@/lib/urls";
+import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { nextCookies } from "better-auth/next-js";
+import { organization, username } from "better-auth/plugins";
+import { APIError, createAuthMiddleware } from "better-auth/api";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db/client";
+import { members, organizations, schema, userEmails } from "@/db/schema";
+import { env } from "@/env";
+import { createEmailSender } from "@/lib/email/sender";
+import {
+  invitationTemplate,
+  resetPasswordTemplate,
+  verifyEmailTemplate,
+} from "@/lib/email/templates";
+import { isReserved } from "@/lib/reserved";
+import { uuidv7 } from "@/lib/uuid";
+import { DEFAULT_PLAN, isSelectablePlan, planAllowsInvites } from "@/lib/plans";
+import { resolvePrimaryEmail } from "@/lib/user-emails";
+import { APP_URL, WEB_URL, API_URL } from "@/lib/urls";
 
 /**
- * Server-side auth helpers for the console.
+ * The console owns authentication for all of Flagon.
  *
- * Auth is OWNED by the API now (BetterAuth is hosted there — see
- * apps/api/src/lib/auth.ts, mounted at /api/auth/*). The console is a pure
- * client: it forwards the request cookie to the API's session endpoints. There
- * is no BetterAuth instance here anymore; the browser uses `@/lib/auth-client`
- * (which points at the API), and these server helpers read the session over HTTP.
+ * BetterAuth is hosted HERE (mounted at app/api/auth/[...all]/route.ts) and
+ * issues its queries through the console's own drizzle client against the shared
+ * database. Because auth lives with the console, resolving a session is an
+ * in-process call (getSession below), not a cross-service HTTP hop — the console
+ * never depends on the API being reachable to know who you are.
+ *
+ * The API (apps/api) does NOT import this module. It authenticates its own
+ * requests against the same database independently: PATs/OATs by a hashed lookup,
+ * and the session cookie by verifying BetterAuth's signed cookie cache (see
+ * apps/api/src/lib/auth-context.ts). So there is exactly ONE BetterAuth instance
+ * (here), and no service calls another to answer "who are you".
+ *
+ * Verify every import against the installed BetterAuth version before editing;
+ * subpaths and option shapes move between releases (pinned: better-auth 1.6.x).
  */
 
-/** The session shape the API's /api/auth/get-session returns (dates are ISO strings over HTTP). */
-export type SessionResult = {
-  user: {
-    id: string;
-    name: string;
-    email: string;
-    emailVerified: boolean;
-    image?: string | null;
-    username?: string | null;
-    displayUsername?: string | null;
-    createdAt?: string;
-    updatedAt?: string;
-  };
+const email = createEmailSender();
+
+// Cross-subdomain cookies only in deployed environments, where the console
+// (app.), marketing site (www.), and API (api.) share the apex domain and must
+// share one session cookie. Set AUTH_COOKIE_DOMAIN=".flagon.io" in prod; leave
+// it unset locally so the cookie stays scoped to localhost (shared across ports).
+const cookieDomain = process.env.AUTH_COOKIE_DOMAIN;
+
+export const auth = betterAuth({
+  appName: "Flagon",
+  // Validated at boot (see @/env): guaranteed present, long enough, and never
+  // the dev placeholder in production. The API shares this secret so it can
+  // verify the cookies this instance signs.
+  secret: env.BETTER_AUTH_SECRET,
+  baseURL: process.env.BETTER_AUTH_URL ?? APP_URL,
+
+  database: drizzleAdapter(db, { provider: "pg", schema }),
+
+  // Every origin allowed to drive auth: the console itself, the marketing site
+  // (its sign-in link), and the API.
+  trustedOrigins: [APP_URL, WEB_URL, API_URL],
+
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 8,
+    // Verification is a nag, not a gate (decision: users get in immediately).
+    requireEmailVerification: false,
+    sendResetPassword: async ({ user, url }: { user: { email: string }; url: string }) => {
+      const { subject, html } = resetPasswordTemplate(url);
+      await email.send({ to: user.email, subject, html });
+    },
+  },
+
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url }: { user: { email: string }; url: string }) => {
+      const { subject, html } = verifyEmailTemplate(url);
+      await email.send({ to: user.email, subject, html });
+    },
+  },
+
   session: {
-    id: string;
-    token: string;
-    userId: string;
-    expiresAt: string;
-    activeOrganizationId?: string | null;
-    ipAddress?: string | null;
-    userAgent?: string | null;
-    createdAt?: string;
-    updatedAt?: string;
-  };
-} | null;
+    // A short-lived signed snapshot in a cookie lets the proxy make an optimistic
+    // signed-in/out decision without a database round-trip, and lets the API
+    // verify a session without hitting the database on the hot path; the console
+    // page still does the authoritative in-process check.
+    cookieCache: { enabled: true, maxAge: 5 * 60 },
+  },
 
-/**
- * Thrown when we CANNOT determine the session because the auth API is
- * unreachable (network error, timeout, or 5xx) after retries. This is a real
- * error, NOT a sign-out: a transient blip or cold start must never masquerade as
- * "you're logged out". Protected pages let this bubble to the error boundary
- * (see app/error.tsx), which tells the user their session is safe and offers a
- * retry, instead of silently dumping them at /login.
- */
-export class SessionUnavailableError extends Error {
-  constructor() {
-    super("Flagon's authentication service is temporarily unreachable.");
-    this.name = "SessionUnavailableError";
-  }
-}
+  // Brute-force protection on the auth endpoints. In-memory (per instance) on
+  // purpose: a better-auth "database" store would want its own rate-limit table
+  // and collide with the API's existing `rate_limits` table. The generous global
+  // window covers everything; credential-sensitive routes get strict per-IP
+  // windows on top. Normal session traffic keeps the default, so real users are
+  // never throttled.
+  rateLimit: {
+    window: 10,
+    max: 100,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 10 },
+      "/sign-in/username": { window: 60, max: 10 },
+      "/sign-up/email": { window: 3600, max: 10 },
+      "/request-password-reset": { window: 3600, max: 5 },
+      "/reset-password": { window: 3600, max: 5 },
+    },
+  },
 
-// Retry budget for reaching the auth API. Timeout is per-attempt (so a cold
-// start that hangs is aborted and retried against a warm instance); backoff is
-// the pause BEFORE each attempt. Kept under a typical 10s function budget.
-const AUTH_TIMEOUT_MS = 2800;
-const AUTH_BACKOFF_MS = [0, 250, 600];
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // Sign in with ANY verified alias: rewrite the submitted email to the account
+  // primary before the credential check (GitHub-style multi-email). Unknown or
+  // unverified addresses pass through unchanged, so this never reveals whether an
+  // address exists.
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/sign-in/email") return;
+      const submitted = ctx.body?.email;
+      if (typeof submitted !== "string" || !submitted) return;
+      const primary = await resolvePrimaryEmail(submitted);
+      if (primary === submitted.trim().toLowerCase()) return;
+      return { context: { body: { ...ctx.body, email: primary } } };
+    }),
+  },
 
-/**
- * Fetch from the API with the forwarded cookie, RETRYING transient failures
- * (network error, timeout, 5xx) with short backoff so a momentary hiccup does
- * not look like a hard failure. Returns the Response, or null if every attempt
- * failed to get a usable answer (caller decides whether that is fatal).
- */
-async function authFetch(path: string, init?: RequestInit): Promise<Response | null> {
-  const cookie = (await headers()).get("cookie") ?? "";
-  for (let attempt = 0; attempt < AUTH_BACKOFF_MS.length; attempt++) {
-    if (AUTH_BACKOFF_MS[attempt]) await sleep(AUTH_BACKOFF_MS[attempt]!);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), AUTH_TIMEOUT_MS);
-    try {
-      const res = await fetch(`${API_URL}${path}`, {
-        ...init,
-        headers: { cookie, ...(init?.headers ?? {}) },
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      // 5xx: the service is up but erroring — worth another try until we run out.
-      if (res.status >= 500 && attempt < AUTH_BACKOFF_MS.length - 1) continue;
-      return res;
-    } catch {
-      // Network error / timeout / abort — fall through to the next attempt.
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  return null;
-}
+  plugins: [
+    username({
+      minUsernameLength: 3,
+      maxUsernameLength: 39,
+      usernameValidator: (value) =>
+        // GitHub-style: letters, digits, single hyphens, no leading/trailing
+        // hyphen, and not a reserved word.
+        /^[a-z0-9](?:[a-z0-9-]{1,37}[a-z0-9])?$/i.test(value) &&
+        !isReserved(value),
+    }),
+    organization({
+      // The subscription tier, stored on the org row; set by billing, not users.
+      schema: {
+        organization: {
+          additionalFields: {
+            plan: {
+              type: "string",
+              required: false,
+              defaultValue: "hobby",
+              input: true,
+            },
+          },
+        },
+      },
+      sendInvitationEmail: async (data) => {
+        const acceptUrl = `${APP_URL}/invite/${data.id}`;
+        const { subject, html } = invitationTemplate({
+          organizationName: data.organization.name,
+          inviterName: data.inviter.user.name || data.inviter.user.email,
+          acceptUrl,
+        });
+        await email.send({ to: data.email, subject, html });
+      },
+      organizationHooks: {
+        // Two guards on org creation:
+        //  1. Coerce any not-currently-available plan (e.g. a crafted request)
+        //     down to the default, so the stored marker is always a real plan.
+        //  2. An account may own only ONE Hobby organization (Hobby is the
+        //     single-user tier). Block a second one.
+        beforeCreateOrganization: async ({ organization: org, user }) => {
+          const plan =
+            typeof org.plan === "string" && isSelectablePlan(org.plan)
+              ? org.plan
+              : DEFAULT_PLAN;
 
-/**
- * The current session for the incoming request, or null when signed out. Reads
- * the API's get-session with the forwarded cookie. This is the seam the whole
- * console gates on (pages, layouts, server actions).
- */
-export const getSession = cache(async (): Promise<SessionResult> => {
-  // No session cookie at all = definitely signed out. Never hit the API for this
-  // (and never throw): a signed-out visitor with the API down should still land
-  // cleanly on /login, not on an error screen.
-  const cookie = (await headers()).get("cookie") ?? "";
-  if (!cookie.includes("session_token")) return null;
+          if (plan === "hobby") {
+            const existing = await db
+              .select({ id: organizations.id })
+              .from(members)
+              .innerJoin(
+                organizations,
+                eq(members.organizationId, organizations.id),
+              )
+              .where(
+                and(
+                  eq(members.userId, user.id),
+                  eq(organizations.plan, "hobby"),
+                ),
+              )
+              .limit(1);
+            if (existing.length) {
+              throw new APIError("BAD_REQUEST", {
+                message:
+                  "You can only have one Hobby organization. Upgrade to Pro to create more.",
+              });
+            }
+          }
 
-  // We HAVE a session cookie, so the answer is authoritative only if the API
-  // actually answered. If it did, trust it (a valid session, or a real sign-out
-  // when the row is gone/expired -> null). If it did NOT (unreachable after
-  // retries, or a 5xx), that is an ERROR, not a logout -> throw so the caller
-  // surfaces it instead of signing the user out on a blip.
-  const res = await authFetch("/api/auth/get-session");
-  if (!res || !res.ok) throw new SessionUnavailableError();
-  const data = (await res.json()) as SessionResult;
-  return data && data.user ? data : null;
+          return { data: { ...org, plan } };
+        },
+        // A new Pro org is stamped `incomplete` (locked) until Stripe Checkout
+        // completes and the webhook flips it active — stops free Pro at creation.
+        afterCreateOrganization: async ({ organization: org }) => {
+          if (org.plan === "pro") {
+            await db
+              .update(organizations)
+              .set({ subscriptionStatus: "incomplete" })
+              .where(eq(organizations.id, org.id));
+          }
+        },
+        // Hobby is a single-user plan: inviting teammates requires a paid plan.
+        beforeCreateInvitation: async ({ invitation }) => {
+          const rows = await db
+            .select({ plan: organizations.plan })
+            .from(organizations)
+            .where(eq(organizations.id, invitation.organizationId))
+            .limit(1);
+          if (!planAllowsInvites(rows[0]?.plan ?? "hobby")) {
+            throw new APIError("FORBIDDEN", {
+              message:
+                "Inviting teammates requires a paid plan. Hobby is limited to one user.",
+            });
+          }
+        },
+      },
+    }),
+    // nextCookies must be the LAST plugin so it can attach Set-Cookie headers
+    // written by any earlier plugin to the Next response.
+    nextCookies(),
+  ],
+
+  databaseHooks: {
+    user: {
+      create: {
+        // Seed the GitHub-style multi-email table with the signup address as the
+        // verified-or-not primary, so `user_emails` is the source of truth from
+        // the first row and `user.email` mirrors the primary.
+        after: async (createdUser: {
+          id: string;
+          email: string;
+          emailVerified?: boolean;
+        }) => {
+          await db
+            .insert(userEmails)
+            .values({
+              userId: createdUser.id,
+              email: createdUser.email.toLowerCase(),
+              verified: createdUser.emailVerified ?? false,
+              isPrimary: true,
+            })
+            .onConflictDoNothing();
+        },
+      },
+      update: {
+        // Keep the primary `user_emails` row's verified flag in step when
+        // BetterAuth marks the user's email verified.
+        after: async (updatedUser: { email: string; emailVerified?: boolean }) => {
+          if (updatedUser.emailVerified) {
+            await db
+              .update(userEmails)
+              .set({ verified: true })
+              .where(eq(userEmails.email, updatedUser.email.toLowerCase()));
+          }
+        },
+      },
+    },
+  },
+
+  advanced: {
+    // All identifiers are UUIDv7 (time-ordered). BetterAuth calls this for every
+    // model's id; our own tables default them via drizzle `$defaultFn`.
+    database: { generateId: () => uuidv7() },
+    // Our own cookie namespace, off BetterAuth's default `better-auth`. `proxy.ts`
+    // and the API both read this same prefix; the three MUST stay in sync.
+    cookiePrefix: "flagon",
+    ...(cookieDomain
+      ? { crossSubDomainCookies: { enabled: true, domain: cookieDomain } }
+      : {}),
+  },
 });
+
+export type SessionResult = Awaited<ReturnType<typeof auth.api.getSession>>;
+
+/**
+ * The current session for the incoming request, or null when signed out.
+ * Server-only: reads the request headers via next/headers, resolved IN-PROCESS
+ * (no HTTP hop). This is the seam the whole console gates on (pages, layouts,
+ * server actions).
+ */
+export async function getSession() {
+  return auth.api.getSession({ headers: await headers() });
+}
 
 /**
  * The current user, or throw. For server actions behind the auth gate, where a
- * missing session is unexpected (the proxy already keeps signed-out visitors out).
+ * missing session is an unexpected/forbidden state rather than a redirect case
+ * (the proxy already keeps signed-out visitors off these routes).
  */
 export async function requireUser() {
   const session = await getSession();
@@ -126,21 +298,9 @@ export async function requireUser() {
 }
 
 /** Device sessions for the current user (security page). Empty on any failure. */
-export async function getSessions(): Promise<
-  {
-    token: string;
-    createdAt: string;
-    userAgent?: string | null;
-    ipAddress?: string | null;
-  }[]
-> {
-  const res = await authFetch("/api/auth/list-sessions");
-  if (!res || !res.ok) return [];
+export async function getSessions() {
   try {
-    const data = (await res.json()) as
-      | { token: string; createdAt: string; userAgent?: string | null; ipAddress?: string | null }[]
-      | null;
-    return Array.isArray(data) ? data : [];
+    return await auth.api.listSessions({ headers: await headers() });
   } catch {
     return [];
   }

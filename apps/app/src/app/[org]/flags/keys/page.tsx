@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { FLAG_ENVIRONMENTS, listSdkKeys } from "@/lib/flags-api";
-import { SdkKeysManager } from "./sdk-keys-manager";
+import { ClientKeysManager } from "./client-keys-manager";
 
 /**
  * Client keys: per-environment publishable credentials used to evaluate flags
@@ -38,7 +38,7 @@ export default async function SdkKeysPage({
           Per-environment credentials for evaluating flags with the OpenFeature OFREP provider.
         </p>
       </div>
-      <SdkKeysManager
+      <ClientKeysManager
         slug={slug}
         environments={FLAG_ENVIRONMENTS}
         keys={keys}

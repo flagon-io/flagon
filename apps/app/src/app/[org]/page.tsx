@@ -33,16 +33,22 @@ export default async function OrgProjects({
   // to a null entitlement (the sidebar renders an "unavailable" note, not an error).
   const [projects, usageResult, teams] = await Promise.all([
     listProjects(slug),
-    getOrgUsage(slug, { from: dayString(29), to: dayString(0), groupBy: "meter" }),
+    getOrgUsage(slug, {
+      from: dayString(29),
+      to: dayString(0),
+      groupBy: "meter",
+    }),
     listTeams(slug),
   ]);
   const entitlement = usageResult?.entitlement ?? null;
+  const usage = usageResult?.usage ?? null;
   const teamOptions = teams.map((t) => ({ key: t.key, name: t.name }));
 
   // Who may create: managers always, members when the org's policy allows it.
   // Mirrors the API's requireProjectCreator so the UI never offers a 403.
   const canCreate =
-    canManageOrg(membership.role) || membership.projectCreationPolicy === "members";
+    canManageOrg(membership.role) ||
+    membership.projectCreationPolicy === "members";
 
   return (
     <ProjectsView
@@ -50,7 +56,7 @@ export default async function OrgProjects({
       projects={projects}
       canCreate={canCreate}
       entitlement={entitlement}
-      plan={membership.plan}
+      usage={usage}
       teams={teamOptions}
     />
   );

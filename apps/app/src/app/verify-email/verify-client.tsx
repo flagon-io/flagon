@@ -4,17 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, Loader2 } from "lucide-react";
-import { API_URL } from "@/lib/urls";
+import { APP_URL } from "@/lib/urls";
 import { FormError } from "@/components/form-error";
 
 type State = "verifying" | "success" | "error";
 
 /**
- * Verifies the email in the browser by calling the API's verify endpoint directly,
- * credentialed — so the auto-sign-in session cookie the API sets lands (it's
- * apex-scoped, shared across app./api.). No `callbackURL` is sent, so the API
- * returns JSON instead of redirecting: the user never leaves the console. Already-
- * verified tokens also come back OK, so a second click is harmless.
+ * Verifies the email in the browser by calling the console's own verify endpoint,
+ * so the auto-sign-in session cookie BetterAuth sets lands same-origin. No
+ * `callbackURL` is sent, so it returns JSON instead of redirecting: the user never
+ * leaves the console. Already-verified tokens also come back OK, so a second click
+ * is harmless.
  */
 export function VerifyEmail({ token }: { token: string }) {
   const router = useRouter();
@@ -29,7 +29,7 @@ export function VerifyEmail({ token }: { token: string }) {
     void (async () => {
       try {
         const res = await fetch(
-          `${API_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}`,
+          `${APP_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}`,
           { method: "GET", credentials: "include" },
         );
         setState(res.ok ? "success" : "error");

@@ -1,0 +1,92 @@
+export const metadata = {
+  title: "Tenant isolation",
+  description:
+    "How Flagon keeps one organization's data from ever reaching another: per-organization row-level security in Postgres, forced on, with the API running as a role that cannot bypass it.",
+};
+
+# Tenant isolation
+
+Every organization on Flagon shares one Postgres database. Isolation between them
+is enforced by the **database itself**, not by remembering to add a `WHERE` clause
+in application code. This page is the whole boundary in one place, so it can be
+reviewed on its own.
+
+## Row-level security, forced on
+
+Every tenant table carries a **row-level security** policy that exposes only rows
+whose `organization_id` matches the organization set for the current transaction:
+
+```sql
+-- On each tenant table (illustrative)
+ALTER TABLE flags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE flags FORCE  ROW LEVEL SECURITY;
+
+CREATE POLICY flags_org_isolation ON flags
+  USING (organization_id = current_setting('app.current_org_id')::uuid);
+```
+
+The `FORCE` is the important part: without it, the table's owner role would be
+exempt from the policy. With it, **no connection is exempt**, including the one the
+application uses. There is no privileged read path that quietly sees everything.
+
+## The API cannot bypass RLS
+
+The API connects to Postgres as a **restricted role that cannot bypass row-level
+security** (`NOBYPASSRLS`). Even if a query forgot its organization filter, the
+database returns only the current organization's rows. The same restricted role is
+used in development, in CI, and in production, so the boundary you test is the
+boundary you ship.
+
+## One organization per transaction
+
+Work for an organization runs inside a helper that opens a transaction and sets the
+current organization **local to that transaction**:
+
+```ts
+await withOrg(organizationId, async (tx) => {
+  // every tenant query goes through `tx`
+});
+```
+
+`set_config('app.current_org_id', orgId, true)` scopes the setting to the
+transaction, so it is gone the moment the pooled connection is handed to the next
+request. It can't leak across requests that share a connection. And a tenant query
+run **without** an organization set sees nothing under `FORCE` RLS, so the system
+**fails closed**: a missing scope yields an empty result, never someone else's
+data.
+
+<Callout tone="note" title="Defense in depth, not the lock">
+RLS is the backstop, not the authorization. A request is authorized first (an
+[organization token](/docs/platform/authentication) for that org, or a verified
+[membership](/docs/platform/security/permissions)); only then does it enter
+`withOrg`. RLS turns a forgotten filter from a cross-tenant leak into an empty
+result. Two independent layers have to fail for data to cross.
+</Callout>
+
+## Which tables are tenant tables
+
+Product data (projects, flags, and the resources each product adds) is
+organization-owned and carries RLS. A small set of **identity** tables, the
+accounts, organizations, and memberships the [console
+owns](/docs/platform/architecture), sit at the auth layer and are queried to
+*establish* which organization a request may act for, before any tenant context
+exists. They are guarded by application authorization rather than RLS, because
+they are what authorization itself reads.
+
+## Verified in CI
+
+Isolation isn't a claim we make once. A **tenancy audit** runs in CI, and the
+integration test suite executes against Postgres **as the restricted, RLS-enforcing
+role**, so cross-tenant access is actively attempted and must come back empty.
+Tenancy is exercised on every change, not assumed.
+
+## Related
+
+<CardGrid cols={2}>
+  <Card href="/docs/platform/security/permissions" title="Permissions & roles">
+    The authorization layer that runs before a request ever reaches the database.
+  </Card>
+  <Card href="/docs/platform/architecture" title="Architecture overview">
+    Where this sits in the whole system: one Postgres, two writers, one boundary.
+  </Card>
+</CardGrid>

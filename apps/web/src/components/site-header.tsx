@@ -3,6 +3,7 @@ import { brand, Cta, FlagonMark } from "@flagon/design";
 import { APP_URL, SIGN_IN_URL, SIGN_UP_URL } from "@/lib/urls";
 import { getMarketingSession } from "@/lib/session";
 import { AccountMenu } from "@/components/account-menu";
+import { MobileNav } from "@/components/mobile-nav";
 
 /**
  * The top-level sections the marketing site will grow into. Items without an
@@ -87,7 +88,12 @@ export async function SiteHeader() {
             </>
           ) : (
             <>
-              <Cta variant="secondary" size="sm" href={SIGN_IN_URL}>
+              <Cta
+                variant="secondary"
+                size="sm"
+                href={SIGN_IN_URL}
+                className="hidden sm:inline-flex"
+              >
                 Sign in
               </Cta>
               <Cta variant="primary" size="sm" href={SIGN_UP_URL}>
@@ -95,6 +101,7 @@ export async function SiteHeader() {
               </Cta>
             </>
           )}
+          <MobileNav signedIn={Boolean(user)} />
         </div>
       </div>
     </header>

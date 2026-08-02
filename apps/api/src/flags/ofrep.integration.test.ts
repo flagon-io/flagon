@@ -4,8 +4,8 @@ import { eq } from "drizzle-orm";
 
 /**
  * End-to-end proof of the OFREP evaluation pipeline against the REAL tables:
- * seed a flag + variants + per-env config + an SDK key, then resolve the key and
- * evaluate exactly as the route does (resolveSdkKey -> withOrg -> load -> engine).
+ * seed a flag + variants + per-env config + an client key, then resolve the key and
+ * evaluate exactly as the route does (resolveClientKey -> withOrg -> load -> engine).
  *
  * Runs only where a migrated database is reachable (CI; or locally with
  * DATABASE_URL/APP_DATABASE_URL pointing at a migrated DB); skipped otherwise.
@@ -21,8 +21,8 @@ describe.skipIf(!DATABASE_URL)("OFREP pipeline (integration)", () => {
   let withOrg: typeof import("../db/tenant.js")["withOrg"];
   let loadEvaluationData: typeof import("./config.js")["loadEvaluationData"];
   let evaluate: typeof import("./evaluate.js")["evaluate"];
-  let generateSdkKey: typeof import("./sdk-key.js")["generateSdkKey"];
-  let resolveSdkKey: typeof import("./sdk-key.js")["resolveSdkKey"];
+  let generateClientKey: typeof import("./client-key.js")["generateClientKey"];
+  let resolveClientKey: typeof import("./client-key.js")["resolveClientKey"];
 
   const orgId = randomUUID();
   let envId: string;
@@ -35,7 +35,7 @@ describe.skipIf(!DATABASE_URL)("OFREP pipeline (integration)", () => {
     ({ withOrg } = await import("../db/tenant.js"));
     ({ loadEvaluationData } = await import("./config.js"));
     ({ evaluate } = await import("./evaluate.js"));
-    ({ generateSdkKey, resolveSdkKey } = await import("./sdk-key.js"));
+    ({ generateClientKey, resolveClientKey } = await import("./client-key.js"));
 
     // Seed the RLS-protected tables INSIDE withOrg so this passes whether the
     // test connection enforces RLS (the restricted role, as in CI) or bypasses
@@ -75,11 +75,11 @@ describe.skipIf(!DATABASE_URL)("OFREP pipeline (integration)", () => {
       feId = fe.id;
     });
 
-    // sdk_keys is an auth-layer table with NO RLS (it is resolved before any org
+    // client_keys is an auth-layer table with NO RLS (it is resolved before any org
     // context exists), so it is written on the bare client, exactly as minting does.
-    const gen = generateSdkKey();
+    const gen = generateClientKey();
     sdkToken = gen.token;
-    await db.insert(t.sdkKeys).values({
+    await db.insert(t.clientKeys).values({
       organizationId: orgId,
       environmentId: envId,
       name: "test key",
@@ -91,7 +91,7 @@ describe.skipIf(!DATABASE_URL)("OFREP pipeline (integration)", () => {
 
   afterAll(async () => {
     if (!db) return;
-    await db.delete(t.sdkKeys).where(eq(t.sdkKeys.organizationId, orgId));
+    await db.delete(t.clientKeys).where(eq(t.clientKeys.organizationId, orgId));
     await withOrg(orgId, async (tx) => {
       await tx.delete(t.flags).where(eq(t.flags.organizationId, orgId));
       await tx.delete(t.environments).where(eq(t.environments.organizationId, orgId));
@@ -105,13 +105,13 @@ describe.skipIf(!DATABASE_URL)("OFREP pipeline (integration)", () => {
       return flag ? evaluate(flag, context, data.segments) : null;
     });
 
-  it("resolves an SDK key to its org + environment", async () => {
-    const identity = await resolveSdkKey(sdkToken);
+  it("resolves an client key to its org + environment", async () => {
+    const identity = await resolveClientKey(sdkToken);
     expect(identity).toMatchObject({ organizationId: orgId, environmentId: envId });
   });
 
-  it("rejects an unknown SDK key", async () => {
-    expect(await resolveSdkKey("flagon_sdk_not_a_real_key")).toBeNull();
+  it("rejects an unknown client key", async () => {
+    expect(await resolveClientKey("flagon_sdk_not_a_real_key")).toBeNull();
   });
 
   it("evaluates enabled -> on (true)", async () => {

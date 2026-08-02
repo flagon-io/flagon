@@ -25,6 +25,19 @@ export const metadata: Metadata = { title: "Usage" };
 
 const RANGE_DAYS: Record<string, number> = { "7": 7, "30": 30, "90": 90 };
 
+/** The full active billing cycle, including future zero-filled days. */
+function currentCycle(): { from: string; to: string } {
+  const now = new Date();
+  return {
+    from: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+      .toISOString()
+      .slice(0, 10),
+    to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0))
+      .toISOString()
+      .slice(0, 10),
+  };
+}
+
 function dayString(offsetDays: number): string {
   return new Date(Date.now() - offsetDays * 24 * 60 * 60 * 1000)
     .toISOString()
@@ -55,7 +68,10 @@ export default async function UsagePage({
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) notFound();
 
-  const range = sp.range && RANGE_DAYS[sp.range] ? sp.range : "30";
+  const range =
+    sp.range === "cycle" || (sp.range && RANGE_DAYS[sp.range])
+      ? sp.range
+      : "cycle";
   // "meter" is the default (the billing view: per-product usage lines, mirroring
   // Vercel's by-product structure). flag/environment/reason are exploratory lenses
   // that slice flag evaluations. Project isn't a dimension — evaluations aren't
@@ -64,9 +80,10 @@ export default async function UsagePage({
   const groupBy: UsageGroupBy = GROUP_BY.includes(sp.groupBy as UsageGroupBy)
     ? (sp.groupBy as UsageGroupBy)
     : "meter";
-  const days = RANGE_DAYS[range]!;
-  const from = dayString(days - 1);
-  const to = dayString(0);
+  const selectedPeriod = range === "cycle" ? currentCycle() : null;
+  const days = selectedPeriod ? null : RANGE_DAYS[range]!;
+  const from = selectedPeriod?.from ?? dayString(days! - 1);
+  const to = selectedPeriod?.to ?? dayString(0);
 
   const result = await getOrgUsage(slug, { from, to, groupBy });
   const usage = result?.usage ?? null;
@@ -90,8 +107,12 @@ export default async function UsagePage({
   // a cap plan nothing is charged (the ceiling limits access instead).
   const billableSeries = usage?.series.filter((s) => s.billable) ?? [];
   const usedEvents = billableSeries.reduce((sum, s) => sum + s.usage, 0);
-  const grossEventCents = billableSeries.reduce((sum, s) => sum + s.chargeCents, 0);
-  const eventRate = billableSeries[0]?.pricePerMillionCents ?? EVENT_OVERAGE_PER_MILLION_CENTS;
+  const grossEventCents = billableSeries.reduce(
+    (sum, s) => sum + s.chargeCents,
+    0,
+  );
+  const eventRate =
+    billableSeries[0]?.pricePerMillionCents ?? EVENT_OVERAGE_PER_MILLION_CENTS;
   const overageEvents = Math.max(0, usedEvents - includedEvents);
   const overageCents = bills ? (overageEvents / 1_000_000) * eventRate : 0;
   const includedAppliedCents = bills ? grossEventCents - overageCents : 0;
@@ -104,8 +125,9 @@ export default async function UsagePage({
             {planName(plan)} Plan Usage
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
-            {rangeLabel(from, to)} · usage across every product. Reads and checks
-            are free.
+            {range === "cycle" ? "Current billing cycle" : "Selected range"} ·{" "}
+            {rangeLabel(from, to)} · usage across every product. Reads and
+            checks are free.
           </p>
         </div>
         <UsageFilters base={`/${slug}/usage`} range={range} groupBy={groupBy} />
@@ -178,7 +200,9 @@ function CreditBar({
       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8">
         <div
           className={`h-full rounded-full ${over ? "bg-amber-500" : "bg-[#3987e5]"}`}
-          style={{ width: `${Math.max(pct * 100, creditUsedCents > 0 ? 2 : 0)}%` }}
+          style={{
+            width: `${Math.max(pct * 100, creditUsedCents > 0 ? 2 : 0)}%`,
+          }}
         />
       </div>
       <p className="mt-2 text-xs text-zinc-500">
@@ -235,7 +259,9 @@ function EventsBar({
         <p className="mt-2 text-xs text-amber-400/90">
           {bills
             ? `${compact(overageEvents)} events beyond your monthly allowance.${
-                enforcing ? " Billed at the usage rate." : " Enforcement is off, so this is a projection."
+                enforcing
+                  ? " Billed at the usage rate."
+                  : " Enforcement is off, so this is a projection."
               }`
             : `You've reached your ${compact(includedEvents)} free events this month.${
                 enforcing
@@ -301,13 +327,17 @@ function UsageTable({
   }
   // A product's charge is the sum of its billable lines (only on a billing plan).
   const productCharge = (lines: UsageSeries[]) =>
-    bills ? lines.reduce((sum, l) => sum + (l.billable ? l.chargeCents : 0), 0) : 0;
+    bills
+      ? lines.reduce((sum, l) => sum + (l.billable ? l.chargeCents : 0), 0)
+      : 0;
   const totalDue = baseCents + overageCents;
 
   return (
     <section className="overflow-hidden rounded-xl border border-white/10 bg-white/2">
       {/* Column labels */}
-      <div className={`${ROW_GRID} border-b border-white/8 py-3 text-xs font-medium tracking-wide text-zinc-500 uppercase`}>
+      <div
+        className={`${ROW_GRID} border-b border-white/8 py-3 text-xs font-medium tracking-wide text-zinc-500 uppercase`}
+      >
         <span>Product</span>
         <span className="hidden sm:block" />
         <span className="text-right">Usage</span>
@@ -328,13 +358,18 @@ function UsageTable({
                 const i = colorOf.get(s.key) ?? 0;
                 const color = i < MAX_SERIES ? seriesColor(i) : OTHER_COLOR;
                 return (
-                  <li key={s.key} className={`${ROW_GRID} border-b border-white/5 py-3`}>
+                  <li
+                    key={s.key}
+                    className={`${ROW_GRID} border-b border-white/5 py-3`}
+                  >
                     <div className="flex min-w-0 items-center gap-3">
                       <span
                         className="size-2.5 shrink-0 rounded-full"
                         style={{ backgroundColor: color }}
                       />
-                      <span className="truncate text-sm text-zinc-200">{s.label}</span>
+                      <span className="truncate text-sm text-zinc-200">
+                        {s.label}
+                      </span>
                       {!s.billable ? (
                         <span className="rounded border border-white/10 px-1 py-0.5 text-[9px] font-medium tracking-wide text-zinc-500 uppercase">
                           Free
@@ -350,7 +385,10 @@ function UsageTable({
                       ) : null}
                     </div>
                     <span className="hidden justify-end sm:flex">
-                      <Sparkline values={s.points.map((p) => p.usage)} color={color} />
+                      <Sparkline
+                        values={s.points.map((p) => p.usage)}
+                        color={color}
+                      />
                     </span>
                     <span className="text-right text-sm text-zinc-300 tabular-nums">
                       {compact(s.usage)}
@@ -374,7 +412,9 @@ function UsageTable({
       <div className={`${ROW_GRID} py-3`}>
         <div className="flex min-w-0 items-center gap-3">
           <span className="size-2.5 shrink-0 rounded-full bg-[#3987e5]" />
-          <span className="truncate text-sm text-zinc-200">{planLabel} plan</span>
+          <span className="truncate text-sm text-zinc-200">
+            {planLabel} plan
+          </span>
         </div>
         <span className="hidden sm:block" />
         <span className="text-right text-sm text-zinc-500 tabular-nums">
@@ -391,7 +431,11 @@ function UsageTable({
         {groups
           .filter((g) => productCharge(g.lines) > 0)
           .map((g) => (
-            <Row key={g.product} label={`${g.product} Subtotal`} value={usd(productCharge(g.lines))} />
+            <Row
+              key={g.product}
+              label={`${g.product} Subtotal`}
+              value={usd(productCharge(g.lines))}
+            />
           ))}
         {bills && includedEvents > 0 ? (
           <Row
@@ -431,7 +475,9 @@ function Row({
   return (
     <div className="flex w-full max-w-xs items-center justify-between">
       <span className="text-zinc-500">{label}</span>
-      <span className={`tabular-nums ${muted ? "text-zinc-400" : "text-zinc-300"}`}>
+      <span
+        className={`tabular-nums ${muted ? "text-zinc-400" : "text-zinc-300"}`}
+      >
         {value}
       </span>
     </div>

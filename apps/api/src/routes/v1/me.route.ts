@@ -38,7 +38,7 @@ registerRoute({
   summary: "Identify the caller",
   description:
     "Resolve the authenticated identity for this request. Send a personal or organization access token as `Authorization: Bearer <token>`, or call from a browser that holds a valid Flagon session cookie. Returns 401 when neither is present or valid.",
-  tags: ["Identity"],
+  tags: ["Account"],
   responses: {
     200: { description: "The authenticated identity.", schema: meResponse },
     401: { description: "No valid token or session was supplied." },

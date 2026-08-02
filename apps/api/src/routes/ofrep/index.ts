@@ -18,10 +18,10 @@ import { createDurableEvalLimiter } from "../../lib/durable-eval-limiter.js";
 import { rateLimit, tooManyRequests } from "../../lib/rate-limit.js";
 import { clientIp } from "../../lib/http.js";
 import {
-  looksLikeSdkKey,
-  resolveSdkKey,
-  type SdkKeyIdentity,
-} from "../../flags/sdk-key.js";
+  looksLikeClientKey,
+  resolveClientKey,
+  type ClientKeyIdentity,
+} from "../../flags/client-key.js";
 import type {
   EvaluationContext,
   EvaluationResult,
@@ -31,7 +31,7 @@ import { registerRoute, registerComponentSchema } from "../../openapi/registry.j
 /**
  * OFREP — the OpenFeature Remote Evaluation Protocol. This is the hot path SDKs
  * call: an OpenFeature client with an OFREP provider hits these endpoints to
- * evaluate flags, authenticated by an SDK key (which pins the org + environment).
+ * evaluate flags, authenticated by an client key (which pins the org + environment).
  *
  *   POST /ofrep/v1/evaluate/flags/{key}   single flag
  *   POST /ofrep/v1/evaluate/flags         all flags (bulk)
@@ -44,7 +44,7 @@ import { registerRoute, registerComponentSchema } from "../../openapi/registry.j
 export const ofrep = new Hono();
 
 /**
- * Durable, cross-instance rate limiter on evaluation, keyed by SDK key. The
+ * Durable, cross-instance rate limiter on evaluation, keyed by client key. The
  * count lives in Postgres so the ceiling holds across every serverless instance,
  * with no dependence on an edge/CDN/WAF. It reserves a small batch of tokens per
  * database round-trip and spends them from memory (see durable-eval-limiter.ts),
@@ -67,22 +67,22 @@ function evalRateLimitForPlan(plan: string): number {
   return plan === "hobby" ? env.EVAL_RATE_LIMIT_HOBBY : env.EVAL_RATE_LIMIT;
 }
 
-async function authenticate(c: Context): Promise<SdkKeyIdentity | null> {
+async function authenticate(c: Context): Promise<ClientKeyIdentity | null> {
   const authorization = c.req.header("authorization");
   if (!authorization?.startsWith("Bearer ")) return null;
   const token = authorization.slice(7).trim();
-  if (!looksLikeSdkKey(token)) return null;
-  return resolveSdkKey(token);
+  if (!looksLikeClientKey(token)) return null;
+  return resolveClientKey(token);
 }
 
 /**
- * Resolve the SDK key, or return the response to send. A bad/absent key still
- * costs a resolveSdkKey DB lookup, so a flood of invalid keys could hammer the
+ * Resolve the client key, or return the response to send. A bad/absent key still
+ * costs a resolveClientKey DB lookup, so a flood of invalid keys could hammer the
  * database on this public hot path. Throttle repeated FAILURES by IP (mirroring
  * the management API's failed-bearer backstop) before returning 401; a valid key
  * never touches the limiter.
  */
-async function requireSdkKey(c: Context): Promise<SdkKeyIdentity | Response> {
+async function requireSdkKey(c: Context): Promise<ClientKeyIdentity | Response> {
   const identity = await authenticate(c);
   if (identity) return identity;
   const limited = await rateLimit({
@@ -348,13 +348,13 @@ ofrep.post("/v1/exposures", async (c) => {
 
   if (events.length === 0) return c.json({ recorded: 0, duplicate: false }, 202);
 
-  // Plan-cap enforcement, GATED by the plan's hardCap policy (lib/plans.ts). Today
-  // every plan is warn-first (hardCap:false): we only MEASURE against the allowance
-  // (the counter increments below, surfaced on the usage page) and never block, so
-  // a Hobby org past its cap keeps recording. Flip a plan's hardCap to true and an
-  // over-allowance org is refused here. `anyPlanHardCaps()` is a static short-circuit
-  // so while every plan is warn-first this loads no plan and touches no DB — zero
-  // hot-path cost until a cap is deliberately turned on.
+  // Plan-cap enforcement, GATED by the plan's hardCap policy (lib/plans.ts). Hobby
+  // (free) HARD-CAPS: past its monthly allowance an org is refused here (403), so the
+  // free tier can't run up unbounded cost. Paid plans are warn-first (hardCap:false):
+  // we only MEASURE against the allowance (the counter increments below, surfaced on
+  // the usage page) and never block. `anyPlanHardCaps()` is a static short-circuit, so
+  // if NO plan hard-caps this loads no plan and touches no DB; today Hobby does, so a
+  // hard-capped plan pays one plan lookup here.
   if (anyPlanHardCaps()) {
     const plan = await orgPlan(identity.organizationId);
     if (planHardCaps(plan)) {
@@ -402,7 +402,7 @@ ofrep.post("/v1/exposures", async (c) => {
 
 // --- OpenAPI registration ----------------------------------------------------
 // The two evaluation endpoints, declared so they appear in GET /openapi.json and
-// the root index. Both take an SDK key and read the OFREP evaluation context.
+// the root index. Both take an client key and read the OFREP evaluation context.
 const OFREP_TAG = "OFREP evaluation";
 
 // The request body: an optional OpenFeature evaluation context. `targetingKey`

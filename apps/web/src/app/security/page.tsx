@@ -3,7 +3,7 @@ import { brand } from "@flagon/design";
 import { LegalShell } from "@/components/legal-shell";
 
 export const metadata: Metadata = {
-  title: `Security (Draft) · ${brand.name}`,
+  title: `Security · ${brand.name}`,
   description: `Draft overview of how ${brand.name} protects your account and data, and how to report a vulnerability.`,
 };
 
@@ -31,8 +31,14 @@ export default function SecurityPage() {
       <h2>Data and tenancy</h2>
       <ul>
         <li>
-          Data is scoped to your organization, and access is governed by member
-          roles.
+          {brand.name} is multi-tenant, and each organization&apos;s data is
+          isolated at the database layer by PostgreSQL row-level security. It is
+          forced on so no request can read across organizations, and the service
+          connects with a database role that cannot bypass it.
+        </li>
+        <li>
+          Within your organization, access is governed by member roles, and every
+          request is authorized before it reaches your data.
         </li>
         <li>Data is encrypted in transit (TLS).</li>
         <li>

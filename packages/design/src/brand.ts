@@ -18,6 +18,8 @@ export const brand = {
   url: "https://www.flagon.io",
   github: "https://github.com/flagon-io",
   repo: "https://github.com/flagon-io/flagon",
+  /** Community + product discussion. The one place this URL lives; import it. */
+  discord: "https://discord.gg/dtYQs6rPXN",
 
   eyebrow: "The self-hostable developer platform",
   taglineLead: "Stop building your platform.",

@@ -27,10 +27,10 @@ const AUTH_LAYER_EXEMPT = new Set([
   "members",
   "invitations",
   "access_tokens",
-  // A CREDENTIAL table: an SDK key must resolve to its org before any org
+  // A CREDENTIAL table: an client key must resolve to its org before any org
   // context exists, so it can't be gated by app.current_org_id RLS. Looked up by
   // unique high-entropy hash; management is org-scoped in the app layer.
-  "sdk_keys",
+  "client_keys",
 ]);
 
 type Row = {

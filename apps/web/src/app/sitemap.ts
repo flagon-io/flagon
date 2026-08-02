@@ -9,7 +9,7 @@ import { flatNav } from "@/lib/docs-nav";
 const MARKETING = ["/", "/pricing", "/privacy", "/security", "/terms"];
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const docs = ["/docs", ...flatNav.map((i) => i.href)];
+  const docs = [...new Set(["/docs", ...flatNav.map((i) => i.href)])];
   return [...MARKETING, ...docs].map((path) => ({
     url: new URL(path, brand.url).toString(),
     changeFrequency: "weekly",

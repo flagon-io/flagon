@@ -55,8 +55,15 @@ services:
   ministack:
     image: ministackorg/ministack
     restart: unless-stopped
+    environment:
+      PERSIST_STATE: "1"
+      STATE_DIR: /var/lib/ministack/state
+      S3_PERSIST: "1"
+      S3_DATA_DIR: /var/lib/ministack/s3
     ports:
       - "${STORAGE_PORT:-4566}:4566"
+    volumes:
+      - flagon-ministack:/var/lib/ministack
 
   # One-shot: create the public bucket, make it world-readable (objects are served
   # publicly, like an R2 bucket bound to cdn.flagon.io), and allow browser PUTs
@@ -88,3 +95,4 @@ services:
 
 volumes:
   flagon-postgres:
+  flagon-ministack:

@@ -17,9 +17,10 @@ import {
   FlaskConical,
   Globe,
   KeyRound,
-  LifeBuoy,
   Logs,
   Mail,
+  Menu,
+  MessagesSquare,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
@@ -37,6 +38,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { OrgMembership } from "@/lib/org";
+import { brand } from "@flagon/design";
 import { WEB_URL } from "@/lib/urls";
 import { OrgSwitcher } from "./org-switcher";
 import { WorkspaceSearch } from "./workspace-search";
@@ -71,7 +73,7 @@ type NavArea = {
 
 /** A root-level row: a plain link, a not-yet-built surface, or a drill-in area. */
 type RootEntry =
-  | { kind: "link"; label: string; icon: LucideIcon; href: string }
+  | { kind: "link"; label: string; icon: LucideIcon; href: string; external?: boolean }
   | { kind: "soon"; label: string; icon: LucideIcon }
   | { kind: "area"; area: NavArea };
 
@@ -184,7 +186,7 @@ function buildNav(base: string): {
       [
         { kind: "link", label: "Teams", icon: Users, href: `${base}/teams` },
         { kind: "link", label: "Usage", icon: Activity, href: `${base}/usage` },
-        { kind: "soon", label: "Support", icon: LifeBuoy },
+        { kind: "link", label: "Community", icon: MessagesSquare, href: brand.discord, external: true },
         { kind: "area", area: settings },
       ],
     ],
@@ -207,6 +209,16 @@ export function WorkspaceSidebar({
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  // Mobile: the sidebar is an off-canvas drawer (static from `lg` up).
+  const [mobileOpen, setMobileOpen] = useState(false);
+  // Close the drawer when the route changes (tapping a nav link navigates), via
+  // the during-render "adjust state from the previous render" pattern React
+  // documents, the same one the view-direction tracking below uses.
+  const [drawerRoute, setDrawerRoute] = useState(pathname);
+  if (drawerRoute !== pathname) {
+    setDrawerRoute(pathname);
+    setMobileOpen(false);
+  }
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -279,11 +291,27 @@ export function WorkspaceSidebar({
         : "forward";
 
   return (
-    <aside
-      className={`flex h-full shrink-0 flex-col border-r border-white/8 bg-black transition-[width] ${
-        collapsed ? "w-14" : "w-60"
-      }`}
-    >
+    <>
+      {/* Mobile: a fixed trigger in the (otherwise empty) left of the top bar. */}
+      <button
+        type="button"
+        aria-label="Open navigation"
+        onClick={() => setMobileOpen(true)}
+        className="fixed top-2.5 left-3 z-30 grid size-9 place-items-center rounded-md text-zinc-300 hover:bg-white/5 lg:hidden"
+      >
+        <Menu className="size-5" />
+      </button>
+      {mobileOpen ? (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      ) : null}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex h-full w-60 shrink-0 flex-col border-r border-white/8 bg-black transition-[transform,width] lg:static lg:z-auto lg:translate-x-0 ${
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        } ${collapsed ? "lg:w-14" : "lg:w-60"}`}
+      >
       {/* Org switcher: a header the same height as the top bar, so the sidebar
           and the bar share one continuous top strip. */}
       <div className="flex h-14 shrink-0 items-center border-b border-white/8 px-2">
@@ -338,7 +366,8 @@ export function WorkspaceSidebar({
           {!collapsed ? <span className="text-sm">Collapse</span> : null}
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
 
@@ -359,7 +388,15 @@ function RootNav({
           {i > 0 ? <Divider /> : null}
           <ul className="flex flex-col gap-0.5">
             {section.map((entry) =>
-              entry.kind === "link" ? (
+              entry.kind === "link" && entry.external ? (
+                <NavExternal
+                  key={entry.href}
+                  href={entry.href}
+                  Icon={entry.icon}
+                  label={entry.label}
+                  collapsed={collapsed}
+                />
+              ) : entry.kind === "link" ? (
                 <NavRow
                   key={entry.href}
                   href={entry.href}

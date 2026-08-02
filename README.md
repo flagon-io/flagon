@@ -9,7 +9,7 @@ Feature flags are available today: OpenFeature-native and evaluated over
 rules, reusable segments, percentage splits, and scheduled progressive rollouts.
 Any OpenFeature SDK can point at the API and evaluate flags with no custom glue.
 
-```
+```text
 apps/
   web/   Next.js marketing site + docs → flagon.io, flagon.io/docs
   app/   Next.js product app           → app.flagon.io    (invite-only for now)
@@ -55,7 +55,7 @@ Stop local dependencies with `npm run compose:down`.
 
 ```sh
 npm test          # Vitest: unit + DB-backed integration and tenancy suites
-npm run lint      # lint + typecheck every workspace
+npm run lint      # ESLint across workspaces; the API also runs `tsc --noEmit`
 npm run build     # production build of all apps
 ```
 

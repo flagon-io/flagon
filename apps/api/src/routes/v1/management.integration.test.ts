@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 
 /**
  * Full-loop integration: drive the management API over HTTP (as an org token),
- * then evaluate the result through OFREP with a minted SDK key. This exercises
+ * then evaluate the result through OFREP with a minted client key. This exercises
  * auth -> org resolution -> withOrg/RLS -> create/seed -> per-env config ->
  * SDK-key issuance -> evaluation, exactly as the console + an SDK would.
  *
@@ -54,7 +54,7 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
 
   afterAll(async () => {
     if (!db) return;
-    await db.delete(schema.sdkKeys).where(eq(schema.sdkKeys.organizationId, orgId));
+    await db.delete(schema.clientKeys).where(eq(schema.clientKeys.organizationId, orgId));
     await db.delete(schema.flags).where(eq(schema.flags.organizationId, orgId));
     await db.delete(schema.segments).where(eq(schema.segments.organizationId, orgId));
     await db.delete(schema.environments).where(eq(schema.environments.organizationId, orgId));
@@ -141,7 +141,7 @@ describe.skipIf(!DATABASE_URL)("management API + OFREP (integration)", () => {
     expect(res.status).toBe(404);
   });
 
-  it("enables a flag, mints an SDK key, and evaluates it via OFREP", async () => {
+  it("enables a flag, mints an client key, and evaluates it via OFREP", async () => {
     const enable = await app.request(`${base}/flags/checkout/environments/production`, {
       method: "PATCH",
       headers: auth(),

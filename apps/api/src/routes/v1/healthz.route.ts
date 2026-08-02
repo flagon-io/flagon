@@ -15,7 +15,7 @@ registerRoute({
   summary: "Health check",
   description:
     "Liveness probe. Returns the current server time; never touches the database.",
-  tags: ["Meta"],
+  tags: ["Health"],
   responses: {
     200: { description: "The service is up.", schema: healthResponse },
   },

@@ -29,13 +29,16 @@ import { createProjectAction } from "./projects/actions";
 import { FRAMEWORKS, LIFECYCLES, TIERS, labelFor } from "@/lib/catalog";
 import { FrameworkIcon, ProjectIcon } from "@/components/framework-badge";
 import type { Project } from "@/lib/projects-api";
-import type { Entitlement } from "@/lib/flags-api";
+import type { Entitlement, OrgUsage, UsageSeries } from "@/lib/flags-api";
 import { compact, usd } from "./usage/format";
 
 type TeamOption = { key: string; name: string };
 
 /** Prepend a "None" sentinel to an optional single-select's options. */
-function withNone(options: { value: string; label: string }[], noneLabel = "None") {
+function withNone(
+  options: { value: string; label: string }[],
+  noneLabel = "None",
+) {
   return [{ value: NONE, label: `— ${noneLabel} —` }, ...options];
 }
 
@@ -67,14 +70,14 @@ export function ProjectsView({
   projects,
   canCreate,
   entitlement,
-  plan,
+  usage,
   teams,
 }: {
   slug: string;
   projects: Project[];
   canCreate: boolean;
   entitlement: Entitlement | null;
-  plan: string;
+  usage: OrgUsage | null;
   teams: TeamOption[];
 }) {
   const [open, setOpen] = useState(false);
@@ -95,7 +98,11 @@ export function ProjectsView({
   return (
     <div className="flex flex-col gap-6">
       {projects.length === 0 ? (
-        <EmptyState slug={slug} canCreate={canCreate} onNew={() => setOpen(true)} />
+        <EmptyState
+          slug={slug}
+          canCreate={canCreate}
+          onNew={() => setOpen(true)}
+        />
       ) : (
         <>
           {/* Top bar: search · view toggle · new */}
@@ -116,8 +123,16 @@ export function ProjectsView({
               value={view}
               onValueChange={(v) => setView(v as View)}
               options={[
-                { value: "grid", label: <LayoutGrid className="size-4" />, title: "Grid view" },
-                { value: "list", label: <List className="size-4" />, title: "List view" },
+                {
+                  value: "grid",
+                  label: <LayoutGrid className="size-4" />,
+                  title: "Grid view",
+                },
+                {
+                  value: "list",
+                  label: <List className="size-4" />,
+                  title: "List view",
+                },
               ]}
             />
             {canCreate ? (
@@ -130,7 +145,7 @@ export function ProjectsView({
           {/* Body: usage sidebar + projects */}
           <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
             <aside className="order-2 flex flex-col gap-6 lg:order-1">
-              <UsagePanel slug={slug} entitlement={entitlement} plan={plan} />
+              <UsagePanel slug={slug} entitlement={entitlement} usage={usage} />
             </aside>
 
             <div className="order-1 min-w-0 lg:order-2">
@@ -147,7 +162,12 @@ export function ProjectsView({
               ) : (
                 <div className="overflow-hidden rounded-xl border border-white/10">
                   {filtered.map((p, i) => (
-                    <ProjectRow key={p.key} slug={slug} project={p} first={i === 0} />
+                    <ProjectRow
+                      key={p.key}
+                      slug={slug}
+                      project={p}
+                      first={i === 0}
+                    />
                   ))}
                 </div>
               )}
@@ -157,7 +177,11 @@ export function ProjectsView({
       )}
 
       {open ? (
-        <NewProjectModal slug={slug} teams={teams} onClose={() => setOpen(false)} />
+        <NewProjectModal
+          slug={slug}
+          teams={teams}
+          onClose={() => setOpen(false)}
+        />
       ) : null}
     </div>
   );
@@ -199,7 +223,9 @@ function ProjectCard({ slug, project: p }: { slug: string; project: Project }) {
       </div>
 
       <p className="line-clamp-2 min-h-10 text-sm text-zinc-400">
-        {p.description || <span className="text-zinc-600">No description yet.</span>}
+        {p.description || (
+          <span className="text-zinc-600">No description yet.</span>
+        )}
       </p>
 
       <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
@@ -235,7 +261,9 @@ function ProjectRow({
       <span className="hidden min-w-0 items-center gap-1.5 text-xs text-zinc-500 sm:inline-flex">
         <OwnerLine project={p} />
       </span>
-      <span className="shrink-0 text-xs text-zinc-600">{relativeTime(p.createdAt)}</span>
+      <span className="shrink-0 text-xs text-zinc-600">
+        {relativeTime(p.createdAt)}
+      </span>
     </Link>
   );
 }
@@ -248,11 +276,11 @@ function ProjectRow({
 function UsagePanel({
   slug,
   entitlement,
-  plan,
+  usage,
 }: {
   slug: string;
   entitlement: Entitlement | null;
-  plan: string;
+  usage: OrgUsage | null;
 }) {
   // Days left in the current calendar-month cycle (the credit resets monthly).
   const daysLeft = useMemo(() => {
@@ -261,22 +289,16 @@ function UsagePanel({
     return Math.max(0, Math.ceil((end - now.getTime()) / 86_400_000));
   }, []);
 
-  const stats: { label: string; value: string }[] = [];
-  if (entitlement) {
-    stats.push({ label: "Exposures", value: compact(entitlement.usedEvents) });
-    if (entitlement.creditCents > 0) {
-      stats.push({ label: "Overage", value: usd(entitlement.overageCents) });
-    } else if (entitlement.remainingEvents !== null) {
-      stats.push({ label: "Remaining", value: compact(entitlement.remainingEvents) });
-    }
-  }
-
   return (
     <section className="flex flex-col gap-4 rounded-xl border border-white/10 bg-white/2 p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase">Usage</p>
-          <p className="mt-1 text-sm text-zinc-300">{daysLeft} days left in cycle</p>
+          <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase">
+            Usage
+          </p>
+          <p className="mt-1 text-sm text-zinc-300">
+            {daysLeft} days left in cycle
+          </p>
         </div>
         <Link
           href={`/${slug}/usage`}
@@ -308,27 +330,64 @@ function UsagePanel({
         />
       ) : null}
 
-      {stats.length > 0 ? (
-        <dl
-          className={`grid gap-3 border-t border-white/8 pt-4 ${
-            stats.length > 1 ? "grid-cols-2" : "grid-cols-1"
-          }`}
-        >
-          {stats.map((s) => (
-            <div key={s.label}>
-              <dt className="text-xs text-zinc-500">{s.label}</dt>
-              <dd className="mt-0.5 text-sm text-zinc-100 tabular-nums">{s.value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
+      <ProductUsageBreakdown series={usage?.series ?? []} />
 
       <p className="text-xs text-zinc-600">
-        {plan === "hobby"
-          ? "Flag checks are free; opt-in exposures count toward your monthly limit."
-          : "Flag checks are free; you're billed only for opt-in exposures past your credit."}
+        Usage across every product. Reads and checks are free.
       </p>
     </section>
+  );
+}
+
+/** The same by-product meter hierarchy as the full Usage page, compacted for the sidebar. */
+function ProductUsageBreakdown({ series }: { series: UsageSeries[] }) {
+  const groups: { product: string; lines: UsageSeries[] }[] = [];
+  for (const line of series) {
+    let group = groups.find((candidate) => candidate.product === line.product);
+    if (!group) {
+      group = { product: line.product, lines: [] };
+      groups.push(group);
+    }
+    group.lines.push(line);
+  }
+
+  return (
+    <div className="border-t border-white/8 pt-4">
+      <p className="mb-3 text-xs font-medium tracking-wide text-zinc-500 uppercase">
+        Last 30 days
+      </p>
+      {groups.length === 0 ? (
+        <p className="text-xs text-zinc-500">No usage recorded yet.</p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {groups.map((group) => (
+            <div key={group.product}>
+              <p className="mb-2 text-[10px] font-medium tracking-wide text-zinc-600 uppercase">
+                {group.product}
+              </p>
+              <dl className="flex flex-col gap-2">
+                {group.lines.map((line) => (
+                  <div
+                    key={line.key}
+                    className="flex items-baseline justify-between gap-3"
+                  >
+                    <dt className="truncate text-xs text-zinc-400">
+                      {line.label}
+                    </dt>
+                    <dd className="shrink-0 text-xs text-zinc-200 tabular-nums">
+                      {compact(line.usage)}{" "}
+                      <span className="text-zinc-600">
+                        {line.usage === 1 ? line.unit : `${line.unit}s`}
+                      </span>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -354,7 +413,10 @@ function Meter({
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium text-zinc-300">{label}</span>
         <span className="text-zinc-400 tabular-nums">
-          <span className={over ? "text-amber-400" : "text-zinc-200"}>{used}</span> / {total}
+          <span className={over ? "text-amber-400" : "text-zinc-200"}>
+            {used}
+          </span>{" "}
+          / {total}
         </span>
       </div>
       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8">
@@ -380,10 +442,12 @@ function EmptyState({
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Projects</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
+            Projects
+          </h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Your catalog: the projects your org runs, who owns them, and what&apos;s
-            built on top.
+            Your catalog: the projects your org runs, who owns them, and
+            what&apos;s built on top.
           </p>
         </div>
       </div>
@@ -397,9 +461,9 @@ function EmptyState({
             {canCreate ? "Create your first project" : "No projects yet"}
           </p>
           <p className="mx-auto mt-1.5 max-w-md text-sm text-zinc-500">
-            A project is a system you run. Give it a stack, an owning team, and a
-            README, then build flags and more on top. This is the foundation your
-            catalog grows from.
+            A project is a system you run. Give it a stack, an owning team, and
+            a README, then build flags and more on top. This is the foundation
+            your catalog grows from.
           </p>
         </div>
         {canCreate ? (
@@ -415,7 +479,9 @@ function EmptyState({
             </Link>
           </div>
         ) : (
-          <p className="text-sm text-zinc-500">An owner or admin can create the first one.</p>
+          <p className="text-sm text-zinc-500">
+            An owner or admin can create the first one.
+          </p>
         )}
       </div>
     </div>
@@ -454,14 +520,16 @@ function RepositoryLink() {
       >
         <span className="inline-flex min-w-0 items-center gap-2">
           <GitBranch className="size-4 shrink-0" />
-          <span className="truncate">Select an organization and repository</span>
+          <span className="truncate">
+            Select an organization and repository
+          </span>
         </span>
         <ChevronDown className="size-4 shrink-0" />
       </button>
       <p className="mt-1.5 text-xs text-zinc-500">
         Auto-detects the stack and can import settings from a{" "}
-        <span className="font-mono text-zinc-400">flagon.yml</span>. You&apos;ll still
-        name it below.
+        <span className="font-mono text-zinc-400">flagon.yml</span>. You&apos;ll
+        still name it below.
       </p>
     </div>
   );
@@ -499,7 +567,12 @@ function NewProjectModal({
     setError(null);
     if (!name.trim()) return setError("Give the project a name.");
     const parsedTags = Array.from(
-      new Set(tags.split(",").map((t) => t.trim()).filter(Boolean)),
+      new Set(
+        tags
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean),
+      ),
     );
     start(async () => {
       const res = await createProjectAction(slug, {
@@ -552,7 +625,10 @@ function NewProjectModal({
 
         <Field label="Stack" hint="Optional. What this project is built on.">
           <div className="flex items-center gap-3">
-            <FrameworkIcon framework={framework === NONE ? null : framework} size="md" />
+            <FrameworkIcon
+              framework={framework === NONE ? null : framework}
+              size="md"
+            />
             <Select
               ariaLabel="Stack"
               value={framework}
@@ -609,7 +685,10 @@ function NewProjectModal({
           </Field>
         </div>
 
-        <Field label="Description" hint="Optional. A short summary of what it does.">
+        <Field
+          label="Description"
+          hint="Optional. A short summary of what it does."
+        >
           <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -624,7 +703,11 @@ function NewProjectModal({
         <Button variant="secondary" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="primary" onClick={create} disabled={pending || !name.trim()}>
+        <Button
+          variant="primary"
+          onClick={create}
+          disabled={pending || !name.trim()}
+        >
           {pending ? "Creating…" : "Create Project"}
         </Button>
       </ModalFooter>

@@ -1,0 +1,162 @@
+export const metadata = {
+  title: "Architecture overview",
+  description:
+    "How Flagon fits together: one API as the control plane for product data, thin visual layers on top, a shared multi-tenant Postgres, and the console that owns authentication.",
+};
+
+import { ArchitectureDiagram } from "@/components/docs/architecture-diagram";
+
+# Architecture overview
+
+Flagon is **one API with a couple of thin visual layers on top of it**. The API
+is the control plane for your product data and core logic: it owns every product
+resource (projects, flags, and the rest), enforces the rules on them, and is what
+your services talk to. The console, the marketing site, a future CLI, and the
+OpenFeature SDK evaluating a flag are all clients of the same HTTP surface.
+
+There is one deliberate exception, and the diagram makes it explicit: the console
+(**app.flagon.io**) owns **authentication and identity**, and talks to the
+database directly for that rather than through the API. Everything to do with your
+products goes through the API; signing in and managing your organization does not.
+
+<ArchitectureDiagram />
+
+## The control plane: the API
+
+`apps/api` is a [Hono](https://hono.dev) app served under
+[`/v1`](/docs/platform/api). It owns your **product data and core logic**:
+projects, environments, flags, and the resources each product adds. Product
+mutations go through it, and it is what reads and writes those tables. Your own
+services never reach the database; they reach the API.
+
+Locally it runs as a plain Node process (`@hono/node-server`), so no external
+CLI or account is required to develop against it. Because a Hono app is just a
+`fetch` handler, it also deploys cleanly to serverless platforms that speak the
+Fetch API, but that is a deploy-time detail, not a dependency.
+
+Two entry points sit on this control plane, and they behave differently on
+purpose:
+
+| Surface | Path | Auth | Shape |
+| --- | --- | --- | --- |
+| Management | `/v1/orgs/{org}/...` | [Access token](/docs/platform/authentication) or session cookie | Read + write, org-scoped |
+| Evaluation | `/ofrep/v1/...` | [Client key](/docs/feature-flags/client-keys) | Read-only, high-volume hot path |
+
+Evaluation is split out because it is the request your production traffic
+depends on. It is read-only, cached, and rate-limited independently, so a spike
+in flag checks never contends with someone editing a project in the console.
+
+## The visual layers
+
+The two Next.js apps sit in front of the platform. Neither owns product data, but
+they are not identical in what they own.
+
+<CardGrid cols={2}>
+  <Card title="apps/web">
+    The public site at **flagon.io**, and these docs at **flagon.io/docs**.
+    Mostly static marketing and MDX content, calling `/v1` only for the few
+    things that must be live, such as the waitlist form. It touches no database.
+  </Card>
+  <Card title="apps/app">
+    The signed-in console at **app.flagon.io**. For your products it is a client
+    of the API, so anything you can do by clicking, you can script. It also owns
+    **authentication**, and stores identity in the database itself.
+  </Card>
+</CardGrid>
+
+The console runs [BetterAuth](https://www.better-auth.com), which manages
+accounts, sessions, organizations, and membership in the database directly.
+Identity is the one thing not routed through the API: the API instead *reads* the
+session (or a hashed access token) to authorize each request, so it authenticates
+callers without ever becoming the identity provider. How you actually sign in and
+mint tokens is covered under [Authentication](/docs/platform/authentication).
+
+Both apps read the API's location from configuration, so the same code points at
+`http://localhost:3002` in development and `https://api.flagon.io` in production
+with no code changes.
+
+<Callout tone="note" title="API-first parity">
+  Because the console is only a client of its **products**, we hold a hard rule:
+  every product mutation ships its `/v1` endpoint, OpenAPI spec, and docs in
+  lockstep. There are no UI-only product writes. (Signing in and managing your
+  organization are the console's own domain, not `/v1` endpoints.)
+</Callout>
+
+## The data plane: one Postgres
+
+Everything persists in a **single Postgres instance**, shared by the two writers
+above: the API for product data, the console for identity. They connect as the
+same restricted, RLS-enforcing role and keep independent migration pipelines, so
+neither steps on the other's tables.
+
+Tenants share that database; isolation is enforced by Postgres itself through
+per-organization **row-level security**, forced on so no connection can read
+across organizations, rather than by careful application code. What that
+guarantees is covered on its own under
+[Tenant isolation](/docs/platform/security/isolation), and the
+[permissions](/docs/platform/security/permissions) that authorize a request before
+it reaches the database sit alongside it, so security can be reviewed in one place.
+
+## Substrate and products
+
+Flagon is a platform, not a single app. Underneath everything is shared
+**substrate**: the primitives every product reuses.
+
+<CardGrid cols={3}>
+  <Card href="/docs/platform/organizations" title="Organizations & teams">
+    Accounts, membership, roles, and the billing boundary.
+  </Card>
+  <Card href="/docs/platform/environments" title="Environments">
+    Production, Preview, and Development, kept separate per environment.
+  </Card>
+  <Card href="/docs/platform/authentication" title="Auth & tokens">
+    Sessions for people, scoped tokens and client keys for machines.
+  </Card>
+</CardGrid>
+
+**Products** are built on that substrate and share it rather than reinventing
+it. The [Catalog](/docs/catalog) maps the services you run, and
+[Feature Flags](/docs/feature-flags) is the first product attached to them, with
+more shipping shortly. Because a product does not carry its own accounts,
+environments, or permission model, a concept you learn once (an environment, a
+team role, an access token) carries across everything you add.
+
+## Standards, not lock-in
+
+Where an open standard exists, Flagon speaks it rather than inventing a
+proprietary equivalent. Feature-flag evaluation is
+[OpenFeature](https://openfeature.dev) over its remote protocol,
+[OFREP](https://openfeature.dev/specification/appendix-c/). You evaluate with
+standard, off-the-shelf SDKs pointed at the API, and could point them somewhere
+else tomorrow. The management API is plain REST described by **OpenAPI 3.1**, so
+tooling and client generators work out of the box.
+
+## One codebase, two roles
+
+The repository is the whole product. The exact same source runs as the managed
+service at flagon.io and as an instance on your own infrastructure. Configuration
+decides which, not a different build.
+
+```
+apps/
+  web/   Next.js marketing site + docs → flagon.io, flagon.io/docs
+  app/   Next.js product console        → app.flagon.io
+  api/   Hono API, the control plane    → api.flagon.io/v1/...
+packages/
+  design/  @flagon/design, the shared UI + design system every app renders from
+```
+
+Self-hosting is not a stripped-down fork. It is the same control plane, the same
+data plane, and the same products, running against your own Postgres. See
+[Run Flagon](/docs/self-hosting) for what that takes.
+
+## Where to go next
+
+<CardGrid>
+  <Card href="/docs/platform/api" title="The Flagon API" cta="Read the API guide">
+    The shape of the control plane: base URL, auth, org scope, and errors.
+  </Card>
+  <Card href="/docs/self-hosting" title="Run Flagon" cta="Self-host it">
+    Stand up the same stack on your own infrastructure.
+  </Card>
+</CardGrid>

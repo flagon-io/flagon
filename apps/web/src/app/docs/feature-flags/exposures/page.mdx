@@ -7,10 +7,10 @@ export const metadata = {
 # Record exposures
 
 Evaluating a flag is **free and unlimited** — you never pay to check a flag. An
-**exposure** is the analytics event you send when you want usage or experiment
-analysis on that check: how often a flag serves each variant, pass rates, lift.
-Exposures are the one billable meter, so you send them only for the flags you
-actually want to measure.
+**exposure** is the analytics event recorded when a real user is served a flag:
+it's what powers usage analytics and experiments (how often a flag serves each
+variant, pass rates, lift). Exposures are the one billable meter, so recording
+them is the standard way to make a flag's usage visible.
 
 All requests go to the Flagon API host and authenticate with a
 [client key](/docs/feature-flags/client-keys) — the same key you evaluate with:
@@ -165,6 +165,7 @@ exposures.record("new-checkout", { value });
 | `400` | `PARSE_ERROR` | The body was not valid JSON. |
 | `400` | `INVALID_CONTEXT` | `events` was missing, not an array, or larger than 1,000. |
 | `401` | `AUTHENTICATION_ERROR` | Missing, malformed, or revoked client key. |
+| `403` | `PLAN_LIMIT_REACHED` | The plan's monthly event allowance is exhausted (the Hobby hard cap). Upgrade or wait for the cycle to reset. |
 | `429` | None | Too many requests; back off. A `Retry-After` header says for how long. |
 
 ## Notes on behavior

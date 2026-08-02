@@ -4,7 +4,7 @@ import { waitlist } from "./waitlist.route.js";
 import { contact } from "./contact.route.js";
 import { me } from "./me.route.js";
 import { flags_ } from "./flags.route.js";
-import { sdkKeys_ } from "./sdk-keys.route.js";
+import { clientKeys_ } from "./client-keys.route.js";
 import { segments_ } from "./segments.route.js";
 import { environments_ } from "./environments.route.js";
 import { members_ } from "./members.route.js";
@@ -35,7 +35,7 @@ const orgs = new Hono();
 // runs. The pattern captures :org so the limit is keyed per (org, caller).
 orgs.use("/:org/*", managementWriteLimit);
 orgs.route("/:org/flags", flags_);
-orgs.route("/:org/client-keys", sdkKeys_);
+orgs.route("/:org/client-keys", clientKeys_);
 orgs.route("/:org/segments", segments_);
 orgs.route("/:org/environments", environments_);
 orgs.route("/:org/members", members_);

@@ -39,7 +39,7 @@ function relativeTime(iso: string): string {
  * retrievable here: each row reveals + copies its key on demand. Legacy keys
  * minted before keys were stored (null token) show masked and are copy-disabled.
  */
-export function SdkKeysManager({
+export function ClientKeysManager({
   slug,
   environments,
   keys,
