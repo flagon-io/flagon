@@ -23,6 +23,62 @@ export const TIERS: Option[] = [
 ];
 
 /**
+ * Component kind — the catalog classifier (OpsLevel/Cortex style). Slugs stay in
+ * lockstep with the KINDS enum in apps/api/src/routes/v1/projects.route.ts.
+ */
+export const KINDS: Option[] = [
+  { value: "service", label: "Service" },
+  { value: "library", label: "Library" },
+  { value: "website", label: "Website" },
+  { value: "datastore", label: "Datastore" },
+  { value: "tool", label: "Tool" },
+  { value: "ml_model", label: "ML model" },
+  { value: "docs", label: "Docs" },
+  { value: "other", label: "Other" },
+];
+
+/**
+ * External link types on a catalog entry (runbooks, dashboards, on-call, docs...).
+ * Slugs stay in lockstep with LINK_TYPES in the API's projects.route.ts.
+ */
+export const LINK_TYPES: Option[] = [
+  { value: "runbook", label: "Runbook" },
+  { value: "dashboard", label: "Dashboard" },
+  { value: "oncall", label: "On-call" },
+  { value: "docs", label: "Docs" },
+  { value: "chat", label: "Chat" },
+  { value: "issues", label: "Issues" },
+  { value: "other", label: "Other" },
+];
+
+/** Directed relation types between projects. Lockstep with RELATION_TYPES. */
+export type RelationOption = Option & { inbound: string };
+export const RELATION_TYPES: RelationOption[] = [
+  { value: "depends_on", label: "Depends on", inbound: "Used by" },
+  { value: "part_of", label: "Part of", inbound: "Contains" },
+  { value: "related_to", label: "Related to", inbound: "Related to" },
+];
+
+/** Repository providers we badge; anything else is "other". */
+export const REPO_PROVIDERS: Option[] = [
+  { value: "github", label: "GitHub" },
+  { value: "gitlab", label: "GitLab" },
+  { value: "bitbucket", label: "Bitbucket" },
+  { value: "other", label: "Git" },
+];
+
+export const REPO_VISIBILITY: Option[] = [
+  { value: "public", label: "Public" },
+  { value: "private", label: "Private" },
+  { value: "unknown", label: "Unknown" },
+];
+
+/** The inbound label for a relation type (e.g. depends_on -> "Used by"). */
+export function relationInboundLabel(value: string): string {
+  return RELATION_TYPES.find((r) => r.value === value)?.inbound ?? value;
+}
+
+/**
  * The project's primary stack/framework (Vercel-style preset). The `value` slugs
  * MUST stay in lockstep with the FRAMEWORKS enum the API validates
  * (apps/api/src/routes/v1/projects.route.ts). `mono` + `color` drive the leading

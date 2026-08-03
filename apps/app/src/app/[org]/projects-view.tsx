@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Boxes,
-  ChevronDown,
   GitBranch,
   LayoutGrid,
   List,
@@ -26,7 +25,7 @@ import {
   Textarea,
 } from "@flagon/design";
 import { createProjectAction } from "./projects/actions";
-import { FRAMEWORKS, LIFECYCLES, TIERS, labelFor } from "@/lib/catalog";
+import { FRAMEWORKS, KINDS, LIFECYCLES, TIERS, labelFor } from "@/lib/catalog";
 import { FrameworkIcon, ProjectIcon } from "@/components/framework-badge";
 import type { Project } from "@/lib/projects-api";
 import type { Entitlement, OrgUsage, UsageSeries } from "@/lib/flags-api";
@@ -63,6 +62,7 @@ function relativeTime(iso: string): string {
 }
 
 const NONE = "__none__";
+const ALL = "__all__";
 type View = "grid" | "list";
 
 export function ProjectsView({
@@ -83,17 +83,49 @@ export function ProjectsView({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>("grid");
   const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState({
+    kind: ALL,
+    lifecycle: ALL,
+    tier: ALL,
+    owner: ALL,
+    domain: ALL,
+  });
+  const setFilter = (k: keyof typeof filters, v: string) =>
+    setFilters((f) => ({ ...f, [k]: v }));
+  const anyFilter = Object.values(filters).some((v) => v !== ALL);
+
+  // Facets derived from the projects present, for the owner + domain pickers.
+  const owners = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of projects) if (p.ownerTeam) map.set(p.ownerTeam.key, p.ownerTeam.name);
+    return [...map].map(([value, label]) => ({ value, label }));
+  }, [projects]);
+  const domains = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of projects) for (const d of p.domains) set.add(d);
+    return [...set].sort().map((d) => ({ value: d, label: d }));
+  }, [projects]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.key.toLowerCase().includes(q) ||
-        (p.description?.toLowerCase().includes(q) ?? false),
-    );
-  }, [projects, query]);
+    return projects.filter((p) => {
+      if (
+        q &&
+        !(
+          p.name.toLowerCase().includes(q) ||
+          p.key.toLowerCase().includes(q) ||
+          (p.description?.toLowerCase().includes(q) ?? false)
+        )
+      )
+        return false;
+      if (filters.kind !== ALL && p.kind !== filters.kind) return false;
+      if (filters.lifecycle !== ALL && p.lifecycle !== filters.lifecycle) return false;
+      if (filters.tier !== ALL && p.tier !== filters.tier) return false;
+      if (filters.owner !== ALL && p.ownerTeam?.key !== filters.owner) return false;
+      if (filters.domain !== ALL && !p.domains.includes(filters.domain)) return false;
+      return true;
+    });
+  }, [projects, query, filters]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -142,6 +174,19 @@ export function ProjectsView({
             ) : null}
           </div>
 
+          {/* Facets: filter the catalog + a project count */}
+          <FilterBar
+            filters={filters}
+            setFilter={setFilter}
+            owners={owners}
+            domains={domains}
+            anyFilter={anyFilter}
+            onClear={() =>
+              setFilters({ kind: ALL, lifecycle: ALL, tier: ALL, owner: ALL, domain: ALL })
+            }
+            total={filtered.length}
+          />
+
           {/* Body: usage sidebar + projects */}
           <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
             <aside className="order-2 flex flex-col gap-6 lg:order-1">
@@ -151,7 +196,9 @@ export function ProjectsView({
             <div className="order-1 min-w-0 lg:order-2">
               {filtered.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-white/12 bg-white/2 px-6 py-16 text-center text-sm text-zinc-500">
-                  No projects match &ldquo;{query.trim()}&rdquo;.
+                  {query.trim()
+                    ? `No projects match “${query.trim()}”.`
+                    : "No projects match these filters."}
                 </div>
               ) : view === "grid" ? (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -183,6 +230,60 @@ export function ProjectsView({
           onClose={() => setOpen(false)}
         />
       ) : null}
+    </div>
+  );
+}
+
+type Filters = {
+  kind: string;
+  lifecycle: string;
+  tier: string;
+  owner: string;
+  domain: string;
+};
+
+/** The catalog filter bar: one Select per facet + a project count. */
+function FilterBar({
+  filters,
+  setFilter,
+  owners,
+  domains,
+  anyFilter,
+  onClear,
+  total,
+}: {
+  filters: Filters;
+  setFilter: (k: keyof Filters, v: string) => void;
+  owners: { value: string; label: string }[];
+  domains: { value: string; label: string }[];
+  anyFilter: boolean;
+  onClear: () => void;
+  total: number;
+}) {
+  const opts = (options: { value: string; label: string }[], allLabel: string) => [
+    { value: ALL, label: allLabel },
+    ...options.map((o) => ({ value: o.value, label: o.label })),
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Select ariaLabel="Filter by kind" value={filters.kind} onValueChange={(v) => setFilter("kind", v)} options={opts(KINDS, "All kinds")} />
+      <Select ariaLabel="Filter by lifecycle" value={filters.lifecycle} onValueChange={(v) => setFilter("lifecycle", v)} options={opts(LIFECYCLES, "Any lifecycle")} />
+      <Select ariaLabel="Filter by tier" value={filters.tier} onValueChange={(v) => setFilter("tier", v)} options={opts(TIERS, "Any tier")} />
+      {owners.length > 0 ? (
+        <Select ariaLabel="Filter by owner" value={filters.owner} onValueChange={(v) => setFilter("owner", v)} options={opts(owners, "Any owner")} />
+      ) : null}
+      {domains.length > 0 ? (
+        <Select ariaLabel="Filter by domain" value={filters.domain} onValueChange={(v) => setFilter("domain", v)} options={opts(domains, "Any domain")} />
+      ) : null}
+      {anyFilter ? (
+        <button type="button" onClick={onClear} className="text-xs font-medium text-zinc-400 hover:text-zinc-200">
+          Clear
+        </button>
+      ) : null}
+
+      <span className="ml-auto text-xs text-zinc-500">
+        {total} project{total === 1 ? "" : "s"}
+      </span>
     </div>
   );
 }
@@ -488,50 +589,28 @@ function EmptyState({
   );
 }
 
-/** A small "Soon" badge for features that are telegraphed but not yet live. */
-function SoonBadge() {
-  return (
-    <span className="rounded-full border border-teal-400/20 bg-teal-400/10 px-2 py-0.5 text-[10px] font-medium tracking-wide text-teal-300 uppercase">
-      Soon
-    </span>
-  );
-}
-
 /**
- * The repository link: telegraphs the coming "link a repository" flow — pick an
- * org/repo the way Vercel does, auto-detect the stack, and later import settings
- * from a flagon.yml. Disabled today, and framed as a LINK you attach: you still
- * name and configure the project below whether or not a repo is linked.
+ * Manual repository link: paste a repo URL to attach it. A real Git integration
+ * (pick an org/repo, auto-detect the stack, import a flagon.yml) is coming; until
+ * then this links the repo by hand. You still name and configure the project below
+ * whether or not a repo is linked.
  */
-function RepositoryLink() {
+function RepositoryLink({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/2 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-2 text-sm font-medium text-zinc-200">
-          <GitBranch className="size-4 text-zinc-500" /> Link a Git repository
-        </span>
-        <SoonBadge />
+    <Field
+      label="Repository"
+      hint="Optional. Paste a repo URL to link it. A Git integration is coming."
+    >
+      <div className="relative">
+        <GitBranch className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-zinc-500" />
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="https://github.com/acme/web-app"
+          className="pl-9"
+        />
       </div>
-      <button
-        type="button"
-        disabled
-        aria-label="Select a repository (coming soon)"
-        className="mt-2.5 flex w-full cursor-not-allowed items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-500 opacity-60"
-      >
-        <span className="inline-flex min-w-0 items-center gap-2">
-          <GitBranch className="size-4 shrink-0" />
-          <span className="truncate">
-            Select an organization and repository
-          </span>
-        </span>
-        <ChevronDown className="size-4 shrink-0" />
-      </button>
-      <p className="mt-1.5 text-xs text-zinc-500">
-        Auto-detects the stack and can import settings from a{" "}
-        <span className="font-mono text-zinc-400">flagon.yml</span>. You&apos;ll
-        still name it below.
-      </p>
-    </div>
+    </Field>
   );
 }
 
@@ -549,11 +628,14 @@ function NewProjectModal({
   const [name, setName] = useState("");
   const [key, setKey] = useState("");
   const [keyEdited, setKeyEdited] = useState(false);
+  const [repoUrl, setRepoUrl] = useState("");
+  const [kind, setKind] = useState(NONE);
   const [framework, setFramework] = useState(NONE);
   const [ownerTeam, setOwnerTeam] = useState(NONE);
   const [lifecycle, setLifecycle] = useState(NONE);
   const [tier, setTier] = useState(NONE);
   const [tags, setTags] = useState("");
+  const [domains, setDomains] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -566,25 +648,31 @@ function NewProjectModal({
   function create() {
     setError(null);
     if (!name.trim()) return setError("Give the project a name.");
-    const parsedTags = Array.from(
-      new Set(
-        tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean),
-      ),
-    );
+    const csv = (v: string, lower = false) =>
+      Array.from(
+        new Set(
+          v
+            .split(",")
+            .map((t) => (lower ? t.trim().toLowerCase() : t.trim()))
+            .filter(Boolean),
+        ),
+      );
+    const parsedTags = csv(tags);
+    const parsedDomains = csv(domains, true);
     start(async () => {
       const res = await createProjectAction(slug, {
         name: name.trim(),
         key: key.trim() || slugify(name),
         // Omit (not null) when unset — the create endpoint's fields are optional.
         description: description.trim() || undefined,
+        kind: kind === NONE ? undefined : kind,
         framework: framework === NONE ? undefined : framework,
         ownerTeamKey: ownerTeam === NONE ? undefined : ownerTeam,
         lifecycle: lifecycle === NONE ? undefined : lifecycle,
         tier: tier === NONE ? undefined : tier,
         tags: parsedTags.length ? parsedTags : undefined,
+        domains: parsedDomains.length ? parsedDomains : undefined,
+        repoUrl: repoUrl.trim() || undefined,
       });
       if (res.error) return setError(res.error);
       router.push(`/${slug}/projects/${res.key}`);
@@ -600,7 +688,7 @@ function NewProjectModal({
         onClose={onClose}
       />
       <ModalBody className="flex flex-col gap-4">
-        <RepositoryLink />
+        <RepositoryLink value={repoUrl} onChange={setRepoUrl} />
 
         <Field label="Project name">
           <Input
@@ -681,6 +769,25 @@ function NewProjectModal({
               value={tags}
               onChange={(e) => setTags(e.target.value)}
               placeholder="payments, go, pci"
+            />
+          </Field>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Kind" hint="Optional. What sort of component.">
+            <Select
+              ariaLabel="Kind"
+              value={kind}
+              onValueChange={setKind}
+              className="w-full"
+              options={withNone(KINDS, "No kind")}
+            />
+          </Field>
+          <Field label="Domains" hint="Comma-separated business domains.">
+            <Input
+              value={domains}
+              onChange={(e) => setDomains(e.target.value)}
+              placeholder="payments, growth"
             />
           </Field>
         </div>

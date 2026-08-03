@@ -27,6 +27,14 @@ async function unwrap<T>(res: Response): Promise<{ data?: T; error?: string }> {
 
 // --- Projects ---------------------------------------------------------------
 export type ProjectOwnerTeam = { key: string; name: string };
+export type ProjectLink = { type: string; label: string | null; url: string };
+export type ProjectRepo = {
+  url: string;
+  provider: string;
+  name: string | null;
+  defaultBranch: string | null;
+  visibility: string | null;
+};
 export type Project = {
   key: string;
   name: string;
@@ -34,9 +42,13 @@ export type Project = {
   ownerTeam: ProjectOwnerTeam | null;
   lifecycle: string | null;
   tier: string | null;
+  kind: string | null;
   framework: string | null;
   image: string | null;
   tags: string[];
+  domains: string[];
+  links: ProjectLink[];
+  repo: ProjectRepo | null;
   readme: string | null;
   createdAt: string;
 };
@@ -48,11 +60,62 @@ export type ProjectCatalog = {
   ownerTeamKey?: string | null;
   lifecycle?: string | null;
   tier?: string | null;
+  kind?: string | null;
   framework?: string | null;
   image?: string | null;
   tags?: string[];
+  domains?: string[];
+  links?: ProjectLink[];
+  repoUrl?: string | null;
+  repoDefaultBranch?: string | null;
+  repoVisibility?: string | null;
   readme?: string | null;
 };
+
+// --- Project relations (dependency / service-map edges) ---------------------
+export type ProjectRelation = {
+  id: string;
+  type: string;
+  project: { key: string; name: string };
+};
+export type ProjectRelations = {
+  outgoing: ProjectRelation[];
+  incoming: ProjectRelation[];
+};
+
+export async function listProjectRelations(
+  slug: string,
+  key: string,
+): Promise<ProjectRelations> {
+  const res = await apiFetch(`/v1/orgs/${slug}/projects/${key}/relations`);
+  if (!res.ok) return { outgoing: [], incoming: [] };
+  return (await res.json()) as ProjectRelations;
+}
+
+export async function addProjectRelation(
+  slug: string,
+  key: string,
+  body: { type: string; targetKey: string },
+) {
+  return unwrap<{ ok: true }>(
+    await apiFetch(`/v1/orgs/${slug}/projects/${key}/relations`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function removeProjectRelation(
+  slug: string,
+  key: string,
+  relationId: string,
+) {
+  return unwrap<{ ok: true }>(
+    await apiFetch(`/v1/orgs/${slug}/projects/${key}/relations/${relationId}`, {
+      method: "DELETE",
+    }),
+  );
+}
 
 // --- Project access (GitHub-repository style) -------------------------------
 export type ProjectAccessGrant = { teamKey: string; teamName: string; role: string };
@@ -121,19 +184,24 @@ export async function getProject(slug: string, key: string): Promise<Project | n
   return ((await res.json()) as { project: Project }).project;
 }
 
-export async function createProject(
-  slug: string,
-  body: {
-    name: string;
-    key: string;
-    description?: string;
-    framework?: string;
-    ownerTeamKey?: string;
-    lifecycle?: string;
-    tier?: string;
-    tags?: string[];
-  },
-) {
+export type CreateProjectBody = {
+  name: string;
+  key: string;
+  description?: string;
+  framework?: string;
+  kind?: string;
+  ownerTeamKey?: string;
+  lifecycle?: string;
+  tier?: string;
+  tags?: string[];
+  domains?: string[];
+  links?: ProjectLink[];
+  repoUrl?: string;
+  repoDefaultBranch?: string;
+  repoVisibility?: string;
+};
+
+export async function createProject(slug: string, body: CreateProjectBody) {
   return unwrap<{ project: Project }>(
     await apiFetch(`/v1/orgs/${slug}/projects`, {
       method: "POST",

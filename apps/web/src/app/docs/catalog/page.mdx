@@ -1,39 +1,36 @@
 export const metadata = {
   title: "Catalog",
   description:
-    "The Catalog is the heart of Flagon: a live map of your projects, the teams that own them, and the products attached to each.",
+    "The Catalog is the heart of Flagon: a live map of your projects, the teams that own them, the repositories behind them, and how they relate to each other.",
 };
 
 # Catalog
 
 The **Catalog** is the heart of Flagon. It's a live map of everything you run:
-your projects, the teams that own them, which environments they're deployed to,
-and the products (feature flags today, more to come) attached to each, all in one
-place, on one foundation.
+your projects, the teams that own them, the repositories behind them, and how they
+relate to each other, all in one place, on one foundation.
 
 Where [Feature Flags](/docs/feature-flags) is a product you use, the Catalog is
-the fabric the whole platform hangs on: it's how a project, a team, and the
-things that act on that project stay connected instead of scattered across a
-dozen tools.
+the fabric the whole platform hangs on: it's how a project, its owner, its code,
+and the things it depends on stay connected instead of scattered across a dozen
+tools.
 
 ## What's here today
 
-The Catalog is live. You can:
+The Catalog is live. For every project you can:
 
-- **Create projects** and describe them: a name, a description, a lifecycle stage
-  (planning through GA), a criticality tier, and a rendered README.
-- **Organize people into [teams](/docs/platform/teams)** and hand each team
-  ownership of the projects it's responsible for, so every project has a clear
-  owner. Grant other teams access, GitHub-repository style.
-- **Tag and browse** your projects as a single catalog, visible to everyone in
-  the [organization](/docs/platform/organizations).
-
-<Callout tone="note" title="Still on the way">
-Deeper catalog surfaces are in active development: dependencies between projects,
-scorecards and maturity checks, systems and domains grouping, and linking a
-project back to its source repository. The foundation below is shipped today, and
-this page grows as those land.
-</Callout>
+- **Describe it**: a name, a description, a [kind](#classifying-a-project)
+  (service, library, datastore, and so on), a lifecycle stage, a criticality
+  tier, tags, and a rendered README.
+- **Own it**: hand a [team](/docs/platform/teams) ownership, and grant other
+  teams access GitHub-repository style.
+- **[Link its repository](/docs/catalog/repositories)**: paste a repo URL to
+  attach it. A hosted Git integration is on the way; manual linking works today.
+- **Group it by domain**: tag a project with the free-form business
+  [domains](#domains) it belongs to, and filter the catalog by them.
+- **Add links**: runbooks, dashboards, on-call, and docs, right on the project.
+- **[Map relationships](/docs/catalog/relationships)**: record how projects relate
+  (depends on, part of, related to) and see both directions of the edge.
 
 ## The idea
 
@@ -46,23 +43,39 @@ remembered to update it.
 - **Projects**: what you run, described once.
 - **Ownership**: which [team](/docs/platform/teams) owns each thing, so a page or
   a rollout always has an owner.
-- **Environments**: where each project is deployed, shared with every product.
-- **Attached products**: the flags and resources acting on a project, all
-  reachable from the project itself.
+- **Code & relationships**: the repository behind a project and how it connects to
+  the rest of the catalog.
+
+## Classifying a project
+
+Every project can carry a **kind** (service, library, website, datastore, tool,
+ML model, docs, or other), a **lifecycle** (planning through deprecated), and a
+**tier** (1 critical through 4 low). These drive the catalog filters, so you can
+answer "which Tier 1 services are still in beta" at a glance.
+
+## Domains
+
+**Domains** are free-form business areas a project belongs to, like `payments` or
+`growth`. They're plain labels, not a managed hierarchy: add whichever ones fit,
+and the catalog lets you group and filter by them. Keep them low-cardinality and
+they double as a lightweight systems map.
 
 ## How the pieces fit
 
-<CardGrid cols={3}>
-  <Card href="/docs/platform/projects" title="Projects">
-    The unit of the catalog: metadata, ownership, and everything built on top.
+<CardGrid cols={2}>
+  <Card href="/docs/catalog/repositories" title="Repositories">
+    Link a project to its source repository. Manual today, integrated soon.
   </Card>
-  <Card href="/docs/platform/teams" title="Teams">
-    Groups of people that own projects, with maintainer and member roles.
-  </Card>
-  <Card href="/docs/platform/environments" title="Environments">
-    Production, Preview, and Development, shared across products.
+  <Card href="/docs/catalog/relationships" title="Relationships">
+    Map how projects relate and read the edges in both directions.
   </Card>
 </CardGrid>
+
+<Callout tone="note" title="Still on the way">
+A hosted GitHub, GitLab, and Bitbucket integration (so linking a repo also imports
+its metadata) and deeper grouping are in active development. Everything above ships
+today, and this page grows as those land.
+</Callout>
 
 ## Next
 

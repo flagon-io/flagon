@@ -1,0 +1,54 @@
+export const metadata = {
+  title: "Repository linking",
+  description:
+    "Link a project to its source repository. Manual today (paste a URL); a hosted Git integration is on the way.",
+};
+
+# Repository linking
+
+Every project can point at the repository its code lives in. Today you link it by
+hand: paste the repo URL and Flagon parses the provider and `owner/repo` name from
+it. A hosted GitHub, GitLab, and Bitbucket integration is on the way, and will
+populate the same fields automatically (plus keep them in sync).
+
+## Link a repository
+
+On a project's **Overview**, open the **Repository** card and choose **Edit**
+(owner or admin). Paste the URL, optionally set the default branch and visibility,
+and save:
+
+- **URL**: `https://github.com/your-org/payments`, a GitLab or Bitbucket URL, or
+  an SSH remote like `git@github.com:your-org/payments.git`. Any Git host works;
+  known providers get a matching label.
+- **Default branch**: for example `main`.
+- **Visibility**: public, private, or leave it unset.
+
+The linked repo shows on the project's overview, with a link out to the source.
+
+## Over the API
+
+Repository fields live on the project resource, so you set them with a normal
+project update:
+
+```bash
+curl -X PATCH https://api.flagon.io/v1/orgs/{org}/projects/{key} \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repoUrl": "https://github.com/your-org/payments",
+    "repoDefaultBranch": "main",
+    "repoVisibility": "private"
+  }'
+```
+
+The response echoes a parsed `repo` object (`provider`, `name`, `defaultBranch`,
+`visibility`). Send `"repoUrl": null` to unlink.
+
+A linked repo shows on the project's overview, and a future Git integration will
+build on the same fields.
+
+<Callout tone="note" title="Coming soon">
+The hosted Git integration will let you pick an org and repo instead of pasting a
+URL, detect the stack automatically, and import metadata. Manual linking keeps
+working alongside it.
+</Callout>

@@ -1,0 +1,53 @@
+export const metadata = {
+  title: "Relationships",
+  description:
+    "Map how projects relate to each other (depends on, part of, related to) and read the edges in both directions.",
+};
+
+# Relationships
+
+Projects rarely stand alone. **Relationships** record how they relate, so you can
+see a service's upstream and downstream at a glance, and reason about the blast
+radius of a change.
+
+## Relation types
+
+Each relation is a directed edge from one project to another:
+
+- **Depends on**: this project needs the other to work. The reverse reads as
+  "used by".
+- **Part of**: this project is a component of the other ("contains" in reverse).
+- **Related to**: a looser association, symmetric in meaning.
+
+## Add a relation
+
+On a project, open **Relationships** (owner or admin). Under **Outgoing**, pick a
+relation type and a target project, then add it. It shows up immediately as an
+**outgoing** edge here and as an **incoming** edge on the target project. Either
+project's owners or admins can remove the edge.
+
+Every member can read a project's relationships; only owners and admins change
+them.
+
+## Over the API
+
+```bash
+# Add: this project depends on "ledger"
+curl -X POST https://api.flagon.io/v1/orgs/{org}/projects/{key}/relations \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "depends_on", "targetKey": "ledger" }'
+
+# List both directions
+curl https://api.flagon.io/v1/orgs/{org}/projects/{key}/relations \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+The list response has `outgoing` and `incoming` arrays; each entry names the other
+project and the relation type. Delete an edge by its id with
+`DELETE …/relations/{relationId}`.
+
+<Callout tone="note" title="Coming soon">
+Relations are modeled to point at other catalog entities, not just projects, so
+they will extend to packages and more without breaking existing edges.
+</Callout>

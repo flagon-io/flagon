@@ -3,18 +3,16 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
-import { getProject, listProjectAccess } from "@/lib/projects-api";
-import { listTeams } from "@/lib/teams-api";
+import { getProject } from "@/lib/projects-api";
 import { getUploadConfig } from "@/lib/uploads-api";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
-import { CatalogForm, DeleteProject } from "./catalog-form";
+import { DeleteProject, GeneralForm } from "./catalog-form";
 import { ProjectIconUpload } from "./project-icon-upload";
-import { ProjectAccessManager } from "./project-access";
 
 /**
- * Project settings — edit the catalog metadata (owner team, type, lifecycle,
- * tier, tags, description) and the danger zone. Owner/admin only; everyone else
- * is bounced to the read-only overview.
+ * Project settings — General. The project's identity (name + icon) and the danger
+ * zone. Catalog metadata is edited inline on the overview, and access has its own
+ * page. Owner/admin only; everyone else is bounced to the read-only overview.
  */
 export default async function ProjectSettings({
   params,
@@ -28,15 +26,11 @@ export default async function ProjectSettings({
   if (!membership) redirect("/");
   if (!canManageOrg(membership.role)) redirect(`/${slug}/projects/${key}`);
 
-  const [project, teams, access, uploadConfig] = await Promise.all([
+  const [project, uploadConfig] = await Promise.all([
     getProject(slug, key),
-    listTeams(slug),
-    listProjectAccess(slug, key),
     getUploadConfig(slug),
   ]);
   if (!project) notFound();
-
-  const teamOptions = teams.map((t) => ({ key: t.key, name: t.name }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -47,10 +41,13 @@ export default async function ProjectSettings({
         <ArrowLeft className="size-4" /> {project.name}
       </Link>
 
-      <SettingsHeader title="Project settings" description="Catalog metadata and ownership." />
+      <SettingsHeader
+        title="General"
+        description="The project's identity. Edit its catalog details on the overview."
+      />
 
-      <SettingsSection title="Catalog" description="How this project shows up in the catalog.">
-        <CatalogForm slug={slug} project={project} teams={teamOptions} />
+      <SettingsSection title="Name" description="How this project is named across the catalog.">
+        <GeneralForm slug={slug} project={project} />
       </SettingsSection>
 
       <SettingsSection
@@ -66,19 +63,6 @@ export default async function ProjectSettings({
           uploadsEnabled={uploadConfig.enabled}
           maxSizeBytes={uploadConfig.maxSizeBytes}
           acceptedTypes={uploadConfig.acceptedTypes}
-        />
-      </SettingsSection>
-
-      <SettingsSection
-        title="Access"
-        description="Teams that can act on this project, and the role each holds."
-      >
-        <ProjectAccessManager
-          slug={slug}
-          projectKey={project.key}
-          access={access}
-          teams={teamOptions}
-          canManage
         />
       </SettingsSection>
 

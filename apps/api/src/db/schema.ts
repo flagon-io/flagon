@@ -391,6 +391,21 @@ export const projects = pgTable(
     // place of the generated monogram. Null = fall back to the monogram.
     image: text("image"),
     tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
+    // The component's kind (service/library/website/datastore/...), a slug from
+    // the fixed registry the API validates. A catalog classifier; null = unset.
+    kind: text("kind"),
+    // Free-form business domains this project belongs to (e.g. "payments"). Not a
+    // managed entity — plain strings, deliberately light. Used for grouping/filter.
+    domains: text("domains").array().notNull().default(sql`ARRAY[]::text[]`),
+    // External links (runbook / dashboard / on-call / docs...), each {type,label,url}.
+    links: jsonb("links").$type<ProjectLink[]>().notNull().default(sql`'[]'::jsonb`),
+    // MANUAL repository linking (the console pastes a URL; provider + name are
+    // parsed from it). A future Git integration populates these same columns.
+    repoUrl: text("repo_url"),
+    repoProvider: text("repo_provider"),
+    repoName: text("repo_name"),
+    repoDefaultBranch: text("repo_default_branch"),
+    repoVisibility: text("repo_visibility"),
     // The project's README (Markdown). Manually managed today; when a repository
     // is linked in the future it syncs from the repo's README.md.
     readme: text("readme"),
@@ -401,6 +416,44 @@ export const projects = pgTable(
     uniqueIndex("projects_org_key_key").on(t.organizationId, t.key),
     index("projects_org_idx").on(t.organizationId),
     index("projects_owner_team_idx").on(t.ownerTeamId),
+  ],
+);
+
+/** One external link on a project's catalog entry (stored in projects.links jsonb). */
+export type ProjectLink = { type: string; label: string | null; url: string };
+
+/**
+ * A directed relation between projects (dependency / service-map edge):
+ * source --type--> target. `type` is depends_on | part_of | related_to. The
+ * target is a project today (target_kind 'project'); target_kind leaves room to
+ * point at a package later without a schema change. Tenant data (org-scoped, RLS).
+ */
+export const projectRelations = pgTable(
+  "project_relations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    sourceProjectId: uuid("source_project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    targetKind: text("target_kind").notNull().default("project"),
+    targetProjectId: uuid("target_project_id").references(() => projects.id, {
+      onDelete: "cascade",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_relations_edge_key").on(
+      t.sourceProjectId,
+      t.type,
+      t.targetProjectId,
+    ),
+    index("project_relations_source_idx").on(t.sourceProjectId),
+    index("project_relations_target_idx").on(t.targetProjectId),
+    index("project_relations_org_idx").on(t.organizationId),
   ],
 );
 
@@ -1078,6 +1131,7 @@ export type FlagRule = typeof flagRules.$inferSelect;
 export type ClientKey = typeof clientKeys.$inferSelect;
 export type FlagRevision = typeof flagRevisions.$inferSelect;
 export type Project = typeof projects.$inferSelect;
+export type ProjectRelation = typeof projectRelations.$inferSelect;
 export type Team = typeof teams.$inferSelect;
 export type TeamMember = typeof teamMembers.$inferSelect;
 export type ProjectAccess = typeof projectAccess.$inferSelect;
@@ -1112,6 +1166,7 @@ export const schema = {
   clientKeys,
   flagRevisions,
   projects,
+  projectRelations,
   teams,
   teamMembers,
   projectAccess,

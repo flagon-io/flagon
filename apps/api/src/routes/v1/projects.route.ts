@@ -1,8 +1,8 @@
 import { Hono } from "hono";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { withOrg, type TenantTx } from "../../db/tenant.js";
-import { projects, teams, projectAccess } from "../../db/schema.js";
+import { projects, projectRelations, teams, projectAccess } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
 import {
@@ -12,6 +12,7 @@ import {
 } from "../../lib/org-context.js";
 import { isValidSlug } from "../../lib/slug.js";
 import { isReserved } from "../../lib/reserved.js";
+import { parseRepo } from "../../lib/repo.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
@@ -47,19 +48,47 @@ const FRAMEWORKS = [
 ] as const;
 // GitHub-repository-style access levels a team can hold on a project.
 const ACCESS_ROLES = ["read", "triage", "write", "maintain", "admin"] as const;
+// The component's kind — a catalog classifier (OpsLevel/Cortex style).
+const KINDS = ["service", "library", "website", "datastore", "tool", "ml_model", "docs", "other"] as const;
+// External link types on a catalog entry (runbooks, dashboards, on-call, docs...).
+const LINK_TYPES = ["runbook", "dashboard", "oncall", "docs", "chat", "issues", "other"] as const;
+// Directed relation types between projects (the dependency / service-map edges).
+const RELATION_TYPES = ["depends_on", "part_of", "related_to"] as const;
+// Repository visibility, for a manually-linked repo.
+const REPO_VISIBILITY = ["public", "private", "unknown"] as const;
 const tagsField = z.array(z.string().trim().min(1).max(40)).max(20);
+// Free-form business domains: lowercased + deduped, deliberately not an entity.
+const domainsField = z
+  .array(z.string().trim().min(1).max(40))
+  .max(10)
+  .transform((arr) => [...new Set(arr.map((d) => d.toLowerCase()))]);
+const linkBody = z.object({
+  type: z.enum(LINK_TYPES),
+  label: z.string().trim().min(1).max(60).nullable().optional(),
+  url: z.string().url().max(2048),
+});
+const linksField = z.array(linkBody).max(20);
+const repoUrlField = z.string().trim().url().max(2048);
+const repoBranchField = z.string().trim().min(1).max(120);
 
 const createBody = z.object({
   name: z.string().trim().min(1).max(100),
   key: z.string().trim().min(1).max(100),
   description: z.string().trim().max(500).optional(),
   framework: z.enum(FRAMEWORKS).optional(),
+  kind: z.enum(KINDS).optional(),
   // Catalog metadata can be set at creation too (mirrors the update body), so the
   // console's New Project modal captures it up front instead of a follow-up edit.
   ownerTeamKey: z.string().trim().min(1).max(100).optional(),
   lifecycle: z.enum(LIFECYCLES).optional(),
   tier: z.enum(TIERS).optional(),
   tags: tagsField.optional(),
+  domains: domainsField.optional(),
+  links: linksField.optional(),
+  // Manual repository linking: paste a URL; provider + name are parsed from it.
+  repoUrl: repoUrlField.optional(),
+  repoDefaultBranch: repoBranchField.optional(),
+  repoVisibility: z.enum(REPO_VISIBILITY).optional(),
 });
 const updateBody = z
   .object({
@@ -69,17 +98,38 @@ const updateBody = z
     ownerTeamKey: z.string().trim().min(1).max(100).nullable().optional(),
     lifecycle: z.enum(LIFECYCLES).nullable().optional(),
     tier: z.enum(TIERS).nullable().optional(),
+    kind: z.enum(KINDS).nullable().optional(),
     // The primary stack/framework preset (null clears it).
     framework: z.enum(FRAMEWORKS).nullable().optional(),
     // The project's icon URL, typically an uploaded asset (null clears it).
     image: z.string().url().max(2048).nullable().optional(),
     tags: tagsField.optional(),
+    domains: domainsField.optional(),
+    links: linksField.optional(),
+    // Manual repo link. repoUrl null clears the whole linkage (provider/name too).
+    repoUrl: repoUrlField.nullable().optional(),
+    repoDefaultBranch: repoBranchField.nullable().optional(),
+    repoVisibility: z.enum(REPO_VISIBILITY).nullable().optional(),
     // The project README, Markdown. Generous cap to bound abuse.
     readme: z.string().max(100_000).nullable().optional(),
   })
   .strict();
 
 const ownerTeamSchema = z.object({ key: z.string(), name: z.string() }).nullable();
+const linkSchema = z.object({
+  type: z.string(),
+  label: z.string().nullable(),
+  url: z.string(),
+});
+const repoSchema = z
+  .object({
+    url: z.string(),
+    provider: z.string(),
+    name: z.string().nullable(),
+    defaultBranch: z.string().nullable(),
+    visibility: z.string().nullable(),
+  })
+  .nullable();
 const projectSchema = z.object({
   key: z.string(),
   name: z.string(),
@@ -87,9 +137,13 @@ const projectSchema = z.object({
   ownerTeam: ownerTeamSchema,
   lifecycle: z.string().nullable(),
   tier: z.string().nullable(),
+  kind: z.string().nullable(),
   framework: z.string().nullable(),
   image: z.string().nullable(),
   tags: z.array(z.string()),
+  domains: z.array(z.string()),
+  links: z.array(linkSchema),
+  repo: repoSchema,
   readme: z.string().nullable(),
   createdAt: z.string(),
 });
@@ -109,9 +163,21 @@ function serialize(
     ownerTeam: ownerTeamKey && ownerTeamName ? { key: ownerTeamKey, name: ownerTeamName } : null,
     lifecycle: p.lifecycle,
     tier: p.tier,
+    kind: p.kind,
     framework: p.framework,
     image: p.image,
     tags: p.tags,
+    domains: p.domains,
+    links: p.links,
+    repo: p.repoUrl
+      ? {
+          url: p.repoUrl,
+          provider: p.repoProvider,
+          name: p.repoName,
+          defaultBranch: p.repoDefaultBranch,
+          visibility: p.repoVisibility,
+        }
+      : null,
     readme: p.readme,
     createdAt: p.createdAt.toISOString(),
   };
@@ -228,7 +294,22 @@ projects_.post("/", async (c) => {
 
   const parsed = createBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
-  const { name, key, description, framework, ownerTeamKey, lifecycle, tier, tags } = parsed.data;
+  const {
+    name,
+    key,
+    description,
+    framework,
+    kind,
+    ownerTeamKey,
+    lifecycle,
+    tier,
+    tags,
+    domains,
+    links,
+    repoUrl,
+    repoDefaultBranch,
+    repoVisibility,
+  } = parsed.data;
 
   if (!isValidSlug(key) || isReserved(key)) {
     return jsonError(c, 400, "Choose a different project key (letters, numbers, dashes).");
@@ -258,6 +339,7 @@ projects_.post("/", async (c) => {
       owner = { key: team.key, name: team.name };
     }
 
+    const repo = repoUrl ? parseRepo(repoUrl) : null;
     const [row] = await tx
       .insert(projects)
       .values({
@@ -266,10 +348,18 @@ projects_.post("/", async (c) => {
         name,
         description: description ?? null,
         framework: framework ?? null,
+        kind: kind ?? null,
         ownerTeamId,
         lifecycle: lifecycle ?? null,
         tier: tier ?? null,
         tags: tags ?? [],
+        domains: domains ?? [],
+        links: (links ?? []).map((l) => ({ type: l.type, label: l.label ?? null, url: l.url })),
+        repoUrl: repoUrl ?? null,
+        repoProvider: repo?.provider ?? null,
+        repoName: repo?.name ?? null,
+        repoDefaultBranch: repoDefaultBranch ?? null,
+        repoVisibility: repoVisibility ?? null,
         createdByUserId: ctx.actorUserId,
       })
       .returning();
@@ -289,12 +379,30 @@ projects_.patch("/:key", async (c) => {
 
   const parsed = updateBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
-  const { ownerTeamKey, ...rest } = parsed.data;
+  // links + repoUrl need shaping (label default, provider/name derivation); pull
+  // them out of the passthrough set. Everything else maps 1:1 to a column.
+  const { ownerTeamKey, links, repoUrl, ...rest } = parsed.data;
 
   const result = await withOrg(ctx.orgId, async (tx) => {
     // Resolve the owning team by key when the caller is (re)assigning it. `null`
     // clears ownership; omitted leaves it untouched.
     const set: Record<string, unknown> = { ...rest, updatedAt: new Date() };
+    if (links !== undefined) {
+      set.links = links.map((l) => ({ type: l.type, label: l.label ?? null, url: l.url }));
+    }
+    if (repoUrl !== undefined) {
+      // null clears the whole repo linkage; a URL (re)derives provider + name.
+      if (repoUrl === null) {
+        set.repoUrl = null;
+        set.repoProvider = null;
+        set.repoName = null;
+      } else {
+        const repo = parseRepo(repoUrl);
+        set.repoUrl = repoUrl;
+        set.repoProvider = repo.provider;
+        set.repoName = repo.name;
+      }
+    }
     if (ownerTeamKey !== undefined) {
       if (ownerTeamKey === null) {
         set.ownerTeamId = null;
@@ -556,5 +664,188 @@ projects_.delete("/:key/access/:teamKey", async (c) => {
 
   if (result === "not_found" || result === "no_grant")
     return jsonError(c, 404, "That team does not have access to the project.");
+  return c.json({ ok: true });
+});
+
+// --- Relations (dependency / service-map edges) -----------------------------
+// A directed edge, source --type--> target, between two projects. Stored with a
+// target_kind so it can point at a package later; only project targets today.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const addRelationBody = z.object({
+  type: z.enum(RELATION_TYPES),
+  targetKey: z.string().trim().min(1).max(100),
+});
+
+const relationSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  project: z.object({ key: z.string(), name: z.string() }),
+});
+registerComponentSchema("ProjectRelation", relationSchema);
+registerComponentSchema(
+  "ProjectRelationsResponse",
+  z.object({
+    // `outgoing`: this project --type--> the listed project. `incoming`: the
+    // listed project --type--> this project. Both name the OTHER project.
+    outgoing: z.array(relationSchema),
+    incoming: z.array(relationSchema),
+  }),
+);
+
+const rParams = { ...pParams, key: "The project key." };
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/projects/{key}/relations",
+  summary: "List project relations",
+  description:
+    "The project's dependency edges: `outgoing` (this project points at another) and `incoming` (another points at this). Visible to any member.",
+  tags: [TAG],
+  auth: true,
+  paramDescriptions: rParams,
+  responses: {
+    200: { description: "The project's relations.", schemaName: "ProjectRelationsResponse" },
+    404: { description: "No such project." },
+  },
+});
+registerRoute({
+  method: "post",
+  path: "/v1/orgs/{org}/projects/{key}/relations",
+  summary: "Add a project relation",
+  description:
+    "Add a directed relation (depends_on / part_of / related_to) to another project. Owner/admin only.",
+  tags: [TAG],
+  auth: true,
+  paramDescriptions: rParams,
+  request: { body: addRelationBody },
+  responses: {
+    201: { description: "Created.", schemaName: "DeleteAck" },
+    400: { description: "Unknown target, or a self relation." },
+    404: { description: "No such project." },
+    409: { description: "That relation already exists." },
+    422: { description: "Validation failed." },
+  },
+});
+registerRoute({
+  method: "delete",
+  path: "/v1/orgs/{org}/projects/{key}/relations/{relationId}",
+  summary: "Remove a project relation",
+  description:
+    "Delete a relation touching this project by id, from either endpoint (outgoing or incoming). Owner/admin only.",
+  tags: [TAG],
+  auth: true,
+  paramDescriptions: { ...rParams, relationId: "The relation id." },
+  responses: {
+    200: { description: "Removed.", schemaName: "DeleteAck" },
+    404: { description: "No such project or relation." },
+  },
+});
+
+projects_.get("/:key/relations", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const result = await withOrg(ctx.orgId, async (tx) => {
+    const proj = await projectByKey(tx, c.req.param("key"));
+    if (!proj) return null;
+    const cols = {
+      id: projectRelations.id,
+      type: projectRelations.type,
+      key: projects.key,
+      name: projects.name,
+    };
+    // outgoing: join the TARGET project; incoming: join the SOURCE project.
+    const outgoing = await tx
+      .select(cols)
+      .from(projectRelations)
+      .innerJoin(projects, eq(projects.id, projectRelations.targetProjectId))
+      .where(eq(projectRelations.sourceProjectId, proj.id))
+      .orderBy(projectRelations.type, projects.name);
+    const incoming = await tx
+      .select(cols)
+      .from(projectRelations)
+      .innerJoin(projects, eq(projects.id, projectRelations.sourceProjectId))
+      .where(eq(projectRelations.targetProjectId, proj.id))
+      .orderBy(projectRelations.type, projects.name);
+    const shape = (rows: typeof outgoing) =>
+      rows.map((r) => ({ id: r.id, type: r.type, project: { key: r.key, name: r.name } }));
+    return { outgoing: shape(outgoing), incoming: shape(incoming) };
+  });
+  if (!result) return jsonError(c, 404, "Project not found.");
+  return c.json(result);
+});
+
+projects_.post("/:key/relations", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
+  const parsed = addRelationBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return validationError(c, parsed.error);
+
+  const result = await withOrg(ctx.orgId, async (tx) => {
+    const proj = await projectByKey(tx, c.req.param("key"));
+    if (!proj) return "not_found" as const;
+    const target = await projectByKey(tx, parsed.data.targetKey);
+    if (!target) return "unknown_target" as const;
+    if (target.id === proj.id) return "self" as const;
+    const existing = await tx
+      .select({ id: projectRelations.id })
+      .from(projectRelations)
+      .where(
+        and(
+          eq(projectRelations.sourceProjectId, proj.id),
+          eq(projectRelations.type, parsed.data.type),
+          eq(projectRelations.targetProjectId, target.id),
+        ),
+      )
+      .limit(1)
+      .then((r) => r[0]);
+    if (existing) return "conflict" as const;
+    await tx.insert(projectRelations).values({
+      organizationId: ctx.orgId,
+      sourceProjectId: proj.id,
+      type: parsed.data.type,
+      targetKind: "project",
+      targetProjectId: target.id,
+    });
+    return "ok" as const;
+  });
+
+  if (result === "not_found") return jsonError(c, 404, "Project not found.");
+  if (result === "unknown_target") return jsonError(c, 400, "That target project does not exist.");
+  if (result === "self") return jsonError(c, 400, "A project cannot relate to itself.");
+  if (result === "conflict") return jsonError(c, 409, "That relation already exists.");
+  return c.json({ ok: true }, 201);
+});
+
+projects_.delete("/:key/relations/:relationId", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const denied = requireManager(c, ctx);
+  if (denied) return denied;
+
+  const result = await withOrg(ctx.orgId, async (tx) => {
+    const proj = await projectByKey(tx, c.req.param("key"));
+    if (!proj) return "not_found" as const;
+    // Guard a non-uuid id so it 404s instead of erroring on the SQL cast.
+    if (!UUID_RE.test(c.req.param("relationId"))) return "not_found" as const;
+    // A relationship can be severed from EITHER endpoint: this project as the
+    // source (its own outgoing edge) or as the target (an incoming edge). Both
+    // sides are in the same org, so a manager on either can remove the link.
+    const [row] = await tx
+      .delete(projectRelations)
+      .where(
+        and(
+          eq(projectRelations.id, c.req.param("relationId")),
+          or(
+            eq(projectRelations.sourceProjectId, proj.id),
+            eq(projectRelations.targetProjectId, proj.id),
+          ),
+        ),
+      )
+      .returning({ id: projectRelations.id });
+    return row ? ("ok" as const) : ("not_found" as const);
+  });
+
+  if (result === "not_found") return jsonError(c, 404, "Relation not found.");
   return c.json({ ok: true });
 });

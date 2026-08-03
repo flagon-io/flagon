@@ -96,7 +96,11 @@ export const nav: NavSection[] = [
     items: [
       {
         title: "Catalog",
-        items: [{ title: "Overview", href: "/docs/catalog" }],
+        items: [
+          { title: "Overview", href: "/docs/catalog" },
+          { title: "Repository linking", href: "/docs/catalog/repositories" },
+          { title: "Relationships", href: "/docs/catalog/relationships" },
+        ],
       },
       {
         title: "Feature Flags",

@@ -3,11 +3,14 @@
 import { revalidatePath } from "next/cache";
 import {
   addProjectAccess,
+  addProjectRelation,
   createProject,
   deleteProject,
   removeProjectAccess,
+  removeProjectRelation,
   updateProject,
   updateProjectAccess,
+  type CreateProjectBody,
   type ProjectCatalog,
 } from "@/lib/projects-api";
 import { completeUpload, requestUpload, type UploadTicket } from "@/lib/uploads-api";
@@ -19,16 +22,7 @@ import { completeUpload, requestUpload, type UploadTicket } from "@/lib/uploads-
  */
 export async function createProjectAction(
   slug: string,
-  body: {
-    name: string;
-    key: string;
-    description?: string;
-    framework?: string;
-    ownerTeamKey?: string;
-    lifecycle?: string;
-    tier?: string;
-    tags?: string[];
-  },
+  body: CreateProjectBody,
 ): Promise<{ key?: string; error?: string }> {
   const res = await createProject(slug, body);
   if (res.error) return { error: res.error };
@@ -136,5 +130,31 @@ export async function removeProjectAccessAction(
   const res = await removeProjectAccess(slug, key, teamKey);
   if (res.error) return { error: res.error };
   revalidatePath(`/${slug}/projects/${key}/settings`);
+  return {};
+}
+
+// --- Project relations (dependency / service-map edges) ---------------------
+export async function addProjectRelationAction(
+  slug: string,
+  key: string,
+  type: string,
+  targetKey: string,
+): Promise<{ error?: string }> {
+  const res = await addProjectRelation(slug, key, { type, targetKey });
+  if (res.error) return { error: res.error };
+  // Both endpoints of the edge render it, so revalidate the target too.
+  revalidatePath(`/${slug}/projects/${key}/relationships`);
+  revalidatePath(`/${slug}/projects/${targetKey}/relationships`);
+  return {};
+}
+
+export async function removeProjectRelationAction(
+  slug: string,
+  key: string,
+  relationId: string,
+): Promise<{ error?: string }> {
+  const res = await removeProjectRelation(slug, key, relationId);
+  if (res.error) return { error: res.error };
+  revalidatePath(`/${slug}/projects/${key}/relationships`);
   return {};
 }

@@ -21,6 +21,7 @@ import {
   Mail,
   Menu,
   MessagesSquare,
+  Network,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
@@ -266,6 +267,8 @@ export function WorkspaceSidebar({
           {
             items: [
               { label: "Overview", icon: Boxes, href: projectBase },
+              { label: "Relationships", icon: Network, href: `${projectBase}/relationships` },
+              { label: "Dependencies", icon: Package, soon: true },
               { label: "Deployments", icon: Rocket, soon: true },
               { label: "Domains", icon: Globe, soon: true },
             ],
@@ -274,6 +277,7 @@ export function WorkspaceSidebar({
             heading: "Settings",
             items: [
               { label: "General", icon: SlidersHorizontal, href: `${projectBase}/settings` },
+              { label: "Access", icon: Shield, href: `${projectBase}/settings/access` },
               { label: "Config", icon: FileCog, soon: true },
             ],
           },
