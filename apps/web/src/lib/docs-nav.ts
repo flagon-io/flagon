@@ -33,7 +33,15 @@ export const nav: NavSection[] = [
     items: [
       { title: "Introduction", href: "/docs" },
       { title: "Quickstart", href: "/docs/quickstart" },
-      { title: "Guides", soon: true },
+      {
+        title: "Guides",
+        items: [
+          {
+            title: "From a flag to an experiment",
+            href: "/docs/guides/flag-to-experiment",
+          },
+        ],
+      },
     ],
   },
   {

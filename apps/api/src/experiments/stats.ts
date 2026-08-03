@@ -848,12 +848,30 @@ export function betaProbabilityToBeat(
   const bC = 1 + Math.max(0, nC - cC);
   const aV = 1 + cV;
   const bV = 1 + Math.max(0, nV - cV);
-  // Composite Simpson over [0,1]; f_C(x) * (1 - F_V(x)).
+  // Composite Simpson of f_C(x)·(1 - F_V(x)). A FIXED [0,1] grid silently fails at
+  // high n: each posterior's sd shrinks like 1/√n and drops below the grid spacing
+  // (1/N), so the sharp peak of f_C falls between samples and the integral is
+  // garbage (identical arms → P≈0.7 at 100k/arm, →1.0 at 1M). Instead center the
+  // grid on the ±8·sd window around the two posterior means, where all the mass is;
+  // f_C is negligible outside it, so the windowed integral equals the full one, and
+  // the peak stays resolved at ANY n. (Uniform priors keep a,b ≥ 1, so sd > 0.)
+  const meanC = aC / (aC + bC);
+  const meanV = aV / (aV + bV);
+  const sdC = Math.sqrt((aC * bC) / ((aC + bC) ** 2 * (aC + bC + 1)));
+  const sdV = Math.sqrt((aV * bV) / ((aV + bV) ** 2 * (aV + bV + 1)));
+  const sd = Math.max(sdC, sdV);
+  const lo = Math.max(0, Math.min(meanC, meanV) - 8 * sd);
+  const hi = Math.min(1, Math.max(meanC, meanV) + 8 * sd);
+  if (hi - lo < 1e-12) {
+    // Degenerate: posteriors are effectively point masses. Compare the means.
+    const p = meanV > meanC ? 1 : meanV < meanC ? 0 : 0.5;
+    return direction === "increase" ? p : 1 - p;
+  }
   const N = grid % 2 === 0 ? grid : grid + 1;
-  const h = 1 / N;
+  const h = (hi - lo) / N;
   let acc = 0;
   for (let i = 0; i <= N; i++) {
-    const x = i * h;
+    const x = lo + i * h;
     const w = i === 0 || i === N ? 1 : i % 2 === 1 ? 4 : 2;
     acc += w * betaPdf(x, aC, bC) * (1 - betaCdf(x, aV, bV));
   }
@@ -881,13 +899,26 @@ export function srm(
   if (weightSum <= 0) return null;
 
   let chi = 0;
+  let included = 0;
+  let unexpectedTraffic = false;
   for (const a of arms) {
     const w = weights ? weights[a.variantKey] ?? 0 : 1;
     const expected = (total * w) / weightSum;
-    if (expected <= 0) continue;
+    if (expected <= 0) {
+      // No traffic was expected for this arm. If it received some anyway, that's a
+      // definitive split mismatch (and can't be folded into chi-square — division by
+      // zero), so SRM must FAIL rather than silently drop the arm. Dropping it while
+      // leaving df unchanged (the old bug) could report "healthy" on a broken split.
+      if (a.count > 0) unexpectedTraffic = true;
+      continue;
+    }
+    included++;
     chi += Math.pow(a.count - expected, 2) / expected;
   }
-  const df = arms.length - 1;
+  if (unexpectedTraffic) return { chiSquare: chi, pValue: 0, healthy: false };
+  // df counts only the arms that actually contributed to chi, not every arm.
+  const df = included - 1;
+  if (df < 1) return null;
   const pValue = clampP(1 - chiSquareCdf(chi, df));
   const threshold = opts.srmThreshold ?? 0.001;
   return { chiSquare: chi, pValue, healthy: pValue >= threshold };

@@ -1,0 +1,195 @@
+export const metadata = {
+  title: "From a flag to an experiment",
+  description:
+    "A hands-on walkthrough: split a flag's traffic, record exposures, attach a metric, and run an experiment to measure the lift, end to end.",
+};
+
+# From a flag to an experiment
+
+This guide takes one flag from a simple on/off switch to a measured experiment. By
+the end you will have split traffic between two experiences, recorded who saw which,
+tied a goal to it, and read whether the new experience actually won.
+
+It builds directly on the [Quickstart](/docs/quickstart): you already have a boolean
+flag `new-checkout`, a [client key](/docs/feature-flags/client-keys), and an app that
+evaluates the flag. If not, do that first. It takes about ten minutes.
+
+The whole idea in one line: an **experiment is a flag** plus a **metric**. The flag
+already decides who sees what; the metric measures what happened next.
+
+## 1. Split the traffic
+
+An experiment needs at least two groups to compare. Open `new-checkout` in the
+console, choose an environment, and set it to serve a **50/50 split** between its two
+variants:
+
+- `off` (`false`) is the **control**: the current checkout.
+- `on` (`true`) is the **treatment**: the new checkout you want to test.
+
+Now half of your users get each experience, assigned deterministically by their
+targeting key, so a given user always lands in the same group.
+
+<Callout tone="note" title="Any flag works">
+It does not have to be boolean. A multivariate flag with three variants becomes a
+three-arm experiment the same way. The control is just whichever variant is your
+baseline.
+</Callout>
+
+## 2. Evaluate, and let exposures record themselves
+
+Your app already evaluates the flag with a stable `targetingKey`. Because the flag
+now splits, each user resolves to `on` or `off`, and that resolution **is** their
+experiment assignment:
+
+<CodeGroup examples={{
+  typescript: { code: `const client = OpenFeature.getClient();
+
+// The targetingKey is the unit of the experiment: same user, same arm, every time.
+const showNewCheckout = await client.getBooleanValue("new-checkout", false, {
+  targetingKey: user.id,
+});
+
+renderCheckout({ variant: showNewCheckout ? "new" : "current" });` },
+  python: { code: `client = api.get_client()
+
+# The targeting_key is the unit of the experiment: same user, same arm, every time.
+show_new_checkout = client.get_boolean_value(
+    "new-checkout", False, EvaluationContext(targeting_key=user.id),
+)
+
+render_checkout("new" if show_new_checkout else "current")` },
+  curl: { code: `curl -X POST "https://api.flagon.io/ofrep/v1/evaluate/flags/new-checkout" \\
+  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"context":{"targetingKey":"user-123"}}'
+# => { "value": true, "variant": "on", "reason": "SPLIT", ... }` },
+}} />
+
+That evaluation **records an exposure automatically**: a remote evaluation carrying a
+targeting key logs that this user saw this variant, deduped per user per hour. You do
+not have to send anything extra. (Cached-mode SDKs, which evaluate locally, send
+exposures explicitly instead. See [Record exposures](/docs/feature-flags/exposures).)
+
+The exposure is what lets Flagon attribute an outcome back to the arm the user was in.
+
+## 3. Define what "winning" means
+
+Pick the outcome the experiment should move. Open **Experiments → Metrics → New
+metric**:
+
+- **Name**: `Checkout completed`
+- **Event name**: `checkout_completed` (what your app will send)
+- **Type**: `Conversion` (each unit either did it or did not)
+- **Direction**: `Increase` (higher is the win)
+
+Prefer the API? It is one call:
+
+```http
+POST /v1/orgs/{org}/experiment-metrics
+Authorization: Bearer flagon_...
+Content-Type: application/json
+```
+
+```json
+{
+  "key": "checkout-completed",
+  "name": "Checkout completed",
+  "type": "conversion",
+  "eventName": "checkout_completed",
+  "direction": "increase"
+}
+```
+
+## 4. Create the experiment
+
+Open **Experiments → New experiment** and build it on the flag:
+
+1. **Flag**: `new-checkout`. The experiment reuses the flag's split and assignment.
+2. **Control**: `off`. Every other variant is compared against it.
+3. **Primary metric**: attach `Checkout completed`. Add secondary or guardrail
+   metrics later if you want (guardrails are watched for regressions, not wins).
+4. **Start** the experiment.
+
+From this point, exposures and goal events are collected against the experiment. You
+can start it after traffic is already flowing: Flagon analyzes the history within
+your plan's retention window, so nothing is lost by attaching the metric a little late.
+
+## 5. Send the goal event
+
+When a user actually completes checkout, tell Flagon, with the **same targeting key**
+you evaluated the flag with:
+
+<CodeTabs
+  tabs={[
+    {
+      label: "TypeScript",
+      code: `await fetch("https://api.flagon.io/ofrep/v1/track", {
+  method: "POST",
+  headers: {
+    Authorization: \`Bearer \${process.env.FLAGON_CLIENT_KEY}\`,
+    "Content-Type": "application/json",
+    "Idempotency-Key": crypto.randomUUID(),
+  },
+  body: JSON.stringify({
+    events: [{ metric: "checkout_completed", targetingKey: user.id }],
+  }),
+});`,
+    },
+    {
+      label: "cURL",
+      code: `curl -X POST "https://api.flagon.io/ofrep/v1/track" \\
+  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \\
+  -H "Content-Type: application/json" \\
+  -H "Idempotency-Key: $(uuidgen)" \\
+  -d '{ "events": [ { "metric": "checkout_completed", "targetingKey": "user-123" } ] }'`,
+    },
+  ]}
+/>
+
+Flagon joins the goal event to the arm the user was assigned to, as long as it
+happened **after** their exposure. The targeting key is stored only as a salted hash;
+the raw value is never persisted. See [Record goal events](/docs/experiments/track)
+for values, batching, and idempotency.
+
+<Callout tone="note" title="Send both, from the same key">
+The two things your app must emit are an exposure (automatic on evaluation) and a
+goal event (on the outcome), keyed by the same `targetingKey`. That shared key is the
+entire basis of attribution.
+</Callout>
+
+## 6. Read the results
+
+Open the experiment and go to **Results**. As data arrives you will see, per arm:
+
+- **Lift**: how much the treatment moved the metric versus control, with a confidence
+  interval.
+- **Chance to beat control**: the Bayesian probability the treatment is genuinely
+  better.
+- **Significance**: a p-value from the frequentist test, and a separate **safe to
+  call** signal from the always-valid (sequential) test, so you can peek at the
+  numbers as they come in without inflating your false-positive rate.
+- **Sample-ratio check (SRM)**: a health flag that the split arrived as intended. If
+  it is unhealthy, fix the assignment before trusting the readout.
+
+When the primary metric is significant and pointing the right way, you have your
+answer. Roll the winner out by setting the flag's default to that variant, or stop
+the experiment and keep iterating.
+
+How each number is computed is spelled out in
+[How results work](/docs/experiments/statistics).
+
+## What you built
+
+- A flag that splits traffic into control and treatment.
+- Exposures that record who saw which arm, automatically.
+- A metric and an experiment that measure the outcome.
+- A result you can act on, then ship with the same flag.
+
+## Next steps
+
+- **[Targeting and segments](/docs/feature-flags/targeting)**: run the experiment on
+  just one segment, or exclude internal users.
+- **[Holdouts](/docs/experiments/holdouts)**: hold a global control group out of every
+  experiment to measure your combined impact over time.
+- **[How results work](/docs/experiments/statistics)**: the stats behind lift,
+  significance, and safe-to-call.

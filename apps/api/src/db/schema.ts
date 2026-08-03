@@ -1006,6 +1006,10 @@ export const experimentMetricEvents = pgTable(
       .notNull()
       .defaultNow(),
     day: date("day").notNull(),
+    /** Per-row idempotency key ("<batch Idempotency-Key>:<index>") so a retried
+     *  /track batch (same header) is inserted exactly once. Null when the client
+     *  sent no Idempotency-Key — then rows are not deduped (the client opted out). */
+    idempotencyKey: text("idempotency_key"),
   },
   (t) => [
     index("experiment_metric_events_org_event_idx").on(
@@ -1017,6 +1021,10 @@ export const experimentMetricEvents = pgTable(
       t.unitHash,
     ),
     index("experiment_metric_events_org_day_idx").on(t.organizationId, t.day),
+    // Exactly-once for keyed batches; keyless (null) rows are unconstrained.
+    uniqueIndex("experiment_metric_events_idem_key")
+      .on(t.organizationId, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} is not null`),
   ],
 );
 

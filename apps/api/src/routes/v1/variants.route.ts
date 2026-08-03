@@ -265,6 +265,21 @@ variants_.delete("/:variantKey", async (c) => {
     );
     if (referenced) return "in-use" as const;
 
+    // Referenced by any environment's DEFAULT SERVE (the JSON default rollout)? The
+    // FK only nulls the default/off VARIANT columns, not this JSON, so without this
+    // guard deleting a variant used only in a default rollout leaves the flag serving
+    // a missing variant -> eval ERROR (a live 400 for bucketed traffic).
+    const envServes = await tx
+      .select({ defaultServe: flagEnvironments.defaultServe })
+      .from(flagEnvironments)
+      .where(eq(flagEnvironments.flagId, flag.id));
+    const inDefaultServe = envServes.some(
+      (e) =>
+        e.defaultServe != null &&
+        variantKeysInServe(e.defaultServe as ServeInput).includes(variantKey),
+    );
+    if (inDefaultServe) return "in-use" as const;
+
     await tx.delete(flagVariants).where(eq(flagVariants.id, variant.id));
     await recordRevision(tx, {
       organizationId: ctx.orgId,

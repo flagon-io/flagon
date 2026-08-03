@@ -173,3 +173,38 @@ describe("segments", () => {
     expect(matchConditions([{ segment: "loop-a" }], {}, segments)).toBe(false);
   });
 });
+
+describe("regex operator (ReDoS-safe)", () => {
+  it("matches a normal pattern", () => {
+    expect(match([{ attribute: "e", op: "regex", values: ["^robin@"] }], { e: "robin@flagon.io" })).toBe(true);
+    expect(match([{ attribute: "e", op: "regex", values: ["^admin@"] }], { e: "robin@flagon.io" })).toBe(false);
+  });
+
+  it("refuses a catastrophic nested-quantifier pattern (fails closed, does not hang)", () => {
+    // (a+)+$ against a long non-matching string is exponential backtracking. It must
+    // return false quickly (rejected), not stall the event loop.
+    const start = Date.now();
+    const r = match(
+      [{ attribute: "e", op: "regex", values: ["(a+)+$"] }],
+      { e: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!" },
+    );
+    expect(r).toBe(false);
+    expect(Date.now() - start).toBeLessThan(100);
+  });
+
+  it("refuses an over-long input", () => {
+    expect(
+      match([{ attribute: "e", op: "regex", values: ["x"] }], { e: "x".repeat(5000) }),
+    ).toBe(false);
+  });
+});
+
+describe("object equality is key-order independent", () => {
+  it("eq treats {a,b} and {b,a} as equal", () => {
+    expect(
+      match([{ attribute: "meta", op: "eq", values: [{ a: 1, b: 2 }] }], {
+        meta: { b: 2, a: 1 },
+      }),
+    ).toBe(true);
+  });
+});

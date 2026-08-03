@@ -14,7 +14,7 @@ import {
 } from "../../experiments/holdout-overlay.js";
 import { recordEvaluations, type UsageEntry } from "../../flags/usage.js";
 import { compactUsageEvents, ingestEvents } from "../../usage/events.js";
-import { maybeAutoExpose } from "../../usage/auto-expose.js";
+import { maybeAutoExpose, claimExposure } from "../../usage/auto-expose.js";
 import { notifyUsageThresholds } from "../../usage/notify.js";
 import { eventsAllowanceStatus, isIngestCapped } from "../../usage/allowance.js";
 import { anyPlanHardCaps, planHardCaps } from "../../lib/plans.js";
@@ -405,14 +405,36 @@ ofrep.post("/v1/exposures", async (c) => {
     }
   }
 
+  // Dedup billing per (env, flag, unit, variant) within the session window, sharing the
+  // SAME window as auto-expose so a customer who uses BOTH the auto path and this
+  // endpoint isn't double-billed for one served evaluation (and in-batch repeats
+  // collapse). Unit-less exposures have no dedup basis, so each is billed. Attribution
+  // below still runs on ALL events — analytics is unaffected. The durable Idempotency-Key
+  // remains the cross-restart retry safety net.
+  const nowMs = Date.now();
+  const billable = (events as ExposureEvent[]).reduce((n, e) => {
+    const unit = typeof e.targetingKey === "string" ? e.targetingKey : "";
+    const flagKey = typeof e.key === "string" ? e.key : "";
+    const variant = typeof e.variant === "string" ? e.variant : "";
+    // Dedup only when we have both a unit and a flag key to key on; otherwise bill
+    // (over-bill is the safe direction, and unkeyable events are filtered upstream).
+    return unit && flagKey &&
+      !claimExposure(identity.environmentId, flagKey, unit, variant, nowMs)
+      ? n
+      : n + 1;
+  }, 0);
+
   // Durable + idempotent: awaited in-band so a write failure becomes an error the
   // client retries safely. `Idempotency-Key` (if sent) is the batch's retry
   // identity; a repeat collapses to a no-op.
   const idempotencyKey = c.req.header("idempotency-key")?.trim() || undefined;
-  const result = await ingestEvents(identity.organizationId, events.length, {
-    source: "flags.exposure",
-    idempotencyKey,
-  });
+  const result =
+    billable > 0
+      ? await ingestEvents(identity.organizationId, billable, {
+          source: "flags.exposure",
+          idempotencyKey,
+        })
+      : { recorded: 0, duplicate: false };
 
   // Off the hot path: attribute exposures to any running experiments (additive
   // analytics — best-effort, idempotent per unit) and, for a genuinely new
@@ -447,7 +469,7 @@ ofrep.post("/v1/exposures", async (c) => {
  * auth, rate limiter, and idempotent-batch durability as exposures.
  *
  * These events are BILLED: they meter through the same durable spine as exposures
- * under source "flags.metric" (one "events" unit, one rate, one shared allowance).
+ * under source "experiments.metric" (one "events" unit, one rate, one shared allowance).
  * The per-unit analysis rows (metric_events) are written off the hot path.
  *
  *   POST /ofrep/v1/track   body: { "events": [ { "metric": "checkout", "targetingKey": "u1", "value": 1 } ] }
@@ -532,7 +554,7 @@ ofrep.post("/v1/track", async (c) => {
     }
   }
 
-  // BILLED in-band, exactly-once (source flags.metric). We meter the ACCEPTED
+  // BILLED in-band, exactly-once (source experiments.metric). We meter the ACCEPTED
   // count so the invoice matches what we stored.
   const idempotencyKey = c.req.header("idempotency-key")?.trim() || undefined;
   const result = await ingestEvents(identity.organizationId, parsed.length, {
@@ -542,8 +564,11 @@ ofrep.post("/v1/track", async (c) => {
 
   // Off the hot path: persist the analysis detail and, for a new receipt, compact
   // + notify. Deferred and self-swallowing so analytics can never fail billing.
+  // recordMetricEvents is idempotent on the SAME idempotencyKey (ON CONFLICT), so it
+  // runs unconditionally — safe on a duplicate, and it self-heals a partially-failed
+  // prior insert. (Billing already dedups; this keeps the stored rows exactly-once.)
   const post: Promise<unknown>[] = [
-    recordMetricEvents(identity.organizationId, parsed),
+    recordMetricEvents(identity.organizationId, parsed, idempotencyKey),
   ];
   if (!result.duplicate) {
     post.push(
@@ -701,7 +726,7 @@ registerRoute({
 
 // The goal-event ingest body: a batch of metric events. Each carries the metric
 // (event) name and the unit (targetingKey), plus an optional numeric `value` for
-// mean/sum metrics. The count is metered as a billable event (source flags.metric).
+// mean/sum metrics. The count is metered as a billable event (source experiments.metric).
 const trackRequestSchema = z.object({
   events: z
     .array(

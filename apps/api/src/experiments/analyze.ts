@@ -371,23 +371,38 @@ export async function analyzeExperiment(
       cuped,
     );
 
-    // Multiple-hypothesis correction across the family of treatment×metric p-values:
-    // re-decide `significant` for every treatment arm under the chosen method.
+    // Multiple-hypothesis correction is applied WITHIN each metric ROLE family, not
+    // across every metric at once. Lumping them together let unrelated secondary and
+    // guardrail metrics dilute a genuine PRIMARY win (and made guardrail regressions
+    // HARDER to detect — the opposite of a guardrail's job). Each role (primary /
+    // secondary / guardrail / watched) is its own family of treatment×metric p-values.
     const alpha = 1 - confidenceLevel / 100;
-    const family: { mi: number; vi: number }[] = [];
-    const pvals: (number | null)[] = [];
+    const byRole = new Map<
+      string,
+      { mi: number; vi: number; p: number | null; sp: number | null }[]
+    >();
     metrics.forEach((mr, mi) =>
       mr.analysis.variants.forEach((v, vi) => {
-        if (!v.isControl) {
-          family.push({ mi, vi });
-          pvals.push(v.pValue);
-        }
+        if (v.isControl) return;
+        const role = mr.role || "secondary";
+        const group = byRole.get(role) ?? [];
+        group.push({ mi, vi, p: v.pValue, sp: v.sequentialPValue });
+        byRole.set(role, group);
       }),
     );
-    const corrected = correctSignificance(pvals, alpha, correction);
-    family.forEach((f, k) => {
-      metrics[f.mi]!.analysis.variants[f.vi]!.significant = corrected[k]!;
-    });
+    for (const group of byRole.values()) {
+      // Correct BOTH decision families so whichever mode the experiment runs in
+      // (fixed vs sequential/always-valid) is multiplicity-aware. The sequential call
+      // keeps its "CI excludes zero" requirement and only gets STRICTER under the
+      // correction (never turns a non-significant result significant).
+      const fixed = correctSignificance(group.map((g) => g.p), alpha, correction);
+      const seq = correctSignificance(group.map((g) => g.sp), alpha, correction);
+      group.forEach((g, k) => {
+        const va = metrics[g.mi]!.analysis.variants[g.vi]!;
+        va.significant = fixed[k]!;
+        va.sequentiallySignificant = va.sequentiallySignificant && seq[k]!;
+      });
+    }
 
     return {
       experimentId,

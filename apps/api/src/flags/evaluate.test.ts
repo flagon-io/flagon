@@ -148,6 +148,24 @@ describe("evaluate — default rollout (SPLIT with no rule)", () => {
     const r = evaluate(flag, { targetingKey: "u" }, noSegments);
     expect(r).toMatchObject({ variant: "on", reason: "STATIC" });
   });
+
+  it("does NOT skew a rollout to one slice when targetingKey is absent (regression)", () => {
+    // Old bug: no targetingKey → everyone hashed to the SAME constant point →
+    // silent 100/0 split with reason SPLIT. Now it can't bucket, so it falls through
+    // to the default variant instead of a degenerate all-one-slice rollout.
+    const r = evaluate(defaultRolloutFlag(), {}, noSegments);
+    expect(r.reason).not.toBe("SPLIT");
+    expect(r).toMatchObject({ variant: "on", reason: "STATIC" });
+  });
+
+  it("serves the rollout fallback when targetingKey is absent and a fallback is set", () => {
+    const flag = boolFlag(true);
+    flag.defaultServe = {
+      rollout: [{ variant: "on", weight: 50 }, { variant: "off", weight: 50 }],
+      fallback: "off",
+    };
+    expect(evaluate(flag, {}, noSegments)).toMatchObject({ variant: "off" });
+  });
 });
 
 describe("evaluate — rollout bucketBy", () => {

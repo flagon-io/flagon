@@ -257,6 +257,17 @@ describe("betaProbabilityToBeat", () => {
     const p = betaProbabilityToBeat(200, 1000, 100, 1000, "increase", 512);
     expect(p).toBeGreaterThan(0.999);
   });
+  it("stays ~0.5 for identical arms at HIGH n (grid-resolution regression)", () => {
+    // A fixed [0,1] grid returned ~0.70 at 100k/arm and ~1.0 at 1M/arm because the
+    // posteriors got sharper than the grid spacing. The windowed grid must hold 0.5.
+    expect(near(betaProbabilityToBeat(50_000, 100_000, 50_000, 100_000, "increase", 512), 0.5, 0.02)).toBe(true);
+    expect(near(betaProbabilityToBeat(500_000, 1_000_000, 500_000, 1_000_000, "increase", 512), 0.5, 0.02)).toBe(true);
+  });
+  it("detects a real lift at high n (not everything collapses to 0.5)", () => {
+    // 10.0% vs 10.2% at 1M/arm is a genuine, resolvable win.
+    const p = betaProbabilityToBeat(102_000, 1_000_000, 100_000, 1_000_000, "increase", 512);
+    expect(p).toBeGreaterThan(0.999);
+  });
 });
 
 describe("analyzeContinuous", () => {
@@ -330,6 +341,21 @@ describe("srm", () => {
       { variantKey: "a", count: 0 },
       { variantKey: "b", count: 0 },
     ])).toBeNull();
+  });
+
+  it("FAILS (not silently healthy) when an arm gets traffic it was not expected to", () => {
+    // 'c' has no weight → expected 0. Old bug: 'c' dropped from chi but df unchanged,
+    // so a badly-broken split could read "healthy". It must fail instead.
+    const r = srm(
+      [
+        { variantKey: "a", count: 5000 },
+        { variantKey: "b", count: 5000 },
+        { variantKey: "c", count: 5000 },
+      ],
+      { expectedWeights: { a: 50, b: 50 } },
+    )!;
+    expect(r.healthy).toBe(false);
+    expect(r.pValue).toBe(0);
   });
 });
 

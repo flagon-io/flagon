@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations } from "../db/auth-tables.js";
 import { reportOrgUsage } from "./report.js";
+import { compactUsageEvents } from "./events.js";
 
 /**
  * The metered-billing reporting sweep — the ONLY place usage is reported to Stripe.
@@ -40,6 +41,13 @@ export async function sweepUsageReports(): Promise<{ orgs: number; sent: number 
   let sent = 0;
   for (const org of orgs) {
     try {
+      // Backstop: compact any receipts whose inline (waitUntil) compaction was dropped
+      // — on Vercel that promise is fire-and-forget and a function timeout/crash after
+      // the 202 loses it. reportOrgUsage only claims COMPACTED receipts, so without
+      // this a straggler stays compacted_at=NULL forever and its Pro usage is never
+      // billed. Compaction is idempotent (UPDATE ... WHERE compacted_at IS NULL) and a
+      // cheap no-op when there's nothing pending.
+      await compactUsageEvents(org.id);
       const result = await reportOrgUsage(org);
       sent += result.sent;
     } catch (err) {

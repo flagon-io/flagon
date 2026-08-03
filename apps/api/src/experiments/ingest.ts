@@ -121,14 +121,22 @@ export type MetricEventInput = {
 /**
  * Persist goal events as analysis detail (metric_events). Billing for these is
  * handled separately by the shared durable spine (usage_events, source
- * "flags.metric"); this table carries only what the stats engine joins on.
+ * "experiments.metric"); this table carries only what the stats engine joins on.
+ *
+ * IDEMPOTENT: with an `idempotencyKey` (the /track batch's Idempotency-Key header)
+ * each row is stamped "<key>:<index>" behind a partial unique index and inserted via
+ * ON CONFLICT DO NOTHING, so a retried batch is stored EXACTLY ONCE — billing already
+ * dedups on the same key, and without this the metric rows would double and inflate
+ * every count/sum/mean lift. Keyless batches (no header) aren't deduped (the client
+ * opted out), matching the billing side. `recorded` counts rows actually inserted.
  */
 export async function recordMetricEvents(
   organizationId: string,
   events: MetricEventInput[],
+  idempotencyKey?: string,
 ): Promise<{ recorded: number }> {
   if (events.length === 0) return { recorded: 0 };
-  const rows = events.map((e) => {
+  const rows = events.map((e, i) => {
     const occurredAt = new Date(
       typeof e.timestamp === "number" ? e.timestamp : Date.now(),
     );
@@ -139,11 +147,16 @@ export async function recordMetricEvents(
       value: typeof e.value === "number" && Number.isFinite(e.value) ? e.value : 1,
       occurredAt,
       day: occurredAt.toISOString().slice(0, 10),
+      idempotencyKey: idempotencyKey ? `${idempotencyKey}:${i}` : null,
     };
   });
 
   return withOrg(organizationId, async (tx) => {
-    await tx.insert(experimentMetricEvents).values(rows);
-    return { recorded: rows.length };
+    const inserted = await tx
+      .insert(experimentMetricEvents)
+      .values(rows)
+      .onConflictDoNothing()
+      .returning({ id: experimentMetricEvents.id });
+    return { recorded: inserted.length };
   });
 }

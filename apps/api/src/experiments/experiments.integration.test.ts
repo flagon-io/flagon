@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 /**
  * End-to-end proof of the experiments spine against the REAL tables:
@@ -198,5 +198,40 @@ describe.skipIf(!DATABASE_URL)("experiments spine (integration)", () => {
     );
     const metricLine = rollup.find((r) => r.source === "experiments.metric");
     expect(metricLine?.count).toBe(total);
+  });
+
+  it("stores metric goal events EXACTLY ONCE on a retried /track batch (idempotency key)", async () => {
+    const key = `retry-batch-${Date.now()}`;
+    const batch = [
+      { name: "signup", targetingKey: "u1", value: 1 },
+      { name: "signup", targetingKey: "u2", value: 5 },
+      { name: "signup", targetingKey: "u3", value: 3 },
+    ];
+    const countRows = () =>
+      withOrg(orgId, (tx) =>
+        tx
+          .select()
+          .from(t.experimentMetricEvents)
+          .where(
+            and(
+              eq(t.experimentMetricEvents.organizationId, orgId),
+              eq(t.experimentMetricEvents.eventName, "signup"),
+            ),
+          ),
+      ).then((r) => r.length);
+
+    const first = await recordMetricEvents(orgId, batch, key);
+    expect(first.recorded).toBe(3);
+    expect(await countRows()).toBe(3);
+
+    // Same key again (SDK retry after a network timeout): must NOT double the rows.
+    const retry = await recordMetricEvents(orgId, batch, key);
+    expect(retry.recorded).toBe(0);
+    expect(await countRows()).toBe(3);
+
+    // Without a key, dedup is off (client opted out) — rows accumulate.
+    await recordMetricEvents(orgId, [{ name: "signup", targetingKey: "u4", value: 1 }]);
+    await recordMetricEvents(orgId, [{ name: "signup", targetingKey: "u4", value: 1 }]);
+    expect(await countRows()).toBe(5);
   });
 });

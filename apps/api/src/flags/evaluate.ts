@@ -119,6 +119,9 @@ function pickProgressive(
   if (percent <= 0) return p.fallback;
   if (percent >= 100) return p.variant;
   const identity = p.bucketBy ? resolvePath(context, p.bucketBy) : context.targetingKey;
+  // Without an identity we can't bucket; serve the fallback rather than hashing every
+  // subject to one constant point (a silent 0/100 skew). See pickRollout.
+  if (identity === undefined || identity === null) return p.fallback;
   const point = bucket(rolloutSeed(flagKey, identity));
   return point < percent / 100 ? p.variant : p.fallback;
 }
@@ -135,10 +138,14 @@ function pickRollout(
   const identity = serve.bucketBy
     ? resolvePath(context, serve.bucketBy)
     : context.targetingKey;
-  // Can't bucket the subject (a custom bucketBy attribute is absent): serve the
-  // explicit fallback rather than hashing every un-attributed subject to one slice.
-  if (serve.bucketBy && (identity === undefined || identity === null) && serve.fallback) {
-    return serve.fallback;
+  // Can't bucket the subject — the bucketBy attribute, or by default the targetingKey,
+  // is absent. Hashing anyway would send EVERY un-attributed subject to the same
+  // constant point (rolloutSeed collapses to "<flag>:"), silently skewing the split to
+  // 100/0. Serve the explicit fallback, else return null so the caller falls through to
+  // the flag's default — never a degenerate all-one-slice rollout. (Applies whether or
+  // not a custom bucketBy is set; the old guard only covered custom bucketBy.)
+  if (identity === undefined || identity === null) {
+    return serve.fallback ?? null;
   }
   const point = bucket(rolloutSeed(flagKey, identity));
 

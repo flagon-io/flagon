@@ -240,32 +240,64 @@ function calendarMonthCycle(atMs = Date.now()): BillingCycle {
   };
 }
 
+/** Per-org cache of the resolved billing cycle. The cycle only changes MONTHLY, so a
+ *  few minutes of caching makes the usage page cheap (no Stripe round-trip per load,
+ *  which measured ~3s) and robust; the worst staleness is one TTL at a cycle boundary.
+ *  Error fallbacks are deliberately NOT cached so a transient Stripe hiccup doesn't
+ *  pin an org to the calendar-month window for the whole TTL. */
+const cycleCache = new Map<string, { cycle: BillingCycle; expiresAt: number }>();
+const CYCLE_TTL_MS = 10 * 60_000;
+const STRIPE_CYCLE_TIMEOUT_MS = 2500;
+
+/** Reject if `p` hasn't settled within `ms` — bounds a slow Stripe call so it can
+ *  never hang the usage page (the caller then falls back to the calendar month). */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("stripe timeout")), ms),
+    ),
+  ]);
+}
+
 /**
  * The org's ACTUAL billing cycle for the usage page: the Stripe subscription's current
  * period (e.g. the 24th → the 24th) when the org has an entitling subscription, else the
  * calendar month. This is what makes the console's "included events this cycle" and the
  * consumption chart line up with the customer's real invoice window instead of the
  * calendar month. Resilient: no subscription, a non-entitling status, or any Stripe error
- * all fall back to the calendar month so the usage page never breaks. One Stripe read per
- * call (the usage page is low-traffic; not on any hot path). In this API version the
- * period lives on the subscription ITEM (`current_period_start/end`), not the sub.
+ * or timeout all fall back to the calendar month so the usage page never hangs or breaks.
+ * Cached per org (the cycle changes monthly) so it's not a Stripe round-trip every load.
+ * In this API version the period lives on the subscription ITEM (`current_period_*`).
  */
-export async function billingCycle(orgId: string): Promise<BillingCycle> {
+export async function billingCycle(orgId: string, nowMs = Date.now()): Promise<BillingCycle> {
+  const hit = cycleCache.get(orgId);
+  if (hit && hit.expiresAt > nowMs) return hit.cycle;
+  const cache = (cycle: BillingCycle): BillingCycle => {
+    cycleCache.set(orgId, { cycle, expiresAt: nowMs + CYCLE_TTL_MS });
+    return cycle;
+  };
+
   const org = await getBillingOrgById(orgId);
-  if (!org?.stripeSubscriptionId) return calendarMonthCycle();
+  if (!org?.stripeSubscriptionId) return cache(calendarMonthCycle(nowMs));
   try {
-    const sub = await getStripe().subscriptions.retrieve(org.stripeSubscriptionId);
-    if (!statusEntitlesPro(sub.status)) return calendarMonthCycle();
+    const sub = await withTimeout(
+      getStripe().subscriptions.retrieve(org.stripeSubscriptionId),
+      STRIPE_CYCLE_TIMEOUT_MS,
+    );
+    if (!statusEntitlesPro(sub.status)) return cache(calendarMonthCycle(nowMs));
     const item = sub.items.data[0];
     const start = item?.current_period_start;
     const end = item?.current_period_end;
     if (typeof start !== "number" || typeof end !== "number") {
-      return calendarMonthCycle();
+      return cache(calendarMonthCycle(nowMs));
     }
     const day = (unix: number) => new Date(unix * 1000).toISOString().slice(0, 10);
-    return { from: day(start), to: day(end), source: "stripe" };
+    return cache({ from: day(start), to: day(end), source: "stripe" });
   } catch {
-    return calendarMonthCycle();
+    // Transient Stripe failure/timeout: fall back WITHOUT caching, so the next load
+    // retries instead of showing the calendar month for the whole TTL.
+    return calendarMonthCycle(nowMs);
   }
 }
 

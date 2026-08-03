@@ -128,12 +128,22 @@ function applyOperator(
   }
 }
 
+/** Deterministic JSON with object keys SORTED, so structural equality of objects and
+ *  arrays doesn't depend on key insertion order ({a,b} equals {b,a}). */
+function canonicalJson(v: JsonValue): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  const obj = v as { [k: string]: JsonValue };
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k]!)}`).join(",")}}`;
+}
+
 /** Equality that treats "42" and 42 as equal, so context typing is forgiving. */
 function looseEquals(a: JsonValue, b: JsonValue | undefined): boolean {
   if (a === b) return true;
   if (a == null || b == null) return false;
   if (typeof a === "object" || typeof b === "object") {
-    return JSON.stringify(a) === JSON.stringify(b);
+    return canonicalJson(a) === canonicalJson(b as JsonValue);
   }
   return String(a) === String(b);
 }
@@ -153,7 +163,26 @@ function compareNumeric(
   return cmp(na, nb);
 }
 
+// A quantified group that itself contains an unbounded quantifier — the classic
+// catastrophic-backtracking family `(a+)+`, `(a*)*`, `(.+)*`, etc. Matching such a
+// pattern against a crafted input is exponential and would stall the eval event loop
+// for every co-tenant on the instance, so we refuse to run it. Heuristic, not a proof:
+// it catches the common nested-quantifier forms; a hard guarantee would need a
+// linear-time engine (re2) or a per-eval timeout — a deliberate follow-up.
+const NESTED_QUANTIFIER = /\([^)]*[+*][^)]*\)[+*]/;
+const MAX_REGEX_PATTERN = 1000;
+const MAX_REGEX_INPUT = 4000;
+
 function safeRegexTest(pattern: string, input: string): boolean {
+  // Bound the work per evaluation and refuse patterns/inputs that could hang the
+  // hot path. A rule that can't be evaluated safely simply does not match (fail closed).
+  if (
+    pattern.length > MAX_REGEX_PATTERN ||
+    input.length > MAX_REGEX_INPUT ||
+    NESTED_QUANTIFIER.test(pattern)
+  ) {
+    return false;
+  }
   try {
     return new RegExp(pattern).test(input);
   } catch {

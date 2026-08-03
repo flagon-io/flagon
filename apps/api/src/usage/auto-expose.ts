@@ -30,6 +30,23 @@ import type { EvaluationContext, EvaluationResult, FlagConfig } from "../flags/t
 // Process-local session-dedup (createSessionDedup is pure; see session-dedup.ts).
 const dedup = createSessionDedup(env.EXPOSURE_DEDUP_TTL_MS);
 
+/**
+ * Claim ONE billable exposure for a (env, flag, unit, variant) within the session
+ * window: true the first time (bill it), false while still in-window (already billed).
+ * SHARED by the auto path AND the explicit `/ofrep/v1/exposures` endpoint so a customer
+ * who uses both is billed once per served evaluation, not twice.
+ */
+export function claimExposure(
+  environmentId: string,
+  flagKey: string,
+  unit: string,
+  variant: string,
+  nowMs: number = Date.now(),
+): boolean {
+  const key = `${environmentId}:${flagKey}:${hashUnit(unit)}:${variant}`;
+  return dedup.markSeen(key, nowMs);
+}
+
 // --- Plan-cap gate, cached per org (~60s) so the deduped exposures don't each hit
 // the DB. Uses the plan the client key already resolved. A capped Hobby org keeps
 // getting flags SERVED; it just stops accruing billable exposures. --------------
@@ -87,10 +104,12 @@ export async function maybeAutoExpose(
 
     const variant = result.variant ?? "";
     const nowMs = Date.now();
-    const key = `${identity.environmentId}:${flag.key}:${hashUnit(unit)}:${variant}`;
-    if (!dedup.markSeen(key, nowMs)) return; // already billed this session
 
+    // Cap check BEFORE claiming the dedup slot: a capped org must not mark the
+    // (env,flag,unit,variant) "billed" (which would then suppress a real bill for the
+    // rest of the window if the org un-caps). Cheap — the cap state is cached ~60s.
     if (await orgIsCapped(identity.organizationId, identity.plan, nowMs)) return;
+    if (!claimExposure(identity.environmentId, flag.key, unit, variant, nowMs)) return;
 
     await ingestEvents(identity.organizationId, 1, { source: "flags.exposure" });
     await attributeExposures(identity.organizationId, identity.environmentId, [

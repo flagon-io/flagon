@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, gte, lt, sql } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
 import { usageCounters, usageEventRollups } from "../db/schema.js";
 import {
@@ -73,12 +73,13 @@ export async function eventsUsedInPeriod(
 }
 
 /**
- * Total billable events an org recorded within a day range [fromDay, toDay] (inclusive),
- * summed from the per-day usage rollups across every source. Used for a Stripe billing
- * cycle, whose window (e.g. the 24th → 24th) doesn't line up with the calendar-month
- * counter. Org-scoped by RLS inside the withOrg tx, exactly like the counter read above
- * (usage_event_rollups carries flagon_apply_tenant_rls, migration 0010). Days are `date`
- * strings 'YYYY-MM-DD'; future days simply contribute nothing.
+ * Total billable events an org recorded within a day range, summed from the per-day
+ * usage rollups across every source. The window is **half-open [fromDay, toDay)** — the
+ * end day is EXCLUSIVE. A Stripe cycle's `period_end` instant equals the next cycle's
+ * `period_start`, so counting that boundary day inclusively would sum it into BOTH
+ * cycles' totals; making the end exclusive gives each boundary day to exactly one cycle
+ * (the one it starts). Org-scoped by RLS inside the withOrg tx, exactly like the counter
+ * read above (usage_event_rollups carries flagon_apply_tenant_rls, migration 0010).
  */
 export async function eventsUsedInRange(
   tx: TenantTx,
@@ -91,7 +92,7 @@ export async function eventsUsedInRange(
     .where(
       and(
         gte(usageEventRollups.day, fromDay),
-        lte(usageEventRollups.day, toDay),
+        lt(usageEventRollups.day, toDay),
       ),
     );
   return Number(row?.total ?? 0);
