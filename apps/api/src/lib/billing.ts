@@ -4,6 +4,7 @@ import { db } from "../db/client.js";
 import { organizations } from "../db/auth-tables.js";
 import { getStripe, getProPriceId, getMeteredPriceId } from "./stripe.js";
 import { statusEntitlesPro } from "./entitlement.js";
+import type { BillingCycle } from "../usage/allowance.js";
 
 /**
  * The billing service: everything that talks to Stripe about an organization's
@@ -225,6 +226,47 @@ export async function getBillingSummary(
     cancelAtPeriodEnd: sub.cancel_at_period_end,
     discount,
   };
+}
+
+/** First-of-month → end-of-month (UTC) as day strings — the billing cycle for an org
+ *  with no active Stripe subscription (free Hobby). */
+function calendarMonthCycle(atMs = Date.now()): BillingCycle {
+  const now = new Date(atMs);
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  return {
+    from: day(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))),
+    to: day(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0))),
+    source: "calendar",
+  };
+}
+
+/**
+ * The org's ACTUAL billing cycle for the usage page: the Stripe subscription's current
+ * period (e.g. the 24th → the 24th) when the org has an entitling subscription, else the
+ * calendar month. This is what makes the console's "included events this cycle" and the
+ * consumption chart line up with the customer's real invoice window instead of the
+ * calendar month. Resilient: no subscription, a non-entitling status, or any Stripe error
+ * all fall back to the calendar month so the usage page never breaks. One Stripe read per
+ * call (the usage page is low-traffic; not on any hot path). In this API version the
+ * period lives on the subscription ITEM (`current_period_start/end`), not the sub.
+ */
+export async function billingCycle(orgId: string): Promise<BillingCycle> {
+  const org = await getBillingOrgById(orgId);
+  if (!org?.stripeSubscriptionId) return calendarMonthCycle();
+  try {
+    const sub = await getStripe().subscriptions.retrieve(org.stripeSubscriptionId);
+    if (!statusEntitlesPro(sub.status)) return calendarMonthCycle();
+    const item = sub.items.data[0];
+    const start = item?.current_period_start;
+    const end = item?.current_period_end;
+    if (typeof start !== "number" || typeof end !== "number") {
+      return calendarMonthCycle();
+    }
+    const day = (unix: number) => new Date(unix * 1000).toISOString().slice(0, 10);
+    return { from: day(start), to: day(end), source: "stripe" };
+  } catch {
+    return calendarMonthCycle();
+  }
 }
 
 /** Resolve a customer id from Stripe's `string | Customer | DeletedCustomer`. */

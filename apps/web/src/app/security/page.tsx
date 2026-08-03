@@ -17,7 +17,9 @@ export default function SecurityPage() {
     >
       <h2>Accounts and credentials</h2>
       <ul>
-        <li>Passwords are stored only as salted hashes, never in plain text.</li>
+        <li>
+          Passwords are stored only as salted hashes, never in plain text.
+        </li>
         <li>
           Access tokens (personal and organization) are shown once and stored
           only as hashes; you can revoke any token at any time.
@@ -37,8 +39,8 @@ export default function SecurityPage() {
           connects with a database role that cannot bypass it.
         </li>
         <li>
-          Within your organization, access is governed by member roles, and every
-          request is authorized before it reaches your data.
+          Within your organization, access is governed by member roles, and
+          every request is authorized before it reaches your data.
         </li>
         <li>Data is encrypted in transit (TLS).</li>
         <li>
@@ -50,12 +52,11 @@ export default function SecurityPage() {
       <h2>Reporting a vulnerability</h2>
       <p>
         If you believe you have found a security vulnerability, please report it
-        privately to{" "}
-        <a href="mailto:security@flagon.io">security@flagon.io</a> rather than
-        opening a public issue. Include enough detail to reproduce it. We will
-        acknowledge your report, investigate, and keep you updated. We appreciate
-        responsible disclosure and will not pursue action against good-faith
-        research that respects our users&apos; privacy and data.
+        privately to <a href="mailto:security@flagon.io">security@flagon.io</a>{" "}
+        rather than opening a public issue. Include enough detail to reproduce
+        it. We will acknowledge your report, investigate, and keep you updated.
+        We appreciate responsible disclosure and will not pursue action against
+        good-faith research that respects our users&apos; privacy and data.
       </p>
 
       <h2>Scope</h2>

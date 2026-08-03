@@ -6,6 +6,7 @@ import { validationError } from "../../lib/http.js";
 import { resolveOrg, orgPlan } from "../../lib/org-context.js";
 import { orgUsage } from "../../usage/org-usage.js";
 import { eventsAllowanceStatus } from "../../usage/allowance.js";
+import { billingCycle } from "../../lib/billing.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
@@ -29,13 +30,6 @@ const usageQuery = z.object({
   to: z.string().regex(DAY, "Use a YYYY-MM-DD date.").optional(),
   groupBy: z.enum(GROUP_BY).default("meter"),
 });
-
-/** UTC day string `offsetDays` before today (0 = today). */
-function dayString(offsetDays: number): string {
-  return new Date(Date.now() - offsetDays * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
-}
 
 const usageResponseSchema = z.object({
   usage: z.object({
@@ -69,8 +63,9 @@ const usageResponseSchema = z.object({
       chargeCents: z.number(),
     }),
   }),
-  // The events-allowance picture for the CURRENT month (independent of the chart
-  // range above): what the plan includes, what's used, and whether the org is over.
+  // The events-allowance picture for the org's current BILLING CYCLE (the Stripe
+  // subscription period, else the calendar month) — independent of the chart range
+  // above: what the plan includes, what's used this cycle, and whether it's over.
   // Measured always; ingest is only refused when `entitlement.hardCap` is true.
   entitlement: z.object({
     plan: z.string(),
@@ -119,14 +114,17 @@ usage_.get("/", async (c) => {
   });
   if (!parsed.success) return validationError(c, parsed.error);
 
-  // Default to the trailing 30 days (inclusive of today) when unbounded.
-  const to = parsed.data.to ?? dayString(0);
-  const from = parsed.data.from ?? dayString(29);
+  // The org's real billing cycle (Stripe subscription period, else calendar month).
+  // The allowance bar always reflects this cycle; the chart defaults to it too when no
+  // explicit range is given (the client omits from/to for its "cycle" view).
+  const cycle = await billingCycle(ctx.orgId);
+  const to = parsed.data.to ?? cycle.to;
+  const from = parsed.data.from ?? cycle.from;
 
   const plan = await orgPlan(ctx.orgId);
   const { usage, entitlement } = await withOrg(ctx.orgId, async (tx) => ({
     usage: await orgUsage(tx, { from, to, groupBy: parsed.data.groupBy }),
-    entitlement: await eventsAllowanceStatus(tx, plan),
+    entitlement: await eventsAllowanceStatus(tx, plan, cycle),
   }));
 
   return c.json({ usage, entitlement });

@@ -80,16 +80,24 @@ export default async function UsagePage({
   const groupBy: UsageGroupBy = GROUP_BY.includes(sp.groupBy as UsageGroupBy)
     ? (sp.groupBy as UsageGroupBy)
     : "meter";
-  const selectedPeriod = range === "cycle" ? currentCycle() : null;
-  const days = selectedPeriod ? null : RANGE_DAYS[range]!;
-  const from = selectedPeriod?.from ?? dayString(days! - 1);
-  const to = selectedPeriod?.to ?? dayString(0);
+  // For the "cycle" view, omit from/to so the API windows to the org's REAL billing
+  // cycle (its Stripe subscription period, else the calendar month). For a fixed range
+  // (7/30/90), send explicit dates. The bar (entitlement) always reflects the cycle.
+  const days = range === "cycle" ? null : RANGE_DAYS[range]!;
+  const reqFrom = days ? dayString(days - 1) : undefined;
+  const reqTo = days ? dayString(0) : undefined;
 
-  const result = await getOrgUsage(slug, { from, to, groupBy });
+  const result = await getOrgUsage(slug, { from: reqFrom, to: reqTo, groupBy });
   const usage = result?.usage ?? null;
-  // The events-allowance status is for the CURRENT month (independent of the
-  // chart range), so the bar reflects the real monthly cap whatever range is shown.
+  // The events-allowance status is for the org's current BILLING CYCLE (independent of
+  // the chart range), so the bar reflects the real cycle whatever range is shown.
   const entitlement = result?.entitlement ?? null;
+
+  // Label from the API's returned range — authoritative for the cycle (24th→24th on a
+  // subscription). Fall back to the local calendar month only if the request failed.
+  const fallbackCycle = currentCycle();
+  const from = usage?.range.from ?? reqFrom ?? fallbackCycle.from;
+  const to = usage?.range.to ?? reqTo ?? fallbackCycle.to;
 
   const plan = membership.plan;
   const includedEvents = planIncludedEvents(plan);
@@ -166,7 +174,7 @@ export default async function UsagePage({
 }
 
 /**
- * The monthly event allowance burn-down for the CURRENT month. On a billing plan
+ * The event allowance burn-down for the current BILLING CYCLE. On a billing plan
  * it is the "Included Events" you draw down before overage; on a cap plan (free
  * tier) it is the "Free Events" ceiling, and reaching it means upgrade, not a bill.
  * `enforcing` tells whether the cap is actually blocking yet (it is off until
@@ -197,7 +205,7 @@ function EventsBar({
           <span className={over ? "text-amber-400" : "text-zinc-200"}>
             {compact(usedEvents)}
           </span>{" "}
-          / {compact(includedEvents)} this month
+          / {compact(includedEvents)} this cycle
         </span>
       </div>
       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8">
@@ -209,12 +217,12 @@ function EventsBar({
       {over ? (
         <p className="mt-2 text-xs text-amber-400/90">
           {bills
-            ? `${compact(overageEvents)} events beyond your monthly allowance.${
+            ? `${compact(overageEvents)} events beyond your allowance this cycle.${
                 enforcing
                   ? " Billed at the usage rate."
                   : " Enforcement is off, so this is a projection."
               }`
-            : `You've reached your ${compact(includedEvents)} free events this month.${
+            : `You've reached your ${compact(includedEvents)} free events this cycle.${
                 enforcing
                   ? " Sending is paused until you upgrade to Pro."
                   : " Enforcement is off, so sending continues; upgrade to Pro to raise your limit."
@@ -404,11 +412,11 @@ function UsageTable({
       <p className="border-t border-white/8 px-5 py-3 text-xs text-zinc-600">
         {includedEvents > 0
           ? bills
-            ? `Your plan includes ${compact(includedEvents)} events a month; you only pay for events beyond it.`
-            : `Your plan includes up to ${compact(includedEvents)} events a month, free. Past that, sending pauses until you upgrade to Pro, we never bill you on the free plan.`
+            ? `Your plan includes ${compact(includedEvents)} events per cycle; you only pay for events beyond it.`
+            : `Your plan includes up to ${compact(includedEvents)} events per cycle, free. Past that, sending pauses until you upgrade to Pro, we never bill you on the free plan.`
           : "Events are billed against your contracted volume."}{" "}
-        Reads and checks are always free. This is your running total for the
-        period; the final invoice is issued monthly.
+        Reads and checks are always free. This is your running total for the current
+        billing cycle; the final invoice is issued at the end of it.
       </p>
     </section>
   );

@@ -1,6 +1,6 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
-import { usageCounters } from "../db/schema.js";
+import { usageCounters, usageEventRollups } from "../db/schema.js";
 import {
   planCreditCents,
   planHardCaps,
@@ -31,6 +31,16 @@ import { EVENTS_METER, chargeCents } from "./meters.js";
 
 export type BillingPeriod = { from: string; to: string };
 
+/**
+ * A billing cycle window for the usage page: either the org's Stripe subscription
+ * period (`stripe`, e.g. the 24th → 24th) or the calendar month (`calendar`, the
+ * fallback for orgs with no active subscription). `source` decides how usage is
+ * counted: a stripe cycle sums the per-day rollups over the range; a calendar cycle
+ * reads the exact atomic monthly counter (the same source enforcement uses). Built
+ * by `billingCycle()` in lib/billing.ts.
+ */
+export type BillingCycle = BillingPeriod & { source: "stripe" | "calendar" };
+
 /** The current calendar-month period (UTC): first of the month through today. */
 export function currentBillingPeriod(atMs?: number): BillingPeriod {
   const now = new Date(atMs ?? Date.now());
@@ -59,6 +69,31 @@ export async function eventsUsedInPeriod(
     .select({ total: usageCounters.count })
     .from(usageCounters)
     .where(eq(usageCounters.period, periodKey(period)));
+  return Number(row?.total ?? 0);
+}
+
+/**
+ * Total billable events an org recorded within a day range [fromDay, toDay] (inclusive),
+ * summed from the per-day usage rollups across every source. Used for a Stripe billing
+ * cycle, whose window (e.g. the 24th → 24th) doesn't line up with the calendar-month
+ * counter. Org-scoped by RLS inside the withOrg tx, exactly like the counter read above
+ * (usage_event_rollups carries flagon_apply_tenant_rls, migration 0010). Days are `date`
+ * strings 'YYYY-MM-DD'; future days simply contribute nothing.
+ */
+export async function eventsUsedInRange(
+  tx: TenantTx,
+  fromDay: string,
+  toDay: string,
+): Promise<number> {
+  const [row] = await tx
+    .select({ total: sql<number>`coalesce(sum(${usageEventRollups.count}), 0)` })
+    .from(usageEventRollups)
+    .where(
+      and(
+        gte(usageEventRollups.day, fromDay),
+        lte(usageEventRollups.day, toDay),
+      ),
+    );
   return Number(row?.total ?? 0);
 }
 
@@ -92,16 +127,28 @@ export type AllowanceStatus = {
   creditUsedCents: number;
 };
 
-/** Compute an org's events-allowance status for the current period. */
+/**
+ * Compute an org's events-allowance status for its current billing cycle.
+ *
+ * With a `cycle` (the org's Stripe subscription period, passed by the usage route),
+ * the window and usage follow that cycle — a stripe cycle sums the per-day rollups
+ * over its range, so the console matches the customer's actual invoice window. Without
+ * one (enforcement on the ingest hot path, and any Hobby org) it falls back to the
+ * calendar month read from the exact atomic counter — the original behavior, unchanged.
+ */
 export async function eventsAllowanceStatus(
   tx: TenantTx,
   plan: string,
+  cycle?: BillingCycle,
   atMs?: number,
 ): Promise<AllowanceStatus> {
-  const period = currentBillingPeriod(atMs);
+  const period: BillingPeriod = cycle ?? currentBillingPeriod(atMs);
   const overageMode = planOverage(plan);
   const includedEvents = planIncludedEvents(plan);
-  const usedEvents = await eventsUsedInPeriod(tx, period);
+  const usedEvents =
+    cycle?.source === "stripe"
+      ? await eventsUsedInRange(tx, cycle.from, cycle.to)
+      : await eventsUsedInPeriod(tx, period);
 
   // Contracted plans have no allowance to be "over": their usage is shown as
   // volume against a term envelope elsewhere, so never flag them here.
