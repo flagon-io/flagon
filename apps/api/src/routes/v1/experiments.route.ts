@@ -40,8 +40,8 @@ const slug = z
   .min(1)
   .max(63)
   .regex(
-    /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/,
-    "Use lowercase letters, numbers, and single hyphens.",
+    /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/,
+    "Use lowercase letters, numbers, hyphens, and underscores, starting and ending with a letter or number.",
   );
 
 const role = z.enum(["primary", "secondary", "guardrail"]);

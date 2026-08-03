@@ -119,11 +119,31 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+/**
+ * A failed-validation response carries a per-field `errors` map (see the API's
+ * `validationError`); its top-level `message` is only the generic "The given
+ * data was invalid." Pull the first field message out so the UI can say *what*
+ * was wrong (e.g. the slug's allowed characters) instead of the generic line.
+ */
+function fieldError(body: unknown): string | undefined {
+  const errors = (body as { errors?: Record<string, string[]> } | null)?.errors;
+  if (!errors) return undefined;
+  for (const messages of Object.values(errors)) {
+    if (messages?.length) return messages[0];
+  }
+  return undefined;
+}
+
 /** Parse a JSON response, returning its `message` as an error when not ok. */
 async function unwrap<T>(res: Response): Promise<{ data?: T; error?: string }> {
   const body = await res.json().catch(() => null);
   if (!res.ok) {
-    return { error: (body?.message as string) ?? `Request failed (${res.status}).` };
+    return {
+      error:
+        fieldError(body) ??
+        (body?.message as string) ??
+        `Request failed (${res.status}).`,
+    };
   }
   return { data: body as T };
 }

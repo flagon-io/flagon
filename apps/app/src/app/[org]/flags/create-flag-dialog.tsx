@@ -115,7 +115,10 @@ function CreateFlagDialog({ slug, onClose }: { slug: string; onClose: () => void
       />
       <ModalBody>
         <div className="flex flex-col gap-4">
-          <Field label="Slug">
+          <Field
+            label="Slug"
+            hint="Lowercase letters, numbers, hyphens, and underscores. This is the key you reference in code."
+          >
             <Input
               value={flagSlug}
               onChange={(e) => setFlagSlug(e.target.value)}

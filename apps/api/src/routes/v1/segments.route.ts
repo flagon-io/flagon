@@ -28,7 +28,10 @@ const slug = z
   .toLowerCase()
   .min(1)
   .max(63)
-  .regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/, "Use lowercase letters, numbers, and single hyphens.");
+  .regex(
+    /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/,
+    "Use lowercase letters, numbers, hyphens, and underscores, starting and ending with a letter or number.",
+  );
 
 const createSegment = z.object({
   key: slug,
