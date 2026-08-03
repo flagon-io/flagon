@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { organizations } from "../db/auth-tables.js";
 import { reportOrgUsage } from "./report.js";
 import { compactUsageEvents } from "./events.js";
+import { captureError } from "../lib/monitoring.js";
 
 /**
  * The metered-billing reporting sweep — the ONLY place usage is reported to Stripe.
@@ -18,7 +19,11 @@ import { compactUsageEvents } from "./events.js";
 // Mirrors entitlement.ts ENTITLING_STATUSES; a plain array for the SQL IN filter.
 const ENTITLING_STATUSES = ["active", "trialing", "past_due"];
 
-export async function sweepUsageReports(): Promise<{ orgs: number; sent: number }> {
+export async function sweepUsageReports(): Promise<{
+  orgs: number;
+  sent: number;
+  failed: number;
+}> {
   const orgs = await db
     .select({
       id: organizations.id,
@@ -39,6 +44,7 @@ export async function sweepUsageReports(): Promise<{ orgs: number; sent: number 
     );
 
   let sent = 0;
+  let failed = 0;
   for (const org of orgs) {
     try {
       // Backstop: compact any receipts whose inline (waitUntil) compaction was dropped
@@ -51,8 +57,12 @@ export async function sweepUsageReports(): Promise<{ orgs: number; sent: number 
       const result = await reportOrgUsage(org);
       sent += result.sent;
     } catch (err) {
-      console.error(`[report-sweep] org ${org.slug} failed:`, err);
+      // Swallow per-org so one org's Stripe/DB failure leaves its receipts for the
+      // next sweep without blocking the others — but alert, because a persistent
+      // failure here silently drops that org's bill.
+      failed += 1;
+      captureError(`[report-sweep] org ${org.slug} failed`, err, { org: org.slug });
     }
   }
-  return { orgs: orgs.length, sent };
+  return { orgs: orgs.length, sent, failed };
 }

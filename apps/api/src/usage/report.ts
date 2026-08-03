@@ -5,6 +5,7 @@ import { withOrg } from "../db/tenant.js";
 import { getStripe } from "../lib/stripe.js";
 import { isMeteredReportable } from "../lib/entitlement.js";
 import type { BillingOrg } from "../lib/billing.js";
+import { captureError, captureWarning } from "../lib/monitoring.js";
 import { sourceMeter } from "./meters.js";
 
 /**
@@ -98,9 +99,10 @@ async function sendPending(org: BillingOrg): Promise<number> {
     // so a cron outage is visible; the reconcile-meter tie-out is the backstop.
     const ageMinutes = (Date.now() - new Date(row.createdAt).getTime()) / 60000;
     if (ageMinutes > 60) {
-      console.warn(
+      captureWarning(
         `[report] report ${row.id} has been pending ${Math.round(ageMinutes)}min — ` +
           `investigate (cron gap / repeated Stripe failure).`,
+        { reportId: row.id, org: org.slug, ageMinutes: Math.round(ageMinutes) },
       );
     }
     try {
@@ -122,7 +124,11 @@ async function sendPending(org: BillingOrg): Promise<number> {
       sentQty += row.quantity;
     } catch (err) {
       // Leave the row pending; the next sweep retries with the same identifier.
-      console.error(`[report] meter event failed for report ${row.id}:`, err);
+      // Alert: a persistent failure here is a row aging toward the 24h dedup lapse.
+      captureError(`[report] meter event failed for report ${row.id}`, err, {
+        reportId: row.id,
+        org: org.slug,
+      });
     }
   }
   return sentQty;

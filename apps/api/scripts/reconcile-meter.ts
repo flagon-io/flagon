@@ -54,8 +54,12 @@ async function main() {
   const now = new Date();
   const periodKey = now.toISOString().slice(0, 7);
   const monthStart = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000);
-  // Round end down to the hour (meter summaries require aligned bounds).
-  const endTime = Math.floor(now.getTime() / 1000 / 3600) * 3600;
+  // A meter summary with a daily grouping window requires DAY-aligned bounds. monthStart
+  // is already day-aligned; round the end UP to the next UTC midnight so today's usage is
+  // included. (Stripe's dahlia API rejects hour-aligned bounds here, expecting the
+  // enclosing day boundary — an hour-aligned end_time 400s the request.)
+  const DAY = 86400;
+  const endTime = Math.ceil(now.getTime() / 1000 / DAY) * DAY;
 
   // Ours: the sent report rows for this period.
   const sentRows = await withOrg(org.id, (tx) =>

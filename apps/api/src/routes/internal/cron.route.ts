@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { isBillingConfigured } from "../../lib/stripe.js";
 import { sweepUsageReports } from "../../usage/report-sweep.js";
+import { flushMonitoring } from "../../lib/monitoring.js";
 
 /**
  * Internal cron endpoints — mounted at /internal, OUTSIDE /v1 (no auth-context, no
@@ -29,5 +30,10 @@ internal.on(["GET", "POST"], "/cron/report", async (c) => {
     return c.json({ ok: true, skipped: "billing not configured" });
   }
   const result = await sweepUsageReports();
+  // Any per-org failures were captured to Sentry inside the sweep (the real alert);
+  // flush before the serverless function freezes, or those events are lost. `ok` stays
+  // endpoint-liveness (did the sweep run) so a single transient org failure that
+  // self-heals next sweep doesn't page; `failed` is surfaced as data a monitor can read.
+  await flushMonitoring();
   return c.json({ ok: true, ...result });
 });

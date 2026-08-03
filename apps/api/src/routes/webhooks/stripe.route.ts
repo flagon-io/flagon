@@ -15,6 +15,7 @@ import { handleInvoicePaidCredit } from "../../lib/billing-credits.js";
 import { statusEntitlesPro } from "../../lib/entitlement.js";
 import { reportOrgUsage } from "../../usage/report.js";
 import { logger } from "../../lib/logger.js";
+import { captureError } from "../../lib/monitoring.js";
 
 /**
  * Best-effort: add the metered events item to an entitled sub that lacks it (self-heal
@@ -103,7 +104,11 @@ stripeWebhook.post("/", async (c) => {
           try {
             await reportOrgUsage(org);
           } catch (err) {
-            logger.warn("[stripe:webhook] final usage flush failed", { err });
+            // The sub is about to be un-metered forever; a dropped final flush is
+            // permanently lost usage, so alert rather than just log.
+            captureError("[stripe:webhook] final usage flush failed", err, {
+              org: org.slug,
+            });
           }
         }
         logResult(
@@ -117,8 +122,13 @@ stripeWebhook.post("/", async (c) => {
         break; // Unhandled event types are acknowledged and ignored.
     }
   } catch (err) {
-    // A processing error (e.g. transient DB blip) SHOULD be retried by Stripe.
-    logger.error(`[stripe:webhook] handling ${event.type} failed`, { err });
+    // A processing error (e.g. transient DB blip) SHOULD be retried by Stripe. We
+    // return 500 (not throw), so this never reaches the request-boundary onError —
+    // capture here or a webhook that keeps failing past Stripe's retry window is
+    // invisible.
+    captureError(`[stripe:webhook] handling ${event.type} failed`, err, {
+      eventType: event.type,
+    });
     return c.text("Webhook handler error.", 500);
   }
 
