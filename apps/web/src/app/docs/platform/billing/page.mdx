@@ -38,17 +38,18 @@ into the same credit.
 
 | Plan | Base | Included | Past the allowance |
 | --- | --- | --- | --- |
-| **Hobby** | Free | 1M events / month | Metering stops (events are refused); a single user, a single organization |
-| **Pro** | $50 / month | About 3M events / month | Overage billed at the metered rate |
+| **Hobby** | Free | A free monthly allowance | Metering stops (events are refused); a single user, a single organization |
+| **Pro** | $50 / month | Your monthly usage | Overage billed at the metered rate |
 | **Enterprise** | Contract | A negotiated envelope | Trued up against the contract |
 
-Events meter at **$0.05 per 1,000**. **Pro is $50/mo and includes about three million
-events** before any overage. That included usage is shared: every product's events
-draw from the same allowance, so you're never rationing per-product limits. You pay
-$50 until you pass roughly 3M events, then only the difference at the metered rate.
+Events meter at **$0.03 per 1,000**. **Pro is $50/mo and includes your monthly usage**
+across every product before any overage. That included usage is shared: every product's
+events draw from the same allowance, so you're never rationing per-product limits. You
+pay $50 until your usage exceeds what the plan includes, then only the difference at the
+metered rate. Your current allowance is always shown on the usage page in the app.
 
 <Callout tone="warning" title="Hobby is a hard cap">
-The free Hobby tier stops metering once you pass **1M events** in a cycle:
+The free Hobby tier stops metering once you pass its **free monthly allowance**:
 further exposure ingest is refused with a `403`. Flag **evaluation keeps working**
 (checks are always free), only the recording of new exposures stops. You get
 warning emails at 80% and 100%, so the cap never arrives unannounced. Upgrade to

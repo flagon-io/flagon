@@ -136,7 +136,7 @@ export default async function UsagePage({
       {entitlement && entitlement.includedEvents > 0 ? (
         // Both plans show the EVENT allowance (X of N events), never a dollar credit:
         // Hobby is the free ceiling (hard cap), Pro is "included then overage". Keeping
-        // it event-based means the customer sees "$50/mo, ~3M events", never an internal
+        // it event-based means the customer sees "$50/mo, ~1.7M events", never an internal
         // credit dollar figure. The dollar detail lives in the invoice table below.
         <EventsBar
           usedEvents={entitlement.usedEvents}

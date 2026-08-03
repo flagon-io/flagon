@@ -78,13 +78,13 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
   const statusFor = (plan: string) =>
     withOrg(orgId, (tx) => eventsAllowanceStatus(tx, plan));
 
-  it("hobby under the 1M cap is not over", async () => {
-    await seed(500_000);
+  it("hobby under the 500K cap is not over", async () => {
+    await seed(250_000);
     const s = await statusFor("hobby");
     expect(s).toMatchObject({
-      includedEvents: 1_000_000,
-      usedEvents: 500_000,
-      remainingEvents: 500_000,
+      includedEvents: 500_000,
+      usedEvents: 250_000,
+      remainingEvents: 250_000,
       overageEvents: 0,
       isOver: false,
       overageCents: 0,
@@ -101,7 +101,7 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
     expect(s).toMatchObject({
       usedEvents: 1_500_000,
       remainingEvents: 0,
-      overageEvents: 500_000,
+      overageEvents: 1_000_000,
       isOver: true,
       overageCents: 0,
       hardCap: true,
@@ -111,18 +111,18 @@ describe.skipIf(!DATABASE_URL)("eventsAllowanceStatus (integration)", () => {
     expect(isIngestCapped(s)).toBe(true);
   });
 
-  it("pro over its $150 credit (3M) projects an overage charge at the events rate", async () => {
-    await seed(5_000_000);
+  it("pro over its $50 credit (~1.67M) projects an overage charge at the events rate", async () => {
+    await seed(2_666_667);
     const s = await statusFor("pro");
-    // 5M used, 3M included → 2M over * $0.05/1K = $100 = 10000 cents. The $150 credit shows fully used.
+    // ~2.67M used, ~1.67M included -> 1M over * $0.03/1K = $30 = 3000 cents. The $50 credit shows fully used.
     expect(s).toMatchObject({
-      includedEvents: 3_000_000,
-      overageEvents: 2_000_000,
+      includedEvents: 1_666_667,
+      overageEvents: 1_000_000,
       isOver: true,
       overageMode: "bill",
-      overageCents: 10000,
-      creditCents: 15000,
-      creditUsedCents: 15000,
+      overageCents: 3000,
+      creditCents: 5000,
+      creditUsedCents: 5000,
     });
   });
 

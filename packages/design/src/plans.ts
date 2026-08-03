@@ -10,14 +10,14 @@
  *
  * Pricing model (Vercel-shaped): flag & config checks are free and unlimited on every
  * plan (the wedge); the billable meter is analytics EVENTS (exposures + experiment goal
- * events, and more products to come) at $0.05/1K. Hobby is a hard CAP: 1M events/mo free,
- * then sending stops (upgrade, never billed). Pro's
- * price is $50/mo and INCLUDES ~3M events across every product; overage bills at
- * EVENT_OVERAGE_PER_MILLION_CENTS ($0.05/1K). Mechanically the $50 carries a $150 metered
- * credit that covers those 3M at the rate (base and credit diverge on purpose, so Pro
- * comes in at a third of the big platforms' price and matches at the margin) — but that
- * $150 is an internal number; never surface it to a customer, the price is $50 and the
- * value is "~3M events." Enterprise trues up against a contracted envelope.
+ * events, and more products to come) at $0.03/1K. Hobby is a hard CAP: 500K events/mo
+ * free, then sending stops (upgrade, never billed). Pro's price is $50/mo and INCLUDES
+ * ~1.67M events across every product; overage bills at EVENT_OVERAGE_PER_MILLION_CENTS
+ * ($0.03/1K). The $50 base IS the usage credit — it covers exactly $50 of events (~1.67M
+ * at the rate), dollar-for-dollar with no subsidy; past that you pay the same rate. The
+ * rate sits just under the big platforms' so Flagon's bill stays at or below theirs at
+ * every volume (and the $50 entry is a third of their base). Enterprise trues up against
+ * a contracted envelope.
  */
 export type PlanId = "hobby" | "pro" | "enterprise";
 
@@ -50,7 +50,7 @@ export type Plan = {
   baseCents: number;
   /**
    * The monthly included exposures a plan covers before overage. Hobby 500K is the
-   * hard free cap; Pro 1M is CREDIT-DERIVED ($50 credit ÷ $0.05/1K). Drives the usage
+   * hard free cap; Pro ~1.67M is CREDIT-DERIVED ($50 credit ÷ $0.03/1K). Drives the usage
    * page's credit-drawdown bar. A pricing lever — change it here and the console
    * reprices. Enterprise is 0 (contracted volumes, shown as usage against a term
    * envelope, not an allowance).
@@ -87,7 +87,7 @@ export const PLANS: Plan[] = [
     description: "For personal projects and trying Flagon out.",
     price: { amount: "$0", unit: "per month" },
     baseCents: 0,
-    includedEvents: 1_000_000,
+    includedEvents: 500_000,
     overage: "cap",
     // Be honest: Hobby is not "everything" — it is one user with a free monthly
     // event ceiling, and teams and higher volume need Pro. It is never billed.
@@ -95,7 +95,7 @@ export const PLANS: Plan[] = [
     features: [
       { text: "All core products, at hobby scale" },
       { text: "Unlimited reads and checks, always free" },
-      { text: "1M usage events a month, across every product" },
+      { text: "A free monthly usage allowance, across every product" },
       { text: "Community support" },
     ],
     available: true,
@@ -107,18 +107,17 @@ export const PLANS: Plan[] = [
     description: "Everything you need to build and scale with a team.",
     price: { amount: "$50", unit: "per month", plus: "plus usage" },
     baseCents: 5000,
-    includedEvents: 3_000_000,
+    includedEvents: 1_666_667,
     overage: "bill",
-    // Customer-facing price is $50/mo and INCLUDES ~3M events (never call this "$150"
-    // to a customer — the $50 is the price; 3M is the value). Mechanically the $50 base
-    // carries a $150 metered credit that covers those 3M at the $0.05/1K rate; base and
-    // credit diverge on purpose so Pro comes in at a third of the big platforms' price
-    // while matching them at the margin. Customers pay $50 until they pass 3M.
-    note: "$50/mo, and it includes about 3M events a month across every product. You only pay more if you go past that.",
+    // The $50 base IS the usage credit: it covers exactly $50 of events — ~1.67M at the
+    // $0.03/1K rate — dollar-for-dollar, no subsidy. Past that you pay the same rate. The
+    // rate sits just under the big platforms' so the bill stays at/under theirs at every
+    // volume, while the $50 entry is a third of their base. Pay $50 until you pass ~1.7M.
+    note: "$50/mo, and it includes your monthly usage across every product. You only pay more if you go beyond it.",
     featuresLead: "All Hobby features, plus:",
     features: [
       { text: "Unlimited team members and roles" },
-      { text: "About 3M events a month included, across every product" },
+      { text: "Monthly usage included, across every product" },
       { text: "Usage-based pricing, never per-seat" },
       { text: "Priority support" },
       { text: "SSO with SAML and SCIM", soon: true },
@@ -187,14 +186,45 @@ export function planOverage(id: string): "cap" | "bill" | "contract" {
 
 /**
  * Overage rate for analytics exposures beyond a plan's included allowance, in cents
- * per 1,000,000 exposures ($0.05/1K = $50/1M = 5000). MIRRORS the meter registry's
+ * per 1,000,000 exposures ($0.03/1K = $30/1M = 3000). MIRRORS the meter registry's
  * events rate in the API (apps/api/src/usage/meters.ts) — the API is the source of
  * truth for billing; this copy is for marketing/pricing surfaces that can't import
  * it. Keep the two in sync.
  */
-export const EVENT_OVERAGE_PER_MILLION_CENTS = 5000;
+export const EVENT_OVERAGE_PER_MILLION_CENTS = 3000;
 
-/** The Pro plan's monthly usage credit, in cents ($50). Mirrors the API's PRO_CREDIT_CENTS. */
+/**
+ * The feature bullets to render for a plan. For a usage-billed plan (Pro) this injects
+ * the overage-rate line — DERIVED from EVENT_OVERAGE_PER_MILLION_CENTS so it can't drift
+ * from what the app meters — right after the "usage included" bullet, so the scaling
+ * reads as part of the list rather than sitting in the price heading. We deliberately do
+ * NOT state an included-events count anywhere public (it moves as we tune; the live
+ * number is in the app usage view). Both the pricing table and the create-org picker
+ * render this, so they stay in lockstep.
+ */
+export function planFeatures(plan: Plan): PlanFeature[] {
+  if (plan.overage !== "bill") return plan.features;
+  const per1k = (EVENT_OVERAGE_PER_MILLION_CENTS / 1000 / 100).toFixed(2);
+  const overage: PlanFeature = {
+    text: `Then $${per1k} per 1,000 events beyond that`,
+  };
+  const at = plan.features.findIndex((f) => /usage included/i.test(f.text));
+  return at === -1
+    ? [...plan.features, overage]
+    : [
+        ...plan.features.slice(0, at + 1),
+        overage,
+        ...plan.features.slice(at + 1),
+      ];
+}
+
+/**
+ * The Pro plan's monthly usage credit, in cents ($50) — equal to the base fee, which
+ * at $0.03/1K covers Pro's ~1.67M included events. The base fee IS the credit: $50 in,
+ * $50 of events out. MIRRORS the API's PRO_CREDIT_CENTS (apps/api/src/lib/plans.ts),
+ * the source of truth that actually grants the credit. Display uses `includedEvents`
+ * (~1.67M), not this number.
+ */
 export const PRO_CREDIT_CENTS = 5000;
 
 /** The monthly usage credit (cents) for a plan; 0 for free/contracted. */

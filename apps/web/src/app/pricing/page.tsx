@@ -1,21 +1,14 @@
 import type { Metadata } from "next";
-import {
-  BleedBand,
-  brand,
-  GridBackdrop,
-  planIncludedEvents,
-  EVENT_OVERAGE_PER_MILLION_CENTS,
-} from "@flagon/design";
+import { BleedBand, brand, GridBackdrop } from "@flagon/design";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { PricingTable } from "./pricing-table";
 
-// Rendered from the shared catalog so the marketing copy can never drift from
-// what the app actually meters. "0.5M" / "1M" and the per-1K overage rate.
-const millions = (n: number) => `${n / 1_000_000}M`;
-const HOBBY_EVENTS = millions(planIncludedEvents("hobby"));
-const PRO_EVENTS = millions(planIncludedEvents("pro"));
-const PER_1K = (EVENT_OVERAGE_PER_MILLION_CENTS / 1000 / 100).toFixed(2);
+// We deliberately DON'T publish the included-events counts: they're usage
+// allowances that move as we tune the model, and a stale "it used to be N" is a
+// trap. The live number is always in the app's usage view. The one concrete price
+// we quote is the per-1K overage rate, and it now lives INSIDE the Pro card (see
+// pricing-table.tsx) so the scaling from the $50 base is right there.
 
 export const metadata: Metadata = {
   title: `Pricing · ${brand.name}`,
@@ -52,10 +45,10 @@ export default function PricingPage() {
             width so it sits on one line instead of wrapping for no reason. */}
         <BleedBand>
           <p className="mx-auto max-w-3xl px-6 py-4 text-center text-sm text-zinc-500">
-            You pay for the usage events your products generate. Hobby includes{" "}
-            {HOBBY_EVENTS} events a month and simply pauses there, never a surprise
-            bill. Pro includes {PRO_EVENTS} events, then ${PER_1K} per 1,000 beyond
-            it.
+            You pay for the usage events your products generate, never for seats.
+            Hobby includes a free monthly allowance and simply pauses there, never a
+            surprise bill. Pro includes your monthly usage and only charges for what
+            you send beyond it.
           </p>
         </BleedBand>
 

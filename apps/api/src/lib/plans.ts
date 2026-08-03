@@ -39,33 +39,36 @@ const PLAN_AVAILABILITY: Record<PlanId, boolean> = {
  * The warn-first emails (usage/notify.ts) still fire at 80% and 100%, so the cap never
  * arrives unannounced: an org gets both the heads-up and the ceiling.
  *
- * Calibrated to real feature-flag consumption at Statsig's overage rate. Statsig is
- * $150 Pro / 5M included / 2M free at $0.05/1K, but their 5M gets eaten by analytics +
- * session replays + experiments; our meter is flag exposures + experiment goal events,
- * so 3M of FLAG events is genuinely generous. Pro is $50/mo and INCLUDES ~3M events;
- * overage at $0.05/1K (= Statsig, so we converge at scale and never cross above them).
- * A ~3.6M-flag customer (a real Statsig-account data point) pays ~$80 here vs $150 on
- * Statsig — real margin, still cheaper. Hobby is 1M free (a try-before-Pro wedge).
- * Pro's `included` is CREDIT-DERIVED (drives the usage page + Stripe credit grant, see
- * lib/billing-credits.ts, usage/report.ts), not a hard cap.
+ * Pricing philosophy: the base fee IS a usage credit — $50 buys exactly $50 of events,
+ * dollar-for-dollar, no subsidy. The meter rate ($0.03/1K, usage/meters.ts) is set as
+ * high as it can go while keeping Flagon's total bill at or under Statsig's at EVERY
+ * volume: with a $50 credit the two curves meet exactly at Statsig's 5M bundle edge and
+ * Flagon is cheaper on either side. At $0.03/1K, $50 covers ~1,666,667 events; overage
+ * past that bills at the same rate. We do NOT hand out more events than the money buys
+ * (no "3M for $50") — the value scales with what a customer pays, we just price each
+ * event a hair under Statsig so we never lose the comparison. Pro's `included` is
+ * CREDIT-DERIVED ($50 credit ÷ $0.03/1K ≈ 1.67M; drives the usage page + Stripe credit
+ * grant, see lib/billing-credits.ts, usage/report.ts), not a hard cap. Hobby is 500K
+ * free (a try-before-Pro wedge).
  */
 const PLAN_EVENTS: Record<
   PlanId,
   { included: number; overage: OverageMode; hardCap: boolean }
 > = {
-  hobby: { included: 1_000_000, overage: "cap", hardCap: true },
-  pro: { included: 3_000_000, overage: "bill", hardCap: false },
+  hobby: { included: 500_000, overage: "cap", hardCap: true },
+  // ~1.67M = $50 credit ÷ $0.03/1K. Keep in sync with PRO_CREDIT_CENTS and the meter rate.
+  pro: { included: 1_666_667, overage: "bill", hardCap: false },
   enterprise: { included: 0, overage: "contract", hardCap: false },
 };
 
 /**
  * The monthly metered usage credit (cents) a plan carries — the amount granted per
- * period in Stripe (lib/billing-credits.ts) that offsets metered charges. It exactly
- * covers Pro's `included` at the meter rate: 3,000,000 events x $0.05/1K = $150.
- * (Customers never see this dollar figure; the plan is "$50/mo, ~3M events included" —
- * the credit is the internal Stripe mechanism.) Free/contracted plans have no credit.
+ * period in Stripe (lib/billing-credits.ts) that offsets metered charges. It equals
+ * the Pro base fee: $50, which at the meter rate ($0.03/1K) covers Pro's ~1,666,667
+ * included events. The base fee IS the credit — $50 in, $50 of events out. Free/
+ * contracted plans have no credit.
  */
-export const PRO_CREDIT_CENTS = 15000;
+export const PRO_CREDIT_CENTS = 5000;
 
 /** The monthly usage credit (cents) for a plan; 0 for free/contracted. */
 export function planCreditCents(id: string): number {

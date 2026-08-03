@@ -105,9 +105,9 @@ async function main() {
   const coupon = await stripe.coupons.create({ percent_off: 100, duration: "forever" });
 
   const scenarios: Scenario[] = [
-    { name: "under the credit", exposures: 500_000, expectedCents: 5000 }, // $25 usage -> $50
-    { name: "over the credit", exposures: 1_500_000, expectedCents: 7500 }, // $75 usage -> $75
-    { name: "comped (100% off)", exposures: 1_500_000, comped: true, expectedCents: 0 },
+    { name: "under the credit", exposures: 500_000, expectedCents: 5000 }, // $15 usage -> $50
+    { name: "over the credit", exposures: 3_000_000, expectedCents: 9000 }, // $90 usage -> $90
+    { name: "comped (100% off)", exposures: 3_000_000, comped: true, expectedCents: 0 },
   ];
 
   let allOk = true;

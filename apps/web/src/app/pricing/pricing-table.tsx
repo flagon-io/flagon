@@ -1,5 +1,12 @@
 import type { ReactNode } from "react";
-import { BleedBand, Cta, PLANS, PlanCard, type Plan } from "@flagon/design";
+import {
+  BleedBand,
+  Cta,
+  PLANS,
+  PlanCard,
+  planFeatures,
+  type Plan,
+} from "@flagon/design";
 import { SIGN_UP_URL } from "@/lib/urls";
 
 /**
@@ -120,7 +127,7 @@ function FeatureCell({ plan }: { plan: Plan }) {
         </p>
       ) : null}
       <ul className="flex flex-col gap-3">
-        {plan.features.map((feature) => (
+        {planFeatures(plan).map((feature) => (
           <li
             key={feature.text}
             className={`flex items-start gap-2.5 text-sm/6 ${

@@ -5,7 +5,7 @@
  *   1. A "Flagon Pro" product.
  *   2. The flat base price ($50/mo, lookup_key `flagon_pro_monthly`).
  *   3. A Billing Meter `flagon_events` (sum aggregation, keyed by stripe_customer_id).
- *   4. A metered price at $0.05/1K (lookup_key `flagon_events_metered`) on the Pro
+ *   4. A metered price at $0.03/1K (lookup_key `flagon_events_metered`) on the Pro
  *      product, attached to that meter.
  *
  * Safe to re-run: every step looks up before it creates. Run against TEST mode first
@@ -71,7 +71,7 @@ async function main() {
     console.log(`created meter ${meter.id}`);
   }
 
-  // 4. Metered price at $0.05/1K (lookup_key flagon_events_metered) on the Pro product.
+  // 4. Metered price at $0.03/1K (lookup_key flagon_events_metered) on the Pro product.
   const meteredPrices = await stripe.prices.list({
     lookup_keys: [EVENTS_METERED_PRICE_LOOKUP_KEY],
     active: true,
@@ -84,8 +84,8 @@ async function main() {
       product: baseProductId,
       currency: "usd",
       billing_scheme: "per_unit",
-      // 0.005 cents per exposure = $0.05 per 1,000. Decimal to avoid rounding.
-      unit_amount_decimal: "0.005",
+      // 0.003 cents per exposure = $0.03 per 1,000. Decimal to avoid rounding.
+      unit_amount_decimal: "0.003",
       recurring: { interval: "month", usage_type: "metered", meter: meter.id },
       lookup_key: EVENTS_METERED_PRICE_LOOKUP_KEY,
     });

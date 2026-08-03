@@ -1,5 +1,5 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import type { Plan } from "../plans";
+import { planFeatures, type Plan } from "../plans";
 
 /**
  * A Vercel-style plan column, shared by the marketing pricing page and the
@@ -144,7 +144,7 @@ export function PlanCard({
           <p className="mb-3 text-xs text-zinc-400">{plan.featuresLead}</p>
         ) : null}
         <ul className="gap-2.5 flex flex-col">
-          {plan.features.map((feature) => (
+          {planFeatures(plan).map((feature) => (
             <li
               key={feature.text}
               className={`gap-2.5 text-sm flex items-start ${

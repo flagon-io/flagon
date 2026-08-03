@@ -25,7 +25,7 @@ export const PRO_PRICE_LOOKUP_KEY = "flagon_pro_monthly";
 /**
  * The metered events price + its Billing Meter. Created by scripts/setup-metered.ts:
  * a Billing Meter named `flagon_events` and a metered per-unit price with lookup key
- * `flagon_events_metered` (at $0.05/1K) attached to the Pro product. Usage is reported
+ * `flagon_events_metered` (at $0.03/1K) attached to the Pro product. Usage is reported
  * to the meter (billing.meterEvents.create with event_name = the meter name) and the
  * price turns it into an invoice line; the $50 credit grant offsets it.
  */

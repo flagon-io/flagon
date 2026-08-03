@@ -85,7 +85,8 @@ export type AllowanceStatus = {
    * limit" copy.
    */
   hardCap: boolean;
-  /** The plan's monthly usage credit in cents ($50 = 5000 for Pro; 0 otherwise). */
+  /** The plan's monthly usage credit in cents ($50 = 5000 for Pro, equal to the base
+   *  fee and covering the ~1.67M included at $0.03/1K; 0 otherwise). Internal Stripe number. */
   creditCents: number;
   /** How much of the credit this period's usage has drawn down (capped at creditCents). */
   creditUsedCents: number;

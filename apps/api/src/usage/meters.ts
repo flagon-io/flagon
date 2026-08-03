@@ -64,14 +64,16 @@ export const METERS = {
     unit: "event",
     billable: true, // THE money meter — exposures / analytics events, any product
     tracked: true, // recorded in usage_event_rollups (POST /ofrep/v1/exposures)
-    // $0.05 / 1K = $50 / 1M: at parity with Statsig's exposure rate ($0.05/1K), the
-    // closest peer on this axis — we match the marginal rate but undercut on the base
-    // fee and never charge per-seat. An exposure is a batched DB write, so per-unit
-    // infra is a fraction of a cent — the rate is positioning, not cost recovery, and
-    // stays ~99.9% margin. We compete on breadth of products + a lower entry price.
-    // Pro's $50/mo is a usage credit ($50 buys 1M at this rate); Hobby's 500K free
+    // $0.03 / 1K = $30 / 1M: BELOW Statsig's $0.05/1K exposure rate. $0.03 is the
+    // HIGHEST rate that still keeps Flagon's total bill at or under Statsig's at every
+    // volume — with a $50 credit the two curves cross exactly at Statsig's 5M bundle
+    // edge and Flagon stays cheaper on either side. Charge more per event and you poke
+    // above them in the mid-volume band; this is the "most money without passing the
+    // line" point. An exposure is a batched DB write, so per-unit infra is a fraction
+    // of a cent — the rate is positioning, not cost recovery, and stays ~99.9% margin.
+    // Pro's $50/mo is a usage credit ($50 buys ~1.67M at this rate); Hobby's 500K free
     // ceiling lives with the plans. This is the overage rate.
-    pricePerMillionCents: 5000,
+    pricePerMillionCents: 3000,
     includedQuantity: 0,
   },
 } satisfies Record<MeterId, Meter>;
@@ -110,7 +112,7 @@ export const SOURCE_METERS: Record<string, SourceMeter> = {
   // Experiment goal (metric) events sent via POST /ofrep/v1/track. Namespaced
   // "experiments.metric" (NOT "flags.*") so this feature stays self-contained and
   // clear of any future OTEL metrics. They bill under the SAME Stripe meter + price
-  // as exposures (one "events" unit, one $0.05/1K rate, one shared credit/allowance)
+  // as exposures (one "events" unit, one $0.03/1K rate, one shared credit/allowance)
   // — so measuring outcomes generates revenue with no new Stripe provisioning — but
   // carry their own product/label so the usage page breaks them out as a distinct
   // Experiments line. Each source stages its own report row (own identifier), so

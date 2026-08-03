@@ -60,6 +60,7 @@ export {
   planAllowsInvites,
   planIncludedEvents,
   planOverage,
+  planFeatures,
   EVENT_OVERAGE_PER_MILLION_CENTS,
 } from "./plans";
 export type { Plan, PlanId, PlanPrice, PlanFeature } from "./plans";
