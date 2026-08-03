@@ -6,11 +6,11 @@ import { and, eq } from "drizzle-orm";
  * Warn-first threshold notifications: prove the exactly-once claim on the counter's
  * notified_*_at stamps. We assert the STAMP transitions (the dedup guarantee), which
  * happen before recipients are resolved, so no org/member fixtures are needed — a
- * bare org id with a hobby default plan (2M cap) is enough. The email send itself is
+ * bare org id with a hobby default plan (1M cap) is enough. The email send itself is
  * the console adapter in tests (no RESEND key), so it just logs.
  */
 const DATABASE_URL = process.env.DATABASE_URL ?? process.env.APP_DATABASE_URL;
-const HOBBY_INCLUDED = 500_000;
+const HOBBY_INCLUDED = 1_000_000;
 
 describe.skipIf(!DATABASE_URL)("usage threshold notifications (integration)", () => {
   let db: typeof import("../db/client.js")["db"];

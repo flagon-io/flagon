@@ -39,6 +39,20 @@ const schema = z
     // means fewer writes per high-QPS key but a larger bounded over-count; the
     // default is a small fraction of the per-window limit.
     EVAL_RATE_RESERVE_CHUNK: z.coerce.number().int().positive().default(25),
+    // Exposures default-on: a remote (per-flag) evaluation with a targetingKey
+    // auto-logs a billable exposure, deduped per (env, flag, unit, variant) within
+    // this window so a hot page bills once per session, not per request.
+    // EXPOSURE_AUTO_ENABLED is the global kill-switch. Both have safe defaults, so
+    // there is nothing to set for the behavior to be on.
+    //
+    // Default 1h to MATCH Statsig's billing (their client SDK dedupes exposures for
+    // the same user+flag on a 60m window). A shorter window bills more than Statsig
+    // for the same traffic; a longer one bills less. 1h is parity.
+    EXPOSURE_AUTO_ENABLED: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    EXPOSURE_DEDUP_TTL_MS: z.coerce.number().int().positive().default(3_600_000),
     // Management write path. Caps authenticated mutations on /v1/orgs/:org/*
     // per (org, caller) per window, so a valid token or session can't flood the
     // write path (each write is a withOrg transaction + revision + cache

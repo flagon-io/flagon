@@ -9,14 +9,24 @@ export const metadata = {
 An **exposure** is the analytics event recorded when a real user is served a flag.
 It's what powers everything worth having: per-flag usage (checks/hr, pass rate,
 staleness), always-on **impact** (how each variant moves your metrics), and
-**experiments** (lift, significance). **Log an exposure on every real check.**
-That's the recommended default, and it's how a flag earns its analytics.
+**experiments** (lift, significance). The raw evaluation is always free; the
+**exposure** is the billable analytics event, so you pay to *measure*, never to
+*serve*.
 
-The raw evaluation is still free; the **exposure** is the billable analytics event.
-So you pay to *measure*, never to *serve*, and the more you measure, the more you
-get back. Send the served `variant` and the `targetingKey` with each exposure and
-Flagon attributes it to the arm the unit saw (the targeting key is stored only as a
-salted hash), so impact and experiments light up automatically.
+<Callout tone="note" title="Exposures are on by default">
+When you evaluate a flag **remotely** (the standard OpenFeature OFREP provider POSTs
+one request per check), Flagon logs the exposure for you automatically. There is
+nothing to wire up. It is deduped per user, flag, and variant per hour, so a user
+reloading a hot page bills once an hour, not once per request. Disable
+it per key with the **Auto exposures** toggle on the [client key](/docs/feature-flags/client-keys),
+or per request with the `X-Flagon-Exposure: off` header. The rest of this page is
+for **cached** evaluation, where the SDK fetches the whole config and resolves flags
+locally, so Flagon never sees each check and you log exposures yourself.
+</Callout>
+
+Send the served `variant` and the `targetingKey` with each exposure and Flagon
+attributes it to the arm the unit saw (the targeting key is stored only as a salted
+hash), so impact and experiments light up automatically.
 
 All requests go to the Flagon API host and authenticate with a
 [client key](/docs/feature-flags/client-keys), the same key you evaluate with:
@@ -32,12 +42,13 @@ Examples use `https://api.flagon.io`. Running Flagon locally, the API is at
 `http://localhost:3002`.
 </Callout>
 
-## Log automatically with an OpenFeature hook (recommended)
+## Cached evaluation: log with an OpenFeature hook
 
-The cleanest way to "log on every check" is an OpenFeature **hook** registered once,
-globally. Its `after` stage fires on every successful evaluation, so you never have
-to remember to record an exposure, it just happens, with the served variant and
-targeting key already in hand. This is the setup we recommend by default.
+If you evaluate from a cached config (the SDK fetches all flags and resolves locally),
+log exposures yourself with an OpenFeature **hook** registered once, globally. Its
+`after` stage fires on every successful evaluation, so you never have to remember to
+record an exposure, it just happens, with the served variant and targeting key
+already in hand.
 
 ```ts
 import { OpenFeature, type Hook } from "@openfeature/server-sdk";

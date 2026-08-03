@@ -11,6 +11,7 @@ import {
   ModalBody,
   ModalFooter,
   ModalHeader,
+  SegmentedControl,
   Select,
 } from "@flagon/design";
 import {
@@ -118,7 +119,11 @@ export function ClientKeysManager({
         Client keys are publishable: they ship in your app and can be retrieved here
         any time. Use one with the OpenFeature OFREP provider (or a plain POST to{" "}
         <code className="font-mono text-zinc-400">/ofrep/v1/evaluate/flags</code>) to
-        evaluate flags in that environment. Revoke a key to rotate it.
+        evaluate flags in that environment. Revoke a key to rotate it.{" "}
+        <span className="text-zinc-400">Auto exposures</span> logs one billable
+        exposure per user, flag, and variant each hour so you get usage and
+        experiment analysis automatically; turn it off for a key to only bill
+        exposures you send yourself.
       </p>
 
       {modalEnv !== null ? (
@@ -157,8 +162,17 @@ function KeyRow({
   const [editing, setEditing] = useState(false);
   const [labelDraft, setLabelDraft] = useState(k.name);
   const [savingLabel, saveLabel] = useTransition();
+  const [savingExpose, saveExpose] = useTransition();
   const hasToken = Boolean(k.token);
   const shown = hasToken && revealed ? (k.token as string) : k.masked;
+
+  function toggleExpose(next: boolean) {
+    if (next === k.autoExpose) return;
+    saveExpose(async () => {
+      const res = await updateSdkKeyAction(slug, k.id, { autoExpose: next });
+      if (!res.error) router.refresh();
+    });
+  }
 
   function copy() {
     if (!k.token) return;
@@ -172,7 +186,7 @@ function KeyRow({
     const next = labelDraft.trim();
     if (next === k.name) return;
     saveLabel(async () => {
-      const res = await updateSdkKeyAction(slug, k.id, next);
+      const res = await updateSdkKeyAction(slug, k.id, { name: next });
       if (!res.error) router.refresh();
     });
   }
@@ -256,6 +270,27 @@ function KeyRow({
               : "Never used"}
           <span className="text-zinc-700"> · Added {relativeTime(k.createdAt)}</span>
         </p>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <span className="text-[10px] font-medium tracking-wide text-zinc-600 uppercase">
+          Auto exposures
+        </span>
+        {canManage ? (
+          <SegmentedControl
+            size="sm"
+            sizing="content"
+            value={k.autoExpose ? "on" : "off"}
+            onValueChange={(v) => toggleExpose(v === "on")}
+            options={[
+              { value: "on", label: "On" },
+              { value: "off", label: "Off" },
+            ]}
+            ariaLabel="Auto-log exposures"
+            className={savingExpose ? "pointer-events-none opacity-60" : ""}
+          />
+        ) : (
+          <span className="text-xs text-zinc-400">{k.autoExpose ? "On" : "Off"}</span>
+        )}
       </div>
       {canManage ? (
         <button

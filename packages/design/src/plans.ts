@@ -9,13 +9,15 @@
  * (Contact Sales), never self-serve.
  *
  * Pricing model (Vercel-shaped): flag & config checks are free and unlimited on every
- * plan (the wedge); the billable meter is analytics EXPOSURES at $0.05/1K. Hobby is a
- * hard CAP: 500K exposures/mo free, then sending stops (upgrade, never billed). Pro's
- * $50/mo base is a $50 USAGE CREDIT — a shared, monetary pool ALL metered products draw
- * from — which at $0.05/1K covers 1M exposures; overage bills at
- * EVENT_OVERAGE_PER_MILLION_CENTS. Enterprise trues up against a contracted envelope.
- * A future product adds its own meter/rate and draws the same $50 credit. The dollar
- * figures move the moment these numbers do.
+ * plan (the wedge); the billable meter is analytics EVENTS (exposures + experiment goal
+ * events, and more products to come) at $0.05/1K. Hobby is a hard CAP: 1M events/mo free,
+ * then sending stops (upgrade, never billed). Pro's
+ * price is $50/mo and INCLUDES ~3M events across every product; overage bills at
+ * EVENT_OVERAGE_PER_MILLION_CENTS ($0.05/1K). Mechanically the $50 carries a $150 metered
+ * credit that covers those 3M at the rate (base and credit diverge on purpose, so Pro
+ * comes in at a third of the big platforms' price and matches at the margin) — but that
+ * $150 is an internal number; never surface it to a customer, the price is $50 and the
+ * value is "~3M events." Enterprise trues up against a contracted envelope.
  */
 export type PlanId = "hobby" | "pro" | "enterprise";
 
@@ -85,15 +87,15 @@ export const PLANS: Plan[] = [
     description: "For personal projects and trying Flagon out.",
     price: { amount: "$0", unit: "per month" },
     baseCents: 0,
-    includedEvents: 500_000,
+    includedEvents: 1_000_000,
     overage: "cap",
     // Be honest: Hobby is not "everything" — it is one user with a free monthly
-    // exposure ceiling, and teams and higher volume need Pro. It is never billed.
+    // event ceiling, and teams and higher volume need Pro. It is never billed.
     note: "One user. More usage and team members need Pro.",
     features: [
       { text: "All core products, at hobby scale" },
       { text: "Unlimited reads and checks, always free" },
-      { text: "500K usage events a month, across every product" },
+      { text: "1M usage events a month, across every product" },
       { text: "Community support" },
     ],
     available: true,
@@ -105,15 +107,18 @@ export const PLANS: Plan[] = [
     description: "Everything you need to build and scale with a team.",
     price: { amount: "$50", unit: "per month", plus: "plus usage" },
     baseCents: 5000,
-    includedEvents: 1_000_000,
+    includedEvents: 3_000_000,
     overage: "bill",
-    // The $50 is a usage credit, not a seat charge: it covers ~1M events a month
-    // (a shared credit across all products), and you are only billed past that.
-    note: "$50/mo is a shared usage credit, about 1M events across every product. Pay more only past it.",
+    // Customer-facing price is $50/mo and INCLUDES ~3M events (never call this "$150"
+    // to a customer — the $50 is the price; 3M is the value). Mechanically the $50 base
+    // carries a $150 metered credit that covers those 3M at the $0.05/1K rate; base and
+    // credit diverge on purpose so Pro comes in at a third of the big platforms' price
+    // while matching them at the margin. Customers pay $50 until they pass 3M.
+    note: "$50/mo, and it includes about 3M events a month across every product. You only pay more if you go past that.",
     featuresLead: "All Hobby features, plus:",
     features: [
       { text: "Unlimited team members and roles" },
-      { text: "$50/mo usage credit, about 1M events across every product" },
+      { text: "About 3M events a month included, across every product" },
       { text: "Usage-based pricing, never per-seat" },
       { text: "Priority support" },
       { text: "SSO with SAML and SCIM", soon: true },

@@ -310,6 +310,10 @@ export const clientKeys = pgTable(
     // which stay hashed. Null for keys minted before this became retrievable
     // (those remain masked). keyHash is still the lookup path.
     token: text("token"),
+    // Exposures default-on: remote evaluations on this key auto-log a billable
+    // exposure (deduped per session). On by default; a customer can turn it off
+    // per key.
+    autoExpose: boolean("auto_expose").notNull().default(true),
     createdByUserId: uuid("created_by_user_id"),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),

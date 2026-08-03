@@ -247,9 +247,9 @@ export async function createSdkKeyAction(
 export async function updateSdkKeyAction(
   slug: string,
   id: string,
-  name: string,
+  patch: { name?: string; autoExpose?: boolean },
 ): Promise<{ error?: string }> {
-  const res = await updateSdkKey(slug, id, { name });
+  const res = await updateSdkKey(slug, id, patch);
   if (res.error) return { error: res.error };
   revalidatePath(`/${slug}/flags/keys`);
   return {};

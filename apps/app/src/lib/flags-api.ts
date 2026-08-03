@@ -99,6 +99,8 @@ export type SdkKey = {
   masked: string;
   /** The full publishable key (retrievable). Null only for legacy keys. */
   token: string | null;
+  /** Whether remote evaluations on this key auto-log billable exposures (default true). */
+  autoExpose: boolean;
   lastUsedAt: string | null;
   revokedAt: string | null;
   createdAt: string;
@@ -431,7 +433,11 @@ export async function createSdkKey(
   );
 }
 
-export async function updateSdkKey(slug: string, id: string, body: { name: string }) {
+export async function updateSdkKey(
+  slug: string,
+  id: string,
+  body: { name?: string; autoExpose?: boolean },
+) {
   return unwrap<{ key: SdkKey }>(
     await apiFetch(`/v1/orgs/${slug}/client-keys/${id}`, {
       method: "PATCH",

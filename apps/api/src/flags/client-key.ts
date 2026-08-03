@@ -28,6 +28,9 @@ export type ClientKeyIdentity = {
   /** The org's plan, joined at resolve time so the eval hot path can apply a
    *  plan-scoped fair-use limit without a second lookup. */
   plan: string;
+  /** Whether remote evaluations on this key auto-log a billable exposure (default
+   *  true). Off disables the exposures default-on behavior for this key. */
+  autoExpose: boolean;
 };
 
 /** Mint a new client key: returns the one-time plaintext plus the columns to store. */
@@ -55,6 +58,7 @@ export async function resolveClientKey(
       organizationId: clientKeys.organizationId,
       environmentId: clientKeys.environmentId,
       revokedAt: clientKeys.revokedAt,
+      autoExpose: clientKeys.autoExpose,
       plan: organizations.plan,
     })
     .from(clientKeys)
@@ -81,6 +85,7 @@ export async function resolveClientKey(
     // Default to the tightest tier if the plan couldn't be read (join miss); a real
     // org always supplies its plan (the column is NOT NULL, defaulting to "hobby").
     plan: key.plan ?? "hobby",
+    autoExpose: key.autoExpose,
   };
 }
 

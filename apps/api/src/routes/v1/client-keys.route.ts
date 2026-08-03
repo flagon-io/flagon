@@ -32,7 +32,12 @@ const createKey = z.object({
   environment: z.string().min(1),
 });
 
-const renameKey = z.object({ name: z.string().trim().max(120) });
+const updateKey = z.object({
+  name: z.string().trim().max(120).optional(),
+  // Exposures default-on toggle: when false, remote evaluations on this key stop
+  // auto-logging billable exposures.
+  autoExpose: z.boolean().optional(),
+});
 
 // --- OpenAPI registration ----------------------------------------------------
 const CLIENT_KEYS_TAG = "Client keys";
@@ -81,12 +86,13 @@ registerRoute({
 registerRoute({
   method: "patch",
   path: "/v1/orgs/{org}/client-keys/{id}",
-  summary: "Rename a client key",
-  description: "Change a client key's label. An empty label leaves it unlabelled.",
+  summary: "Update a client key",
+  description:
+    "Update a client key: change its label, and/or toggle `autoExpose` (whether remote evaluations on this key auto-log billable exposures; on by default).",
   tags: [CLIENT_KEYS_TAG],
   auth: true,
   paramDescriptions: clientKeyParams,
-  request: { body: renameKey },
+  request: { body: updateKey },
   responses: {
     200: { description: "The updated client key.", schemaName: "ClientKeyResponse" },
     404: { description: "No client key with that id." },
@@ -124,6 +130,7 @@ function serializeKey(
     // Publishable client key, retrievable in full. Null only for legacy keys
     // minted before keys became retrievable (those stay masked).
     token: k.token ?? null,
+    autoExpose: k.autoExpose,
     lastUsedAt: k.lastUsedAt?.toISOString() ?? null,
     revokedAt: k.revokedAt?.toISOString() ?? null,
     createdAt: k.createdAt.toISOString(),
@@ -144,6 +151,9 @@ const clientKeySchema = z.object({
     .string()
     .nullable()
     .describe("The plaintext key (publishable, retrievable). Null for legacy keys."),
+  autoExpose: z
+    .boolean()
+    .describe("Whether remote evaluations on this key auto-log billable exposures."),
   lastUsedAt: z.string().nullable().describe("ISO 8601 timestamp"),
   revokedAt: z.string().nullable().describe("ISO 8601 timestamp"),
   createdAt: z.string().describe("ISO 8601 timestamp"),
@@ -232,19 +242,24 @@ clientKeys_.post("/:id/revoke", async (c) => {
   return c.json({ ok: true });
 });
 
-// --- Rename ------------------------------------------------------------------
+// --- Update (rename + autoExpose toggle) -------------------------------------
 clientKeys_.patch("/:id", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
   const denied = requireManager(c, ctx);
   if (denied) return denied;
 
-  const parsed = renameKey.safeParse(await c.req.json().catch(() => null));
+  const parsed = updateKey.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
+
+  const patch: Partial<typeof clientKeys.$inferInsert> = {};
+  if (parsed.data.name !== undefined) patch.name = parsed.data.name;
+  if (parsed.data.autoExpose !== undefined) patch.autoExpose = parsed.data.autoExpose;
+  if (Object.keys(patch).length === 0) return jsonError(c, 422, "Nothing to update.");
 
   const [row] = await db
     .update(clientKeys)
-    .set({ name: parsed.data.name })
+    .set(patch)
     .where(and(eq(clientKeys.id, c.req.param("id")), eq(clientKeys.organizationId, ctx.orgId)))
     .returning();
   if (!row) return jsonError(c, 404, "Client key not found.");

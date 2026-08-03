@@ -22,8 +22,14 @@ Each product meters its own **billable event**, and only the billable event
 counts. For **Feature Flags**, that event is an **[exposure](/docs/feature-flags/exposures)**:
 a record that a real user was served a flag. Evaluating a flag (a "check") is
 always **free and unlimited**, whether you evaluate one flag or run millions of
-checks a second. You're billed only for the exposures you record, never for the
-checks behind them.
+checks a second. You're billed only for the exposures behind those checks.
+
+Exposures are logged **automatically** when you evaluate remotely, and are deduped
+per user, flag, and variant **per hour**, so a user reloading a hot page counts
+once an hour, not once per request. That keeps the bill tied to real usage rather
+than raw traffic, and matches how the larger platforms meter. You can turn
+auto-logging off per client key, or log exposures yourself from cached evaluation.
+See [Record exposures](/docs/feature-flags/exposures) for the details.
 
 As more products land, each brings its own billable event, and they all meter
 into the same credit.
@@ -32,17 +38,17 @@ into the same credit.
 
 | Plan | Base | Included | Past the allowance |
 | --- | --- | --- | --- |
-| **Hobby** | Free | 500K events / month | Metering stops (events are refused); a single user, a single organization |
-| **Pro** | $50 / month | A $50 usage credit (about 1M events) | Overage billed at the metered rate |
+| **Hobby** | Free | 1M events / month | Metering stops (events are refused); a single user, a single organization |
+| **Pro** | $50 / month | About 3M events / month | Overage billed at the metered rate |
 | **Enterprise** | Contract | A negotiated envelope | Trued up against the contract |
 
-Events meter at **$0.05 per 1,000**. Pro's $50 base is a **$50 usage credit**, so
-at that rate it covers roughly **one million events** before any overage. The
-credit is monetary and shared: every product's usage draws from the same $50, so
-you're never rationing per-product allowances.
+Events meter at **$0.05 per 1,000**. **Pro is $50/mo and includes about three million
+events** before any overage. That included usage is shared: every product's events
+draw from the same allowance, so you're never rationing per-product limits. You pay
+$50 until you pass roughly 3M events, then only the difference at the metered rate.
 
 <Callout tone="warning" title="Hobby is a hard cap">
-The free Hobby tier stops metering once you pass **500K events** in a cycle:
+The free Hobby tier stops metering once you pass **1M events** in a cycle:
 further exposure ingest is refused with a `403`. Flag **evaluation keeps working**
 (checks are always free), only the recording of new exposures stops. You get
 warning emails at 80% and 100%, so the cap never arrives unannounced. Upgrade to
@@ -69,8 +75,7 @@ GET /v1/orgs/{org}/usage
 ```
 
 It returns the usage breakdown and an `entitlement` object with your plan, the
-included and used events, any overage, and the credit burn-down (`$X of $50
-used`). Any member can read it.
+included and used events, and any overage. Any member can read it.
 
 ## Managing your plan
 

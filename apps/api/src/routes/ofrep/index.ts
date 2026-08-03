@@ -14,6 +14,7 @@ import {
 } from "../../experiments/holdout-overlay.js";
 import { recordEvaluations, type UsageEntry } from "../../flags/usage.js";
 import { compactUsageEvents, ingestEvents } from "../../usage/events.js";
+import { maybeAutoExpose } from "../../usage/auto-expose.js";
 import { notifyUsageThresholds } from "../../usage/notify.js";
 import { eventsAllowanceStatus, isIngestCapped } from "../../usage/allowance.js";
 import { anyPlanHardCaps, planHardCaps } from "../../lib/plans.js";
@@ -271,6 +272,12 @@ ofrep.post("/v1/evaluate/flags/:key", async (c) => {
   await record(c, identity.organizationId, identity.environmentId, [
     usageEntry(flag.id, result),
   ]);
+
+  // Exposures default-on: a remote per-flag evaluation with a targetingKey logs one
+  // billable exposure (deduped per session), unless the key or this request opted
+  // out. Deferred + best-effort, so it never adds latency to or fails the response.
+  const optedOut = c.req.header("x-flagon-exposure")?.trim().toLowerCase() === "off";
+  defer(c, maybeAutoExpose(identity, flag, result, parsed.context, optedOut));
 
   return c.json(toSuccess(result));
 });

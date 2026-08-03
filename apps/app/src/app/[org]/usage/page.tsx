@@ -133,15 +133,11 @@ export default async function UsagePage({
         <UsageFilters base={`/${slug}/usage`} range={range} groupBy={groupBy} />
       </div>
 
-      {entitlement && entitlement.creditCents > 0 ? (
-        // Pro: the Vercel-style usage-credit drawdown ($X of $50 used, then overage).
-        <CreditBar
-          creditCents={entitlement.creditCents}
-          creditUsedCents={entitlement.creditUsedCents}
-          overageCents={entitlement.overageCents}
-        />
-      ) : entitlement && entitlement.includedEvents > 0 ? (
-        // Hobby: the free-events ceiling (hard cap).
+      {entitlement && entitlement.includedEvents > 0 ? (
+        // Both plans show the EVENT allowance (X of N events), never a dollar credit:
+        // Hobby is the free ceiling (hard cap), Pro is "included then overage". Keeping
+        // it event-based means the customer sees "$50/mo, ~3M events", never an internal
+        // credit dollar figure. The dollar detail lives in the invoice table below.
         <EventsBar
           usedEvents={entitlement.usedEvents}
           includedEvents={entitlement.includedEvents}
@@ -166,51 +162,6 @@ export default async function UsagePage({
         overageCents={overageCents}
       />
     </div>
-  );
-}
-
-/**
- * The Pro usage-credit drawdown (Vercel-style): how much of the $50/mo credit this
- * month's usage has spent, then overage. The $50 covers the first $50 of usage
- * (~1M events at $0.05/1K); past that you pay only the difference.
- */
-function CreditBar({
-  creditCents,
-  creditUsedCents,
-  overageCents,
-}: {
-  creditCents: number;
-  creditUsedCents: number;
-  overageCents: number;
-}) {
-  const pct = Math.min(1, creditUsedCents / creditCents);
-  const over = overageCents > 0;
-  const dollars = (creditCents / 100).toFixed(0);
-  return (
-    <section className="rounded-xl border border-white/10 bg-white/2 px-5 py-4">
-      <div className="flex items-center justify-between text-sm">
-        <span className="font-medium text-zinc-300">Usage credit</span>
-        <span className="text-zinc-400 tabular-nums">
-          <span className={over ? "text-amber-400" : "text-zinc-200"}>
-            {usd(creditUsedCents)}
-          </span>{" "}
-          of {usd(creditCents)} used this month
-        </span>
-      </div>
-      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8">
-        <div
-          className={`h-full rounded-full ${over ? "bg-amber-500" : "bg-[#3987e5]"}`}
-          style={{
-            width: `${Math.max(pct * 100, creditUsedCents > 0 ? 2 : 0)}%`,
-          }}
-        />
-      </div>
-      <p className="mt-2 text-xs text-zinc-500">
-        {over
-          ? `Your $${dollars} credit is used up. Usage beyond it bills at $0.05 per 1,000 events. That's ${usd(overageCents)} so far this month.`
-          : `Your $${dollars}/mo includes ${usd(creditCents)} of usage. You're billed only past it.`}
-      </p>
-    </section>
   );
 }
 

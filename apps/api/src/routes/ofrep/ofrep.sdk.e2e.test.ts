@@ -5,7 +5,7 @@ import { serve } from "@hono/node-server";
 import { OpenFeature, type Client } from "@openfeature/server-sdk";
 import { OFREPProvider } from "@openfeature/ofrep-provider";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 /**
  * PROOF A REAL CUSTOMER WORKS: this drives our OFREP endpoints through the ACTUAL
@@ -107,11 +107,29 @@ describe.skipIf(!DATABASE_URL)("OFREP via the OpenFeature SDK (e2e)", () => {
     if (!db) return;
     await db.delete(t.clientKeys).where(eq(t.clientKeys.organizationId, orgId));
     await withOrg(orgId, async (tx) => {
+      await tx.delete(t.usageEvents).where(eq(t.usageEvents.organizationId, orgId));
+      await tx.delete(t.usageCounters).where(eq(t.usageCounters.organizationId, orgId));
       await tx.delete(t.flags).where(eq(t.flags.organizationId, orgId));
       await tx.delete(t.environments).where(eq(t.environments.organizationId, orgId));
       await tx.delete(t.flagEvalRollups).where(eq(t.flagEvalRollups.organizationId, orgId));
     });
   });
+
+  /** Exposures are auto-logged deferred/fire-and-forget, so poll for the receipt. */
+  async function waitForExposure(): Promise<number> {
+    for (let i = 0; i < 40; i++) {
+      const rows = await withOrg(orgId, (tx) =>
+        tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(t.usageEvents)
+          .where(and(eq(t.usageEvents.organizationId, orgId), eq(t.usageEvents.source, "flags.exposure"))),
+      );
+      const n = Number(rows[0]?.n ?? 0);
+      if (n > 0) return n;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return 0;
+  }
 
   it("resolves a boolean flag through the OpenFeature client", async () => {
     expect(await client.getBooleanValue("checkout", false, { targetingKey: "u1" })).toBe(true);
@@ -134,5 +152,12 @@ describe.skipIf(!DATABASE_URL)("OFREP via the OpenFeature SDK (e2e)", () => {
     const d = await client.getBooleanDetails("does-not-exist", false, { targetingKey: "u1" });
     expect(d.value).toBe(false);
     expect(d.errorCode).toBe("FLAG_NOT_FOUND");
+  });
+
+  it("auto-logs a billable exposure through the provider (default-on)", async () => {
+    // A real SDK check on a key with auto_expose on (the default) bills an exposure,
+    // no hook or explicit call required. This is the revenue switch.
+    await client.getBooleanValue("checkout", false, { targetingKey: "auto-1" });
+    expect(await waitForExposure()).toBeGreaterThan(0);
   });
 });
