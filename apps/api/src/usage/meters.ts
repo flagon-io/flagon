@@ -107,6 +107,20 @@ export const SOURCE_METERS: Record<string, SourceMeter> = {
     product: "Feature Flags",
     label: "Flag exposures",
   },
+  // Experiment goal (metric) events sent via POST /ofrep/v1/track. Namespaced
+  // "experiments.metric" (NOT "flags.*") so this feature stays self-contained and
+  // clear of any future OTEL metrics. They bill under the SAME Stripe meter + price
+  // as exposures (one "events" unit, one $0.05/1K rate, one shared credit/allowance)
+  // — so measuring outcomes generates revenue with no new Stripe provisioning — but
+  // carry their own product/label so the usage page breaks them out as a distinct
+  // Experiments line. Each source stages its own report row (own identifier), so
+  // summing into one meter never collides.
+  "experiments.metric": {
+    eventName: "flagon_events",
+    priceLookupKey: "flagon_events_metered",
+    product: "Experiments",
+    label: "Metric events",
+  },
 };
 
 /** The meter config for a durable-event source, or null if that source isn't billed. */

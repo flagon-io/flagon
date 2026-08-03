@@ -1,0 +1,123 @@
+export const metadata = {
+  title: "Record goal events",
+  description:
+    "Send goal events to Flagon with track() so experiments can measure their outcomes: define a metric, the endpoint, request, response, and idempotency.",
+};
+
+# Record goal events
+
+A **goal event** records that a unit *did something*: completed a checkout, made a
+purchase, engaged with a feature. Where an [exposure](/docs/feature-flags/exposures)
+records that a unit *saw* an arm, a goal event records the outcome, and metrics
+measure the impact of an experiment by joining the two on the unit.
+
+Goal events are billable analytics events (the same metered unit as exposures), so
+you pay only to measure, never to serve.
+
+## Define a metric
+
+A **metric** maps a goal-event name to an outcome. Create one in the console under
+**Experiments → Metrics**, or over the [Management API](/docs/feature-flags/management-api):
+
+```http
+POST /v1/orgs/{org}/experiment-metrics
+Authorization: Bearer flagon_...
+Content-Type: application/json
+```
+
+```json
+{
+  "key": "checkout-completed",
+  "name": "Checkout completed",
+  "type": "conversion",
+  "eventName": "checkout_completed",
+  "direction": "increase"
+}
+```
+
+The `eventName` is what you send in `track()`; `type` is how it aggregates
+(`conversion`, `count`, `sum`, `mean`); `direction` says whether higher or lower is
+the win. Attach the metric to an experiment as **primary**, **secondary**, or
+**guardrail**.
+
+## Send goal events
+
+Goal events authenticate with a [client key](/docs/feature-flags/client-keys), the
+same key you evaluate and record exposures with:
+
+```http
+POST /ofrep/v1/track
+Authorization: Bearer flagon_client_...
+Content-Type: application/json
+```
+
+The body is an `events` array. Each entry names the `metric` (the event name) and
+the `targetingKey` (the unit, the same identity you evaluate the flag with).
+A numeric `value` is optional and defaults to `1` (used by `sum`/`mean` metrics).
+Send up to **1,000** events per request and chunk anything larger.
+
+<CodeTabs
+  tabs={[
+    {
+      label: "cURL",
+      code: `curl -X POST "https://api.flagon.io/ofrep/v1/track" \\
+  -H "Authorization: Bearer $FLAGON_CLIENT_KEY" \\
+  -H "Content-Type: application/json" \\
+  -H "Idempotency-Key: $(uuidgen)" \\
+  -d '{
+    "events": [
+      { "metric": "checkout_completed", "targetingKey": "user-42" },
+      { "metric": "revenue", "targetingKey": "user-42", "value": 79.0 }
+    ]
+  }'`,
+    },
+    {
+      label: "TypeScript",
+      code: `await fetch("https://api.flagon.io/ofrep/v1/track", {
+  method: "POST",
+  headers: {
+    Authorization: \`Bearer \${process.env.FLAGON_CLIENT_KEY}\`,
+    "Content-Type": "application/json",
+    "Idempotency-Key": crypto.randomUUID(),
+  },
+  body: JSON.stringify({
+    events: [
+      { metric: "checkout_completed", targetingKey: "user-42" },
+      { metric: "revenue", targetingKey: "user-42", value: 79.0 },
+    ],
+  }),
+});`,
+    },
+  ]}
+/>
+
+<Callout tone="note" title="Base URL">
+Examples use `https://api.flagon.io`. Running Flagon locally, the API is at
+`http://localhost:3002`.
+</Callout>
+
+## Response
+
+A `202` acknowledges the batch:
+
+```json
+{ "recorded": 2, "duplicate": false }
+```
+
+Send an **`Idempotency-Key`** header so a network retry of the same batch is counted
+exactly once. A repeat returns `duplicate: true` and records nothing further.
+Entries missing a metric name or a targeting key are dropped, and only accepted
+events are metered.
+
+## How attribution works
+
+A goal event is joined to a unit's assigned arm when its `targetingKey` matches an
+exposure's `targetingKey` and it occurred **after** first exposure. So the two
+things you must send from your app are:
+
+1. An [exposure](/docs/feature-flags/exposures) with the served `variant` and the
+   `targetingKey`, when a user is assigned.
+2. A goal event with the same `targetingKey`, when the outcome happens.
+
+Targeting keys are stored only as a salted hash on Flagon's side. The raw key is
+never persisted.

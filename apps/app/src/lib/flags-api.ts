@@ -2,6 +2,7 @@ import "server-only";
 import { headers } from "next/headers";
 import { API_URL } from "./urls";
 import { listFromResponse } from "./response-list";
+import type { SharedMetricResult } from "@/components/results/metric-results";
 
 /**
  * Server-side client for the Flagon API's flags surface.
@@ -31,11 +32,15 @@ export type FlagSummary = {
   /** Resolved names (list + detail). */
   createdByName?: string | null;
   maintainerName?: string | null;
-  /** Compact evaluation usage (list view): checks/hr + a 14-day sparkline. */
+  /** Compact evaluation usage (list view): checks/hr, pass rate, staleness + sparkline. */
   usage?: {
     total: number;
     checksPerHour: number;
+    /** Fraction (0-1) serving a truthy variant; null when not boolean-like. */
+    passRate: number | null;
     lastSeenAt: string | null;
+    /** Had traffic but not recently — a cleanup candidate. */
+    stale: boolean;
     series: number[];
   } | null;
 };
@@ -146,6 +151,7 @@ export type FlagUsageEnv = {
   key: string;
   name: string;
   total: number;
+  passRate: number | null;
   lastSeenAt: string | null;
   variants: { key: string; count: number }[];
   series: { day: string; count: number }[];
@@ -153,6 +159,7 @@ export type FlagUsageEnv = {
 
 export type FlagUsage = {
   total: number;
+  passRate: number | null;
   lastSeenAt: string | null;
   environments: FlagUsageEnv[];
 };
@@ -164,6 +171,41 @@ export async function getFlagUsage(
   const res = await apiFetch(`/v1/orgs/${slug}/flags/${key}/usage`);
   if (!res.ok) return null;
   return (await res.json()).usage as FlagUsage;
+}
+
+// --- Always-on outcome impact (the flag's watched metrics) ------------------
+export type FlagImpact = {
+  flagKey: string;
+  environment: string;
+  controlVariantKey: string | null;
+  totalUnits: number;
+  retentionDays: number | null;
+  metrics: SharedMetricResult[];
+};
+
+export async function getFlagImpact(
+  slug: string,
+  key: string,
+  environment = "production",
+): Promise<FlagImpact | null> {
+  const res = await apiFetch(
+    `/v1/orgs/${slug}/flags/${key}/impact?environment=${encodeURIComponent(environment)}`,
+  );
+  if (!res.ok) return null;
+  return (await res.json()) as FlagImpact;
+}
+
+export async function setFlagMetrics(
+  slug: string,
+  key: string,
+  metrics: string[],
+): Promise<{ error?: string }> {
+  const res = await apiFetch(`/v1/orgs/${slug}/flags/${key}/metrics`, {
+    method: "PUT",
+    body: JSON.stringify({ metrics }),
+  });
+  if (res.ok) return {};
+  return unwrap(res);
 }
 
 // --- Org-wide usage (the Usage page) ----------------------------------------

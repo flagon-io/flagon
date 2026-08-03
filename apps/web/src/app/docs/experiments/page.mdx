@@ -1,0 +1,78 @@
+export const metadata = {
+  title: "Experiments",
+  description:
+    "Measure the impact of a rollout. An experiment turns a flag into an A/B test, with metrics tied directly to the variants serving it, and a frequentist + Bayesian readout.",
+};
+
+# Experiments
+
+An **experiment** measures the impact of a rollout. It is the logical conclusion
+of a feature flag: the flag already assigns users to variants deterministically,
+so an experiment layers **metrics** on top to answer the real question: *which
+variant is better, and are we sure?*
+
+Flagon experiments are built on three ideas you may already know:
+
+- **An experiment is a flag.** Its arms are the flag's variants; the flag's
+  deterministic bucketing is the assignment. You do not integrate a second SDK or
+  a separate assignment call. If you evaluate the flag over
+  [OpenFeature](/docs/feature-flags/evaluate/openfeature), you are already
+  assigning users to arms.
+- **Exposures attribute the assignment.** When you
+  [record an exposure](/docs/feature-flags/exposures) that carries the served
+  `variant` and the `targetingKey`, Flagon attributes that unit to its arm. The
+  targeting key is stored only as a salted hash, never in the clear.
+- **Goal events measure the outcome.** You [send goal events](/docs/experiments/track)
+  (a purchase, a signup, an engagement) with `track()`. Flagon joins them back to
+  each unit's assigned arm and computes the result.
+
+## The readout
+
+Every experiment gives you, per metric and per arm versus the control:
+
+- **Relative lift** with a confidence interval.
+- A **p-value** (two-proportion z-test for conversion metrics, Welch's t-test for
+  value metrics), the **frequentist** view.
+- A **Bayesian** probability to beat control, the number most people actually
+  reason about ("there's a 98% chance the variant is better").
+- An always-valid **sequential** test so you can check results any time without the
+  peeking penalty, and a **sample-ratio-mismatch** health check that flags broken
+  assignment before you trust a result.
+
+See [How results work](/docs/experiments/statistics) for what each of these means and
+how Flagon computes them.
+
+<Callout tone="note" title="Reads are free; measurement is metered">
+Evaluating a flag is always free. Exposures and goal events are billable analytics
+events (the same metered unit), so you pay only to measure, never to serve.
+</Callout>
+
+## Set one up
+
+1. Define a [**metric**](/docs/experiments/track#define-a-metric): the outcome you
+   care about, mapped to a `track()` event name (e.g. `checkout_completed`).
+2. Create an **experiment** on a flag, pick the **control** arm, and attach the
+   metric as **primary**.
+3. **Start** it, then send exposures (with `variant` + `targetingKey`) and goal
+   events from your app.
+4. Watch the results fill in, and **decide**: ship, roll back, or keep running.
+
+## Metric types
+
+| Type         | Question it answers                          |
+| ------------ | -------------------------------------------- |
+| `conversion` | Did the unit fire the event at least once?   |
+| `count`      | How many times per unit did the event fire?  |
+| `sum`        | What is the summed value across the unit?    |
+| `mean`       | What is the average value per unit?          |
+
+Each metric has a **direction** (`increase` or `decrease`) so lift is scored the
+right way: a lower bounce rate and a higher conversion rate are both "wins."
+
+## Next
+
+- [Record goal events](/docs/experiments/track): the `track()` endpoint and how to
+  define metrics.
+- [Record exposures](/docs/feature-flags/exposures): attribute assignments to arms.
+- [Management API](/docs/feature-flags/management-api): create and drive
+  experiments programmatically.

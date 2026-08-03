@@ -16,6 +16,9 @@ import { emailVerify_ } from "./emails.route.js";
 import { projects_ } from "./projects.route.js";
 import { teams_ } from "./teams.route.js";
 import { uploads_ } from "./uploads.route.js";
+import { experiments_ } from "./experiments.route.js";
+import { experimentMetrics_ } from "./experiment-metrics.route.js";
+import { holdouts_ } from "./holdouts.route.js";
 import { managementWriteLimit } from "../../lib/management-rate-limit.js";
 
 export const v1 = new Hono();
@@ -45,6 +48,12 @@ orgs.route("/:org/tokens", orgTokens_);
 orgs.route("/:org/projects", projects_);
 orgs.route("/:org/teams", teams_);
 orgs.route("/:org/uploads", uploads_);
+// Experiments and their reusable metric definitions. `experiment-metrics` is a
+// sibling resource (not nested under /experiments) so it never collides with an
+// experiment key, and its own namespace keeps these clear of future OTEL metrics.
+orgs.route("/:org/experiments", experiments_);
+orgs.route("/:org/experiment-metrics", experimentMetrics_);
+orgs.route("/:org/holdouts", holdouts_);
 // The org resource itself (PATCH /:org rename). Registered last so the more
 // specific sub-resource routes above take precedence.
 orgs.route("/:org", org_);

@@ -149,6 +149,7 @@ export type EvaluationReason =
   | "TARGETING_MATCH"
   | "SPLIT"
   | "DISABLED"
+  | "HOLDOUT"
   | "ERROR";
 
 /** OFREP-shaped single-flag result. */

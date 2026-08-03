@@ -105,7 +105,15 @@ export const nav: NavSection[] = [
           { title: "Troubleshooting", href: "/docs/feature-flags/troubleshooting" },
         ],
       },
-      { title: "Experiments", soon: true },
+      {
+        title: "Experiments",
+        items: [
+          { title: "Overview", href: "/docs/experiments" },
+          { title: "Record goal events", href: "/docs/experiments/track" },
+          { title: "How results work", href: "/docs/experiments/statistics" },
+          { title: "Holdouts", href: "/docs/experiments/holdouts" },
+        ],
+      },
       { title: "Deployments", soon: true },
       { title: "Packages", soon: true },
       { title: "Automations", soon: true },

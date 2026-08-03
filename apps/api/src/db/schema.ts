@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -724,6 +725,337 @@ export const assets = pgTable(
   ],
 );
 
+/**
+ * =============================================================================
+ * EXPERIMENTS
+ * =============================================================================
+ * Experimentation built ON TOP of flags: an experiment IS a flag — the serving
+ * flag's deterministic bucketing (flags/evaluate.ts) is the assignment engine,
+ * UNCHANGED — plus experiment metrics (goal events) and a statistics engine.
+ * OpenFeature SDKs already assign users to arms through the standard OFREP
+ * `evaluate` response (variant + reason), so OFREP is untouched. Every table
+ * here is TENANT-scoped (organization_id + the same RLS policy as flags).
+ *
+ *   experiment_metrics                       (reusable goal-metric definitions)
+ *   experiments ─┬─ experiment_metric_links  (primary/secondary/guardrail metrics)
+ *                ├─ experiment_exposures      (per-unit assignment truth)
+ *                └─ experiment_results        (daily per-variant/metric aggregates)
+ *   experiment_metric_events                 (per-unit goal events; analysis detail)
+ *
+ * NAMING: every table is prefixed `experiment_` and the billing source is
+ * `experiments.metric`, so this feature's "metrics" never collide with a future
+ * OTEL/observability metrics product — these are EXPERIMENT goal metrics, a
+ * distinct concept, and are kept entirely within the experiments feature.
+ *
+ * Billing is NOT here: goal (metric) events meter through the shared durable
+ * spine (usage_events) under source "experiments.metric"; these tables carry only
+ * what the stats engine needs. Unit identities are stored as a SALTED HASH of the
+ * targeting key (lib/unit-hash.ts) — a raw targeting key is never persisted.
+ */
+
+/**
+ * A reusable EXPERIMENT metric definition: the outcome an experiment measures.
+ * `type` is the aggregation — 'conversion' (did the unit fire the event at least
+ * once), 'count' (events per unit), 'mean'/'sum' (a numeric `value` on the event,
+ * read from `valueField`). `eventName` is the track() event that feeds it;
+ * `direction` says whether up is good (so lift is scored the right way). Named
+ * `experiment_metrics` (not `metrics`) to stay clear of future OTEL metrics.
+ */
+export const experimentMetrics = pgTable(
+  "experiment_metrics",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    type: text("type").notNull().default("conversion"),
+    /** The track() event name whose occurrences feed this metric. */
+    eventName: text("event_name").notNull(),
+    /** JSON path into the event for the numeric value ('mean'/'sum' metrics). */
+    valueField: text("value_field"),
+    /** 'increase' = a higher value is the win; 'decrease' = lower is better. */
+    direction: text("direction").notNull().default("increase"),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("experiment_metrics_org_key_key").on(t.organizationId, t.key),
+    index("experiment_metrics_org_idx").on(t.organizationId),
+    index("experiment_metrics_org_event_idx").on(t.organizationId, t.eventName),
+  ],
+);
+
+/**
+ * An experiment: a measured rollout of one flag. The arms are the serving flag's
+ * variants; `controlVariantKey` marks the baseline everything is compared to.
+ * `allocation` is the percent of eligible traffic entering the experiment (the
+ * flag's own targeting still gates who is eligible). `status` drives the
+ * lifecycle (draft → running → stopped/archived); `decision` records the
+ * conclusion once stopped.
+ */
+export const experiments = pgTable(
+  "experiments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    hypothesis: text("hypothesis"),
+    flagId: uuid("flag_id")
+      .notNull()
+      .references(() => flags.id, { onDelete: "cascade" }),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environments.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("draft"),
+    /** The variant key treated as the control (baseline) arm. */
+    controlVariantKey: text("control_variant_key"),
+    /** Percent (0-100) of eligible traffic that enters the experiment. */
+    allocation: integer("allocation").notNull().default(100),
+    /** Context path to bucket by; null = the evaluation targetingKey. */
+    bucketBy: text("bucket_by"),
+    /** Confidence level (%) for CIs + significance; alpha = 1 - level/100. */
+    confidenceLevel: integer("confidence_level").notNull().default(95),
+    /** Headline significance uses the always-valid sequential test (safe to peek). */
+    sequential: boolean("sequential").notNull().default(true),
+    /** Multiple-hypothesis correction across the metric family: 'none' | 'bonferroni' | 'bh'. */
+    correction: text("correction").notNull().default("none"),
+    /** CUPED variance reduction: adjust each metric by its pre-exposure covariate. */
+    cuped: boolean("cuped").notNull().default(false),
+    primaryMetricId: uuid("primary_metric_id").references(
+      () => experimentMetrics.id,
+      { onDelete: "set null" },
+    ),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    stoppedAt: timestamp("stopped_at", { withTimezone: true }),
+    /** 'ship' | 'rollback' | 'inconclusive', set when the experiment is decided. */
+    decision: text("decision"),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("experiments_org_key_key").on(t.organizationId, t.key),
+    index("experiments_org_idx").on(t.organizationId),
+    index("experiments_flag_idx").on(t.flagId),
+  ],
+);
+
+/**
+ * The link between an experiment and a metric definition, each with a `role`:
+ * 'primary' (the decision metric), 'secondary' (also-measured), or 'guardrail'
+ * (must not regress). The experiment's `primaryMetricId` is the canonical
+ * primary; this table is the full set (a metric can be reused across
+ * experiments). Named `experiment_metric_links` so the definition table can be
+ * the natural `experiment_metrics`.
+ */
+export const experimentMetricLinks = pgTable(
+  "experiment_metric_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    experimentId: uuid("experiment_id")
+      .notNull()
+      .references(() => experiments.id, { onDelete: "cascade" }),
+    metricId: uuid("metric_id")
+      .notNull()
+      .references(() => experimentMetrics.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("secondary"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("experiment_metric_links_exp_metric_key").on(
+      t.experimentId,
+      t.metricId,
+    ),
+    index("experiment_metric_links_org_idx").on(t.organizationId),
+    index("experiment_metric_links_exp_idx").on(t.experimentId),
+  ],
+);
+
+/**
+ * The per-unit assignment truth, keyed to the FLAG (not an experiment): one row
+ * the first time a unit is exposed to a flag in an environment, recording which
+ * variant it saw. This is ALWAYS-ON — written for every attributed exposure, with
+ * or without an experiment — so both flag-level impact and experiments read it.
+ * Metric events join here on `unitHash` (a salted hash of the targeting key, never
+ * the raw key) so outcomes attribute to the arm the unit actually saw. The unique
+ * (flag, environment, unit) key makes ingest idempotent per unit and freezes the
+ * assignment (a unit can't flip arms). An experiment analyzes this table filtered
+ * to its (flag, environment); a plain flag's impact analyzes all of it.
+ */
+export const flagExposures = pgTable(
+  "flag_exposures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    flagId: uuid("flag_id")
+      .notNull()
+      .references(() => flags.id, { onDelete: "cascade" }),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environments.id, { onDelete: "cascade" }),
+    variantKey: text("variant_key").notNull(),
+    /** Salted sha256 of the targeting key (lib/unit-hash.ts); never the raw key. */
+    unitHash: text("unit_hash").notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    day: date("day").notNull(),
+  },
+  (t) => [
+    uniqueIndex("flag_exposures_flag_env_unit_key").on(
+      t.flagId,
+      t.environmentId,
+      t.unitHash,
+    ),
+    index("flag_exposures_org_idx").on(t.organizationId),
+    index("flag_exposures_flag_env_variant_idx").on(
+      t.flagId,
+      t.environmentId,
+      t.variantKey,
+    ),
+  ],
+);
+
+/**
+ * The metrics "watched" on a flag: which goal metrics show impact on the flag
+ * detail, independent of any experiment. A plain flag with a rollout + a watched
+ * metric gets automatic per-variant impact (Statsig's model). Experiments keep
+ * their own experiment_metric_links (they add roles + a designated control).
+ */
+export const flagMetricLinks = pgTable(
+  "flag_metric_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    flagId: uuid("flag_id")
+      .notNull()
+      .references(() => flags.id, { onDelete: "cascade" }),
+    metricId: uuid("metric_id")
+      .notNull()
+      .references(() => experimentMetrics.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("flag_metric_links_flag_metric_key").on(t.flagId, t.metricId),
+    index("flag_metric_links_org_idx").on(t.organizationId),
+    index("flag_metric_links_flag_idx").on(t.flagId),
+  ],
+);
+
+/**
+ * A holdout: a deterministic global control group held OUT of all experiments in an
+ * environment. `percentage` of units (bucketed by targeting key, stable) are served
+ * the flag's default/control on any flag with a running experiment — so you can
+ * measure the aggregate long-run impact of your whole experimentation program
+ * against a pristine baseline (Statsig's holdout). Enforced at evaluation time.
+ */
+export const holdouts = pgTable(
+  "holdouts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    environmentId: uuid("environment_id")
+      .notNull()
+      .references(() => environments.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** Percent (0-100) of units held out of experiments. */
+    percentage: integer("percentage").notNull().default(5),
+    /** 'active' (enforced) | 'stopped'. */
+    status: text("status").notNull().default("active"),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("holdouts_org_key_key").on(t.organizationId, t.key),
+    index("holdouts_org_idx").on(t.organizationId),
+    index("holdouts_env_status_idx").on(t.environmentId, t.status),
+  ],
+);
+
+/**
+ * Per-unit goal events — the ANALYSIS detail behind experiment metrics (billing
+ * is separate: the same batch meters through usage_events under source
+ * "experiments.metric"). One row per track() event: `eventName` matches a metric's
+ * `eventName`, `value` is the numeric payload for mean/sum metrics (1 for plain
+ * conversions). Joined to experiment_exposures on `unitHash` where occurredAt is
+ * after first exposure. Named `experiment_metric_events` to stay clear of future
+ * OTEL metrics telemetry.
+ */
+export const experimentMetricEvents = pgTable(
+  "experiment_metric_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    /** Salted hash of the targeting key; the join key to experiment_exposures. */
+    unitHash: text("unit_hash").notNull(),
+    eventName: text("event_name").notNull(),
+    value: doublePrecision("value").notNull().default(1),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    day: date("day").notNull(),
+  },
+  (t) => [
+    index("experiment_metric_events_org_event_idx").on(
+      t.organizationId,
+      t.eventName,
+    ),
+    index("experiment_metric_events_org_unit_idx").on(
+      t.organizationId,
+      t.unitHash,
+    ),
+    index("experiment_metric_events_org_day_idx").on(t.organizationId, t.day),
+  ],
+);
+
+/**
+ * Daily per-(experiment, metric, variant) aggregates the stats engine reads. A
+ * rollup job folds exposures + metric_events into sufficient statistics:
+ * `units` (distinct exposed units in the arm), `conversions` (converted units or
+ * total event count), `metricSum` and `metricSumSq` (for mean/variance). Kept as
+ * a precompute for scale; v1 may compute these on read and backfill this table.
+ */
+export const experimentResults = pgTable(
+  "experiment_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    experimentId: uuid("experiment_id")
+      .notNull()
+      .references(() => experiments.id, { onDelete: "cascade" }),
+    metricId: uuid("metric_id")
+      .notNull()
+      .references(() => experimentMetrics.id, { onDelete: "cascade" }),
+    variantKey: text("variant_key").notNull(),
+    day: date("day").notNull(),
+    units: integer("units").notNull().default(0),
+    conversions: integer("conversions").notNull().default(0),
+    metricSum: doublePrecision("metric_sum").notNull().default(0),
+    metricSumSq: doublePrecision("metric_sum_sq").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("experiment_results_bucket_key").on(
+      t.experimentId,
+      t.metricId,
+      t.variantKey,
+      t.day,
+    ),
+    index("experiment_results_org_idx").on(t.organizationId),
+    index("experiment_results_exp_idx").on(t.experimentId),
+  ],
+);
+
 export type Flag = typeof flags.$inferSelect;
 export type NewFlag = typeof flags.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
@@ -743,6 +1075,17 @@ export type UsageCounter = typeof usageCounters.$inferSelect;
 export type UsageMeterReport = typeof usageMeterReports.$inferSelect;
 export type BillingCreditGrant = typeof billingCreditGrants.$inferSelect;
 export type Asset = typeof assets.$inferSelect;
+export type ExperimentMetric = typeof experimentMetrics.$inferSelect;
+export type NewExperimentMetric = typeof experimentMetrics.$inferInsert;
+export type Experiment = typeof experiments.$inferSelect;
+export type NewExperiment = typeof experiments.$inferInsert;
+export type ExperimentMetricLink = typeof experimentMetricLinks.$inferSelect;
+export type FlagExposure = typeof flagExposures.$inferSelect;
+export type FlagMetricLink = typeof flagMetricLinks.$inferSelect;
+export type Holdout = typeof holdouts.$inferSelect;
+export type ExperimentMetricEvent = typeof experimentMetricEvents.$inferSelect;
+export type NewExperimentMetricEvent = typeof experimentMetricEvents.$inferInsert;
+export type ExperimentResult = typeof experimentResults.$inferSelect;
 
 /** Everything the migrator and query layer should know about. */
 export const schema = {
@@ -767,6 +1110,14 @@ export const schema = {
   usageMeterReports,
   billingCreditGrants,
   assets,
+  experimentMetrics,
+  experiments,
+  experimentMetricLinks,
+  flagExposures,
+  flagMetricLinks,
+  experimentMetricEvents,
+  experimentResults,
+  holdouts,
 };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm

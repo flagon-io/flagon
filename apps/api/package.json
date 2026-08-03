@@ -13,6 +13,7 @@
     "db:migrate": "node --env-file-if-exists=.env --import tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "seed:usage": "node --env-file-if-exists=.env --import tsx scripts/seed-validation-usage.ts",
+    "seed:experiments": "node --env-file-if-exists=.env --import tsx scripts/seed-experiments.ts",
     "purge:test-orgs": "node --env-file-if-exists=.env --import tsx scripts/purge-test-orgs.ts"
   },
   "dependencies": {

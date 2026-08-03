@@ -1,0 +1,224 @@
+export const metadata = {
+  title: "How results work: the statistics",
+  description:
+    "The statistics behind a Flagon experiment, in plain terms: frequentist testing (z-test, t-test, p-value, confidence interval), Bayesian probability to beat control, always-valid sequential testing (safe peeking), sample-ratio mismatch, statistical power, and multiple-comparison correction.",
+};
+
+# How results work: the statistics
+
+Every experiment reports its result two ways at once, so you are never trusting a
+single number: a **frequentist** test (the p-value and confidence interval you
+know from a stats class) and a **Bayesian** probability (the "chance to beat
+control" most people actually reason with). On top of that, Flagon runs an
+**always-valid sequential** test so you can check results whenever you like
+without fooling yourself, and a **sample-ratio-mismatch** health check that catches
+a broken experiment before you trust it.
+
+This page defines each term the way the rest of the industry uses it, so a result
+means the same thing here as it does in Statsig, LaunchDarkly, or a textbook.
+
+<Callout tone="note" title="Where you see this">
+Open an experiment's <strong>Results</strong> tab. The header legend names the
+methods in play (Frequentist, Bayesian, Sequential, your confidence level, and any
+correction), and each metric shows lift, a confidence interval, chance to beat
+control, and a p-value per arm versus the control.
+</Callout>
+
+## The vocabulary in one place
+
+| Term | What it answers | Where it shows |
+| ---- | --------------- | -------------- |
+| **Relative lift** | How much better (or worse) is the arm than control? | The `+40.0%` figure |
+| **Confidence interval (CI)** | What is the plausible range for that lift? | The `[+24.1%, +57.9%]` under the lift |
+| **p-value** | If the arm were really no different, how surprising is this data? | The `p-value` column |
+| **Significant** | Is the effect strong enough to act on? | The `significant` badge |
+| **Chance to beat control** | What is the probability this arm is actually better? | The `>99.9%` bar (Bayesian) |
+| **Sequential / always-valid** | Can I trust the result even though I peeked early? | The `Sequential` legend + "safe to call" |
+| **Sample-ratio mismatch (SRM)** | Did units split across arms the way I configured? | A warning banner when it fails |
+| **Power / sample size** | How many units do I need to detect the effect I care about? | The `Power:` line |
+
+## Frequentist testing
+
+The **frequentist** view asks a single question: *if this arm were truly no
+different from control, how unlikely is the data we actually observed?* That answer
+is the **p-value**.
+
+- For a **conversion** metric (did the unit convert, yes or no) Flagon uses a
+  **two-proportion z-test** comparing the arm's rate to the control's.
+- For a **value** metric (`sum`, `mean`, `count` per unit) it uses **Welch's
+  t-test**, which does not assume the two arms have equal variance.
+
+A small p-value means the data would be surprising if there were no real effect, so
+you reject the "no difference" assumption. Flagon calls a result **significant** when
+the p-value falls below `1 − confidence`. At the default **95%** confidence that is
+`p < 0.05`; raise the experiment to 99% and the bar tightens to `p < 0.01`.
+
+Alongside the p-value, every arm reports a **relative lift** and its **confidence
+interval**. Read a 95% CI as: *the true lift is plausibly anywhere in this range.*
+When the interval excludes zero (for example `[+24.1%, +57.9%]`, all positive), the
+arm is significantly better. When it straddles zero, the effect is still within the
+noise. Conversion CIs use a **Wilson** interval, which stays accurate at small
+samples and extreme rates where the textbook "normal approximation" falls apart.
+
+<Callout tone="tip" title="A p-value is not the chance you are right">
+`p = 0.03` does <em>not</em> mean "97% chance the variant wins." It means "if there
+were no effect, data this extreme would show up 3% of the time." The number that
+answers "chance the variant wins" is the Bayesian one below. Reporting both is why
+you do not have to squint at a p-value and hope.
+</Callout>
+
+## Bayesian analysis
+
+The **Bayesian** view answers the question everyone actually asks: *what is the
+probability this arm beats control?* Flagon reports it directly as **chance to beat
+control** (the same quantity Statsig calls "Chance to beat control" and others call
+"probability to be best").
+
+For a conversion metric, Flagon models each arm's true rate with a **Beta posterior**
+updated by that arm's conversions and non-conversions, then computes the probability
+that the arm's rate exceeds the control's. A result of **98%** reads exactly how it
+sounds: given the data so far, there is a 98% chance this arm is genuinely better.
+Values at the extremes are shown as **`>99.9%`** and **`<0.1%`** rather than a
+rounded `100%`, because certainty is never absolute.
+
+Bayesian probabilities are intuitive to act on and compose naturally with a decision
+("ship if chance to beat control is above 95% and the guardrail is safe"). Flagon
+pairs them with the frequentist test rather than replacing it, so a call backed by
+both a high chance-to-beat and a significant p-value is a call you can defend.
+
+## Sequential testing (always-valid)
+
+Here is the trap that quietly ruins most homegrown A/B tests, the **peeking
+problem**: a classic (fixed-horizon) p-value is only valid if you fix the sample
+size in advance and look **once**, at the end. If you watch the dashboard daily and
+stop the moment it reads `p < 0.05`, you inflate your false-positive rate far above
+5%. Significance will eventually flicker true by chance alone.
+
+Flagon defaults every experiment to an **always-valid sequential test** (a mixture
+Sequential Probability Ratio Test, the same family Statsig's "sequential testing" and
+Optimizely's "Stats Engine" use). Its guarantee: **you may check the results as often
+as you want, stop whenever you like, and the error rate still holds.** The legend
+says "safe to peek" and a winning arm says "safe to call" precisely because of this.
+The cost is modest: a sequential test needs a little more data than a fixed test to
+reach significance, and in exchange you are freed from pre-committing a sample size
+and from the peeking penalty.
+
+You can switch a single experiment to a **fixed-horizon** test from **Edit →
+Analysis** when you genuinely will look only once at a pre-planned sample size. In
+that mode the badge reads **trending** while the fixed z-test has fired but the
+experiment has not yet reached its planned size, a reminder that the call is not
+yet safe to make.
+
+<Callout tone="warning" title="Why this matters">
+Sequential testing is the difference between "we hit significance on Tuesday so we
+shipped" being <em>sound</em> versus being a coin flip you mistook for a result.
+Leave it on unless you have a specific reason not to.
+</Callout>
+
+## Sample-ratio mismatch (SRM)
+
+If you allocate an experiment 50/50 but the arms come back 5,200 vs 4,800, something
+is wrong upstream (a broken assignment, a redirect that drops one arm, a logging
+gap), and **every downstream number is untrustworthy.** A **sample-ratio mismatch**
+check catches exactly this.
+
+Flagon runs a **chi-square goodness-of-fit test** comparing the observed unit split
+against the split you configured. When the split is more skewed than random chance
+can explain, the results surface an **SRM warning** so you fix the pipeline instead
+of shipping a phantom win. A clean SRM is the first thing to confirm before reading
+any lift: it is the experiment's smoke alarm.
+
+## Statistical power and sample size
+
+**Power** is the probability that your experiment detects a real effect of a given
+size. The knob that drives it is the **minimum detectable effect (MDE)**: the
+smallest lift you care to catch. Smaller effects need more data.
+
+The Results panel shows a **power readout**: roughly how many units per arm you need
+to detect the configured MDE at your confidence level, and how far along you are (for
+example `4,000 / 14,751 (27%)`). Use it to set expectations before you start ("this
+will take about two weeks at current traffic") and to resist calling a flat result
+early when you are simply **underpowered** rather than genuinely tied.
+
+## CUPED variance reduction
+
+**CUPED** (Controlled-experiment Using Pre-Experiment Data) is the standard trick
+for reaching significance with *less* data, used by Microsoft, Netflix, Booking,
+and Statsig. The idea: a lot of the variance in a metric is not caused by your
+change at all, it is just that some users convert or spend more than others no
+matter what. If you can measure that baseline tendency from *before* the
+experiment, you can subtract it out and see the treatment effect through much less
+noise.
+
+Flagon uses each unit's **pre-exposure value of the same metric** as the covariate
+X (its behavior before it first saw the flag), and replaces the raw outcome Y with
+
+```
+Y* = Y − θ·(X − X̄),   θ = Cov(Y,X) / Var(X)
+```
+
+Because X is measured before assignment, it cannot be affected by the treatment, so
+Y\* has the same expected lift as Y but a smaller variance, reduced by the factor
+(1 − ρ²) where ρ is the correlation between the metric and its pre-period value.
+When a metric has no usable history (a brand-new user base), θ is 0 and CUPED
+quietly does nothing, so it is always safe to leave on.
+
+Turn it on per experiment in **Edit → Analysis**. When it is applied, each metric
+shows a **CUPED** badge with the percent of variance removed (for example "19%
+variance removed"), and the analysis runs on the adjusted values. More variance
+removed means narrower intervals and a significant result sooner, at no cost to
+correctness.
+
+## Multiple-comparison correction
+
+Test one metric at 95% confidence and your false-positive rate is 5%. Test **twenty**
+metrics and, by chance alone, you expect about one to look "significant" even if
+nothing changed. This is the **multiple-comparisons problem**, and it is why a
+dashboard full of green metrics can be misleading.
+
+Flagon can correct for it across an experiment's metric family. Choose the method in
+**Edit → Analysis**:
+
+- **None**: no adjustment. Fine for a single primary metric.
+- **Bonferroni**: the strict, conservative classic. Divide the significance
+  threshold by the number of metrics. Controls the chance of *any* false positive.
+- **Benjamini-Hochberg (FDR)**: controls the *false discovery rate* (the expected
+  fraction of your "wins" that are false). More powerful than Bonferroni when you
+  track many metrics, and the usual choice for a broad metric set.
+
+The correction adjusts which metrics earn the **significant** badge; the raw p-values
+and intervals are always shown so nothing is hidden.
+
+## Holdouts
+
+A **holdout** is a small, deterministic slice of traffic held back from *all*
+experiments, a permanent control group that keeps seeing the baseline. It answers
+the question individual tests cannot: *across everything we shipped this quarter, did
+we actually move the business, or did a hundred small "wins" net out to nothing?*
+
+Holdouts are enforced at evaluation time, so a unit in the holdout is served the
+default variant and never enters an experiment's arms. See
+[Holdouts](/docs/experiments/holdouts) for setup. <em>(Documentation for the holdouts
+surface is expanding alongside the feature.)</em>
+
+## How Flagon computes all this
+
+Every number on the Results panel comes from a single, auditable pipeline:
+
+1. **Exposures** attribute each unit to the arm it saw, frozen at first exposure, so
+   later re-buckets cannot contaminate the result. See
+   [Record exposures](/docs/feature-flags/exposures).
+2. **Goal events** are joined to each unit's arm, counting only events that happened
+   **after** first exposure. See [Record goal events](/docs/experiments/track).
+3. The **analysis window** is your plan's retention window, so the same math powers a
+   live experiment and a retroactive one you add months later. See
+   [Usage & billing](/docs/platform/billing).
+4. The **stats engine** is pure and deterministic: the same inputs always produce the
+   same z-test, t-test, Wilson interval, Beta posterior, sequential bound, SRM, and
+   power readout. No sampling, no approximation drift.
+
+## Next
+
+- [Record exposures](/docs/feature-flags/exposures): attribute units to arms.
+- [Record goal events](/docs/experiments/track): measure the outcomes.
+- [Experiments overview](/docs/experiments): set one up end to end.

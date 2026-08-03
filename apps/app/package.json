@@ -11,7 +11,8 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node --env-file-if-exists=.env.local --env-file-if-exists=.env --import tsx src/db/migrate.ts"
+    "db:migrate": "node --env-file-if-exists=.env.local --env-file-if-exists=.env --import tsx src/db/migrate.ts",
+    "qa": "node --env-file-if-exists=.env.local --env-file-if-exists=.env qa/capture.mjs"
   },
   "dependencies": {
     "@flagon/design": "*",
@@ -48,6 +49,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
+    "playwright-core": "^1.62.1",
     "storybook": "^10.5.5",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",

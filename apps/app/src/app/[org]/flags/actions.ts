@@ -24,6 +24,7 @@ import {
   type FlagType,
   type Predicate,
   type Serve,
+  setFlagMetrics,
 } from "@/lib/flags-api";
 
 /**
@@ -331,3 +332,15 @@ export async function deleteSegmentAction(
   return {};
 }
 
+
+/** Set the metrics whose always-on impact is shown on a flag. */
+export async function setFlagMetricsAction(
+  slug: string,
+  key: string,
+  metrics: string[],
+): Promise<{ error?: string }> {
+  const res = await setFlagMetrics(slug, key, metrics);
+  if (res.error) return { error: res.error };
+  revalidatePath(`/${slug}/flags/${key}`);
+  return {};
+}

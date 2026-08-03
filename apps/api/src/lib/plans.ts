@@ -95,6 +95,29 @@ export function anyPlanHardCaps(): boolean {
   return Object.values(PLAN_EVENTS).some((p) => p.hardCap);
 }
 
+/**
+ * How far back a plan can ANALYZE outcome history (flag impact + experiments), in
+ * days. Every exposure/track event is billed at ingest regardless; this only bounds
+ * the analysis WINDOW, which keeps stored detail cheap and makes "I need more
+ * history" a direct upsell. `null` = unlimited (Enterprise / contract). An org can
+ * carry a higher override (a paid add-on) above its plan base — see
+ * lib/retention.ts effectiveRetentionDays(). Mirror these with the design source of
+ * truth (packages/design/src/plans.ts) so pricing copy matches enforcement.
+ */
+const PLAN_RETENTION_DAYS: Record<PlanId, number | null> = {
+  hobby: 7,
+  pro: 30,
+  enterprise: null,
+};
+
+/** The base analysis-retention window (days) for a plan; null = unlimited. Unknown
+ *  plans fail safe to the Hobby window. */
+export function planRetentionDays(id: string): number | null {
+  return id in PLAN_RETENTION_DAYS
+    ? PLAN_RETENTION_DAYS[id as PlanId]
+    : PLAN_RETENTION_DAYS.hobby;
+}
+
 export const DEFAULT_PLAN: PlanId = "hobby";
 
 /** A known plan that can be chosen right now (mirrors PLANS.filter(p => p.available)). */

@@ -57,6 +57,11 @@ function computeEtag(data: EvaluationData): string {
   const segments = [...data.segments.values()].sort((a, b) =>
     a.key.localeCompare(b.key),
   );
+  // This ETag covers ONLY the flag primitive (flags + segments). Overlays layered
+  // on top of evaluation (the experiments holdout overlay) carry their own
+  // fingerprint; the OFREP endpoint folds the two together so a poller still stops
+  // 304ing when a holdout or running experiment changes. Keeping them separate is
+  // what lets flags and experiments stay decoupled.
   const hash = createHash("sha1")
     .update(JSON.stringify({ flags, segments }))
     .digest("base64url")

@@ -70,24 +70,34 @@ function MiniSparkline({ values }: { values: number[] }) {
 }
 
 // The usage cell always renders a chart (empty bars when there's no traffic yet)
-// so the column keeps a fixed footprint and every row aligns.
+// so the column keeps a fixed footprint and every row aligns. Shows checks/hr and,
+// for boolean-like flags, the pass rate — the gate-style read Statsig surfaces.
 function ChecksCell({ usage }: { usage: FlagSummary["usage"] }) {
   const cph = usage && usage.total > 0 ? usage.checksPerHour : null;
   const rate =
-    cph === null
-      ? "—"
-      : cph >= 1
-        ? `${Math.round(cph)}/hr`
-        : cph > 0
-          ? "<1/hr"
-          : "0/hr";
+    cph === null ? "0/hr" : cph >= 1 ? `${Math.round(cph)}/hr` : cph > 0 ? "<1/hr" : "0/hr";
+  const passRate = usage?.passRate ?? null;
   return (
-    <div className="hidden items-center justify-end gap-2 sm:flex">
+    <div className="hidden items-center justify-end gap-2.5 sm:flex">
       <MiniSparkline values={normalizeSeries(usage?.series)} />
-      <span className="w-10 shrink-0 text-right text-xs whitespace-nowrap text-zinc-500 tabular-nums">
-        {rate}
-      </span>
+      <div className="flex w-16 shrink-0 flex-col items-end leading-tight">
+        <span className="text-xs whitespace-nowrap text-zinc-400 tabular-nums">{rate}</span>
+        {passRate !== null ? (
+          <span className="text-[11px] whitespace-nowrap text-zinc-500 tabular-nums">
+            {Math.round(passRate * 100)}% pass
+          </span>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+/** A muted "Stale" pill for flags with traffic that's gone quiet (cleanup candidate). */
+function StaleBadge() {
+  return (
+    <span className="rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300/90">
+      Stale
+    </span>
   );
 }
 
@@ -217,6 +227,8 @@ export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[]
                     <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-500/90">
                       Archived
                     </span>
+                  ) : flag.usage?.stale ? (
+                    <StaleBadge />
                   ) : null}
                 </div>
                 <span className="hidden truncate font-mono text-sm text-zinc-400 sm:block">

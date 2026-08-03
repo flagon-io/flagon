@@ -38,8 +38,10 @@ const shared = {
   allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   // If-None-Match lets browser OFREP providers make conditional bulk-eval
   // requests; without it the cross-origin preflight rejects the header and the
-  // 304 caching path is dead from the browser.
-  allowHeaders: ["Content-Type", "Authorization", "If-None-Match"],
+  // 304 caching path is dead from the browser. Idempotency-Key lets browser
+  // clients send exposures/goal events with exactly-once retry semantics; without
+  // it the preflight for /ofrep/v1/exposures and /ofrep/v1/track is rejected.
+  allowHeaders: ["Content-Type", "Authorization", "If-None-Match", "Idempotency-Key"],
   // ETag is required for the conditional-request/304 loop; Retry-After and the
   // RateLimit-* family let SDKs read throttling signals off a 429.
   exposeHeaders: [

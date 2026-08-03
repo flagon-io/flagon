@@ -61,8 +61,12 @@ describe.skipIf(!DATABASE_URL)("orgUsage per-product breakdown (integration)", (
     // label until it's added to SOURCE_METERS, at which point it gets its own band.
     expect(catalog).toMatchObject({ product: "Platform", label: "Events", usage: 2000 });
 
-    // Distinct products => distinct bands (this is what the table groups on).
-    expect(new Set(billable.map((s) => s.product)).size).toBe(2);
+    // Distinct products among sources WITH usage => distinct bands (what the table
+    // groups on). Filtered to usage > 0 so it stays robust as more billable sources
+    // are registered (e.g. experiments.metric), which show a zero line until used.
+    expect(
+      new Set(billable.filter((s) => s.usage > 0).map((s) => s.product)).size,
+    ).toBe(2);
 
     // The invoice/allowance total sums across every billable line, not just one.
     expect(usage.totals.billableUsage).toBe(7000);

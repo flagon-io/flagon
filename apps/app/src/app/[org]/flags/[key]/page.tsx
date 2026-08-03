@@ -5,14 +5,17 @@ import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import {
   getFlag,
+  getFlagImpact,
   getFlagUsage,
   listMembers,
   listSegments,
 } from "@/lib/flags-api";
+import { listMetrics } from "@/lib/experiments-api";
 import { ArchivedNotice } from "./archived-notice";
 import { EnvCard } from "./env-controls";
 import { EvaluationsAside } from "./evaluations-aside";
 import { FlagActions } from "./flag-actions";
+import { FlagImpactSection } from "./flag-impact-section";
 import { FlagInfoPanel } from "./flag-info-panel";
 import { UseInCodeButton } from "./use-in-code";
 import { VariantsEditor } from "./variants-editor";
@@ -33,11 +36,13 @@ export default async function FlagDetail({
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
 
-  const [detail, segments, members, usage] = await Promise.all([
+  const [detail, segments, members, usage, impact, metrics] = await Promise.all([
     getFlag(slug, key),
     listSegments(slug),
     listMembers(slug),
     getFlagUsage(slug, key),
+    getFlagImpact(slug, key),
+    listMetrics(slug),
   ]);
   if (!detail) notFound();
 
@@ -122,6 +127,15 @@ export default async function FlagDetail({
               ))}
             </div>
           </section>
+
+          {/* Always-on outcome impact — the reason to send exposures + goal events. */}
+          <FlagImpactSection
+            slug={slug}
+            flagKey={detail.flag.key}
+            impact={impact}
+            allMetrics={metrics.map((m) => ({ key: m.key, name: m.name }))}
+            canManage={canManageOrg(membership.role)}
+          />
         </div>
 
         <aside className="flex flex-col gap-5 lg:border-l lg:border-white/8 lg:pl-6">

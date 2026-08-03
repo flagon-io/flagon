@@ -63,7 +63,7 @@ function statusLabel(status: string | null): string | null {
     case "trialing":
       return "Trialing";
     case "past_due":
-      return "Past due — update your card";
+      return "Past due: update your card";
     case "canceled":
       return "Canceled";
     case "unpaid":

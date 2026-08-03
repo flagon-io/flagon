@@ -7,12 +7,15 @@ import type { TenantTx } from "../../db/tenant.js";
 import { db } from "../../db/client.js";
 import {
   environments,
+  experimentMetrics,
   flagEnvironments,
+  flagMetricLinks,
   flagRevisions,
   flagRules,
   flagVariants,
   flags,
 } from "../../db/schema.js";
+import { analyzeFlag } from "../../experiments/analyze.js";
 import { users } from "../../db/auth-tables.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
@@ -353,7 +356,9 @@ registerComponentSchema("DeleteAck", z.object({ ok: z.boolean() }));
 const flagUsageSummarySchema = z.object({
   total: z.number(),
   checksPerHour: z.number(),
+  passRate: z.number().nullable().describe("Fraction (0-1) serving a truthy variant; null if not boolean-like."),
   lastSeenAt: z.string().nullable().describe("ISO 8601 timestamp"),
+  stale: z.boolean().describe("Had traffic in the window but none recently — a cleanup candidate."),
   series: z.array(z.number()),
 });
 
@@ -428,12 +433,14 @@ registerComponentSchema(
   z.object({
     usage: z.object({
       total: z.number(),
+      passRate: z.number().nullable(),
       lastSeenAt: z.string().nullable().describe("ISO 8601 timestamp"),
       environments: z.array(
         z.object({
           key: z.string(),
           name: z.string(),
           total: z.number(),
+          passRate: z.number().nullable(),
           lastSeenAt: z.string().nullable().describe("ISO 8601 timestamp"),
           variants: z.array(z.object({ key: z.string(), count: z.number() })),
           series: z.array(z.object({ day: z.string(), count: z.number() })),
@@ -816,6 +823,145 @@ flags_.get("/:key/usage", async (c) => {
 
   if (!usage) return jsonError(c, 404, "Flag not found.");
   return c.json({ usage });
+});
+
+// --- Outcome impact (always-on) ----------------------------------------------
+// Per-variant metric impact for a flag, from attributed exposures + goal events —
+// no experiment required. The analysis window is the org's retention (a paid
+// lever), applied inside analyzeFlag().
+const setWatchedMetrics = z.object({
+  metrics: z.array(z.string().trim().min(1)).describe("Metric keys to watch on the flag."),
+});
+
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/flags/{key}/impact",
+  summary: "Get flag impact",
+  description:
+    "Per watched metric, per-variant impact for a flag (conversion/lift, confidence interval, p-value, Bayesian chance to beat control, SRM). Computed from attributed exposures + goal events over the org's retention window — no experiment needed. The control is the environment's default variant.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: { org: "The organization slug.", key: "The flag key." },
+  responses: {
+    200: { description: "The flag's impact readout.", schemaName: "FlagImpactResponse" },
+    404: { description: "No flag or environment with that key." },
+  },
+});
+
+registerRoute({
+  method: "put",
+  path: "/v1/orgs/{org}/flags/{key}/metrics",
+  summary: "Set watched metrics",
+  description: "Replace the set of metrics whose impact is shown on the flag.",
+  tags: [FLAGS_TAG],
+  auth: true,
+  paramDescriptions: { org: "The organization slug.", key: "The flag key." },
+  request: { body: setWatchedMetrics },
+  responses: {
+    200: { description: "The watched metrics were set.", schemaName: "DeleteAck" },
+    404: { description: "No flag (or a metric) with that key." },
+    422: { description: "A referenced metric does not exist." },
+  },
+});
+
+const flagVariantAnalysisSchema = z.object({
+  variantKey: z.string(),
+  isControl: z.boolean(),
+  units: z.number(),
+  estimate: z.number(),
+  ciLow: z.number(),
+  ciHigh: z.number(),
+  absoluteLift: z.number().nullable(),
+  relativeLift: z.number().nullable(),
+  relativeLiftCiLow: z.number().nullable(),
+  relativeLiftCiHigh: z.number().nullable(),
+  pValue: z.number().nullable(),
+  probabilityToBeatControl: z.number().nullable(),
+  significant: z.boolean(),
+  sequentialPValue: z.number().nullable(),
+  sequentialCiLow: z.number().nullable(),
+  sequentialCiHigh: z.number().nullable(),
+  sequentiallySignificant: z.boolean(),
+});
+registerComponentSchema(
+  "FlagImpactResponse",
+  z.object({
+    flagKey: z.string(),
+    environment: z.string(),
+    controlVariantKey: z.string().nullable(),
+    totalUnits: z.number(),
+    retentionDays: z.number().nullable(),
+    metrics: z.array(
+      z.object({
+        metricKey: z.string(),
+        metricName: z.string(),
+        metricType: z.string(),
+        role: z.string(),
+        direction: z.string(),
+        analysis: z.object({
+          family: z.string(),
+          direction: z.string(),
+          confidence: z.number(),
+          variants: z.array(flagVariantAnalysisSchema),
+          srm: z
+            .object({ chiSquare: z.number(), pValue: z.number(), healthy: z.boolean() })
+            .nullable(),
+        }),
+      }),
+    ),
+  }),
+);
+
+flags_.get("/:key/impact", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const key = c.req.param("key") ?? "";
+  const environment = c.req.query("environment") || "production";
+  const results = await analyzeFlag(ctx.orgId, key, environment);
+  if (!results) return jsonError(c, 404, "Flag or environment not found.");
+  return c.json(results);
+});
+
+flags_.put("/:key/metrics", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const parsed = setWatchedMetrics.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return validationError(c, parsed.error);
+  const key = c.req.param("key") ?? "";
+
+  const outcome: null | { error: string } | { ok: true } = await withOrg(ctx.orgId, async (tx) => {
+    const flag = await loadFlag(tx, key);
+    if (!flag) return null;
+    const keys = [...new Set(parsed.data.metrics)];
+    const defs = keys.length
+      ? await tx
+          .select({ id: experimentMetrics.id, key: experimentMetrics.key })
+          .from(experimentMetrics)
+          .where(
+            and(
+              eq(experimentMetrics.organizationId, ctx.orgId),
+              inArray(experimentMetrics.key, keys),
+            ),
+          )
+      : [];
+    const byKey = new Map(defs.map((d) => [d.key, d.id]));
+    for (const k of keys) if (!byKey.has(k)) return { error: `Metric "${k}" does not exist.` } as const;
+
+    await tx.delete(flagMetricLinks).where(eq(flagMetricLinks.flagId, flag.id));
+    if (keys.length) {
+      await tx
+        .insert(flagMetricLinks)
+        .values(
+          keys.map((k) => ({ organizationId: ctx.orgId, flagId: flag.id, metricId: byKey.get(k)! })),
+        )
+        .onConflictDoNothing({ target: [flagMetricLinks.flagId, flagMetricLinks.metricId] });
+    }
+    return { ok: true as const };
+  });
+
+  if (!outcome) return jsonError(c, 404, "Flag not found.");
+  if ("error" in outcome) return jsonError(c, 422, outcome.error);
+  return c.json({ ok: true });
 });
 
 // --- Update metadata ---------------------------------------------------------

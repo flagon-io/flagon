@@ -72,8 +72,9 @@ const lineup: LineupItem[] = [
   {
     icon: FlaskConical,
     name: "Experiments",
-    tone: "soon",
-    label: "Soon",
+    tone: "available",
+    label: "Available",
+    href: "/docs/experiments",
     body: "Measure a rollout's impact, tied to the flags serving it.",
   },
   {

@@ -131,7 +131,7 @@ export function OrgSwitcher({
         <PopoverTrigger asChild>
           <button
             type="button"
-            aria-label={`${current.name} — switch organization`}
+            aria-label={`${current.name}, switch organization`}
             className="flex w-full items-center justify-center rounded-md px-2 py-1.5 transition-colors outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-teal-500/50"
           >
             <OrgAvatar org={current} />

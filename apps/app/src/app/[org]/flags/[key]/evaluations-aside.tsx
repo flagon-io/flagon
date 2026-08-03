@@ -79,6 +79,14 @@ export function EvaluationsAside({ usage }: { usage: FlagUsage }) {
         </span>
         <span className="text-xs text-zinc-500">last {relativeTime(usage.lastSeenAt)}</span>
       </div>
+      {usage.passRate !== null ? (
+        <div className="mt-1 flex items-baseline justify-between">
+          <span className="text-xs text-zinc-500">Pass rate</span>
+          <span className="text-sm font-medium text-teal-300 tabular-nums">
+            {Math.round(usage.passRate * 100)}%
+          </span>
+        </div>
+      ) : null}
       <div className="mt-2">
         <Sparkline values={combinedSeries(usage)} />
       </div>
@@ -87,7 +95,12 @@ export function EvaluationsAside({ usage }: { usage: FlagUsage }) {
         {usage.environments.map((env) => (
           <div key={env.key} className="flex items-center justify-between gap-2 text-xs">
             <span className="truncate text-zinc-400">{env.name}</span>
-            <span className="text-zinc-500 tabular-nums">{compact(env.total)}</span>
+            <span className="flex items-center gap-2 tabular-nums">
+              {env.passRate !== null ? (
+                <span className="text-teal-300/80">{Math.round(env.passRate * 100)}%</span>
+              ) : null}
+              <span className="text-zinc-500">{compact(env.total)}</span>
+            </span>
           </div>
         ))}
       </div>

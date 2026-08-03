@@ -7,6 +7,11 @@ import {
   getEvaluationDataWithEtag,
 } from "../../flags/eval-cache.js";
 import { evaluate } from "../../flags/evaluate.js";
+import {
+  applyHoldout,
+  getHoldoutOverlay,
+  overlayFingerprint,
+} from "../../experiments/holdout-overlay.js";
 import { recordEvaluations, type UsageEntry } from "../../flags/usage.js";
 import { compactUsageEvents, ingestEvents } from "../../usage/events.js";
 import { notifyUsageThresholds } from "../../usage/notify.js";
@@ -27,6 +32,12 @@ import type {
   EvaluationResult,
 } from "../../flags/types.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
+import {
+  attributeExposures,
+  recordMetricEvents,
+  type ExposureEvent,
+  type MetricEventInput,
+} from "../../experiments/ingest.js";
 
 /**
  * OFREP — the OpenFeature Remote Evaluation Protocol. This is the hot path SDKs
@@ -219,10 +230,12 @@ ofrep.post("/v1/evaluate/flags/:key", async (c) => {
   }
 
   const key = c.req.param("key");
-  const data = await getEvaluationData(
-    identity.organizationId,
-    identity.environmentId,
-  );
+  // Flag config (the primitive) and the experiments holdout overlay are loaded and
+  // cached independently, then composed here — flags does not know about holdouts.
+  const [data, overlay] = await Promise.all([
+    getEvaluationData(identity.organizationId, identity.environmentId),
+    getHoldoutOverlay(identity.organizationId, identity.environmentId),
+  ]);
   const flag = data.flags.find((f) => f.key === key);
 
   if (!flag) {
@@ -235,7 +248,12 @@ ofrep.post("/v1/evaluate/flags/:key", async (c) => {
     );
   }
 
-  const result = evaluate(flag, parsed.context, data.segments);
+  const result = applyHoldout(
+    flag,
+    evaluate(flag, parsed.context, data.segments),
+    parsed.context,
+    overlay,
+  );
   if (result.reason === "ERROR") {
     // A handled evaluation error (bad variant reference, degenerate config) is a
     // 400 per the OFREP spec: the request reached us and was understood, the
@@ -270,18 +288,23 @@ ofrep.post("/v1/evaluate/flags", async (c) => {
     return ofrepFail(c, 400, parsed.errorCode, parsed.errorDetails);
   }
 
-  const { data, etag } = await getEvaluationDataWithEtag(
-    identity.organizationId,
-    identity.environmentId,
-  );
+  const [{ data, etag: flagEtag }, overlay] = await Promise.all([
+    getEvaluationDataWithEtag(identity.organizationId, identity.environmentId),
+    getHoldoutOverlay(identity.organizationId, identity.environmentId),
+  ]);
 
-  // Config-version caching: a client polls with a static context, so an
-  // unchanged config (same ETag) means unchanged results — answer 304 with no
-  // body, sparing the evaluation and the payload.
+  // Config-version caching: a client polls with a static context, so an unchanged
+  // config (same ETag) means unchanged results — answer 304 with no body, sparing
+  // the evaluation and the payload. The flag ETag and the holdout-overlay
+  // fingerprint are folded together so the ETag also moves when a holdout or a
+  // running experiment changes, even though the two caches are independent.
+  const etag = `${flagEtag.slice(0, -1)}:${overlayFingerprint(overlay)}"`;
   c.header("ETag", etag);
   if (c.req.header("if-none-match") === etag) return c.body(null, 304);
 
-  const results = data.flags.map((flag) => evaluate(flag, parsed.context, data.segments));
+  const results = data.flags.map((flag) =>
+    applyHoldout(flag, evaluate(flag, parsed.context, data.segments), parsed.context, overlay),
+  );
   const entries = data.flags
     .map((flag, i) => ({ flag, result: results[i] }))
     .filter(({ result }) => result.reason !== "ERROR")
@@ -384,18 +407,144 @@ ofrep.post("/v1/exposures", async (c) => {
     idempotencyKey,
   });
 
-  // Off the hot path, for a genuinely new receipt: fold it into the daily rollups
-  // (if this slips, the receipt stays uncompacted and the next ingest picks it up)
-  // and send any warn-first threshold email. notifyUsageThresholds never throws.
+  // Off the hot path: attribute exposures to any running experiments (additive
+  // analytics — best-effort, idempotent per unit) and, for a genuinely new
+  // receipt, fold it into the daily rollups and send any warn-first threshold
+  // email. All of this is deferred and swallows its own errors so it can never
+  // fail the metered response the client just earned. Billing already happened
+  // in-band above; this is analysis only.
+  const post: Promise<unknown>[] = [
+    attributeExposures(
+      identity.organizationId,
+      identity.environmentId,
+      events as ExposureEvent[],
+    ),
+  ];
   if (!result.duplicate) {
-    await defer(
-      c,
-      Promise.all([
-        compactUsageEvents(identity.organizationId),
-        notifyUsageThresholds(identity.organizationId),
-      ]),
+    post.push(
+      compactUsageEvents(identity.organizationId),
+      notifyUsageThresholds(identity.organizationId),
     );
   }
+  await defer(c, Promise.all(post).catch(() => {}));
+
+  return c.json({ recorded: result.recorded, duplicate: result.duplicate }, 202);
+});
+
+/**
+ * Goal (metric) event ingest — the experiment analytics + revenue endpoint.
+ *
+ * Where an exposure records that a unit SAW an arm, a track event records that a
+ * unit DID something (converted, purchased, engaged). Metrics measure the impact
+ * of an experiment by joining these back to a unit's assigned arm. Same client-key
+ * auth, rate limiter, and idempotent-batch durability as exposures.
+ *
+ * These events are BILLED: they meter through the same durable spine as exposures
+ * under source "flags.metric" (one "events" unit, one rate, one shared allowance).
+ * The per-unit analysis rows (metric_events) are written off the hot path.
+ *
+ *   POST /ofrep/v1/track   body: { "events": [ { "metric": "checkout", "targetingKey": "u1", "value": 1 } ] }
+ *   Header (optional):     Idempotency-Key: <stable per-batch id>
+ */
+ofrep.post("/v1/track", async (c) => {
+  const identity = await requireSdkKey(c);
+  if (identity instanceof Response) return identity;
+
+  const limited = await evalLimiter.check(identity.keyId, evalRateLimitForPlan(identity.plan));
+  if (!limited.ok) return tooManyRequests(c, limited);
+
+  const text = await c.req.text().catch(() => "");
+  let body: unknown;
+  try {
+    body = text.trim() === "" ? {} : JSON.parse(text);
+  } catch {
+    return ofrepFail(c, 400, "PARSE_ERROR", "Request body is not valid JSON.");
+  }
+
+  const raw = (body as { events?: unknown } | null)?.events;
+  if (!Array.isArray(raw)) {
+    return ofrepFail(c, 400, "INVALID_CONTEXT", "`events` must be an array of goal events.");
+  }
+  if (raw.length > MAX_EXPOSURES_PER_REQUEST) {
+    return ofrepFail(
+      c,
+      400,
+      "INVALID_CONTEXT",
+      `Too many events in one request (max ${MAX_EXPOSURES_PER_REQUEST}); send them in smaller batches.`,
+    );
+  }
+
+  // Normalize each event: name (`metric` or `event`) + unit (`targetingKey` or
+  // `unit`) are required; `value` defaults to 1. Malformed entries are dropped so
+  // one bad row never fails the batch, but we bill only what we accept.
+  const parsed: MetricEventInput[] = [];
+  for (const e of raw as Record<string, unknown>[]) {
+    const name =
+      typeof e.metric === "string" && e.metric
+        ? e.metric
+        : typeof e.event === "string" && e.event
+          ? e.event
+          : null;
+    const targetingKey =
+      typeof e.targetingKey === "string" && e.targetingKey
+        ? e.targetingKey
+        : typeof e.unit === "string" && e.unit
+          ? e.unit
+          : null;
+    if (!name || !targetingKey) continue;
+    parsed.push({
+      name,
+      targetingKey,
+      value: typeof e.value === "number" ? e.value : 1,
+      timestamp: typeof e.timestamp === "number" ? e.timestamp : undefined,
+    });
+  }
+
+  if (parsed.length === 0) return c.json({ recorded: 0, duplicate: false }, 202);
+
+  // Same hard-cap gate as exposures: a hard-capped plan past its allowance is
+  // refused so the free tier can't run up unbounded cost (metric events share the
+  // one "events" allowance with exposures).
+  if (anyPlanHardCaps()) {
+    const plan = await orgPlan(identity.organizationId);
+    if (planHardCaps(plan)) {
+      const status = await withOrg(identity.organizationId, (tx) =>
+        eventsAllowanceStatus(tx, plan),
+      );
+      if (isIngestCapped(status)) {
+        return c.json(
+          {
+            errorCode: "PLAN_LIMIT_REACHED",
+            errorDetails: `This organization has used its ${status.includedEvents.toLocaleString()} included events for the current period. Upgrade to record more.`,
+            includedEvents: status.includedEvents,
+            usedEvents: status.usedEvents,
+          },
+          403,
+        );
+      }
+    }
+  }
+
+  // BILLED in-band, exactly-once (source flags.metric). We meter the ACCEPTED
+  // count so the invoice matches what we stored.
+  const idempotencyKey = c.req.header("idempotency-key")?.trim() || undefined;
+  const result = await ingestEvents(identity.organizationId, parsed.length, {
+    source: "experiments.metric",
+    idempotencyKey,
+  });
+
+  // Off the hot path: persist the analysis detail and, for a new receipt, compact
+  // + notify. Deferred and self-swallowing so analytics can never fail billing.
+  const post: Promise<unknown>[] = [
+    recordMetricEvents(identity.organizationId, parsed),
+  ];
+  if (!result.duplicate) {
+    post.push(
+      compactUsageEvents(identity.organizationId),
+      notifyUsageThresholds(identity.organizationId),
+    );
+  }
+  await defer(c, Promise.all(post).catch(() => {}));
 
   return c.json({ recorded: result.recorded, duplicate: result.duplicate }, 202);
 });
@@ -483,10 +632,27 @@ registerRoute({
 });
 
 // The exposure ingest body: a batch of analytics events. Each entry carries the
-// flag key it relates to (and any client-side detail); Flagon meters the count.
+// flag key it relates to; to attribute an exposure to a running experiment, also
+// send the served `variant` and the `targetingKey` (the unit). Flagon meters the
+// count regardless; attribution is additive and privacy-preserving (the targeting
+// key is stored only as a salted hash).
 const exposuresRequestSchema = z.object({
   events: z
-    .array(z.object({ key: z.string().optional() }).catchall(z.unknown()))
+    .array(
+      z
+        .object({
+          key: z.string().optional().describe("The flag key the exposure is for."),
+          variant: z
+            .string()
+            .optional()
+            .describe("The variant the SDK served — the experiment arm to attribute."),
+          targetingKey: z
+            .string()
+            .optional()
+            .describe("The unit identity (evaluation targetingKey); stored as a salted hash."),
+        })
+        .catchall(z.unknown()),
+    )
     .describe("A batch of exposure events; the count is metered."),
 });
 registerComponentSchema("ExposuresRequest", exposuresRequestSchema);
@@ -520,6 +686,71 @@ registerRoute({
   request: { body: exposuresRequestSchema },
   responses: {
     202: { description: "The exposures were accepted for metering.", schemaName: "ExposuresResponse" },
+    400: { description: "The request body could not be parsed, or `events` was invalid or too large." },
+    401: { description: "A valid client key is required." },
+    429: { description: "Too many requests; retry after the Retry-After delay." },
+  },
+});
+
+// The goal-event ingest body: a batch of metric events. Each carries the metric
+// (event) name and the unit (targetingKey), plus an optional numeric `value` for
+// mean/sum metrics. The count is metered as a billable event (source flags.metric).
+const trackRequestSchema = z.object({
+  events: z
+    .array(
+      z
+        .object({
+          metric: z
+            .string()
+            .optional()
+            .describe("The metric/event name a metric definition matches on (alias: `event`)."),
+          event: z.string().optional().describe("Alias for `metric`."),
+          targetingKey: z
+            .string()
+            .optional()
+            .describe("The unit identity, joined to the arm the unit was assigned (alias: `unit`)."),
+          unit: z.string().optional().describe("Alias for `targetingKey`."),
+          value: z
+            .number()
+            .optional()
+            .describe("Numeric payload for mean/sum metrics; defaults to 1 for a conversion."),
+          timestamp: z.number().optional().describe("Client event time (ms since epoch)."),
+        })
+        .catchall(z.unknown()),
+    )
+    .describe("A batch of goal events; each accepted event is a billable metric event."),
+});
+registerComponentSchema("TrackRequest", trackRequestSchema);
+registerComponentSchema(
+  "TrackResponse",
+  z.object({
+    recorded: z
+      .number()
+      .describe("Goal events durably metered by this request; 0 if it was a duplicate."),
+    duplicate: z
+      .boolean()
+      .describe("True when this batch's Idempotency-Key was already seen; the request was a no-op."),
+  }),
+);
+
+registerRoute({
+  method: "post",
+  path: "/ofrep/v1/track",
+  summary: "Record goal events",
+  description:
+    "Record a batch of goal (metric) events for experiment analysis. Where an exposure records that a unit saw an arm, a goal event records that a unit did something (converted, purchased, engaged); metrics measure impact by joining these to the unit's assigned arm. Authenticated by the same client key as evaluation. Each accepted event is a billable event (metered under the Experiments line, at the same rate as exposures). Send an `Idempotency-Key` header so a network retry of the same batch is counted exactly once. Malformed entries (missing name or unit) are dropped, and only accepted events are metered.",
+  tags: [OFREP_TAG],
+  security: "sdkKey",
+  headerParams: [
+    {
+      name: "Idempotency-Key",
+      description:
+        "A stable, unique id for this batch. A retry with the same key is counted once; omit it and each request is a distinct batch.",
+    },
+  ],
+  request: { body: trackRequestSchema },
+  responses: {
+    202: { description: "The goal events were accepted for metering.", schemaName: "TrackResponse" },
     400: { description: "The request body could not be parsed, or `events` was invalid or too large." },
     401: { description: "A valid client key is required." },
     429: { description: "Too many requests; retry after the Retry-After delay." },

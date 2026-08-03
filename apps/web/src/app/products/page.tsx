@@ -80,9 +80,10 @@ const products: Product[] = [
   {
     icon: FlaskConical,
     name: "Experiments",
-    tone: "soon",
-    label: "Coming soon",
-    body: "Measure the impact of a rollout with metrics tied directly to the flags serving it.",
+    tone: "available",
+    label: "Available",
+    href: "/docs/experiments",
+    body: "Measure the impact of a rollout with metrics tied directly to the flags serving it. Frequentist and Bayesian results, from the flag you already ship.",
   },
   {
     icon: Rocket,

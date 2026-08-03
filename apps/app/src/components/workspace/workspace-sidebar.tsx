@@ -27,11 +27,13 @@ import {
   Plug,
   Rocket,
   Settings,
+  Shield,
   Signal,
   Siren,
   SlidersHorizontal,
   Split,
   SquareCode,
+  Target,
   ToggleRight,
   Users,
   Workflow,
@@ -69,6 +71,9 @@ type NavArea = {
   icon: LucideIcon;
   href: string;
   groups: NavGroup[];
+  /** Extra path prefixes that also belong to this area (sub-features routed
+   *  outside the area's own href, e.g. Experiments living under Flags). */
+  aliases?: string[];
 };
 
 /** A root-level row: a plain link, a not-yet-built surface, or a drill-in area. */
@@ -95,6 +100,9 @@ function buildNav(base: string): {
     label: "Flags",
     icon: ToggleRight,
     href: `${base}/flags`,
+    // Experiments and their metrics are routed at /experiments but belong to the
+    // Flags area, so browsing them keeps this sub-nav in context.
+    aliases: [`${base}/experiments`],
     groups: [
       {
         // The flag-tied surfaces (flags, plus the segments and experiments built
@@ -102,7 +110,14 @@ function buildNav(base: string): {
         items: [
           { label: "Flags", icon: ToggleRight, href: `${base}/flags` },
           { label: "Segments", icon: Split, href: `${base}/flags/segments` },
-          { label: "Experiments", icon: FlaskConical, soon: true },
+        ],
+      },
+      {
+        heading: "Experiments",
+        items: [
+          { label: "Experiments", icon: FlaskConical, href: `${base}/experiments` },
+          { label: "Metrics", icon: Target, href: `${base}/experiments/metrics` },
+          { label: "Holdouts", icon: Shield, href: `${base}/experiments/holdouts` },
         ],
       },
       {
@@ -193,9 +208,11 @@ function buildNav(base: string): {
   };
 }
 
-/** True when the current path is the area's landing or anything beneath it. */
+/** True when the current path is the area's landing, anything beneath it, or
+ *  under one of its aliased sub-feature prefixes. */
 function inArea(pathname: string, area: NavArea): boolean {
-  return pathname === area.href || pathname.startsWith(`${area.href}/`);
+  const prefixes = [area.href, ...(area.aliases ?? [])];
+  return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
 export function WorkspaceSidebar({

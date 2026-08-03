@@ -42,3 +42,6 @@ next-env.d.ts
 
 # storybook build output
 storybook-static
+
+# qa screenshot output (harness is committed, its captures are not)
+qa/shots

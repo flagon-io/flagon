@@ -1,0 +1,47 @@
+export const metadata = {
+  title: "Holdouts",
+  description:
+    "A holdout is a deterministic slice of traffic held back from all experiments: a permanent control group that measures the aggregate impact of everything you shipped.",
+};
+
+# Holdouts
+
+A **holdout** is a small, fixed slice of traffic held back from *every* experiment.
+While individual experiments each ask "did this one change help?", a holdout answers
+the question no single test can: *across everything we shipped, did we actually move
+the business, or did a hundred small wins net out to nothing?*
+
+The held-back units form a **permanent, global control group**. They keep seeing the
+baseline experience, and the difference between them and everyone else is the
+aggregate impact of your whole experimentation program.
+
+## How it works
+
+- A holdout carries a **percentage** of traffic (for example 5%) and is bucketed
+  **deterministically** by the unit's targeting key, so a unit that is in the holdout
+  stays in it, so the group is stable over time, not re-rolled per request.
+- Holdouts are enforced **at evaluation time**. A unit in the holdout is served the
+  flag's **default variant** with reason `HOLDOUT`, and never enters any
+  experiment's arms. Your experiments therefore measure only non-held-back traffic,
+  and the holdout accumulates a clean baseline to compare against.
+- The mechanism is deterministic and pure: the same unit and the same holdout always
+  resolve the same way, with no effect on flags that are not governed by an
+  experiment.
+
+<Callout tone="note" title="Reserve it up front">
+Because a holdout removes its slice from every experiment, decide the size before you
+start measuring. A larger holdout gives a more precise aggregate readout but leaves
+less traffic to experiment on. 5% to 10% is a common starting point.
+</Callout>
+
+## Manage holdouts
+
+Create and size holdouts in the console under **Experiments → Holdouts**. Each
+holdout has a key, a percentage, and an on/off state, and applies across the
+experiments in the environment.
+
+## Next
+
+- [How results work](/docs/experiments/statistics): the statistics behind every
+  readout, including how a holdout functions as a global control.
+- [Experiments overview](/docs/experiments): set up an experiment end to end.
