@@ -9,6 +9,7 @@ import { AccountMenu } from "@/components/workspace/account-menu";
 const ITEMS = [
   { href: "/settings", label: "Profile" },
   { href: "/settings/emails", label: "Emails" },
+  { href: "/settings/notifications", label: "Notifications" },
   { href: "/settings/security", label: "Security" },
   { href: "/settings/tokens", label: "Access tokens" },
 ];

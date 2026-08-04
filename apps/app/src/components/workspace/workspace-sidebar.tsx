@@ -32,6 +32,7 @@ import {
   Signal,
   Siren,
   SlidersHorizontal,
+  Smartphone,
   Split,
   SquareCode,
   Target,
@@ -172,8 +173,35 @@ function buildNav(base: string): {
     ],
   };
 
+  // Reliability: incidents up top, on-call (schedules + escalation) below.
+  const incidents: NavArea = {
+    key: "incidents",
+    label: "Incidents",
+    icon: Siren,
+    href: `${base}/incidents`,
+    groups: [
+      {
+        items: [
+          { label: "Incidents", icon: Siren, href: `${base}/incidents` },
+          { label: "Runbooks", icon: BookText, href: `${base}/incidents/runbooks` },
+        ],
+      },
+      {
+        heading: "On-call",
+        items: [
+          { label: "Schedules", icon: BellRing, href: `${base}/incidents/on-call` },
+          { label: "Escalation", icon: Workflow, href: `${base}/incidents/escalation` },
+        ],
+      },
+      {
+        heading: "Postmortems",
+        items: [{ label: "RCCA template", icon: FileCog, href: `${base}/incidents/rcca-template` }],
+      },
+    ],
+  };
+
   return {
-    areas: [flags, settings],
+    areas: [flags, incidents, settings],
     sections: [
       [
         // Projects is the org home, so its link always works.
@@ -192,12 +220,12 @@ function buildNav(base: string): {
         // providers — all coming soon for now).
         { kind: "link", label: "Integrations", icon: Plug, href: `${base}/integrations` },
       ],
-      // Reliability suite (Better Stack-style, but Flagon's own product): the
-      // play is Incidents — they feed the Status Page and drive On-call.
+      // Reliability suite (Better Stack-style, but Flagon's own product): Incidents
+      // + On-call are live; the Status Page is the next piece.
       [
-        { kind: "soon", label: "Incidents", icon: Siren },
+        { kind: "area", area: incidents },
         { kind: "soon", label: "Status Page", icon: Signal },
-        { kind: "soon", label: "On-call", icon: BellRing },
+        { kind: "soon", label: "Mobile app", icon: Smartphone },
       ],
       [
         { kind: "link", label: "Teams", icon: Users, href: `${base}/teams` },
@@ -269,8 +297,14 @@ export function WorkspaceSidebar({
               { label: "Overview", icon: Boxes, href: projectBase },
               { label: "Relationships", icon: Network, href: `${projectBase}/relationships` },
               { label: "Dependencies", icon: Package, soon: true },
+            ],
+          },
+          {
+            heading: "Operations",
+            items: [
               { label: "Deployments", icon: Rocket, soon: true },
-              { label: "Domains", icon: Globe, soon: true },
+              { label: "Logs", icon: Logs, soon: true },
+              { label: "Incidents", icon: Siren, href: `${projectBase}/incidents` },
             ],
           },
           {
@@ -278,6 +312,7 @@ export function WorkspaceSidebar({
             items: [
               { label: "General", icon: SlidersHorizontal, href: `${projectBase}/settings` },
               { label: "Access", icon: Shield, href: `${projectBase}/settings/access` },
+              { label: "Domains", icon: Globe, soon: true },
               { label: "Config", icon: FileCog, soon: true },
             ],
           },

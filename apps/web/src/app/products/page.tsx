@@ -109,9 +109,10 @@ const products: Product[] = [
   {
     icon: Siren,
     name: "Incidents & on-call",
-    tone: "soon",
-    label: "Coming soon",
-    body: "Declare incidents, run on-call schedules, and keep a status page, tied to the services in your catalog.",
+    tone: "available",
+    label: "Available",
+    href: "/docs/incidents",
+    body: "Declare incidents against the services in your catalog, route them to the owning team, and page the on-call responder through escalation policies.",
   },
 ];
 
@@ -187,7 +188,7 @@ export default function ProductsPage() {
           <SectionHead
             eyebrow="The lineup"
             title="The Catalog is the core. Feature Flags ships on it today."
-            lede="More products are landing shortly, each one arriving on the foundation you already know."
+            lede="More products are landing shortly, each one arriving on the foundation you already know. Everything here is early-access alpha: usable now, and improving quickly."
           />
           <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {products.map((p) => {
@@ -235,11 +236,11 @@ export default function ProductsPage() {
               </span>
             </div>
             <h2 className="mt-3 max-w-2xl text-2xl font-semibold tracking-tight text-zinc-100 sm:text-3xl">
-              Feature Flags, ready for production
+              Feature Flags, our most complete product
             </h2>
             <p className="mt-3 max-w-2xl text-base/7 text-zinc-400">
-              A complete flag product, evaluated over the open OpenFeature protocol so
-              any SDK can read it with no custom glue.
+              A full flag product, evaluated over the open OpenFeature protocol so any
+              SDK can read it with no custom glue. Alpha, but in real use today.
             </p>
             <div className="mt-8 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
               {flagFeatures.map(({ icon: Icon, title, body }) => (

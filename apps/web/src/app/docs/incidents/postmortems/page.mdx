@@ -1,0 +1,67 @@
+export const metadata = {
+  title: "Postmortems (RCCA)",
+  description:
+    "Root Cause & Corrective Action: the postmortem your team writes after an incident. Customize which severities require one and the fields it collects, and track corrective actions to done.",
+};
+
+# Postmortems (RCCA)
+
+An **RCCA** (Root Cause & Corrective Action) is the postmortem written after an
+incident: what actually broke, why, and what you are changing so it does not happen
+again. Every incident has one, and its shape comes from a template your organization
+controls.
+
+## The template
+
+Under **Incidents → RCCA template**, an org manager decides two things:
+
+- **Which severities require an RCCA.** A required incident is flagged until its
+  postmortem is written, so nothing severe closes without a writeup. The default is
+  SEV1 and SEV2.
+- **The fields.** Each field has a label, a stable **key**, an optional prompt, and a
+  required flag. Flagon seeds a **standard template** — Root cause, Contributing
+  factors, Impact, Resolution, and Lessons learned — which you can add to, rename, or
+  trim.
+
+Field **keys** are stable identifiers: renaming a label keeps existing RCCA answers
+mapped, because answers are stored against the key, not the label.
+
+## Writing the RCCA
+
+On an incident, the **RCCA** section renders the template's fields as a form. Any
+member can fill it in — postmortems are collaborative — and it saves against the
+incident. Alongside the writeup you track **corrective actions**: the concrete
+follow-ups, each with an owner and a status (open, in progress, done). Corrective
+actions are the part that actually prevents a repeat, so they are first-class, not a
+bullet buried in prose.
+
+## Over the API
+
+Everything the console does is available over the API.
+
+```bash
+# Read or customize the org template
+curl .../rcca-template
+curl -X PUT .../rcca-template -d '{
+  "requiredSeverities": ["sev1", "sev2"],
+  "fields": [
+    { "key": "root_cause", "label": "Root cause", "required": true },
+    { "key": "impact", "label": "Impact" },
+    { "key": "resolution", "label": "Resolution" }
+  ]
+}'
+
+# Write an incident's RCCA (values keyed to the template's field keys)
+curl -X PUT .../incidents/{number}/rcca -d '{
+  "values": { "root_cause": "Connection pool exhausted under retry storm", "impact": "12m of 5xx on checkout" }
+}'
+
+# Track corrective actions
+curl -X POST   .../incidents/{number}/action-items -d '{ "title": "Cap retries with jitter", "assigneeUserId": "usr_..." }'
+curl -X PATCH  .../incidents/{number}/action-items/{id} -d '{ "status": "done" }'
+curl -X DELETE .../incidents/{number}/action-items/{id}
+```
+
+The incident payload (`GET .../incidents/{number}`) carries `rccaRequired`, the
+`rccaTemplate`, the saved `rcca` values, and the `actionItems`, so a single read has
+everything the postmortem view needs.

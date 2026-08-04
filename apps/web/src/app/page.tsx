@@ -94,9 +94,10 @@ const lineup: LineupItem[] = [
   {
     icon: Siren,
     name: "Incidents & on-call",
-    tone: "soon",
-    label: "Soon",
-    body: "Declare incidents, run on-call, and keep a status page.",
+    tone: "available",
+    label: "Available",
+    href: "/docs/incidents",
+    body: "Declare incidents on your services and page the on-call responder.",
   },
 ];
 
@@ -122,9 +123,15 @@ export default function Home() {
           />
 
           <div className="relative mx-auto w-full max-w-7xl px-6 py-24 sm:px-12 sm:pt-28 lg:px-20">
-            <p className="font-mono text-xs tracking-[0.25em] text-teal-400/80 uppercase">
-              {brand.eyebrow}
-            </p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="font-mono text-xs tracking-[0.25em] text-teal-400/80 uppercase">
+                {brand.eyebrow}
+              </p>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-400/25 bg-teal-400/10 px-2.5 py-0.5 text-[11px] font-medium text-teal-200">
+                <span className="size-1.5 rounded-full bg-teal-400" />
+                Early-access alpha
+              </span>
+            </div>
 
             <h1 className="mt-6 max-w-3xl text-5xl leading-[1.05] font-semibold tracking-tight text-zinc-100 sm:text-6xl md:text-7xl">
               {brand.taglineLead}
@@ -172,7 +179,7 @@ export default function Home() {
           <SectionHead
             eyebrow="The lineup"
             title="One platform. A growing set of products."
-            lede="The Catalog is the core. Feature Flags ships on it today, with more landing every week, each one on the same foundation you already know."
+            lede="The Catalog is the core. Feature Flags ships on it today, with more landing every week, each one on the same foundation you already know. Everything here is early-access alpha: usable now, and moving fast."
           />
           <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {lineup.map((p) => {

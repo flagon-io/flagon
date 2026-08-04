@@ -1,0 +1,56 @@
+export const metadata = {
+  title: "Runbooks",
+  description:
+    "Reusable playbooks whose steps become an incident's checklist. Attach by affected service or severity threshold, and work through them as you respond.",
+};
+
+# Runbooks
+
+A **runbook** is a playbook: the ordered steps a responder works through during an
+incident. Instead of remembering (or hunting for) the recovery procedure at 3am,
+the steps are already on the incident, ready to check off.
+
+## Writing a runbook
+
+Under **Incidents → Runbooks**, create a runbook and give it steps. Each step is
+either:
+
+- a **task**, with markdown instructions (what to check, what command to run), or
+- a **link**, to a dashboard, query, or doc the responder should open.
+
+Then decide when it attaches:
+
+- **By service**: cover one or more catalog projects. Any incident affecting a
+  covered service gets the runbook.
+- **By severity**: set a threshold (for example, SEV2). Any incident **at least**
+  that severe gets the runbook.
+
+The two are additive — a runbook can attach by service, by severity, or both.
+
+## On an incident
+
+When an incident is declared, every matching runbook's steps **materialize onto
+the incident as a checklist** (a copy — editing the runbook later never changes a
+live incident). Responders check items off as they go, and the incident shows the
+progress. You can also attach a runbook to an open incident by hand.
+
+## Over the API
+
+```bash
+# Define a runbook
+curl -X POST .../runbooks -d '{ "key": "db-outage", "name": "DB outage", "triggerSeverity": "sev2" }'
+curl -X PUT  .../runbooks/db-outage/steps \
+  -d '{ "steps": [ { "title": "Check replica lag", "body": "Run pg_stat_replication", "kind": "task" },
+                    { "title": "DB dashboard", "kind": "link", "url": "https://grafana/db" } ] }'
+curl -X PUT  .../runbooks/db-outage/services -d '{ "projectKeys": ["payments"] }'
+
+# Work the checklist on an incident
+curl .../incidents/{number}                 # includes `checklist`
+curl -X POST .../incidents/{number}/checklist/{itemId}/toggle
+```
+
+<Callout tone="note" title="Coming soon">
+Today's steps are tasks and links. Action steps — a step that pages a schedule,
+posts to a linked Slack channel, or runs an automation — arrive as those
+integrations land.
+</Callout>

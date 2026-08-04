@@ -3,6 +3,7 @@ import { brand, Cta, FlagonMark } from "@flagon/design";
 import { APP_URL, SIGN_IN_URL, SIGN_UP_URL } from "@/lib/urls";
 import { getMarketingSession } from "@/lib/session";
 import { AccountMenu } from "@/components/account-menu";
+import { AlphaBanner } from "@/components/alpha-banner";
 import { MobileNav } from "@/components/mobile-nav";
 
 /**
@@ -33,13 +34,17 @@ export async function SiteHeader() {
   const user = await getMarketingSession();
 
   return (
-    <header className="sticky top-0 z-20 border-b border-white/5 bg-[#09090b]/80 backdrop-blur">
+    <div className="sticky top-0 z-20">
+      <header className="border-b border-white/5 bg-[#09090b]/80 backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-6">
         <div className="flex items-center gap-8">
           <Link href="/" className="flex items-center gap-2.5">
             <FlagonMark className="size-7" />
-            <span className="text-[15px] font-semibold tracking-tight">
+            <span className="flex items-center gap-1.5 text-[15px] font-semibold tracking-tight">
               {brand.name}
+              <span className="rounded border border-teal-400/25 bg-teal-400/10 px-1 py-0.5 text-[9px] font-semibold tracking-wide text-teal-300 uppercase">
+                Alpha
+              </span>
             </span>
           </Link>
           <nav className="hidden items-center gap-6 md:flex">
@@ -104,6 +109,8 @@ export async function SiteHeader() {
           <MobileNav signedIn={Boolean(user)} />
         </div>
       </div>
-    </header>
+      </header>
+      <AlphaBanner />
+    </div>
   );
 }

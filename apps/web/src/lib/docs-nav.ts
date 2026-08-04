@@ -126,10 +126,18 @@ export const nav: NavSection[] = [
           { title: "Holdouts", href: "/docs/experiments/holdouts" },
         ],
       },
+      {
+        title: "Incidents & on-call",
+        items: [
+          { title: "Incidents", href: "/docs/incidents" },
+          { title: "Runbooks", href: "/docs/incidents/runbooks" },
+          { title: "On-call", href: "/docs/incidents/on-call" },
+          { title: "Postmortems (RCCA)", href: "/docs/incidents/postmortems" },
+        ],
+      },
       { title: "Deployments", soon: true },
       { title: "Packages", soon: true },
       { title: "Automations", soon: true },
-      { title: "Incidents & on-call", soon: true },
     ],
   },
   {

@@ -19,6 +19,10 @@ import { uploads_ } from "./uploads.route.js";
 import { experiments_ } from "./experiments.route.js";
 import { experimentMetrics_ } from "./experiment-metrics.route.js";
 import { holdouts_ } from "./holdouts.route.js";
+import { incidents_ } from "./incidents.route.js";
+import { oncall_ } from "./oncall.route.js";
+import { runbooks_ } from "./runbooks.route.js";
+import { rcca_ } from "./rcca.route.js";
 import { managementWriteLimit } from "../../lib/management-rate-limit.js";
 
 export const v1 = new Hono();
@@ -54,6 +58,11 @@ orgs.route("/:org/uploads", uploads_);
 orgs.route("/:org/experiments", experiments_);
 orgs.route("/:org/experiment-metrics", experimentMetrics_);
 orgs.route("/:org/holdouts", holdouts_);
+// Reliability: incidents + on-call (schedules, overrides, escalation policies).
+orgs.route("/:org/incidents", incidents_);
+orgs.route("/:org/oncall", oncall_);
+orgs.route("/:org/runbooks", runbooks_);
+orgs.route("/:org/rcca-template", rcca_);
 // The org resource itself (PATCH /:org rename). Registered last so the more
 // specific sub-resource routes above take precedence.
 orgs.route("/:org", org_);

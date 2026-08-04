@@ -5,6 +5,7 @@ import { jsonError } from "../../lib/http.js";
 import { registerRoute } from "../../openapi/registry.js";
 import { personalTokens_ } from "./personal-tokens.route.js";
 import { meEmails_ } from "./emails.route.js";
+import { meNotificationChannels_ } from "./notifications.route.js";
 
 export const me = new Hono();
 
@@ -47,9 +48,11 @@ registerRoute({
 
 me.use("*", authContext);
 
-// Personal access tokens + email management (inherit authContext from above).
+// Personal access tokens + email + notification-channel management (inherit
+// authContext from above).
 me.route("/tokens", personalTokens_);
 me.route("/emails", meEmails_);
+me.route("/notification-channels", meNotificationChannels_);
 
 me.get("/", (c) => {
   const auth = getAuth(c);

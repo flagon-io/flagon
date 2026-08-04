@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { isBillingConfigured } from "../../lib/stripe.js";
 import { sweepUsageReports } from "../../usage/report-sweep.js";
+import { sweepEscalations } from "../../incidents/escalate-sweep.js";
 import { flushMonitoring } from "../../lib/monitoring.js";
 
 /**
@@ -34,6 +35,21 @@ internal.on(["GET", "POST"], "/cron/report", async (c) => {
   // flush before the serverless function freezes, or those events are lost. `ok` stays
   // endpoint-liveness (did the sweep run) so a single transient org failure that
   // self-heals next sweep doesn't page; `failed` is surfaced as data a monitor can read.
+  await flushMonitoring();
+  return c.json({ ok: true, ...result });
+});
+
+/**
+ * The on-call escalation sweep. Climbs unacked incidents through their escalation
+ * policy's levels as time elapses, paging each new level once (see
+ * incidents/escalate-sweep.ts). Idempotent; Vercel Cron calls it ~every 5 minutes.
+ */
+internal.on(["GET", "POST"], "/cron/escalate", async (c) => {
+  if (!cronAuthorized(c.req.header("authorization"))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const result = await sweepEscalations();
+  // Per-org failures were captured inside the sweep; flush before the function freezes.
   await flushMonitoring();
   return c.json({ ok: true, ...result });
 });

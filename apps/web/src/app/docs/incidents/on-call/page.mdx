@@ -1,0 +1,67 @@
+export const metadata = {
+  title: "On-call",
+  description:
+    "On-call rotations for teams or individuals, one-off overrides, and escalation policies that page the next responder when an incident goes unacknowledged.",
+};
+
+# On-call
+
+On-call decides **who responds**. A rotation can belong to a team or stand alone,
+its participants are whichever people you add, and escalation policies climb a
+ladder of responders when an incident isn't acknowledged in time.
+
+## Schedules
+
+A **schedule** is a rotation. Create one under **Incidents → Schedules**:
+
+- **Bind it to a team**, or leave it standalone (an individual or cross-team rotation).
+- **Add participants** in order; the rotation advances every *N* hours from an
+  anchor time. Who's on-call now is computed deterministically.
+- **Overrides** let one person cover a window (a swap, a holiday); an active
+  override wins over the rotation.
+
+A team's schedule surfaces on every project that team owns, so "who do I page for
+this service" is always answerable.
+
+## Escalation policies
+
+An **escalation policy** is an ordered list of levels. Each level pages a target
+(a schedule, a team, or a specific user) and waits `delay` minutes before climbing
+to the next:
+
+```
+Level 1  →  schedule: primary      (page immediately)
+Level 2  →  team: sre              (after 5 min unacknowledged)
+Level 3  →  user: the on-call lead (after another 10 min)
+```
+
+Attach a policy when you [declare an incident](/docs/incidents). Flagon pages
+level 1 right away; a background sweep climbs the ladder until someone
+**acknowledges**, which stops escalation.
+
+Escalation is **relentless**: set a policy to **repeat** the whole ladder up to N
+times, so an unacknowledged page keeps circling back through your responders
+instead of dead-ending at the last level.
+
+## Notification channels
+
+A page reaches a responder through their **notification channels** (each person
+manages their own in **account settings → Notifications**). Today **email**
+delivers; **SMS**, **voice calls**,
+**mobile push** (a Flagon mobile app), and **Slack** are scaffolded — you can add
+them now, and they start delivering when each provider lands. Until then, every
+page also goes to the responder's account email, so nothing is missed.
+
+## Over the API
+
+```bash
+# A rotation
+curl -X POST .../oncall/schedules -d '{ "key": "primary", "name": "Primary", "teamKey": "sre" }'
+curl -X PUT  .../oncall/schedules/primary/members -d '{ "userIds": ["<id>", "<id>"] }'
+
+# An escalation policy
+curl -X POST .../oncall/escalation-policies -d '{ "key": "sev1", "name": "Sev1" }'
+curl -X PUT  .../oncall/escalation-policies/sev1/levels \
+  -d '{ "levels": [ { "targetType": "schedule", "targetRef": "primary", "delayMinutes": 5 },
+                     { "targetType": "team", "targetRef": "sre", "delayMinutes": 0 } ] }'
+```

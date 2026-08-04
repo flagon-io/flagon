@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ChevronRight, Rocket, Settings } from "lucide-react";
+import { BellRing, ChevronRight, Rocket, Settings, Siren } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { getProject, listProjectRelations } from "@/lib/projects-api";
-import { listTeams } from "@/lib/teams-api";
+import { listOpenIncidentsForProject, type Incident } from "@/lib/incidents-api";
+import { teamCurrentOnCall } from "@/lib/oncall-api";
+import { listTeams, listTeamMembers } from "@/lib/teams-api";
+import { SEVERITIES, SEVERITY_STYLE, labelFor, severityTone } from "@/lib/incidents";
 import { ProjectIcon } from "@/components/framework-badge";
+import { Card, CardHead } from "./cards";
 import { EditableLinks, EditableOverview, EditableRepository } from "./overview-cards";
 import { RelationshipGraph } from "./relationship-graph";
 import { ProjectReadme } from "./project-readme";
@@ -26,16 +30,27 @@ export default async function ProjectOverview({
   if (!session) redirect("/login");
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
-  const [project, relations, teams] = await Promise.all([
+  const [project, relations, teams, openIncidents] = await Promise.all([
     getProject(slug, key),
     listProjectRelations(slug, key),
     listTeams(slug),
+    listOpenIncidentsForProject(slug, key),
   ]);
   if (!project) notFound();
 
   const canManage = canManageOrg(membership.role);
   const teamOptions = teams.map((t) => ({ key: t.key, name: t.name }));
   const relHref = `/${slug}/projects/${key}/relationships`;
+
+  // The owning team's current on-call responder (name resolved from the roster).
+  let onCallName: string | null = null;
+  if (project.ownerTeam) {
+    const [oncall, roster] = await Promise.all([
+      teamCurrentOnCall(slug, project.ownerTeam.key),
+      listTeamMembers(slug, project.ownerTeam.key),
+    ]);
+    if (oncall?.current) onCallName = roster.find((m) => m.userId === oncall.current)?.name ?? "On-call";
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -89,12 +104,80 @@ export default async function ProjectOverview({
         </div>
 
         <aside className="flex flex-col gap-5">
+          <IncidentsCard slug={slug} projectKey={project.key} incidents={openIncidents} canManage={canManage} />
+          {project.ownerTeam ? <OnCallCard slug={slug} teamKey={project.ownerTeam.key} name={onCallName} /> : null}
           <EditableRepository slug={slug} projectKey={project.key} repo={project.repo} canManage={canManage} />
           <EditableLinks slug={slug} projectKey={project.key} links={project.links} canManage={canManage} />
           <SoonCard icon={<Rocket className="size-4" />} title="Deployments" />
         </aside>
       </div>
     </div>
+  );
+}
+
+function IncidentsCard({ slug, projectKey, incidents, canManage }: { slug: string; projectKey: string; incidents: Incident[]; canManage: boolean }) {
+  return (
+    <Card>
+      <CardHead
+        title="Incidents"
+        action={
+          <span className="flex items-center gap-3">
+            {canManage ? (
+              <Link href={`/${slug}/projects/${projectKey}/incidents?declare=1`} className="text-xs text-teal-400 hover:text-teal-300">
+                Declare
+              </Link>
+            ) : null}
+            <Link href={`/${slug}/projects/${projectKey}/incidents`} className="text-xs text-zinc-400 hover:text-zinc-200">
+              All
+            </Link>
+          </span>
+        }
+      />
+      <div className="px-4 py-3.5">
+        {incidents.length === 0 ? (
+          <p className="inline-flex items-center gap-2 text-sm text-zinc-500">
+            <Siren className="size-4 text-zinc-600" /> No open incidents
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {incidents.slice(0, 4).map((i) => {
+              const s = SEVERITY_STYLE[severityTone(i.severity)];
+              return (
+                <li key={i.number}>
+                  <Link href={`/${slug}/incidents/${i.number}`} className="flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100">
+                    <span className="shrink-0 rounded border px-1 text-[10px] font-semibold" style={{ backgroundColor: s.bg, color: s.fg, borderColor: s.border }}>
+                      {labelFor(SEVERITIES, i.severity)}
+                    </span>
+                    <span className="truncate">{i.title}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function OnCallCard({ slug, teamKey, name }: { slug: string; teamKey: string; name: string | null }) {
+  return (
+    <Card>
+      <CardHead
+        title="On-call"
+        action={
+          <Link href={`/${slug}/incidents/on-call`} className="text-xs text-zinc-400 hover:text-zinc-200">
+            Schedules
+          </Link>
+        }
+      />
+      <div className="px-4 py-3.5">
+        <p className="inline-flex items-center gap-2 text-sm text-zinc-200">
+          <BellRing className="size-4 text-teal-400" />
+          {name ?? <span className="text-zinc-500">No on-call for {teamKey}</span>}
+        </p>
+      </div>
+    </Card>
   );
 }
 

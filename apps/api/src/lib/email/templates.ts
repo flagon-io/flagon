@@ -145,6 +145,29 @@ export function usageThresholdTemplate(opts: {
   };
 }
 
+export function incidentTemplate(opts: {
+  organizationName: string;
+  number: number;
+  title: string;
+  severity: string;
+  status: string;
+  kind: "declared" | "escalated" | "update";
+  incidentUrl: string;
+}): Template {
+  const { organizationName, number, title, severity, status, kind, incidentUrl } = opts;
+  const label = `INC-${number}`;
+  const verb = kind === "escalated" ? "escalated to you" : kind === "update" ? "updated" : "declared";
+  return {
+    subject: `[${severity.toUpperCase()}] ${label}: ${title}`,
+    html: layout({
+      heading: `${label} ${verb}`,
+      intro: `An incident on ${organizationName} was ${verb}: "${title}" (${severity}, ${status}). Acknowledge it to stop escalation and take point.`,
+      cta: { label: "View incident", href: incidentUrl },
+      footnote: `You are receiving this because you are on-call or on the responding team for ${organizationName}.`,
+    }),
+  };
+}
+
 export function invitationTemplate(opts: {
   organizationName: string;
   inviterName: string;

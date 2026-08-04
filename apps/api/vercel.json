@@ -2,5 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run db:migrate && npm run stripe:sync && npm run build",
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
-  "crons": [{ "path": "/internal/cron/report", "schedule": "*/5 * * * *" }]
+  "crons": [
+    { "path": "/internal/cron/report", "schedule": "*/5 * * * *" },
+    { "path": "/internal/cron/escalate", "schedule": "*/5 * * * *" }
+  ]
 }
