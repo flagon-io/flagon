@@ -12,7 +12,7 @@ import Stripe from "stripe";
  * The API version is pinned to the SDK's own generated version so request and
  * response shapes always match the installed `stripe` types.
  */
-const API_VERSION = "2026-07-29.dahlia" satisfies Stripe.StripeConfig["apiVersion"];
+const API_VERSION = "2026-06-24.dahlia" satisfies Stripe.StripeConfig["apiVersion"];
 
 /**
  * The stable business identifier for the Pro plan's recurring price. Create a

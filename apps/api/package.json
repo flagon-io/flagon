@@ -19,23 +19,23 @@
     "purge:test-orgs": "node --env-file-if-exists=.env --import tsx scripts/purge-test-orgs.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.0",
-    "@sentry/node": "^10.69.0",
+    "@hono/node-server": "^1.19.17",
+    "@sentry/node": "^10.68.0",
     "aws4fetch": "^1.0.20",
-    "better-auth": "^1.6.26",
+    "better-auth": "^1.6.25",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.13.0",
-    "postgres": "^3.4.9",
+    "hono": "^4.12.32",
+    "postgres": "^3.4.7",
     "resend": "^6.18.1",
-    "stripe": "^22.4.0",
-    "zod": "^4.4.3"
+    "stripe": "^22.3.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@openfeature/ofrep-provider": "^0.2.5",
     "@openfeature/server-sdk": "^1.23.0",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.1.1",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.23.7",
+    "tsx": "^4.23.0",
     "typescript": "^5"
   }
 }
