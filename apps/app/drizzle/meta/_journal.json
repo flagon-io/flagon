@@ -29,6 +29,13 @@
       "when": 1785500000000,
       "tag": "0003_sso_scim_2fa",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785600000000,
+      "tag": "0004_sso_scim_grants",
+      "breakpoints": true
     }
   ]
 }

@@ -57,27 +57,34 @@ jobs:
       - name: Lint & typecheck
         run: npm run lint
 
-      # Apply both pipelines' migrations to the throwaway DB so the tenancy audit
-      # inspects the real, current schema (RLS policies included).
-      - name: Apply migrations
-        run: |
-          npm run db:migrate -w @flagon/api
-          npm run db:migrate -w @flagon/app
-
-      # A restricted, RLS-ENFORCING role (NOBYPASSRLS), created after migrations
-      # so the tables exist to grant on. The suite runs AS this role below, so the
-      # integration + tenancy tests actually exercise row-level security instead
-      # of bypassing it. Mirrors production, where the API connects via
-      # APP_DATABASE_URL as exactly such a role.
+      # Create the restricted, RLS-ENFORCING role (NOBYPASSRLS) BEFORE migrations,
+      # exactly like production, where flagon_app pre-exists in Neon. This ordering
+      # is load-bearing: the per-migration GRANTs are guarded on the role existing,
+      # so creating it first makes those grants ACTUALLY RUN here.
+      #
+      # We deliberately do NOT blanket-grant ALL TABLES. CI must rely on the same
+      # per-migration grants production does, so a migration that creates a table
+      # but forgets to GRANT it to flagon_app turns CI RED — via the grants.audit
+      # test and any query run as this role — instead of only exploding in prod
+      # (which is exactly how SSO/SCIM broke on 2026-08-05). Only schema USAGE is
+      # granted here (schema-level, not per-table, so it can't mask that bug class);
+      # 0000_auth grants it too, this just guarantees the role can connect.
       - name: Create restricted app role
         env:
           PGPASSWORD: flagon
         run: |
           psql -h localhost -U flagon -d flagon -v ON_ERROR_STOP=1 \
             -c "CREATE ROLE flagon_app LOGIN PASSWORD 'flagon_app' NOSUPERUSER NOBYPASSRLS" \
-            -c "GRANT USAGE ON SCHEMA public TO flagon_app" \
-            -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO flagon_app" \
-            -c "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO flagon_app"
+            -c "GRANT USAGE ON SCHEMA public TO flagon_app"
+
+      # Apply both pipelines' migrations. With flagon_app already present, each
+      # migration's guarded per-table GRANTs apply now — mirroring prod — so the
+      # schema the suite runs against has exactly the grants the migrations give
+      # (the tenancy audit still inspects the real schema + RLS policies too).
+      - name: Apply migrations
+        run: |
+          npm run db:migrate -w @flagon/api
+          npm run db:migrate -w @flagon/app
 
       # APP_DATABASE_URL (the restricted role) takes precedence in the DB client,
       # so every DB-backed test runs under RLS. --no-file-parallelism keeps the
