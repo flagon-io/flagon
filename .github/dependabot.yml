@@ -1,6 +1,93 @@
 version: 2
+
 updates:
+  # The actions our CI (.github/workflows/ci.yml) pins by major — keep them current.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+      - github-actions
+
+  # npm. One entry covers the whole workspace: Dependabot reads the root
+  # package.json's `workspaces` and updates apps/* and packages/* alongside it.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    # Bump the range in package.json too (e.g. ^3.9 -> ^3.10), not just the lock.
+    versioning-strategy: increase
+    commit-message:
+      prefix: deps
+      prefix-development: deps-dev
+    labels:
+      - dependencies
+    # Deliberate pins — don't let Dependabot fight them:
+    #  - TypeScript 7.x breaks the Vercel build (native port, no ts.sys); the root
+    #    `overrides` holds us on 6.x. Allow patch/minor, never the major.
+    #  - React/React-DOM are moved by hand in lockstep with Next; no auto-majors.
+    ignore:
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: react
+        update-types: [version-update:semver-major]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major]
+    # Group tightly-coupled families so they move together (a half-bumped family
+    # is a broken build), and batch the long tail of minor/patch into one PR.
+    # First matching group wins, so families are listed before the catch-alls.
+    groups:
+      next:
+        patterns:
+          - next
+          - "@next/*"
+          - eslint-config-next
+      sentry:
+        patterns:
+          - "@sentry/*"
+      better-auth:
+        patterns:
+          - better-auth
+          - "@better-auth/*"
+      drizzle:
+        patterns:
+          - drizzle-orm
+          - drizzle-kit
+      storybook:
+        patterns:
+          - storybook
+          - "@storybook/*"
+      visx:
+        patterns:
+          - "@visx/*"
+      radix:
+        patterns:
+          - radix-ui
+          - "@radix-ui/*"
+      openfeature:
+        patterns:
+          - "@openfeature/*"
+      mdx:
+        patterns:
+          - "@mdx-js/*"
+          - remark-gfm
+      eslint:
+        patterns:
+          - eslint
+          - "eslint-*"
+          - "@eslint/*"
+      types:
+        patterns:
+          - "@types/*"
+      # Everything else: one PR for all minor + patch bumps. Majors still arrive
+      # as their own PRs so they get reviewed on their own.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch

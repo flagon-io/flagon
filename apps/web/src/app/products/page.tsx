@@ -35,7 +35,6 @@ import {
   ShieldCheck,
   Signal,
   Siren,
-  Smartphone,
   Smile,
   Timer,
   ToggleRight,
@@ -104,7 +103,6 @@ const roadmap: RoadmapTier[] = [
       { icon: Workflow, title: "Automations", body: "Run work on events across every product: the platform's own Actions, wired to your services." },
       { icon: Signal, title: "Status pages", body: "Public and internal status, driven straight from your incidents." },
       { icon: KeyRound, title: "Secrets management", body: "Store, rotate, and reference secrets per project and environment, part of project config." },
-      { icon: Smartphone, title: "Mobile app", body: "Acknowledge incidents and take your on-call pages from your phone." },
     ],
   },
   {

@@ -32,7 +32,6 @@ import {
   Signal,
   Siren,
   SlidersHorizontal,
-  Smartphone,
   Split,
   SquareCode,
   Target,
@@ -254,7 +253,6 @@ function buildNav(base: string): {
       [
         { kind: "area", area: incidents },
         { kind: "soon", label: "Status Page", icon: Signal },
-        { kind: "soon", label: "Mobile app", icon: Smartphone },
       ],
       [
         { kind: "link", label: "Teams", icon: Users, href: `${base}/teams` },
