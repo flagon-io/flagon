@@ -21,7 +21,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "remark-gfm": "^4.0.1",
-    "sugar-high": "^0.9.3"
+    "sugar-high": "^1.2.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
