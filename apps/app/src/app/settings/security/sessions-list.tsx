@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast, useConfirm } from "@flagon/design";
 import { authClient } from "@/lib/auth-client";
 
 type SessionRow = {
@@ -15,20 +16,52 @@ type SessionRow = {
 /** Lists active sessions with a per-row revoke, plus "sign out everywhere else". */
 export function SessionsList({ sessions }: { sessions: SessionRow[] }) {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
+  // Keyed per row so revoking one session doesn't disable every other row's
+  // button; `busyAll` covers the sign-out-everywhere action.
+  const [busyToken, setBusyToken] = useState<string | null>(null);
+  const [busyAll, setBusyAll] = useState(false);
 
   async function revoke(token: string) {
-    setBusy(true);
-    await authClient.revokeSession({ token });
+    if (
+      !(await confirm({
+        title: "Revoke this session?",
+        message:
+          "The device on this session will be signed out and must sign in again.",
+        confirmLabel: "Revoke session",
+        tone: "danger",
+      }))
+    )
+      return;
+    setBusyToken(token);
+    const { error } = await authClient.revokeSession({ token });
+    setBusyToken(null);
+    if (error) {
+      toast.error("Couldn't revoke session", error.message);
+      return;
+    }
     router.refresh();
-    setBusy(false);
   }
 
   async function revokeOthers() {
-    setBusy(true);
-    await authClient.revokeOtherSessions();
+    if (
+      !(await confirm({
+        title: "Sign out everywhere else?",
+        message:
+          "Every other session but this one will be signed out. Those devices must sign in again.",
+        confirmLabel: "Sign out other sessions",
+        tone: "danger",
+      }))
+    )
+      return;
+    setBusyAll(true);
+    const { error } = await authClient.revokeOtherSessions();
+    setBusyAll(false);
+    if (error) {
+      toast.error("Couldn't sign out other sessions", error.message);
+      return;
+    }
     router.refresh();
-    setBusy(false);
   }
 
   return (
@@ -56,11 +89,11 @@ export function SessionsList({ sessions }: { sessions: SessionRow[] }) {
             {!s.current ? (
               <button
                 type="button"
-                disabled={busy}
+                disabled={busyToken === s.token || busyAll}
                 onClick={() => revoke(s.token)}
                 className="text-xs font-medium text-zinc-500 hover:text-red-400 disabled:opacity-50"
               >
-                Revoke
+                {busyToken === s.token ? "Revoking…" : "Revoke"}
               </button>
             ) : null}
           </li>
@@ -70,13 +103,14 @@ export function SessionsList({ sessions }: { sessions: SessionRow[] }) {
       {sessions.length > 1 ? (
         <button
           type="button"
-          disabled={busy}
+          disabled={busyAll}
           onClick={revokeOthers}
           className="self-start text-xs font-medium text-red-400 hover:text-red-300 disabled:opacity-50"
         >
-          Sign out all other sessions
+          {busyAll ? "Signing out…" : "Sign out all other sessions"}
         </button>
       ) : null}
+      {confirmDialog}
     </div>
   );
 }

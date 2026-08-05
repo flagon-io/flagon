@@ -35,6 +35,11 @@ export {
 } from "./components/toast";
 export { Modal, ModalHeader, ModalBody, ModalFooter } from "./components/modal";
 export {
+  ConfirmDialog,
+  useConfirm,
+  type ConfirmOptions,
+} from "./components/confirm-dialog";
+export {
   Menu,
   MenuTrigger,
   MenuContent,

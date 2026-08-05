@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { brand } from "@flagon/design";
@@ -31,7 +32,9 @@ export default async function SignupPage() {
         </>
       }
     >
-      <SignupForm providers={configuredOAuthProviders()} />
+      <Suspense>
+        <SignupForm providers={configuredOAuthProviders()} />
+      </Suspense>
     </AuthShell>
   );
 }

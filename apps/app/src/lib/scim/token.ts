@@ -31,6 +31,7 @@ export async function authenticateScimToken(
       revokedAt: scimTokens.revokedAt,
       scimEnabled: organizations.scimEnabled,
       plan: organizations.plan,
+      orgDeletedAt: organizations.deletedAt,
     })
     .from(scimTokens)
     .innerJoin(organizations, eq(scimTokens.organizationId, organizations.id))
@@ -39,6 +40,8 @@ export async function authenticateScimToken(
   const t = rows[0];
   if (!t) return null;
   if (t.revokedAt) return null;
+  // A soft-deleted org provisions nothing: its SCIM bearer resolves to nothing.
+  if (t.orgDeletedAt) return null;
   if (!t.scimEnabled) return null;
   // SCIM is a paid capability; a token can't provision on a downgraded org even
   // if `scim_enabled` was somehow left on. The API gates enablement too.

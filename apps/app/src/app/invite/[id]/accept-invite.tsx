@@ -31,31 +31,43 @@ export function AcceptInvite({
   async function accept() {
     setPending("accept");
     setError(null);
-    const { error } = await authClient.organization.acceptInvitation({
-      invitationId,
-    });
-    if (error) {
-      setError(error.message ?? "Could not accept this invitation.");
+    try {
+      const { error } = await authClient.organization.acceptInvitation({
+        invitationId,
+      });
+      if (error) {
+        setError(error.message ?? "Could not accept this invitation.");
+        setPending(null);
+        return;
+      }
+      await authClient.organization.setActive({ organizationSlug: orgSlug });
+      router.push(`/${orgSlug}`);
+      router.refresh();
+    } catch {
+      // Never leave the buttons disabled on a rejected request; surface it and
+      // re-enable so the user can retry.
+      setError("We couldn't reach the server. Check your connection and try again.");
       setPending(null);
-      return;
     }
-    await authClient.organization.setActive({ organizationSlug: orgSlug });
-    router.push(`/${orgSlug}`);
-    router.refresh();
   }
 
   async function reject() {
     setPending("reject");
     setError(null);
-    const { error } = await authClient.organization.rejectInvitation({
-      invitationId,
-    });
-    setPending(null);
-    if (error) {
-      setError(error.message ?? "Could not decline this invitation.");
-      return;
+    try {
+      const { error } = await authClient.organization.rejectInvitation({
+        invitationId,
+      });
+      if (error) {
+        setError(error.message ?? "Could not decline this invitation.");
+        setPending(null);
+        return;
+      }
+      router.push("/");
+    } catch {
+      setError("We couldn't reach the server. Check your connection and try again.");
+      setPending(null);
     }
-    router.push("/");
   }
 
   return (

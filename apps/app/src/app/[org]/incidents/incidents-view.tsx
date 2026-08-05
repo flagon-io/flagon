@@ -233,6 +233,7 @@ export function DeclareModal({ slug, teams, projects, policies, initialServices,
                   <button
                     key={p.key}
                     type="button"
+                    aria-pressed={on}
                     onClick={() => toggleService(p.key)}
                     className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${on ? "border-teal-400/30 bg-teal-400/10 text-teal-200" : "border-white/10 bg-white/5 text-zinc-400 hover:text-zinc-200"}`}
                   >

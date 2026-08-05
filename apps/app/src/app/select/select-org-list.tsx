@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { FormError } from "@/components/form-error";
 import { planName } from "@/lib/plans";
 import type { OrgMembership } from "@/lib/org";
 
@@ -14,16 +15,33 @@ import type { OrgMembership } from "@/lib/org";
 export function SelectOrgList({ orgs }: { orgs: OrgMembership[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function open(org: OrgMembership) {
     setBusy(org.id);
-    await authClient.organization.setActive({ organizationId: org.id });
-    router.push(`/${org.slug}`);
-    router.refresh();
+    setError(null);
+    try {
+      const { error } = await authClient.organization.setActive({
+        organizationId: org.id,
+      });
+      if (error) {
+        setError(error.message ?? "We couldn't open that organization. Try again.");
+        setBusy(null);
+        return;
+      }
+      router.push(`/${org.slug}`);
+      router.refresh();
+    } catch {
+      // Never leave every org button disabled on a rejected request; surface it
+      // and re-enable so the user can retry.
+      setError("We couldn't reach the server. Check your connection and try again.");
+      setBusy(null);
+    }
   }
 
   return (
     <div className="flex flex-col gap-3">
+      {error ? <FormError>{error}</FormError> : null}
       <ul className="flex flex-col gap-2">
         {orgs.map((org) => (
           <li key={org.id}>

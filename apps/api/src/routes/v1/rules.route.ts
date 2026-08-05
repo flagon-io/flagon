@@ -16,6 +16,7 @@ import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
 import { resolveOrg } from "../../lib/org-context.js";
 import { recordRevision } from "../../flags/revisions.js";
+import { runningExperimentKey, experimentLockMessage } from "../../experiments/lock.js";
 import { describeRule, diffRuleDescriptions } from "../../flags/describe.js";
 import {
   conditionsSchema,
@@ -202,12 +203,16 @@ registerRoute({
 type Resolved =
   | { kind: "ok"; flag: typeof flags.$inferSelect; fe: typeof flagEnvironments.$inferSelect }
   | { kind: "no-flag" }
-  | { kind: "no-env" };
+  | { kind: "no-env" }
+  | { kind: "locked"; experimentKey: string };
 
+/** Resolve (flag, env, flagEnvironment). When `lockForWrite`, a running experiment
+ *  on this flag+env blocks the write (its targeting rules are part of the arms). */
 async function resolveFlagEnv(
   tx: TenantTx,
   flagKey: string,
   envKey: string,
+  lockForWrite = false,
 ): Promise<Resolved> {
   const flag = (
     await tx.select().from(flags).where(eq(flags.key, flagKey)).limit(1)
@@ -230,6 +235,10 @@ async function resolveFlagEnv(
       .limit(1)
   )[0];
   if (!fe) return { kind: "no-env" };
+  if (lockForWrite) {
+    const experimentKey = await runningExperimentKey(tx, flag.id, env.id);
+    if (experimentKey) return { kind: "locked", experimentKey };
+  }
   return { kind: "ok", flag, fe };
 }
 
@@ -302,9 +311,15 @@ registerComponentSchema("Rule", ruleSchema);
 registerComponentSchema("RuleResponse", z.object({ rule: ruleSchema }));
 registerComponentSchema("RuleListResponse", z.array(ruleSchema));
 
-/** Map a non-ok resolution to a 404 response. */
-function resolveError(c: Context, kind: "no-flag" | "no-env"): Response {
-  return kind === "no-flag"
+/** Map a non-ok resolution to a response: 404 (missing) or 409 (experiment lock). */
+function resolveError(
+  c: Context,
+  outcome: { kind: string; experimentKey?: string },
+  envKey = "",
+): Response {
+  if (outcome.kind === "locked")
+    return jsonError(c, 409, experimentLockMessage(outcome.experimentKey ?? "", envKey));
+  return outcome.kind === "no-flag"
     ? jsonError(c, 404, "Flag not found.")
     : jsonError(c, 404, "Environment not found for this flag.");
 }
@@ -324,7 +339,7 @@ rules_.post("/", async (c) => {
   const { flagKey, envKey } = params(c);
 
   const outcome = await withOrg(ctx.orgId, async (tx) => {
-    const resolved = await resolveFlagEnv(tx, flagKey, envKey);
+    const resolved = await resolveFlagEnv(tx, flagKey, envKey, true);
     if (resolved.kind !== "ok") return resolved;
     if (resolved.flag.archivedAt) return { kind: "archived" as const };
 
@@ -373,7 +388,7 @@ rules_.post("/", async (c) => {
 
   if (outcome.kind === "bad-ref") return jsonError(c, 422, outcome.message);
   if (outcome.kind === "archived") return jsonError(c, 409, ARCHIVED_MESSAGE);
-  if (outcome.kind !== "ok") return resolveError(c, outcome.kind);
+  if (outcome.kind !== "ok") return resolveError(c, outcome, envKey);
   return c.json({ rule: serialize(outcome.row) }, 201);
 });
 
@@ -390,7 +405,7 @@ rules_.put("/", async (c) => {
   const { flagKey, envKey } = params(c);
 
   const outcome = await withOrg(ctx.orgId, async (tx) => {
-    const resolved = await resolveFlagEnv(tx, flagKey, envKey);
+    const resolved = await resolveFlagEnv(tx, flagKey, envKey, true);
     if (resolved.kind !== "ok") return resolved;
     if (resolved.flag.archivedAt) return { kind: "archived" as const };
 
@@ -447,7 +462,7 @@ rules_.put("/", async (c) => {
 
   if (outcome.kind === "bad-ref") return jsonError(c, 422, outcome.message);
   if (outcome.kind === "archived") return jsonError(c, 409, ARCHIVED_MESSAGE);
-  if (outcome.kind !== "ok") return resolveError(c, outcome.kind);
+  if (outcome.kind !== "ok") return resolveError(c, outcome, envKey);
   return c.json(outcome.rows.map(serialize));
 });
 
@@ -468,7 +483,7 @@ rules_.get("/", async (c) => {
     return { kind: "ok" as const, rows };
   });
 
-  if (outcome.kind !== "ok") return resolveError(c, outcome.kind);
+  if (outcome.kind !== "ok") return resolveError(c, outcome, envKey);
   return c.json(outcome.rows.map(serialize));
 });
 
@@ -481,7 +496,7 @@ rules_.patch("/:ruleId", async (c) => {
   const { flagKey, envKey, ruleId } = params(c);
 
   const outcome = await withOrg(ctx.orgId, async (tx) => {
-    const resolved = await resolveFlagEnv(tx, flagKey, envKey);
+    const resolved = await resolveFlagEnv(tx, flagKey, envKey, true);
     if (resolved.kind !== "ok") return resolved;
     if (resolved.flag.archivedAt) return { kind: "archived" as const };
 
@@ -537,7 +552,7 @@ rules_.patch("/:ruleId", async (c) => {
   if (outcome.kind === "bad-ref") return jsonError(c, 422, outcome.message);
   if (outcome.kind === "no-rule") return jsonError(c, 404, "Rule not found.");
   if (outcome.kind === "archived") return jsonError(c, 409, ARCHIVED_MESSAGE);
-  if (outcome.kind !== "ok") return resolveError(c, outcome.kind);
+  if (outcome.kind !== "ok") return resolveError(c, outcome, envKey);
   return c.json({ rule: serialize(outcome.row) });
 });
 
@@ -548,7 +563,7 @@ rules_.delete("/:ruleId", async (c) => {
   const { flagKey, envKey, ruleId } = params(c);
 
   const outcome = await withOrg(ctx.orgId, async (tx) => {
-    const resolved = await resolveFlagEnv(tx, flagKey, envKey);
+    const resolved = await resolveFlagEnv(tx, flagKey, envKey, true);
     if (resolved.kind !== "ok") return resolved;
     if (resolved.flag.archivedAt) return { kind: "archived" as const };
     const deleted = await tx
@@ -573,7 +588,7 @@ rules_.delete("/:ruleId", async (c) => {
 
   if (outcome.kind === "no-rule") return jsonError(c, 404, "Rule not found.");
   if (outcome.kind === "archived") return jsonError(c, 409, ARCHIVED_MESSAGE);
-  if (outcome.kind !== "ok") return resolveError(c, outcome.kind);
+  if (outcome.kind !== "ok") return resolveError(c, outcome, envKey);
   return c.json({ ok: true });
 });
 
@@ -586,7 +601,7 @@ rules_.post("/reorder", async (c) => {
   const { flagKey, envKey } = params(c);
 
   const outcome = await withOrg(ctx.orgId, async (tx) => {
-    const resolved = await resolveFlagEnv(tx, flagKey, envKey);
+    const resolved = await resolveFlagEnv(tx, flagKey, envKey, true);
     if (resolved.kind !== "ok") return resolved;
     if (resolved.flag.archivedAt) return { kind: "archived" as const };
     await Promise.all(
@@ -613,6 +628,6 @@ rules_.post("/reorder", async (c) => {
   });
 
   if (outcome.kind === "archived") return jsonError(c, 409, ARCHIVED_MESSAGE);
-  if (outcome.kind !== "ok") return resolveError(c, outcome.kind);
+  if (outcome.kind !== "ok") return resolveError(c, outcome, envKey);
   return c.json({ ok: true });
 });

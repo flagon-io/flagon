@@ -36,3 +36,8 @@ npm-debug.log*
 
 # Local demo script (holds a production SDK key)
 demo.sh
+test-results/
+playwright-report/
+e2e/.auth/
+blob-report/
+.playwright/

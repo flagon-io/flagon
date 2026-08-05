@@ -20,6 +20,7 @@ import {
   ModalBody,
   ModalFooter,
   ModalHeader,
+  toast,
 } from "@flagon/design";
 import { archiveFlagAction, deleteFlagAction } from "../actions";
 import type { FlagRevision } from "@/lib/flags-api";
@@ -72,18 +73,30 @@ export function FlagActions({
   const [pending, start] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   function archive(action: "archive" | "restore") {
     start(async () => {
       const res = await archiveFlagAction(slug, flagKey, action);
-      if (!res.error) router.refresh();
+      if (res.error) {
+        toast.error(
+          action === "archive"
+            ? "Couldn't archive flag"
+            : "Couldn't restore flag",
+          res.error,
+        );
+        return;
+      }
+      router.refresh();
     });
   }
 
   function remove() {
+    setDeleteError(null);
     start(async () => {
       const res = await deleteFlagAction(slug, flagKey);
-      if (!res.error) router.push(afterDeleteHref ?? `/${slug}/flags`);
+      if (res.error) return setDeleteError(res.error);
+      router.push(afterDeleteHref ?? `/${slug}/flags`);
     });
   }
 
@@ -176,10 +189,19 @@ export function FlagActions({
       ) : null}
 
       {confirmDelete ? (
-        <Modal onClose={() => setConfirmDelete(false)} size="sm">
+        <Modal
+          onClose={() => {
+            setConfirmDelete(false);
+            setDeleteError(null);
+          }}
+          size="sm"
+        >
           <ModalHeader
             title="Delete flag"
-            onClose={() => setConfirmDelete(false)}
+            onClose={() => {
+              setConfirmDelete(false);
+              setDeleteError(null);
+            }}
           />
           <ModalBody>
             <p className="text-sm text-zinc-400">
@@ -188,9 +210,18 @@ export function FlagActions({
               of its variants, environment config, and targeting rules. This
               cannot be undone.
             </p>
+            {deleteError ? (
+              <p className="mt-3 text-sm text-red-400">{deleteError}</p>
+            ) : null}
           </ModalBody>
           <ModalFooter>
-            <Button variant="secondary" onClick={() => setConfirmDelete(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setConfirmDelete(false);
+                setDeleteError(null);
+              }}
+            >
               Cancel
             </Button>
             <Button variant="danger" onClick={remove} disabled={pending}>

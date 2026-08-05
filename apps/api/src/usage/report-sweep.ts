@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations } from "../db/auth-tables.js";
 import { reportOrgUsage } from "./report.js";
@@ -40,6 +40,9 @@ export async function sweepUsageReports(): Promise<{
         eq(organizations.plan, "pro"),
         inArray(organizations.subscriptionStatus, ENTITLING_STATUSES),
         isNotNull(organizations.stripeCustomerId),
+        // Never report usage for a soft-deleted org (defense-in-depth: the delete
+        // flow already sets status=canceled, but don't rely on that alone).
+        isNull(organizations.deletedAt),
       ),
     );
 

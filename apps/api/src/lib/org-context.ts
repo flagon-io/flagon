@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   members,
@@ -47,7 +47,7 @@ export async function orgIdBySlug(slug: string): Promise<string | null> {
     await db
       .select({ id: organizations.id })
       .from(organizations)
-      .where(eq(organizations.slug, slug))
+      .where(and(eq(organizations.slug, slug), isNull(organizations.deletedAt)))
       .limit(1)
   )[0];
   return row?.id ?? null;
@@ -254,7 +254,8 @@ export async function resolveOrg(
         require2fa: organizations.require2fa,
       })
       .from(organizations)
-      .where(eq(organizations.slug, slug))
+      // A soft-deleted org is gone: resolve nothing so every route 404s.
+      .where(and(eq(organizations.slug, slug), isNull(organizations.deletedAt)))
       .limit(1)
   )[0];
   // Authorize BEFORE revealing anything about the org. A caller who isn't

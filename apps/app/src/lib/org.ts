@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { invitations, members, organizations, users } from "@/db/schema";
 
@@ -47,7 +47,7 @@ export const getUserOrganizations = cache(async (
     })
     .from(members)
     .innerJoin(organizations, eq(members.organizationId, organizations.id))
-    .where(eq(members.userId, userId))
+    .where(and(eq(members.userId, userId), isNull(organizations.deletedAt)))
     .orderBy(organizations.createdAt);
 });
 
@@ -74,7 +74,13 @@ export const getMembershipBySlug = cache(async (
     })
     .from(members)
     .innerJoin(organizations, eq(members.organizationId, organizations.id))
-    .where(and(eq(members.userId, userId), eq(organizations.slug, slug)))
+    .where(
+      and(
+        eq(members.userId, userId),
+        eq(organizations.slug, slug),
+        isNull(organizations.deletedAt),
+      ),
+    )
     .limit(1);
   return rows[0] ?? null;
 });
@@ -101,7 +107,13 @@ export async function userHasHobbyOrg(userId: string): Promise<boolean> {
     .select({ id: organizations.id })
     .from(members)
     .innerJoin(organizations, eq(members.organizationId, organizations.id))
-    .where(and(eq(members.userId, userId), eq(organizations.plan, "hobby")))
+    .where(
+      and(
+        eq(members.userId, userId),
+        eq(organizations.plan, "hobby"),
+        isNull(organizations.deletedAt),
+      ),
+    )
     .limit(1);
   return rows.length > 0;
 }

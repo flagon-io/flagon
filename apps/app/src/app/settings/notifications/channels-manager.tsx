@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Mail, MessageSquare, Phone, Plus, Smartphone, Trash2 } from "lucide-react";
-import { Button, Field, Input, Select } from "@flagon/design";
+import { Button, Field, Input, Select, toast, useConfirm } from "@flagon/design";
 import type { NotificationChannel } from "@/lib/notifications-api";
 import { addChannelAction, removeChannelAction } from "./actions";
 
@@ -24,6 +24,7 @@ export function ChannelsManager({
   accountEmail: string;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, start] = useTransition();
   const [type, setType] = useState("email");
   const [value, setValue] = useState("");
@@ -40,9 +41,27 @@ export function ChannelsManager({
       router.refresh();
     });
   }
-  function remove(id: string) {
+  async function remove(channel: NotificationChannel) {
+    if (
+      !(await confirm({
+        title: "Remove channel?",
+        message: (
+          <>
+            Incident pages will no longer reach{" "}
+            <strong className="text-zinc-200">{channel.value}</strong>.
+          </>
+        ),
+        confirmLabel: "Remove channel",
+        tone: "danger",
+      }))
+    )
+      return;
     start(async () => {
-      await removeChannelAction(id);
+      const res = await removeChannelAction(channel.id);
+      if (res.error) {
+        toast.error("Couldn't remove channel", res.error);
+        return;
+      }
       router.refresh();
     });
   }
@@ -77,7 +96,7 @@ export function ChannelsManager({
               {!ch.deliverable ? (
                 <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">Soon</span>
               ) : null}
-              <button type="button" onClick={() => remove(ch.id)} disabled={pending} className="shrink-0 text-zinc-500 hover:text-red-400" aria-label="Remove channel">
+              <button type="button" onClick={() => remove(ch)} disabled={pending} className="shrink-0 text-zinc-500 hover:text-red-400 disabled:opacity-50" aria-label={`Remove ${d.label} channel ${ch.value}`}>
                 <Trash2 className="size-4" />
               </button>
             </div>
@@ -105,6 +124,7 @@ export function ChannelsManager({
         ) : null}
         {error ? <p className="text-sm text-red-400">{error}</p> : null}
       </div>
+      {confirmDialog}
     </div>
   );
 }

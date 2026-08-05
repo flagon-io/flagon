@@ -6,7 +6,7 @@ import {
   experimentMetricLinks,
   experimentMetricEvents,
   experimentMetrics,
-  flagExposures,
+  experimentExposures,
 } from "../db/schema.js";
 
 /**
@@ -60,12 +60,11 @@ export async function experimentDiagnostics(
       .where(eq(experimentMetricLinks.experimentId, exp.id));
     const eventNames = [...new Set(metricRows.map((m) => m.eventName))];
 
-    // Per-arm distinct exposed units.
+    // Per-arm distinct enrolled units — this experiment's own enrollment.
     const armRows = (await tx.execute(sql`
       select variant_key, count(distinct unit_hash)::int as units
-      from flag_exposures
-      where flag_id = ${exp.flagId}
-        and environment_id = ${exp.environmentId}
+      from experiment_exposures
+      where experiment_id = ${exp.id}
         and organization_id = ${organizationId}
       group by variant_key
       order by units desc
@@ -73,21 +72,16 @@ export async function experimentDiagnostics(
     const arms = armRows.map((r) => ({ variant: r.variant_key, units: Number(r.units) }));
     const totalExposures = arms.reduce((s, a) => s + a.units, 0);
 
-    // The most recent attributed exposures.
+    // The most recent enrollments for this experiment.
     const recentExp = await tx
       .select({
-        unit: flagExposures.unitHash,
-        variant: flagExposures.variantKey,
-        at: flagExposures.firstSeenAt,
+        unit: experimentExposures.unitHash,
+        variant: experimentExposures.variantKey,
+        at: experimentExposures.firstSeenAt,
       })
-      .from(flagExposures)
-      .where(
-        and(
-          eq(flagExposures.flagId, exp.flagId),
-          eq(flagExposures.environmentId, exp.environmentId),
-        ),
-      )
-      .orderBy(desc(flagExposures.firstSeenAt))
+      .from(experimentExposures)
+      .where(eq(experimentExposures.experimentId, exp.id))
+      .orderBy(desc(experimentExposures.firstSeenAt))
       .limit(STREAM_LIMIT);
 
     // The most recent goal events for this experiment's metrics.

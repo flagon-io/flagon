@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getCookieCache } from "better-auth/cookies";
 import { db } from "../db/client.js";
 import { accessTokens, organizations, users } from "../db/auth-tables.js";
@@ -81,7 +81,7 @@ async function fromToken(token: string): Promise<AuthIdentity> {
       await db
         .select()
         .from(organizations)
-        .where(eq(organizations.id, t.organizationId))
+        .where(and(eq(organizations.id, t.organizationId), isNull(organizations.deletedAt)))
         .limit(1)
     )[0];
     if (!o) return null;

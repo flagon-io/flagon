@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Select } from "@flagon/design";
+import { Select, useConfirm } from "@flagon/design";
 import { authClient } from "@/lib/auth-client";
 import { ASSIGNABLE_ORG_ROLES, orgRoleLabel } from "@/lib/roles";
 import { submitButtonClass } from "@/components/field";
@@ -108,6 +108,7 @@ export function MembersList({
   members: MemberRow[];
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,6 +124,21 @@ export function MembersList({
   }
 
   async function remove(m: MemberRow) {
+    if (
+      !(await confirm({
+        title: "Remove member?",
+        message: (
+          <>
+            <strong className="text-zinc-200">{m.name}</strong> will immediately
+            lose access to this organization and all of its projects. They can be
+            invited back later.
+          </>
+        ),
+        confirmLabel: "Remove member",
+        tone: "danger",
+      }))
+    )
+      return;
     setBusy(m.memberId);
     setError(null);
     const { error } = await authClient.organization.removeMember({
@@ -187,6 +203,7 @@ export function MembersList({
           );
         })}
       </ul>
+      {confirmDialog}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Shield, Trash2 } from "lucide-react";
+import { Pencil, Plus, Shield, Trash2 } from "lucide-react";
 import {
   Button,
   Field,
@@ -13,6 +13,7 @@ import {
   ModalHeader,
   Select,
   Textarea,
+  useConfirm,
 } from "@flagon/design";
 import type { Holdout } from "@/lib/experiments-api";
 import { createHoldoutAction, deleteHoldoutAction, updateHoldoutAction } from "../actions";
@@ -33,16 +34,38 @@ export function HoldoutsManager({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Holdout | null>(null);
   const [pending, start] = useTransition();
 
-  const toggle = (h: Holdout) =>
+  const toggle = async (h: Holdout) => {
+    // Stopping an active holdout returns its held-out units to experiments; confirm first.
+    if (h.status === "active") {
+      const ok = await confirm({
+        title: "Stop holdout?",
+        message: <>Its held-out units rejoin experiments.</>,
+        confirmLabel: "Stop holdout",
+      });
+      if (!ok) return;
+    }
     start(async () => {
       await updateHoldoutAction(slug, h.key, { status: h.status === "active" ? "stopped" : "active" });
       router.refresh();
     });
-  const remove = (h: Holdout) => {
-    if (!confirm(`Delete holdout "${h.name}"? Its units rejoin experiments.`)) return;
+  };
+  const remove = async (h: Holdout) => {
+    const ok = await confirm({
+      title: "Delete holdout?",
+      message: (
+        <>
+          Deleting <strong className="text-zinc-200">{h.name}</strong> returns its held-out units
+          to experiments.
+        </>
+      ),
+      confirmLabel: "Delete holdout",
+    });
+    if (!ok) return;
     start(async () => {
       await deleteHoldoutAction(slug, h.key);
       router.refresh();
@@ -104,15 +127,26 @@ export function HoldoutsManager({
                 <span className="text-xs text-zinc-500 capitalize">{h.status}</span>
               )}
               {canManage ? (
-                <button
-                  type="button"
-                  onClick={() => remove(h)}
-                  disabled={pending}
-                  className="grid size-9 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-40"
-                  aria-label={`Delete ${h.name}`}
-                >
-                  <Trash2 className="size-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setEditing(h)}
+                    disabled={pending}
+                    className="grid size-9 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 disabled:opacity-40"
+                    aria-label={`Edit ${h.name}`}
+                  >
+                    <Pencil className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(h)}
+                    disabled={pending}
+                    className="grid size-9 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-40"
+                    aria-label={`Delete ${h.name}`}
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
               ) : null}
             </div>
           ))}
@@ -122,6 +156,10 @@ export function HoldoutsManager({
       {creating ? (
         <CreateHoldoutModal slug={slug} environments={environments} onClose={() => setCreating(false)} />
       ) : null}
+      {editing ? (
+        <EditHoldoutModal slug={slug} holdout={editing} onClose={() => setEditing(null)} />
+      ) : null}
+      {confirmDialog}
     </div>
   );
 }
@@ -230,6 +268,87 @@ function CreateHoldoutModal({
         </Button>
         <Button variant="primary" onClick={submit} disabled={pending || !name.trim()}>
           {pending ? "Creating…" : "Create"}
+        </Button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
+function EditHoldoutModal({
+  slug,
+  holdout,
+  onClose,
+}: {
+  slug: string;
+  holdout: Holdout;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [name, setName] = useState(holdout.name);
+  const [percentage, setPercentage] = useState(String(holdout.percentage));
+  const [description, setDescription] = useState(holdout.description ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  function submit() {
+    setError(null);
+    if (!name.trim()) return setError("Give the holdout a name.");
+    const pct = Number(percentage);
+    if (!Number.isInteger(pct) || pct < 1 || pct > 100) return setError("Percentage must be 1–100.");
+    start(async () => {
+      const res = await updateHoldoutAction(slug, holdout.key, {
+        name: name.trim(),
+        description: description.trim() || null,
+        percentage: pct,
+      });
+      if (res.error) return setError(res.error);
+      onClose();
+      router.refresh();
+    });
+  }
+
+  return (
+    <Modal onClose={onClose} size="lg">
+      <ModalHeader
+        title="Edit Holdout"
+        description="Rename, resize, or redescribe this holdout."
+        onClose={onClose}
+      />
+      <ModalBody>
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Name">
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Global holdout" autoFocus />
+            </Field>
+            <Field label="Percentage held out">
+              <Input
+                type="number"
+                min={1}
+                max={100}
+                value={percentage}
+                onChange={(e) => setPercentage(e.target.value)}
+                className="font-mono"
+              />
+            </Field>
+          </div>
+
+          <Field label="Description">
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What this holdout measures…"
+              rows={2}
+            />
+          </Field>
+        </div>
+        {error ? <p className="mt-4 text-sm text-red-400">{error}</p> : null}
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="primary" onClick={submit} disabled={pending || !name.trim()}>
+          {pending ? "Saving…" : "Save"}
         </Button>
       </ModalFooter>
     </Modal>

@@ -121,7 +121,7 @@ export function RccaSection({
               <li key={it.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-white/8 bg-white/2 p-2">
                 <span className={`min-w-0 flex-1 truncate text-sm ${it.status === "done" ? "text-zinc-500 line-through" : "text-zinc-200"}`}>{it.title}</span>
                 {it.assigneeUserId ? <span className="shrink-0 text-xs text-zinc-500">{nameBy.get(it.assigneeUserId) ?? "Assigned"}</span> : null}
-                <Select ariaLabel="Status" value={it.status} onValueChange={(v) => updateItem(it.id, { status: v })} options={STATUS} />
+                <Select ariaLabel="Status" value={it.status} onValueChange={(v) => updateItem(it.id, { status: v })} options={STATUS} fullWidth={false} />
                 <button type="button" onClick={() => removeItem(it.id)} disabled={pending} className="shrink-0 text-zinc-500 hover:text-red-400" aria-label="Remove action"><Trash2 className="size-4" /></button>
               </li>
             ))}
@@ -129,7 +129,7 @@ export function RccaSection({
         ) : null}
         <div className="mt-2 flex flex-wrap items-end gap-2">
           <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Add a corrective action…" className="min-w-52 flex-1" />
-          <Select ariaLabel="Assignee" value={newAssignee} onValueChange={setNewAssignee} options={[{ value: NONE, label: "Unassigned" }, ...orgMembers.map((m) => ({ value: m.userId, label: m.name }))]} />
+          <Select fullWidth={false} ariaLabel="Assignee" value={newAssignee} onValueChange={setNewAssignee} options={[{ value: NONE, label: "Unassigned" }, ...orgMembers.map((m) => ({ value: m.userId, label: m.name }))]} />
           <Button variant="secondary" size="sm" onClick={addItem} disabled={pending || !newTitle.trim()}><Plus className="size-4" /> Add</Button>
         </div>
       </div>

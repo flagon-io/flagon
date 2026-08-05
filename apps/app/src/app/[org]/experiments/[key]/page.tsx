@@ -92,6 +92,12 @@ export default async function ExperimentDetail({
             ) : null}
           </div>
           <span className="font-mono text-xs text-zinc-500">{experiment.key}</span>
+          {experiment.hypothesis ? (
+            <p className="mt-1 max-w-2xl text-sm text-zinc-400">
+              <span className="text-zinc-500">Hypothesis: </span>
+              {experiment.hypothesis}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
@@ -147,15 +153,6 @@ export default async function ExperimentDetail({
                     </li>
                   ))}
                 </ul>
-              </div>
-            ) : null}
-
-            {experiment.hypothesis ? (
-              <div className="flex flex-col gap-2">
-                <h3 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">
-                  Hypothesis
-                </h3>
-                <p className="text-sm text-zinc-300">{experiment.hypothesis}</p>
               </div>
             ) : null}
           </aside>

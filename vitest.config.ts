@@ -14,11 +14,22 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   resolve: {
-    alias: {
-      "server-only": fileURLToPath(
-        new URL("./node_modules/server-only/empty.js", import.meta.url),
-      ),
-    },
+    // Array form so we can use a REGEX for the console's `@/` path alias — it
+    // matches only `@/...` (never a scoped package like `@flagon/design`), letting
+    // apps/app's DB-backed tests exercise modules that import via `@/`. Only
+    // apps/app uses `@/` (apps/api/design do not), so this is collision-free.
+    alias: [
+      {
+        find: "server-only",
+        replacement: fileURLToPath(
+          new URL("./node_modules/server-only/empty.js", import.meta.url),
+        ),
+      },
+      {
+        find: /^@\//,
+        replacement: fileURLToPath(new URL("./apps/app/src/", import.meta.url)),
+      },
+    ],
   },
   test: {
     environment: "node",

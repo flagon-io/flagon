@@ -13,6 +13,8 @@ import {
   ModalHeader,
   SegmentedControl,
   Select,
+  toast,
+  useConfirm,
 } from "@flagon/design";
 import {
   createSdkKeyAction,
@@ -53,13 +55,31 @@ export function ClientKeysManager({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, start] = useTransition();
   const [modalEnv, setModalEnv] = useState<string | null>(null);
 
-  function revoke(id: string) {
+  async function revoke(k: SdkKey) {
+    const ok = await confirm({
+      title: "Revoke client key?",
+      message: (
+        <>
+          Revoking{" "}
+          <strong className="text-zinc-200">{k.name || "this key"}</strong>{" "}
+          immediately breaks any app using it. This cannot be undone.
+        </>
+      ),
+      confirmLabel: "Revoke key",
+      tone: "danger",
+    });
+    if (!ok) return;
     start(async () => {
-      const res = await revokeSdkKeyAction(slug, id);
-      if (!res.error) router.refresh();
+      const res = await revokeSdkKeyAction(slug, k.id);
+      if (res.error) {
+        toast.error("Couldn't revoke key", res.error);
+        return;
+      }
+      router.refresh();
     });
   }
 
@@ -98,7 +118,7 @@ export function ClientKeysManager({
                       divided={i > 0}
                       canManage={canManage}
                       pending={pending}
-                      onRevoke={() => revoke(k.id)}
+                      onRevoke={() => revoke(k)}
                     />
                   ))}
                   {canManage ? (
@@ -137,6 +157,7 @@ export function ClientKeysManager({
           }}
         />
       ) : null}
+      {confirmDialog}
     </div>
   );
 }
@@ -170,15 +191,23 @@ function KeyRow({
     if (next === k.autoExpose) return;
     saveExpose(async () => {
       const res = await updateSdkKeyAction(slug, k.id, { autoExpose: next });
-      if (!res.error) router.refresh();
+      if (res.error) {
+        toast.error("Couldn't update auto exposures", res.error);
+        return;
+      }
+      router.refresh();
     });
   }
 
   function copy() {
     if (!k.token) return;
-    navigator.clipboard.writeText(k.token);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    navigator.clipboard
+      .writeText(k.token)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => toast.error("Couldn't copy", "Clipboard is unavailable in this context."));
   }
 
   function commitLabel() {
@@ -187,7 +216,12 @@ function KeyRow({
     if (next === k.name) return;
     saveLabel(async () => {
       const res = await updateSdkKeyAction(slug, k.id, { name: next });
-      if (!res.error) router.refresh();
+      if (res.error) {
+        setLabelDraft(k.name);
+        toast.error("Couldn't rename key", res.error);
+        return;
+      }
+      router.refresh();
     });
   }
 
@@ -298,6 +332,7 @@ function KeyRow({
           onClick={onRevoke}
           disabled={pending}
           title="Revoke"
+          aria-label={`Revoke ${k.name || "client key"}`}
           className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
         >
           <Trash2 className="size-4" />

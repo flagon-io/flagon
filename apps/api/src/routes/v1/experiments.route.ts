@@ -5,6 +5,7 @@ import { z } from "zod";
 import { withOrg } from "../../db/tenant.js";
 import type { TenantTx } from "../../db/tenant.js";
 import {
+  sql,
   environments,
   experiments,
   experimentMetricLinks,
@@ -453,7 +454,10 @@ type WriteOutcome = "conflict" | { error: string } | { hydrated: Hydrated };
 /** An edit handler's result: not-found, a 422 message, or the hydrated row. */
 type EditOutcome = null | { error: string } | { hydrated: Hydrated };
 
-/** Replace an experiment's metric attachments from a {key, role}[] list. */
+/** Replace an experiment's metric attachments from a {key, role}[] list. Each link
+ *  captures a FROZEN SNAPSHOT of the metric definition (type/event/value/direction)
+ *  so later edits to the reusable metric never rewrite this experiment's meaning;
+ *  the snapshot is re-stamped when the experiment starts (see reSnapshotMetrics). */
 async function applyMetrics(
   tx: TenantTx,
   orgId: string,
@@ -463,7 +467,14 @@ async function applyMetrics(
   const keys = [...new Set(desired.map((m) => m.key))];
   const defs = keys.length
     ? await tx
-        .select({ id: experimentMetrics.id, key: experimentMetrics.key })
+        .select({
+          id: experimentMetrics.id,
+          key: experimentMetrics.key,
+          type: experimentMetrics.type,
+          eventName: experimentMetrics.eventName,
+          valueField: experimentMetrics.valueField,
+          direction: experimentMetrics.direction,
+        })
         .from(experimentMetrics)
         .where(
           and(
@@ -472,7 +483,7 @@ async function applyMetrics(
           ),
         )
     : [];
-  const byKey = new Map(defs.map((d) => [d.key, d.id]));
+  const byKey = new Map(defs.map((d) => [d.key, d]));
   for (const k of keys) if (!byKey.has(k)) return "missing";
 
   await tx
@@ -481,15 +492,40 @@ async function applyMetrics(
   let primaryMetricId: string | null = null;
   if (desired.length) {
     const rows = desired.map((m) => {
-      const metricId = byKey.get(m.key)!;
-      if (m.role === "primary") primaryMetricId = metricId;
-      return { organizationId: orgId, experimentId, metricId, role: m.role };
+      const def = byKey.get(m.key)!;
+      if (m.role === "primary") primaryMetricId = def.id;
+      return {
+        organizationId: orgId,
+        experimentId,
+        metricId: def.id,
+        role: m.role,
+        metricType: def.type,
+        eventName: def.eventName,
+        valueField: def.valueField,
+        direction: def.direction,
+      };
     });
     await tx.insert(experimentMetricLinks).values(rows).onConflictDoNothing({
       target: [experimentMetricLinks.experimentId, experimentMetricLinks.metricId],
     });
   }
   return { primaryMetricId };
+}
+
+/** Re-stamp every metric link's frozen snapshot from the current metric definition.
+ *  Called when an experiment STARTS: draft metrics may have been edited up to this
+ *  moment, but once running the definition is frozen for the life of the results. */
+async function reSnapshotMetrics(tx: TenantTx, experimentId: string): Promise<void> {
+  await tx.execute(sql`
+    update experiment_metric_links l
+       set metric_type = m.type,
+           event_name = m.event_name,
+           value_field = m.value_field,
+           direction = m.direction
+      from experiment_metrics m
+     where m.id = l.metric_id
+       and l.experiment_id = ${experimentId}
+  `);
 }
 
 // --- Handlers ----------------------------------------------------------------
@@ -693,6 +729,9 @@ function lifecycle(action: "start" | "stop") {
         action === "start"
           ? { status: "running" as const, startedAt: existing.startedAt ?? new Date() }
           : { status: "stopped" as const, stoppedAt: new Date() };
+      // Freeze each attached metric's definition at the moment the experiment
+      // starts, so editing a reusable metric later can't rewrite these results.
+      if (action === "start") await reSnapshotMetrics(tx, existing.id);
       const [updated] = await tx
         .update(experiments)
         .set({ ...patch, updatedAt: new Date() })

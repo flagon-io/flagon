@@ -19,7 +19,11 @@ import { captureError } from "../lib/monitoring.js";
  * (RLS forces the withOrg loop); a failed org is captured and skipped.
  */
 export async function sweepEscalations(): Promise<{ orgs: number; paged: number }> {
-  const orgs = await db.select({ id: organizations.id }).from(organizations);
+  // Never page/email on behalf of a soft-deleted org (mirrors the usage report-sweep).
+  const orgs = await db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(isNull(organizations.deletedAt));
   const now = new Date();
   let paged = 0;
 

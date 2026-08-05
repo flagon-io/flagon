@@ -29,6 +29,7 @@ import {
   Rocket,
   Settings,
   Shield,
+  ShieldCheck,
   Signal,
   Siren,
   SlidersHorizontal,
@@ -175,7 +176,12 @@ function buildNav(base: string): {
         items: [
           { label: "Members", icon: Users, href: `${base}/settings/members` },
           { label: "Invitations", icon: Mail, href: `${base}/settings/invitations` },
-          { label: "Roles", icon: UserCog, soon: true },
+          {
+            label: "Member privileges",
+            icon: UserCog,
+            href: `${base}/settings/member-privileges`,
+          },
+          { label: "Roles", icon: ShieldCheck, soon: true },
         ],
       },
       {

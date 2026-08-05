@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { members, organizations } from "@/db/schema";
 import { getSession } from "@/lib/auth";
@@ -32,7 +32,7 @@ export async function setMemberRoleAction(
   const org = await db
     .select({ id: organizations.id })
     .from(organizations)
-    .where(eq(organizations.slug, slug))
+    .where(and(eq(organizations.slug, slug), isNull(organizations.deletedAt)))
     .limit(1)
     .then((r) => r[0]);
   if (!org) return { error: "Organization not found." };
@@ -66,5 +66,63 @@ export async function setMemberRoleAction(
     .set({ role })
     .where(and(eq(members.id, memberId), eq(members.organizationId, org.id)));
   revalidatePath(`/${slug}/settings/members`);
+  return {};
+}
+
+/**
+ * Transfer organization ownership to another member. There is exactly one owner
+ * per org: the current owner hands it over (dropping to admin) and the target is
+ * promoted to owner, in one transaction. BetterAuth's update-member-role can set
+ * the owner role but does NOT demote the previous owner, so we write the
+ * app-owned `members` table directly here (the same table role changes already
+ * go through) to keep the single-owner invariant.
+ *
+ * Owner-only, and only onto an existing non-owner member (never yourself).
+ */
+export async function transferOwnershipAction(
+  slug: string,
+  memberId: string,
+): Promise<{ error?: string }> {
+  const session = await getSession();
+  if (!session) return { error: "Not authenticated." };
+
+  const org = await db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(and(eq(organizations.slug, slug), isNull(organizations.deletedAt)))
+    .limit(1)
+    .then((r) => r[0]);
+  if (!org) return { error: "Organization not found." };
+
+  const actor = await db
+    .select({ id: members.id, role: members.role })
+    .from(members)
+    .where(and(eq(members.organizationId, org.id), eq(members.userId, session.user.id)))
+    .limit(1)
+    .then((r) => r[0]);
+  if (!actor || actor.role !== "owner") {
+    return { error: "Only the current owner can transfer ownership." };
+  }
+
+  const target = await db
+    .select({ id: members.id, role: members.role, userId: members.userId })
+    .from(members)
+    .where(and(eq(members.id, memberId), eq(members.organizationId, org.id)))
+    .limit(1)
+    .then((r) => r[0]);
+  if (!target) return { error: "Member not found." };
+  if (target.userId === session.user.id) {
+    return { error: "You already own this organization." };
+  }
+  if (target.role === "owner") {
+    return { error: "That member already owns this organization." };
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.update(members).set({ role: "owner" }).where(eq(members.id, target.id));
+    await tx.update(members).set({ role: "admin" }).where(eq(members.id, actor.id));
+  });
+  revalidatePath(`/${slug}/settings/members`);
+  revalidatePath(`/${slug}/settings`);
   return {};
 }

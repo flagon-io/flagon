@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations } from "../db/auth-tables.js";
 import { getStripe, getProPriceId, getMeteredPriceId } from "./stripe.js";
@@ -325,12 +325,14 @@ export function orgForSubscription(
 async function resolveOrg(
   subscription: Stripe.Subscription,
 ): Promise<BillingOrg | null> {
+  // A soft-deleted org's billing is frozen: skip it so a late/adversarial Stripe
+  // event can't flip its status back to entitling and re-arm usage reporting.
   const byMeta = subscription.metadata?.flagon_org_id;
   if (byMeta) {
     const rows = await db
       .select(billingColumns)
       .from(organizations)
-      .where(eq(organizations.id, byMeta))
+      .where(and(eq(organizations.id, byMeta), isNull(organizations.deletedAt)))
       .limit(1);
     if (rows[0]) return rows[0];
   }
@@ -339,7 +341,7 @@ async function resolveOrg(
     const rows = await db
       .select(billingColumns)
       .from(organizations)
-      .where(eq(organizations.stripeCustomerId, customerId))
+      .where(and(eq(organizations.stripeCustomerId, customerId), isNull(organizations.deletedAt)))
       .limit(1);
     if (rows[0]) return rows[0];
   }
@@ -375,6 +377,125 @@ export async function syncSubscription(
     .where(eq(organizations.id, org.id));
 
   return org.id;
+}
+
+/**
+ * A settlement snapshot for the delete flow: what the org still owes and whether
+ * it's safe to delete without leaving money on the table. `owedCents` folds the
+ * remaining balance on OPEN (finalized, unpaid) invoices plus any positive Stripe
+ * customer balance (a pending debit). `hasActiveSubscription` means a live sub is
+ * still accruing usage that hasn't been invoiced. `clear` = nothing owed and no
+ * active subscription — safe to delete. `blocked` = there are open UNPAID invoices
+ * (an existing debt), which we refuse to let deletion escape.
+ */
+export type Settlement = {
+  hasActiveSubscription: boolean;
+  openInvoiceCount: number;
+  owedCents: number;
+  clear: boolean;
+  blocked: boolean;
+};
+
+/** Sum the still-owed cents across a customer's OPEN (finalized, unpaid) invoices. */
+async function openInvoices(
+  stripe: Stripe,
+  customerId: string,
+): Promise<{ count: number; owedCents: number }> {
+  const list = await stripe.invoices.list({ customer: customerId, status: "open", limit: 100 });
+  const owedCents = list.data.reduce((sum, inv) => sum + (inv.amount_remaining ?? 0), 0);
+  return { count: list.data.length, owedCents };
+}
+
+/**
+ * Read-only settlement snapshot for the org (drives the Danger Zone preview). Never
+ * mutates Stripe. An org with no customer owes nothing and is immediately clear.
+ */
+export async function getSettlement(org: BillingOrg): Promise<Settlement> {
+  if (!org.stripeCustomerId) {
+    return { hasActiveSubscription: false, openInvoiceCount: 0, owedCents: 0, clear: true, blocked: false };
+  }
+  const stripe = getStripe();
+  const [open, customer] = await Promise.all([
+    openInvoices(stripe, org.stripeCustomerId),
+    stripe.customers.retrieve(org.stripeCustomerId),
+  ]);
+  // A positive Stripe customer balance is a pending debit owed on the next invoice.
+  const balanceOwed =
+    customer && !customer.deleted && typeof customer.balance === "number"
+      ? Math.max(0, customer.balance)
+      : 0;
+  const hasActiveSubscription =
+    !!org.stripeSubscriptionId && statusEntitlesPro(org.subscriptionStatus);
+  const owedCents = open.owedCents + balanceOwed;
+  return {
+    hasActiveSubscription,
+    openInvoiceCount: open.count,
+    owedCents,
+    clear: owedCents === 0 && !hasActiveSubscription,
+    blocked: open.count > 0,
+  };
+}
+
+/**
+ * SETTLE the org for deletion: cancel the subscription IMMEDIATELY, invoicing the
+ * accrued metered usage now (`invoice_now` + `prorate`) so nothing goes unbilled,
+ * then force-collect every open invoice from the payment method on file. Returns
+ * the resulting settlement — `clear` only when no open invoice remains. Idempotent:
+ * safe to call when there's no subscription (it just collects any open invoices).
+ * The caller must NOT delete unless the returned settlement is `clear`.
+ */
+export async function settleAndCancel(org: BillingOrg): Promise<Settlement> {
+  if (!org.stripeCustomerId) {
+    return { hasActiveSubscription: false, openInvoiceCount: 0, owedCents: 0, clear: true, blocked: false };
+  }
+  const stripe = getStripe();
+
+  // 1. Cancel the live subscription, finalizing accrued usage into a final invoice.
+  //    Track whether it is CONFIRMED gone: only then may we treat it as canceled in
+  //    the re-check below. If the cancel threw on a live sub, we must NOT assume it
+  //    canceled (it could still be billing) — leave it active so `clear` stays false
+  //    and deletion is refused (safe: we never delete an org whose sub still bills).
+  let subscriptionCanceled = !org.stripeSubscriptionId;
+  if (org.stripeSubscriptionId) {
+    try {
+      const sub = await stripe.subscriptions.retrieve(org.stripeSubscriptionId);
+      if (sub.status === "canceled") {
+        subscriptionCanceled = true;
+      } else {
+        await stripe.subscriptions.cancel(org.stripeSubscriptionId, {
+          invoice_now: true,
+          prorate: true,
+        });
+        subscriptionCanceled = true;
+      }
+    } catch (err) {
+      // Couldn't confirm cancellation — leave subscriptionCanceled false (blocks delete).
+      console.error("[billing] settleAndCancel: cancel failed:", err);
+    }
+  }
+
+  // 2. Force-collect every open invoice from the card on file (best-effort each).
+  const open = await stripe.invoices.list({ customer: org.stripeCustomerId, status: "open", limit: 100 });
+  for (const inv of open.data) {
+    if (!inv.id) continue;
+    try {
+      await stripe.invoices.pay(inv.id);
+    } catch (err) {
+      console.error(`[billing] settleAndCancel: pay invoice ${inv.id} failed:`, err);
+    }
+  }
+
+  // 3. Re-read the settlement AFTER cancel + collection. The org row's subscription
+  //    status is only refreshed by the webhook (a later request), so reflect the
+  //    just-confirmed cancel LOCALLY before re-checking — otherwise the stale
+  //    "active" status keeps hasActiveSubscription true and clear false forever.
+  //    owedCents still comes from LIVE Stripe reads, so a real unpaid balance still
+  //    blocks; only the subscription-liveness bit is corrected.
+  const fresh = (await getBillingOrgById(org.id)) ?? org;
+  const local = subscriptionCanceled
+    ? { ...fresh, subscriptionStatus: "canceled", stripeSubscriptionId: null }
+    : fresh;
+  return getSettlement(local);
 }
 
 /**

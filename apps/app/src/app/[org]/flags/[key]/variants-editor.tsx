@@ -3,7 +3,7 @@
 import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
-import { Button, Input } from "@flagon/design";
+import { Button, Input, useConfirm } from "@flagon/design";
 import {
   createVariantAction,
   deleteVariantAction,
@@ -90,6 +90,7 @@ export function VariantsEditor({
   readOnly?: boolean;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -102,6 +103,22 @@ export function VariantsEditor({
       if (res.error) setError(res.error);
       else router.refresh();
     });
+  }
+
+  async function confirmDelete(variant: FlagVariant, displayName: string) {
+    const ok = await confirm({
+      title: "Delete variant?",
+      message: (
+        <>
+          Delete <strong className="text-zinc-200">{displayName}</strong>? This
+          can&apos;t be undone.
+        </>
+      ),
+      confirmLabel: "Delete variant",
+      tone: "danger",
+    });
+    if (!ok) return;
+    run(() => deleteVariantAction(slug, flagKey, variant.key));
   }
 
   return (
@@ -122,6 +139,7 @@ export function VariantsEditor({
             canDelete={editable && variants.length > 1}
             pending={pending}
             onRun={run}
+            onDelete={confirmDelete}
           />
         ))}
 
@@ -142,6 +160,7 @@ export function VariantsEditor({
         </div>
       </div>
       {error ? <p className="mt-1.5 text-xs text-red-400">{error}</p> : null}
+      {confirmDialog}
     </section>
   );
 }
@@ -156,6 +175,7 @@ function VariantRow({
   canDelete,
   pending,
   onRun,
+  onDelete,
 }: {
   slug: string;
   flagKey: string;
@@ -166,6 +186,7 @@ function VariantRow({
   canDelete: boolean;
   pending: boolean;
   onRun: (fn: () => Promise<{ error?: string }>) => void;
+  onDelete: (variant: FlagVariant, displayName: string) => void;
 }) {
   const [valueText, setValueText] = useState(() => formatValue(type, variant.value));
   const [label, setLabel] = useState(variant.label ?? "");
@@ -198,9 +219,10 @@ function VariantRow({
   const trash = canDelete ? (
     <button
       type="button"
-      onClick={() => onRun(() => deleteVariantAction(slug, flagKey, variant.key))}
+      onClick={() => onDelete(variant, variant.label || fallbackName)}
       disabled={pending}
       title="Remove variant"
+      aria-label={`Delete ${variant.label || fallbackName}`}
       className="mt-6 grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
     >
       <Trash2 className="size-4" />

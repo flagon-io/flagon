@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Archive } from "lucide-react";
-import { Button } from "@flagon/design";
+import { Button, toast } from "@flagon/design";
 import { archiveFlagAction } from "../actions";
 
 /**
@@ -18,7 +18,11 @@ export function ArchivedNotice({ slug, flagKey }: { slug: string; flagKey: strin
   function restore() {
     start(async () => {
       const res = await archiveFlagAction(slug, flagKey, "restore");
-      if (!res.error) router.refresh();
+      if (res.error) {
+        toast.error("Couldn't restore flag", res.error);
+        return;
+      }
+      router.refresh();
     });
   }
 

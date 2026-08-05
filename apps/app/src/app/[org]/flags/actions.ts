@@ -22,8 +22,10 @@ import {
   updateVariant,
   type FlagEnvConfig,
   type FlagType,
+  type FlagImpact,
   type Predicate,
   type Serve,
+  getFlagImpact,
   setFlagMetrics,
 } from "@/lib/flags-api";
 
@@ -343,4 +345,13 @@ export async function setFlagMetricsAction(
   if (res.error) return { error: res.error };
   revalidatePath(`/${slug}/flags/${key}`);
   return {};
+}
+
+/** Recompute a flag's always-on impact for an environment (drives the env switch). */
+export async function getFlagImpactAction(
+  slug: string,
+  key: string,
+  environment: string,
+): Promise<FlagImpact | null> {
+  return getFlagImpact(slug, key, environment);
 }

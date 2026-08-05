@@ -1,8 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { IconGitHub } from "@flagon/design";
+import { useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
+import { IconGitHub, toast } from "@flagon/design";
 import { authClient } from "@/lib/auth-client";
+import { safeRedirect } from "@/lib/safe-redirect";
 import type { OAuthProviders } from "@/lib/oauth";
 
 /**
@@ -12,8 +14,24 @@ import type { OAuthProviders } from "@/lib/oauth";
  * hands off to BetterAuth's social sign-in.
  */
 export function SocialButtons({ providers }: { providers: OAuthProviders }) {
+  const params = useSearchParams();
+  const [pending, setPending] = useState<"google" | "github" | null>(null);
+
   async function go(provider: "google" | "github") {
-    await authClient.signIn.social({ provider, callbackURL: "/" });
+    setPending(provider);
+    try {
+      // On success this hands off to the provider (a full navigation), so the
+      // button stays pending until we leave the page; only a rejection returns
+      // control here, where we re-enable and surface the failure.
+      const callbackURL = safeRedirect(params.get("redirect"));
+      await authClient.signIn.social({ provider, callbackURL });
+    } catch {
+      setPending(null);
+      toast.error(
+        "Sign-in failed",
+        "We couldn't reach the server. Check your connection and try again.",
+      );
+    }
   }
 
   return (
@@ -22,12 +40,16 @@ export function SocialButtons({ providers }: { providers: OAuthProviders }) {
         label="Continue with Google"
         icon={<GoogleIcon />}
         enabled={providers.google}
+        pending={pending === "google"}
+        disabled={pending !== null}
         onClick={() => go("google")}
       />
       <SocialButton
         label="Continue with GitHub"
         icon={<IconGitHub className="size-4" />}
         enabled={providers.github}
+        pending={pending === "github"}
+        disabled={pending !== null}
         onClick={() => go("github")}
       />
     </div>
@@ -38,24 +60,29 @@ function SocialButton({
   label,
   icon,
   enabled,
+  pending = false,
+  disabled = false,
   onClick,
 }: {
   label: string;
   icon: ReactNode;
   enabled: boolean;
+  pending?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
+  const interactive = enabled && !disabled;
   return (
     <button
       type="button"
-      onClick={enabled ? onClick : undefined}
-      disabled={!enabled}
+      onClick={interactive ? onClick : undefined}
+      disabled={!interactive}
       title={enabled ? undefined : "Coming soon"}
-      aria-disabled={!enabled}
+      aria-disabled={!interactive}
       className="flex h-10 items-center justify-center gap-2.5 rounded-md border border-white/10 bg-white/5 text-sm font-medium text-zinc-200 transition-colors hover:border-white/20 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-white/10 disabled:hover:bg-white/5"
     >
       {icon}
-      {label}
+      {pending ? "Redirecting…" : label}
     </button>
   );
 }

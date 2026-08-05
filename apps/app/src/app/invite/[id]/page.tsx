@@ -79,7 +79,7 @@ export default async function InvitePage({
             Sign in to accept
           </Link>
           <Link
-            href="/signup"
+            href={`/signup?redirect=/invite/${id}`}
             className="rounded-md border border-white/10 px-4 py-2.5 text-center text-sm text-zinc-200 transition-colors hover:border-white/20"
           >
             Create an account

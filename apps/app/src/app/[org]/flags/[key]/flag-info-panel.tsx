@@ -32,11 +32,14 @@ export function FlagInfoPanel({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
   function save(body: Parameters<typeof updateFlagMetaAction>[2]) {
+    setError(null);
     start(async () => {
       const res = await updateFlagMetaAction(slug, flag.key, body);
-      if (!res.error) router.refresh();
+      if (res.error) return setError(res.error);
+      router.refresh();
     });
   }
 
@@ -71,6 +74,8 @@ export function FlagInfoPanel({
           onChange={(tags) => save({ tags })}
         />
       </Row>
+
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
     </>
   );
 }

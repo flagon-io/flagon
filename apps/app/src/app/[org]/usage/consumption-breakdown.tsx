@@ -232,9 +232,24 @@ function Chart({
     ? (xScale(todayKey) ?? 0) + xScale.bandwidth() / 2
     : null;
 
+  // A concise text alternative for the stacked bars. Cumulative series already
+  // carry the running total in their last point, so sum the last values there;
+  // otherwise sum every point.
+  const total = chartSeries.reduce(
+    (sum, s) =>
+      sum + (cumulative ? (s.values.at(-1) ?? 0) : s.values.reduce((a, b) => a + b, 0)),
+    0,
+  );
+  const totalLabel = metric === "cost" ? usd(total) : `${compact(total)} events`;
+  const rangeLabel =
+    buckets.length > 0
+      ? `${buckets[0]!.full} to ${buckets.at(-1)!.full}`
+      : "the selected range";
+  const chartLabel = `Consumption breakdown, stacked bar chart. ${metric === "cost" ? "Total cost" : "Total usage"} ${totalLabel} from ${rangeLabel}.`;
+
   return (
     <div ref={containerRef} className="relative">
-      <svg width={width} height={HEIGHT}>
+      <svg width={width} height={HEIGHT} role="img" aria-label={chartLabel}>
         <Group left={MARGIN.left} top={MARGIN.top}>
           <GridRows
             scale={yScale}

@@ -187,12 +187,49 @@ describe.skipIf(!DATABASE_URL)("experiments API + OFREP (integration, HTTP)", ()
     expect(primary.analysis.srm.healthy).toBe(true);
   });
 
+  it("locks the flag's environment targeting while the experiment is running", async () => {
+    // An env-config change (here: split reallocation) is refused with a 409.
+    const envPatch = await app.request(`${base}/flags/checkout/environments/production`, {
+      method: "PATCH",
+      headers: auth(),
+      body: JSON.stringify({
+        defaultServe: { rollout: [{ variant: "on", weight: 1 }, { variant: "off", weight: 1 }] },
+      }),
+    });
+    expect(envPatch.status).toBe(409);
+
+    // A targeting-rule write is refused too.
+    const ruleAdd = await post(`${base}/flags/checkout/environments/production/rules`, {
+      serve: { variant: "on" },
+    });
+    expect(ruleAdd.status).toBe(409);
+
+    // But READS are never blocked.
+    const list = await app.request(
+      `${base}/flags/checkout/environments/production/rules`,
+      { headers: auth() },
+    );
+    expect(list.status).toBe(200);
+  });
+
   it("records a decision and reflects it", async () => {
     const decide = await post(`${base}/experiments/checkout-exp/decide`, { decision: "ship" });
     expect(decide.status).toBe(200);
     const body = await decide.json();
     expect(body.experiment.decision).toBe("ship");
     expect(body.experiment.status).toBe("stopped");
+  });
+
+  it("releases the targeting lock once the experiment is stopped", async () => {
+    // The prior test stopped the experiment; the same env change now succeeds.
+    const envPatch = await app.request(`${base}/flags/checkout/environments/production`, {
+      method: "PATCH",
+      headers: auth(),
+      body: JSON.stringify({
+        defaultServe: { rollout: [{ variant: "on", weight: 1 }, { variant: "off", weight: 1 }] },
+      }),
+    });
+    expect(envPatch.status).toBe(200);
   });
 
   it("refuses an org the token is not authorized for", async () => {

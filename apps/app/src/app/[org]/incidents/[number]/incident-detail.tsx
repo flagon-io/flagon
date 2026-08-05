@@ -3,12 +3,20 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BellRing, Boxes, Check, CircleDot, ListChecks, Link2, Square, SquareCheckBig } from "lucide-react";
+import { BellRing, BookText, Boxes, Check, CircleDot, ListChecks, Link2, Plus, Square, SquareCheckBig, X } from "lucide-react";
 import { Button, Select, Textarea } from "@flagon/design";
 import { STATUSES, labelFor } from "@/lib/incidents";
 import type { IncidentDetail as Detail } from "@/lib/incidents-api";
 import { SeverityBadge, StatusPill } from "../incidents-view";
-import { acknowledgeIncidentAction, postUpdateAction, resolveIncidentAction, toggleChecklistAction } from "../actions";
+import {
+  acknowledgeIncidentAction,
+  addServiceAction,
+  attachRunbookAction,
+  postUpdateAction,
+  removeServiceAction,
+  resolveIncidentAction,
+  toggleChecklistAction,
+} from "../actions";
 import { RccaSection } from "./rcca-section";
 
 function when(iso: string): string {
@@ -20,11 +28,19 @@ export function IncidentDetail({
   detail,
   responderName,
   orgMembers,
+  projects,
+  runbooks,
+  policies,
+  canManage,
 }: {
   slug: string;
   detail: Detail;
   responderName: string | null;
   orgMembers: { userId: string; name: string }[];
+  projects: { key: string; name: string }[];
+  runbooks: { key: string; name: string }[];
+  policies: { key: string; name: string }[];
+  canManage: boolean;
 }) {
   const router = useRouter();
   const { incident, services, updates } = detail;
@@ -32,8 +48,15 @@ export function IncidentDetail({
   const [error, setError] = useState<string | null>(null);
   const [body, setBody] = useState("");
   const [status, setStatus] = useState(incident.status);
+  const [pickService, setPickService] = useState("");
+  const [pickRunbook, setPickRunbook] = useState("");
   const acked = Boolean(incident.acknowledgedAt);
   const resolved = incident.status === "resolved";
+  const policyName = incident.escalationPolicyKey
+    ? (policies.find((p) => p.key === incident.escalationPolicyKey)?.name ?? incident.escalationPolicyKey)
+    : null;
+  const attachedKeys = new Set(services.map((s) => s.key));
+  const addableProjects = projects.filter((p) => !attachedKeys.has(p.key));
 
   function run(fn: () => Promise<{ error?: string }>) {
     setError(null);
@@ -48,6 +71,25 @@ export function IncidentDetail({
     run(async () => {
       const res = await postUpdateAction(slug, incident.number, { body: body.trim(), status: status !== incident.status ? status : undefined });
       if (!res.error) setBody("");
+      return res;
+    });
+  }
+  function addService() {
+    if (!pickService) return;
+    run(async () => {
+      const res = await addServiceAction(slug, incident.number, pickService);
+      if (!res.error) setPickService("");
+      return res;
+    });
+  }
+  function removeService(projectKey: string) {
+    run(() => removeServiceAction(slug, incident.number, projectKey));
+  }
+  function attachRunbook() {
+    if (!pickRunbook) return;
+    run(async () => {
+      const res = await attachRunbookAction(slug, incident.number, pickRunbook);
+      if (!res.error) setPickRunbook("");
       return res;
     });
   }
@@ -95,7 +137,7 @@ export function IncidentDetail({
               <p className="mb-2 text-xs font-medium text-zinc-500">Post an update</p>
               <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={2} placeholder="What changed?" />
               <div className="mt-2 flex items-center justify-between gap-2">
-                <Select ariaLabel="Status" value={status} onValueChange={setStatus} options={STATUSES} />
+                <Select ariaLabel="Status" value={status} onValueChange={setStatus} options={STATUSES} fullWidth={false} />
                 <Button variant="secondary" onClick={postUpdate} disabled={pending || !body.trim()}>Post update</Button>
               </div>
             </div>
@@ -150,7 +192,7 @@ export function IncidentDetail({
               <p className="text-sm text-zinc-500">Unowned</p>
             )}
             {incident.escalationPolicyKey ? (
-              <p className="mt-1 text-xs text-zinc-500">Escalation: {incident.escalationPolicyKey}</p>
+              <p className="mt-1 text-xs text-zinc-500">Escalation: {policyName}</p>
             ) : null}
           </Panel>
           <Panel title="Affected services">
@@ -159,15 +201,53 @@ export function IncidentDetail({
             ) : (
               <ul className="flex flex-col gap-1.5">
                 {services.map((s) => (
-                  <li key={s.key}>
-                    <Link href={`/${slug}/projects/${s.key}`} className="inline-flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100">
-                      <Boxes className="size-3.5 text-zinc-500" /> {s.name}
+                  <li key={s.key} className="flex items-center justify-between gap-2">
+                    <Link href={`/${slug}/projects/${s.key}`} className="inline-flex min-w-0 items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100">
+                      <Boxes className="size-3.5 shrink-0 text-zinc-500" /> <span className="truncate">{s.name}</span>
                     </Link>
+                    {canManage ? (
+                      <button type="button" onClick={() => removeService(s.key)} disabled={pending} className="shrink-0 text-zinc-500 hover:text-red-400 disabled:opacity-50" aria-label={`Remove ${s.name}`}>
+                        <X className="size-3.5" />
+                      </button>
+                    ) : null}
                   </li>
                 ))}
               </ul>
             )}
+            {canManage && addableProjects.length > 0 ? (
+              <div className="mt-3 flex items-center gap-2">
+                <Select
+                  ariaLabel="Add service"
+                  value={pickService}
+                  onValueChange={setPickService}
+                  placeholder="Add a service…"
+                  className="flex-1"
+                  options={addableProjects.map((p) => ({ value: p.key, label: p.name }))}
+                />
+                <Button variant="secondary" size="sm" onClick={addService} disabled={pending || !pickService} aria-label="Add service">
+                  <Plus className="size-4" />
+                </Button>
+              </div>
+            ) : null}
           </Panel>
+          {canManage && runbooks.length > 0 ? (
+            <Panel title="Attach runbook">
+              <p className="mb-2 text-xs text-zinc-500">Pull a runbook&apos;s steps onto this incident as a checklist.</p>
+              <div className="flex items-center gap-2">
+                <Select
+                  ariaLabel="Runbook"
+                  value={pickRunbook}
+                  onValueChange={setPickRunbook}
+                  placeholder="Choose a runbook…"
+                  className="flex-1"
+                  options={runbooks.map((r) => ({ value: r.key, label: r.name }))}
+                />
+                <Button variant="secondary" size="sm" onClick={attachRunbook} disabled={pending || !pickRunbook}>
+                  <BookText className="size-4" /> Attach
+                </Button>
+              </div>
+            </Panel>
+          ) : null}
           <Panel title="Details">
             <dl className="flex flex-col gap-1.5 text-sm">
               <Row label="Status" value={labelFor(STATUSES, incident.status)} />

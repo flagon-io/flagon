@@ -2,8 +2,11 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getSession } from "@/lib/auth";
-import { getMembershipBySlug } from "@/lib/org";
+import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { getIncident } from "@/lib/incidents-api";
+import { listPolicies } from "@/lib/oncall-api";
+import { listRunbooks } from "@/lib/runbooks-api";
+import { listProjects } from "@/lib/projects-api";
 import { listMembers } from "@/lib/flags-api";
 import { listTeamMembers } from "@/lib/teams-api";
 import { IncidentDetail } from "./incident-detail";
@@ -22,7 +25,13 @@ export default async function IncidentPage({ params }: { params: Promise<{ org: 
   if (!membership) redirect("/");
   if (!Number.isInteger(number)) notFound();
 
-  const [detail, orgMembers] = await Promise.all([getIncident(slug, number), listMembers(slug)]);
+  const [detail, orgMembers, projects, runbooks, policies] = await Promise.all([
+    getIncident(slug, number),
+    listMembers(slug),
+    listProjects(slug),
+    listRunbooks(slug),
+    listPolicies(slug),
+  ]);
   if (!detail) notFound();
 
   // Resolve the responder's name from the owning team's roster.
@@ -42,6 +51,10 @@ export default async function IncidentPage({ params }: { params: Promise<{ org: 
         detail={detail}
         responderName={responderName}
         orgMembers={orgMembers.map((m) => ({ userId: m.userId, name: m.name }))}
+        projects={projects.map((p) => ({ key: p.key, name: p.name }))}
+        runbooks={runbooks.map((r) => ({ key: r.key, name: r.name }))}
+        policies={policies.map((p) => ({ key: p.key, name: p.name }))}
+        canManage={canManageOrg(membership.role)}
       />
     </div>
   );

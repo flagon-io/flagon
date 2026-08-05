@@ -23,17 +23,24 @@ export function ForgotPasswordForm() {
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email") ?? "").trim();
 
-    const { error } = await authClient.requestPasswordReset({
-      email,
-      redirectTo: "/reset-password",
-    });
+    try {
+      const { error } = await authClient.requestPasswordReset({
+        email,
+        redirectTo: "/reset-password",
+      });
 
-    setPending(false);
-    if (error) {
-      setError(error.message ?? "Something went wrong. Please try again.");
-      return;
+      if (error) {
+        setError(error.message ?? "Something went wrong. Please try again.");
+        setPending(false);
+        return;
+      }
+      setSent(true);
+    } catch {
+      // Never leave the button spinning on a rejected request; surface it and
+      // re-enable so the user can retry.
+      setError("We couldn't reach the server. Check your connection and try again.");
+      setPending(false);
     }
-    setSent(true);
   }
 
   if (sent) {
@@ -53,6 +60,7 @@ export function ForgotPasswordForm() {
         type="email"
         name="email"
         required
+        autoFocus
         autoComplete="email"
         placeholder="you@company.com"
       />

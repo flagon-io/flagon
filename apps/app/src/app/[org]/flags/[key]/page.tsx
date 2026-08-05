@@ -1,18 +1,21 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FlaskConical } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import {
   getFlag,
+  getFlagImpact,
   getFlagUsage,
   listMembers,
   listSegments,
 } from "@/lib/flags-api";
+import { listExperiments, listMetrics } from "@/lib/experiments-api";
 import { ArchivedNotice } from "./archived-notice";
 import { EnvCard } from "./env-controls";
 import { EvaluationsAside } from "./evaluations-aside";
 import { FlagActions } from "./flag-actions";
+import { FlagImpactPanel } from "./flag-impact";
 import { FlagInfoPanel } from "./flag-info-panel";
 import { UseInCodeButton } from "./use-in-code";
 import { VariantsEditor } from "./variants-editor";
@@ -33,16 +36,24 @@ export default async function FlagDetail({
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
 
-  const [detail, segments, members, usage] = await Promise.all([
-    getFlag(slug, key),
-    listSegments(slug),
-    listMembers(slug),
-    getFlagUsage(slug, key),
-  ]);
+  const impactEnv = "production";
+  const [detail, segments, members, usage, experiments, metricsLibrary, impact] =
+    await Promise.all([
+      getFlag(slug, key),
+      listSegments(slug),
+      listMembers(slug),
+      getFlagUsage(slug, key),
+      listExperiments(slug),
+      listMetrics(slug),
+      getFlagImpact(slug, key, impactEnv),
+    ]);
   if (!detail) notFound();
 
   const isBoolean = detail.flag.type === "boolean";
   const archived = Boolean(detail.flag.archivedAt);
+  // Experiments measuring THIS flag — running ones lock the flag's targeting.
+  const flagExperiments = experiments.filter((e) => e.flag === detail.flag.key);
+  const runningExperiments = flagExperiments.filter((e) => e.status === "running");
 
   return (
     <div className="flex flex-col gap-6">
@@ -86,6 +97,34 @@ export default async function FlagDetail({
 
       {archived ? <ArchivedNotice slug={slug} flagKey={detail.flag.key} /> : null}
 
+      {runningExperiments.length > 0 ? (
+        <div className="flex items-start gap-3 rounded-xl border border-teal-500/20 bg-teal-500/6 px-4 py-3">
+          <FlaskConical className="mt-0.5 size-4 shrink-0 text-teal-300" />
+          <div className="min-w-0 text-sm">
+            <p className="text-zinc-200">
+              Measured by{" "}
+              {runningExperiments.map((e, i) => (
+                <span key={e.key}>
+                  {i > 0 ? ", " : ""}
+                  <Link
+                    href={`/${slug}/experiments/${e.key}`}
+                    className="font-medium text-teal-300 hover:text-teal-200"
+                  >
+                    {e.name}
+                  </Link>
+                  <span className="text-zinc-500"> ({e.environment})</span>
+                </span>
+              ))}
+              .
+            </p>
+            <p className="mt-0.5 text-zinc-500">
+              This flag&apos;s targeting is locked while the experiment runs so the arms
+              stay fixed. Stop the experiment to reallocate traffic.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-8 lg:grid-cols-[1fr_280px]">
         <div className="flex min-w-0 flex-col gap-6">
           {/* Variants — only meaningful for multivariate flags (boolean is on/off). */}
@@ -122,6 +161,17 @@ export default async function FlagDetail({
               ))}
             </div>
           </section>
+
+          {/* Always-on impact: watched metrics measured vs the default variant. */}
+          <FlagImpactPanel
+            slug={slug}
+            flagKey={detail.flag.key}
+            environments={detail.environments.map((e) => ({ key: e.key, name: e.name }))}
+            initialImpact={impact}
+            initialEnvironment={impactEnv}
+            metricsLibrary={metricsLibrary.map((m) => ({ key: m.key, name: m.name }))}
+            canManage={canManageOrg(membership.role)}
+          />
         </div>
 
         <aside className="flex flex-col gap-5 lg:border-l lg:border-white/8 lg:pl-6">

@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Field, Input, Switch, toast } from "@flagon/design";
+import { Button, Field, Input, Switch, toast, useConfirm } from "@flagon/design";
 import { FormError } from "@/components/form-error";
 import { CopyField } from "@/components/settings/copy-field";
 import {
@@ -40,6 +40,7 @@ export function ScimSection({
   tokens: ScimTokenRow[];
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [enabled, setEnabled] = useState(scimEnabled);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -81,9 +82,28 @@ export function ScimSection({
     });
   }
 
-  function revoke(id: string) {
+  async function revoke(token: ScimTokenRow) {
+    if (
+      !(await confirm({
+        title: "Revoke SCIM token?",
+        message: (
+          <>
+            <strong className="text-zinc-200">{token.name}</strong> will stop
+            working immediately. Your identity provider will no longer be able to
+            provision members until you issue a new token.
+          </>
+        ),
+        confirmLabel: "Revoke token",
+        tone: "danger",
+      }))
+    )
+      return;
     start(async () => {
-      await revokeScimTokenAction(slug, id);
+      const res = await revokeScimTokenAction(slug, token.id);
+      if (res?.error) {
+        toast.error("Couldn't revoke token", res.error);
+        return;
+      }
       router.refresh();
     });
   }
@@ -179,7 +199,7 @@ export function ScimSection({
                     <button
                       type="button"
                       disabled={pending}
-                      onClick={() => revoke(t.id)}
+                      onClick={() => revoke(t)}
                       className="text-xs font-medium text-zinc-500 hover:text-red-400 disabled:opacity-50"
                     >
                       Revoke
@@ -196,6 +216,7 @@ export function ScimSection({
           )}
         </>
       ) : null}
+      {confirmDialog}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { toast } from "@flagon/design";
 import { SocialButtons } from "@/components/social-buttons";
 import type { OAuthProviders } from "@/lib/oauth";
 import { authClient } from "@/lib/auth-client";
+import { safeRedirect } from "@/lib/safe-redirect";
 
 /**
  * The sign-in form, modeled on GitHub: one identifier (email OR username) plus
@@ -58,7 +59,7 @@ export function LoginForm({ providers }: { providers: OAuthProviders }) {
       // Where to land is decided by the root router once the session cookie is
       // set (active org, org picker, or create-org). `redirect` carries a
       // deep-link a guard bounced us from.
-      const next = params.get("redirect") || "/";
+      const next = safeRedirect(params.get("redirect"));
       router.push(next);
       router.refresh();
     } catch {
@@ -88,6 +89,7 @@ export function LoginForm({ providers }: { providers: OAuthProviders }) {
         type="text"
         name="identifier"
         required
+        autoFocus
         autoComplete="username"
         placeholder="you@company.com"
       />

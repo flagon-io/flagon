@@ -7,7 +7,6 @@ import {
   planIncludedEvents,
   planOverage,
   planBaseCents,
-  EVENT_OVERAGE_PER_MILLION_CENTS,
 } from "@/lib/plans";
 import {
   getOrgUsage,
@@ -119,10 +118,16 @@ export default async function UsagePage({
     (sum, s) => sum + s.chargeCents,
     0,
   );
-  const eventRate =
-    billableSeries[0]?.pricePerMillionCents ?? EVENT_OVERAGE_PER_MILLION_CENTS;
   const overageEvents = Math.max(0, usedEvents - includedEvents);
-  const overageCents = bills ? (overageEvents / 1_000_000) * eventRate : 0;
+  // Overage is the share of the GROSS charge attributable to events past the
+  // allowance. Deriving it from the gross (rather than one series' per-million rate)
+  // is exact when every billable series shares one rate AND stays correct if two
+  // products ever price differently — the allowance offsets a proportional slice of
+  // each series instead of being charged at series[0]'s rate against the aggregate.
+  const overageCents =
+    bills && usedEvents > 0
+      ? Math.round(grossEventCents * (overageEvents / usedEvents))
+      : 0;
   const includedAppliedCents = bills ? grossEventCents - overageCents : 0;
 
   return (
@@ -134,8 +139,8 @@ export default async function UsagePage({
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
             {range === "cycle" ? "Current billing cycle" : "Selected range"} ·{" "}
-            {rangeLabel(from, to)} · usage across every product. Reads and
-            checks are free.
+            {rangeLabel(from, to)} · usage across every product. Checks are
+            free; exposures are metered.
           </p>
         </div>
         <UsageFilters base={`/${slug}/usage`} range={range} groupBy={groupBy} />
@@ -208,7 +213,14 @@ function EventsBar({
           / {compact(includedEvents)} this cycle
         </span>
       </div>
-      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8">
+      <div
+        role="progressbar"
+        aria-valuenow={usedEvents}
+        aria-valuemin={0}
+        aria-valuemax={includedEvents}
+        aria-label={`${compact(usedEvents)} of ${compact(includedEvents)} events used this cycle`}
+        className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8"
+      >
         <div
           className={`h-full rounded-full ${over ? "bg-amber-500" : "bg-[#3987e5]"}`}
           style={{ width: `${Math.max(pct * 100, usedEvents > 0 ? 2 : 0)}%` }}
@@ -426,8 +438,8 @@ function UsageTable({
             ? `Your plan includes ${compact(includedEvents)} events per cycle; you only pay for events beyond it.`
             : `Your plan includes up to ${compact(includedEvents)} events per cycle, free. Past that, sending pauses until you upgrade to Pro, we never bill you on the free plan.`
           : "Events are billed against your contracted volume."}{" "}
-        Reads and checks are always free. This is your running total for the current
-        billing cycle; the final invoice is issued at the end of it.
+        Checks are free; exposures are the metered unit. This is your running total
+        for the current billing cycle; the final invoice is issued at the end of it.
       </p>
     </section>
   );

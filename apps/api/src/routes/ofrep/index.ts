@@ -525,6 +525,11 @@ ofrep.post("/v1/track", async (c) => {
       name,
       targetingKey,
       value: typeof e.value === "number" ? e.value : 1,
+      // Arbitrary payload a metric's value_field can extract from (non-array object).
+      properties:
+        e.properties && typeof e.properties === "object" && !Array.isArray(e.properties)
+          ? (e.properties as Record<string, unknown>)
+          : undefined,
       timestamp: typeof e.timestamp === "number" ? e.timestamp : undefined,
     });
   }

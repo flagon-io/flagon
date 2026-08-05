@@ -34,18 +34,27 @@ export function ResetPasswordForm({ token }: { token: string }) {
     }
 
     setPending(true);
-    const { error } = await authClient.resetPassword({
-      newPassword: password,
-      token,
-    });
+    try {
+      const { error } = await authClient.resetPassword({
+        newPassword: password,
+        token,
+      });
 
-    if (error) {
-      setError(error.message ?? "We could not reset your password. Request a new link.");
+      if (error) {
+        setError(
+          error.message ?? "We could not reset your password. Request a new link.",
+        );
+        setPending(false);
+        return;
+      }
+
+      router.push("/login?reset=1");
+    } catch {
+      // Never leave the button spinning on a rejected request; surface it and
+      // re-enable so the user can retry.
+      setError("We couldn't reach the server. Check your connection and try again.");
       setPending(false);
-      return;
     }
-
-    router.push("/login?reset=1");
   }
 
   return (
@@ -56,6 +65,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
         type="password"
         name="password"
         required
+        autoFocus
         minLength={8}
         autoComplete="new-password"
         placeholder="••••••••"

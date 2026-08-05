@@ -16,6 +16,7 @@ import {
   flags,
 } from "../../db/schema.js";
 import { analyzeFlag } from "../../experiments/analyze.js";
+import { runningExperimentKey, experimentLockMessage } from "../../experiments/lock.js";
 import { users } from "../../db/auth-tables.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
@@ -1070,6 +1071,10 @@ flags_.patch("/:key/environments/:envKey", async (c) => {
     )[0];
     if (!env) return "no-env" as const;
 
+    // Lock the arms while an experiment is running on this flag+env.
+    const lockedBy = await runningExperimentKey(tx, flag.id, env.id);
+    if (lockedBy) return { locked: lockedBy } as const;
+
     const variants = await tx
       .select({ id: flagVariants.id, key: flagVariants.key })
       .from(flagVariants)
@@ -1207,5 +1212,7 @@ flags_.patch("/:key/environments/:envKey", async (c) => {
     return jsonError(c, 422, "Referenced variant does not exist on this flag.");
   if (outcome === "bad-reuse")
     return jsonError(c, 422, "Reuse source must be a different, existing environment.");
+  if (typeof outcome === "object" && "locked" in outcome)
+    return jsonError(c, 409, experimentLockMessage(outcome.locked ?? "", envKey ?? ""));
   return c.json({ ok: true });
 });

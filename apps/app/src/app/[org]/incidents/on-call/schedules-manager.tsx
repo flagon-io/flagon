@@ -2,10 +2,16 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { BellRing, Plus, Trash2, Users } from "lucide-react";
+import { BellRing, CalendarClock, Plus, Trash2, Users, X } from "lucide-react";
 import { Button, Field, Input, Select } from "@flagon/design";
 import type { OncallScheduleDetail } from "@/lib/oncall-api";
-import { createScheduleAction, deleteScheduleAction, setScheduleMembersAction } from "../actions";
+import {
+  addOverrideAction,
+  createScheduleAction,
+  deleteScheduleAction,
+  removeOverrideAction,
+  setScheduleMembersAction,
+} from "../actions";
 
 type Opt = { key: string; name: string };
 type OrgMember = { userId: string; name: string };
@@ -13,6 +19,12 @@ const NONE = "__none__";
 
 function slugify(v: string) {
   return v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
+}
+
+function whenRange(startsAt: string, endsAt: string): string {
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return `${fmt(startsAt)} → ${fmt(endsAt)}`;
 }
 
 export function SchedulesManager({
@@ -124,10 +136,45 @@ function ScheduleCard({
   const [pending, start] = useTransition();
   const [members, setMembers] = useState<string[]>(detail.members.map((m) => m.userId));
   const [error, setError] = useState<string | null>(null);
-  const { schedule, current } = detail;
+  const [ovUser, setOvUser] = useState("");
+  const [ovStart, setOvStart] = useState("");
+  const [ovEnd, setOvEnd] = useState("");
+  const { schedule, current, overrides } = detail;
 
   function toggle(userId: string) {
     setMembers((m) => (m.includes(userId) ? m.filter((u) => u !== userId) : [...m, userId]));
+  }
+  function addOverrideRow() {
+    setError(null);
+    if (!ovUser) return setError("Pick who covers.");
+    if (!ovStart || !ovEnd) return setError("Set a start and end.");
+    if (new Date(ovEnd) <= new Date(ovStart)) return setError("End must be after start.");
+    start(async () => {
+      const res = await addOverrideAction(slug, schedule.key, {
+        userId: ovUser,
+        startsAt: new Date(ovStart).toISOString(),
+        endsAt: new Date(ovEnd).toISOString(),
+      });
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setOvUser("");
+      setOvStart("");
+      setOvEnd("");
+      router.refresh();
+    });
+  }
+  function removeOverrideRow(id: string) {
+    setError(null);
+    start(async () => {
+      const res = await removeOverrideAction(slug, schedule.key, id);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      router.refresh();
+    });
   }
   function save() {
     setError(null);
@@ -176,6 +223,7 @@ function ScheduleCard({
                 <button
                   key={m.userId}
                   type="button"
+                  aria-pressed={on}
                   onClick={() => toggle(m.userId)}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${on ? "border-teal-400/30 bg-teal-400/10 text-teal-200" : "border-white/10 bg-white/5 text-zinc-400 hover:text-zinc-200"}`}
                 >
@@ -198,6 +246,55 @@ function ScheduleCard({
         {canManage ? (
           <div className="mt-2">
             <Button variant="secondary" size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save rotation"}</Button>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Overrides: temporary "cover for me" swaps that win over the rotation. */}
+      <div className="mt-4 border-t border-white/8 pt-3">
+        <p className="mb-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500">
+          <CalendarClock className="size-3.5" /> Overrides
+        </p>
+        {overrides.length === 0 ? (
+          <p className="text-xs text-zinc-500">No overrides. The rotation decides who is on-call.</p>
+        ) : (
+          <ul className="flex flex-col gap-1.5">
+            {overrides.map((o) => (
+              <li key={o.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/8 bg-white/2 px-2.5 py-1.5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-zinc-200">{nameBy.get(o.userId) ?? "Member"}</p>
+                  <p className="text-xs text-zinc-500 tabular-nums">{whenRange(o.startsAt, o.endsAt)}</p>
+                </div>
+                {canManage ? (
+                  <button type="button" onClick={() => removeOverrideRow(o.id)} disabled={pending} className="shrink-0 text-zinc-500 hover:text-red-400 disabled:opacity-50" aria-label="Remove override">
+                    <X className="size-4" />
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+        {canManage ? (
+          <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+            <Field label="Who covers">
+              <Select
+                ariaLabel="Override member"
+                value={ovUser}
+                onValueChange={setOvUser}
+                placeholder="Pick a member…"
+                className="w-full"
+                options={orgMembers.map((m) => ({ value: m.userId, label: m.name }))}
+              />
+            </Field>
+            <Field label="From">
+              <Input type="datetime-local" value={ovStart} onChange={(e) => setOvStart(e.target.value)} />
+            </Field>
+            <Field label="Until">
+              <Input type="datetime-local" value={ovEnd} onChange={(e) => setOvEnd(e.target.value)} />
+            </Field>
+            <Button variant="secondary" onClick={addOverrideRow} disabled={pending || !ovUser || !ovStart || !ovEnd}>
+              <Plus className="size-4" /> Add
+            </Button>
           </div>
         ) : null}
       </div>

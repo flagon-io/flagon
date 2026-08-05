@@ -5,6 +5,7 @@ import {
   customType,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -191,6 +192,16 @@ export const organizations = pgTable("organizations", {
   scimEnabled: boolean("scim_enabled").notNull().default(false),
   // BetterAuth stores arbitrary org metadata as a JSON string here.
   metadata: text("metadata"),
+  // Soft delete: set instead of removing the row. A non-null deletedAt hides the
+  // org from ALL access (routing, membership, API org resolution filter it out)
+  // while retaining data + billing/cancellation state for the retention window; a
+  // FUTURE purge cron hard-deletes past retention (see lib/org-lifecycle.ts).
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  deletedByUserId: uuid("deleted_by_user_id"),
+  // Snapshot of memberships (userId + role) captured at soft-delete so a future
+  // restore can recreate them; the live member/invitation rows are removed on
+  // delete so the org also vanishes from better-auth's own org endpoints.
+  deletedMembers: jsonb("deleted_members").$type<{ userId: string; role: string }[]>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

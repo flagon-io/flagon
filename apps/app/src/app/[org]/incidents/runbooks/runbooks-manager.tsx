@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { BookText, GripVertical, Link2, ListChecks, Plus, Trash2 } from "lucide-react";
+import { BookText, ChevronDown, ChevronUp, Link2, ListChecks, Plus, Trash2 } from "lucide-react";
 import { Button, Field, Input, Select, Textarea } from "@flagon/design";
 import { SEVERITIES } from "@/lib/incidents";
 import type { RunbookDetail } from "@/lib/runbooks-api";
@@ -122,6 +122,15 @@ function RunbookCard({
   function setStep(i: number, patch: Partial<StepDraft>) {
     setSteps((ss) => ss.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
   }
+  function moveStep(i: number, dir: -1 | 1) {
+    setSteps((ss) => {
+      const j = i + dir;
+      if (j < 0 || j >= ss.length) return ss;
+      const next = ss.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  }
   function toggleService(key: string) {
     setServices((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
   }
@@ -178,7 +187,7 @@ function RunbookCard({
             {projects.map((p) => {
               const on = services.includes(p.key);
               return (
-                <button key={p.key} type="button" onClick={() => toggleService(p.key)} className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${on ? "border-teal-400/30 bg-teal-400/10 text-teal-200" : "border-white/10 bg-white/5 text-zinc-400 hover:text-zinc-200"}`}>{p.name}</button>
+                <button key={p.key} type="button" aria-pressed={on} onClick={() => toggleService(p.key)} className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${on ? "border-teal-400/30 bg-teal-400/10 text-teal-200" : "border-white/10 bg-white/5 text-zinc-400 hover:text-zinc-200"}`}>{p.name}</button>
               );
             })}
           </div>
@@ -198,7 +207,14 @@ function RunbookCard({
             {steps.map((s, i) => (
               <div key={i} className="flex flex-col gap-2 rounded-lg border border-white/8 bg-white/2 p-2.5">
                 <div className="flex items-center gap-2">
-                  <GripVertical className="size-4 shrink-0 text-zinc-600" />
+                  <div className="flex shrink-0 flex-col">
+                    <button type="button" onClick={() => moveStep(i, -1)} disabled={i === 0} className="text-zinc-600 hover:text-zinc-300 disabled:opacity-30" aria-label="Move step up">
+                      <ChevronUp className="size-3.5" />
+                    </button>
+                    <button type="button" onClick={() => moveStep(i, 1)} disabled={i === steps.length - 1} className="text-zinc-600 hover:text-zinc-300 disabled:opacity-30" aria-label="Move step down">
+                      <ChevronDown className="size-3.5" />
+                    </button>
+                  </div>
                   <Input value={s.title} onChange={(e) => setStep(i, { title: e.target.value })} placeholder="Step title" className="flex-1" />
                   <Select ariaLabel="Step kind" value={s.kind} onValueChange={(v) => setStep(i, { kind: v })} options={STEP_KINDS} />
                   <button type="button" onClick={() => setSteps((ss) => ss.filter((_, idx) => idx !== i))} className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400" aria-label="Remove step"><Trash2 className="size-4" /></button>

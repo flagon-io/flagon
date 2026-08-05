@@ -35,6 +35,7 @@ export function UsageFilters({
         ariaLabel="Date range"
         value={range}
         onValueChange={(v) => go({ range: v })}
+        fullWidth={false}
         options={[
           { value: "cycle", label: "Current cycle" },
           { value: "7", label: "Last 7 days" },
@@ -46,6 +47,7 @@ export function UsageFilters({
         ariaLabel="Group by"
         value={groupBy}
         onValueChange={(v) => go({ groupBy: v })}
+        fullWidth={false}
         options={[
           { value: "meter", label: "By Product" },
           { value: "flag", label: "By Flag" },

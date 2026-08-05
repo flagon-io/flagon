@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Field, Input, SegmentedControl, Textarea, toast } from "@flagon/design";
+import { Button, Field, Input, SegmentedControl, Textarea, toast, useConfirm } from "@flagon/design";
 import { KeyRound, Trash2 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { FormError } from "@/components/form-error";
@@ -51,6 +51,7 @@ export function SsoSection({
   spUrls: SpUrls;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [protocol, setProtocol] = useState<"saml" | "oidc">("saml");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +105,22 @@ export function SsoSection({
     });
   }
 
-  function remove() {
+  async function remove() {
+    if (
+      !(await confirm({
+        title: "Remove single sign-on?",
+        message: (
+          <>
+            The {orgName} identity provider connection will be deleted and SSO
+            enforcement turned off. Members will sign in with their Flagon
+            credentials until you configure a provider again.
+          </>
+        ),
+        confirmLabel: "Remove SSO",
+        tone: "danger",
+      }))
+    )
+      return;
     start(async () => {
       const res = await removeSsoProviderAction(slug);
       if (res.error) toast.error("Couldn't remove SSO", res.error);
@@ -169,6 +185,7 @@ export function SsoSection({
           }}
           onChange={(next) => updateSecurityAction(slug, { ssoEnforced: next })}
         />
+        {confirmDialog}
       </div>
     );
   }

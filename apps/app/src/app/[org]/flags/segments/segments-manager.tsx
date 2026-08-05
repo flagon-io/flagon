@@ -13,6 +13,8 @@ import {
   ModalFooter,
   ModalHeader,
   Textarea,
+  toast,
+  useConfirm,
 } from "@flagon/design";
 import { createSegmentAction, deleteSegmentAction } from "../actions";
 import type { Predicate, Segment } from "@/lib/flags-api";
@@ -34,6 +36,7 @@ export function SegmentsManager({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, start] = useTransition();
   const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);
@@ -45,10 +48,26 @@ export function SegmentsManager({
       s.key.toLowerCase().includes(q.toLowerCase()),
   );
 
-  function remove(key: string) {
+  async function remove(segment: Segment) {
+    const ok = await confirm({
+      title: "Delete segment?",
+      message: (
+        <>
+          Deleting <strong className="text-zinc-200">{segment.name}</strong> is
+          permanent. Flag rules referencing it will no longer match.
+        </>
+      ),
+      confirmLabel: "Delete segment",
+      tone: "danger",
+    });
+    if (!ok) return;
     start(async () => {
-      const res = await deleteSegmentAction(slug, key);
-      if (!res.error) router.refresh();
+      const res = await deleteSegmentAction(slug, segment.key);
+      if (res.error) {
+        toast.error("Couldn't delete segment", res.error);
+        return;
+      }
+      router.refresh();
     });
   }
 
@@ -109,9 +128,10 @@ export function SegmentsManager({
               {canManage ? (
                 <button
                   type="button"
-                  onClick={() => remove(s.key)}
+                  onClick={() => remove(s)}
                   disabled={pending}
                   title="Delete segment"
+                  aria-label={`Delete ${s.name}`}
                   className="mr-2 grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
                 >
                   <Trash2 className="size-4" />
@@ -125,6 +145,7 @@ export function SegmentsManager({
       {creating ? (
         <CreateSegmentModal slug={slug} onClose={() => setCreating(false)} />
       ) : null}
+      {confirmDialog}
     </div>
   );
 }

@@ -219,6 +219,17 @@ export const auth = betterAuth({
             });
           }
         },
+        // Organization deletion is GUARDED, not self-serve. The API's tenant data
+        // (flags, experiments, usage) lives in a separate pipeline with no foreign
+        // key to this auth org row, so a raw delete here would ORPHAN it. Block it
+        // until a safe cross-service cascade + soft-delete/retention lands (see the
+        // org-lifecycle design). This protects data even if a client calls delete.
+        beforeDeleteOrganization: async () => {
+          throw new APIError("FORBIDDEN", {
+            message:
+              "Organization deletion isn't self-serve yet. Contact support to remove an organization.",
+          });
+        },
       },
     }),
     // Two-factor (TOTP + backup codes). Enrollment is opt-in per user on the

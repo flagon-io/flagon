@@ -6,12 +6,13 @@ import { Command } from "cmdk";
 import { Search } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import type { OrgMembership } from "@/lib/org";
+import { getWorkspaceSearchIndex, type SearchRecord } from "./search-actions";
 
 /**
  * The workspace search (Vercel "Find"). A trigger styled as a search field opens
- * a cmdk command palette; ⌘K / Ctrl+K toggles it from anywhere. The palette
- * navigates to the surfaces that exist today and switches organizations. As
- * projects/flags/etc. land, their records get added as searchable items.
+ * a cmdk command palette; ⌘K / Ctrl+K toggles it from anywhere. It searches REAL
+ * records (flags, experiments, segments, projects) — loaded once on first open and
+ * fuzzy-filtered by cmdk — plus static destinations and org switching.
  */
 export function WorkspaceSearch({
   orgs,
@@ -24,17 +25,48 @@ export function WorkspaceSearch({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [records, setRecords] = useState<SearchRecord[] | null>(null);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [loadingRecords, setLoadingRecords] = useState(false);
+
+  // Load the record index for the active org (once, lazily). Best-effort: on
+  // failure the palette still works for navigation. Called when the palette opens,
+  // and re-loads if the active org changed since the last load.
+  function ensureIndex() {
+    if (loadingRecords || loadedFor === current.slug) return;
+    setLoadingRecords(true);
+    getWorkspaceSearchIndex(current.slug)
+      .then((r) => {
+        setRecords(r);
+        setLoadedFor(current.slug);
+      })
+      .catch(() => {
+        setRecords([]);
+        setLoadedFor(current.slug);
+      })
+      .finally(() => setLoadingRecords(false));
+  }
+
+  function openPalette() {
+    ensureIndex();
+    setOpen(true);
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
+        ensureIndex(); // idempotent: loads once, no-ops when already loaded
         setOpen((v) => !v);
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+    // ensureIndex reads the latest slug/loaded state via the deps below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current.slug, loadedFor, loadingRecords]);
+
+  const GROUPS: SearchRecord["group"][] = ["Flags", "Experiments", "Segments", "Projects"];
 
   function go(href: string) {
     setOpen(false);
@@ -69,7 +101,7 @@ export function WorkspaceSearch({
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={openPalette}
         aria-label="Search"
         title="Search (Ctrl/⌘ K)"
         className={`flex w-full items-center rounded-md border border-white/10 bg-white/5 text-zinc-500 transition-colors hover:border-white/20 hover:text-zinc-300 ${
@@ -99,8 +131,28 @@ export function WorkspaceSearch({
         />
         <Command.List className="max-h-80 overflow-y-auto p-2 **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:pt-2 **:[[cmdk-group-heading]]:pb-1 **:[[cmdk-group-heading]]:text-[11px] **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:text-zinc-500 **:[[cmdk-group-heading]]:uppercase">
           <Command.Empty className="py-8 text-center text-sm text-zinc-500">
-            No results found.
+            {loadingRecords ? "Searching…" : "No results found."}
           </Command.Empty>
+
+          {GROUPS.map((group) => {
+            const items = (records ?? []).filter((r) => r.group === group);
+            if (items.length === 0) return null;
+            return (
+              <Command.Group key={group} heading={group}>
+                {items.map((r) => (
+                  <Command.Item
+                    key={`${group}:${r.href}`}
+                    value={`${r.group} ${r.label} ${r.sublabel}`}
+                    onSelect={() => go(r.href)}
+                    className="flex cursor-pointer items-center justify-between gap-2 rounded-md p-2 text-sm text-zinc-200 outline-none data-[selected=true]:bg-white/8 data-[selected=true]:text-zinc-100"
+                  >
+                    <span className="truncate">{r.label}</span>
+                    <span className="shrink-0 font-mono text-[11px] text-zinc-500">{r.sublabel}</span>
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            );
+          })}
 
           <Command.Group heading="Go to">
             {goItems.map((item) => (

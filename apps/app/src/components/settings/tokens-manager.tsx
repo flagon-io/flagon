@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Select } from "@flagon/design";
+import { Select, useConfirm } from "@flagon/design";
 import { submitButtonClass } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
 
@@ -45,7 +45,9 @@ export function TokensManager({
   scopeNote: string;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
+  const [revokingId, setRevokingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [freshToken, setFreshToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -72,13 +74,32 @@ export function TokensManager({
     });
   }
 
-  function revoke(id: string) {
+  async function revoke(token: TokenRow) {
+    if (
+      !(await confirm({
+        title: "Revoke token?",
+        message: (
+          <>
+            <strong className="text-zinc-200">{token.name}</strong> will stop
+            working immediately. This breaks any CI or automation still using it.
+          </>
+        ),
+        confirmLabel: "Revoke token",
+        tone: "danger",
+      }))
+    )
+      return;
+    setError(null);
     const fd = new FormData();
-    fd.set("id", id);
-    startTransition(async () => {
-      await revokeAction(fd);
-      router.refresh();
-    });
+    fd.set("id", token.id);
+    setRevokingId(token.id);
+    const result = await revokeAction(fd);
+    setRevokingId(null);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    router.refresh();
   }
 
   async function copy() {
@@ -173,11 +194,11 @@ export function TokensManager({
               </div>
               <button
                 type="button"
-                disabled={pending}
-                onClick={() => revoke(t.id)}
+                disabled={revokingId === t.id}
+                onClick={() => revoke(t)}
                 className="text-xs font-medium text-zinc-500 hover:text-red-400 disabled:opacity-50"
               >
-                Revoke
+                {revokingId === t.id ? "Revoking…" : "Revoke"}
               </button>
             </li>
           ))}
@@ -185,6 +206,7 @@ export function TokensManager({
       ) : (
         <FormNotice>No tokens yet. Generate one above to use the API.</FormNotice>
       )}
+      {confirmDialog}
     </div>
   );
 }

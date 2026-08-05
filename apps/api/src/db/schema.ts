@@ -870,6 +870,16 @@ export const experimentMetricLinks = pgTable(
       .notNull()
       .references(() => experimentMetrics.id, { onDelete: "cascade" }),
     role: text("role").notNull().default("secondary"),
+    /**
+     * Frozen snapshot of the metric definition for THIS experiment, stamped at
+     * attach and re-stamped at start. Analysis reads these (falling back to the
+     * live metric only when null) so editing the reusable metric later never
+     * rewrites the meaning of a past experiment's results.
+     */
+    metricType: text("metric_type"),
+    eventName: text("event_name"),
+    valueField: text("value_field"),
+    direction: text("direction"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -924,6 +934,45 @@ export const flagExposures = pgTable(
     index("flag_exposures_flag_env_variant_idx").on(
       t.flagId,
       t.environmentId,
+      t.variantKey,
+    ),
+  ],
+);
+
+/**
+ * Per-EXPERIMENT enrollment: the arm a unit saw the first time it was exposed
+ * while a given experiment was running, frozen per (experiment, unit). Unlike
+ * flag_exposures (frozen per flag lifetime, used for always-on retroactive flag
+ * impact), this is scoped to one experiment, so enrollment is naturally windowed
+ * to the experiment's active life and a repeat experiment on the same flag gets a
+ * fresh enrollment set. Metric events join here on `unitHash`; goal events at/after
+ * `firstSeenAt` are the response, before it the CUPED pre-period. Written off the
+ * hot path when an exposure arrives for a flag with a running experiment.
+ */
+export const experimentExposures = pgTable(
+  "experiment_exposures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    experimentId: uuid("experiment_id")
+      .notNull()
+      .references(() => experiments.id, { onDelete: "cascade" }),
+    variantKey: text("variant_key").notNull(),
+    /** Salted sha256 of the targeting key (lib/unit-hash.ts); never the raw key. */
+    unitHash: text("unit_hash").notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    day: date("day").notNull(),
+  },
+  (t) => [
+    uniqueIndex("experiment_exposures_exp_unit_key").on(
+      t.experimentId,
+      t.unitHash,
+    ),
+    index("experiment_exposures_org_idx").on(t.organizationId),
+    index("experiment_exposures_exp_variant_idx").on(
+      t.experimentId,
       t.variantKey,
     ),
   ],
@@ -1007,6 +1056,9 @@ export const experimentMetricEvents = pgTable(
     unitHash: text("unit_hash").notNull(),
     eventName: text("event_name").notNull(),
     value: doublePrecision("value").notNull().default(1),
+    /** Arbitrary event payload; a metric's value_field (dot-path) extracts a number
+     *  from here at analysis time when the SDK sends properties instead of a value. */
+    properties: jsonb("properties"),
     occurredAt: timestamp("occurred_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

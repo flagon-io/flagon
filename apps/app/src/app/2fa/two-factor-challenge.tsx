@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Field, Input } from "@flagon/design";
 import { FormError } from "@/components/form-error";
 import { authClient } from "@/lib/auth-client";
+import { safeRedirect } from "@/lib/safe-redirect";
 
 /**
  * Complete the sign-in by verifying a TOTP code (or a backup code). On success
@@ -14,7 +15,7 @@ import { authClient } from "@/lib/auth-client";
 export function TwoFactorChallenge() {
   const router = useRouter();
   const params = useSearchParams();
-  const redirectTo = params.get("redirect") || "/";
+  const redirectTo = safeRedirect(params.get("redirect"));
   const [code, setCode] = useState("");
   const [useBackup, setUseBackup] = useState(false);
   const [pending, start] = useTransition();
@@ -24,15 +25,21 @@ export function TwoFactorChallenge() {
     event.preventDefault();
     setError(null);
     start(async () => {
-      const res = useBackup
-        ? await authClient.twoFactor.verifyBackupCode({ code: code.trim() })
-        : await authClient.twoFactor.verifyTotp({ code: code.trim() });
-      if (res?.error) {
-        setError(res.error.message ?? "That code didn't match. Try again.");
-        return;
+      try {
+        const res = useBackup
+          ? await authClient.twoFactor.verifyBackupCode({ code: code.trim() })
+          : await authClient.twoFactor.verifyTotp({ code: code.trim() });
+        if (res?.error) {
+          setError(res.error.message ?? "That code didn't match. Try again.");
+          return;
+        }
+        router.push(redirectTo);
+        router.refresh();
+      } catch {
+        // Surface a rejected request instead of leaving it as an unhandled
+        // rejection; the transition ends and the button re-enables.
+        setError("We couldn't reach the server. Check your connection and try again.");
       }
-      router.push(redirectTo);
-      router.refresh();
     });
   }
 

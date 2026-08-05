@@ -10,6 +10,7 @@ import {
   List,
   Plus,
   Search,
+  SlidersHorizontal,
   Users,
 } from "lucide-react";
 import {
@@ -20,6 +21,9 @@ import {
   ModalBody,
   ModalFooter,
   ModalHeader,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   SegmentedControl,
   Select,
   Textarea,
@@ -137,7 +141,7 @@ export function ProjectsView({
         />
       ) : (
         <>
-          {/* Top bar: search · view toggle · new */}
+          {/* Top bar: search · filters · view toggle · new (Vercel-style single row) */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-zinc-500" />
@@ -149,6 +153,16 @@ export function ProjectsView({
                 className="pl-9"
               />
             </div>
+            <FiltersPopover
+              filters={filters}
+              setFilter={setFilter}
+              owners={owners}
+              domains={domains}
+              anyFilter={anyFilter}
+              onClear={() =>
+                setFilters({ kind: ALL, lifecycle: ALL, tier: ALL, owner: ALL, domain: ALL })
+              }
+            />
             <SegmentedControl
               ariaLabel="View"
               sizing="content"
@@ -174,18 +188,12 @@ export function ProjectsView({
             ) : null}
           </div>
 
-          {/* Facets: filter the catalog + a project count */}
-          <FilterBar
-            filters={filters}
-            setFilter={setFilter}
-            owners={owners}
-            domains={domains}
-            anyFilter={anyFilter}
-            onClear={() =>
-              setFilters({ kind: ALL, lifecycle: ALL, tier: ALL, owner: ALL, domain: ALL })
-            }
-            total={filtered.length}
-          />
+          {/* A subtle result count under the top bar. */}
+          <div className="-mt-1 flex justify-end">
+            <span className="text-xs text-zinc-500">
+              {filtered.length} project{filtered.length === 1 ? "" : "s"}
+            </span>
+          </div>
 
           {/* Body: usage sidebar + projects */}
           <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -242,15 +250,35 @@ type Filters = {
   domain: string;
 };
 
-/** The catalog filter bar: one Select per facet + a project count. */
-function FilterBar({
+/** One labelled facet inside the Filters popover. */
+function FilterField({
+  label,
+  value,
+  onValueChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onValueChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-xs font-medium text-zinc-400">{label}</span>
+      <Select ariaLabel={label} value={value} onValueChange={onValueChange} options={options} />
+    </label>
+  );
+}
+
+/** The catalog Filters popover, Vercel-style: a single Filters button (with an
+ *  active-count badge) that sits inline in the search row, not a row of selects. */
+function FiltersPopover({
   filters,
   setFilter,
   owners,
   domains,
   anyFilter,
   onClear,
-  total,
 }: {
   filters: Filters;
   setFilter: (k: keyof Filters, v: string) => void;
@@ -258,33 +286,49 @@ function FilterBar({
   domains: { value: string; label: string }[];
   anyFilter: boolean;
   onClear: () => void;
-  total: number;
 }) {
   const opts = (options: { value: string; label: string }[], allLabel: string) => [
     { value: ALL, label: allLabel },
     ...options.map((o) => ({ value: o.value, label: o.label })),
   ];
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Select ariaLabel="Filter by kind" value={filters.kind} onValueChange={(v) => setFilter("kind", v)} options={opts(KINDS, "All kinds")} />
-      <Select ariaLabel="Filter by lifecycle" value={filters.lifecycle} onValueChange={(v) => setFilter("lifecycle", v)} options={opts(LIFECYCLES, "Any lifecycle")} />
-      <Select ariaLabel="Filter by tier" value={filters.tier} onValueChange={(v) => setFilter("tier", v)} options={opts(TIERS, "Any tier")} />
-      {owners.length > 0 ? (
-        <Select ariaLabel="Filter by owner" value={filters.owner} onValueChange={(v) => setFilter("owner", v)} options={opts(owners, "Any owner")} />
-      ) : null}
-      {domains.length > 0 ? (
-        <Select ariaLabel="Filter by domain" value={filters.domain} onValueChange={(v) => setFilter("domain", v)} options={opts(domains, "Any domain")} />
-      ) : null}
-      {anyFilter ? (
-        <button type="button" onClick={onClear} className="text-xs font-medium text-zinc-400 hover:text-zinc-200">
-          Clear
-        </button>
-      ) : null}
+  const activeCount = [filters.kind, filters.lifecycle, filters.tier, filters.owner, filters.domain].filter(
+    (v) => v !== ALL,
+  ).length;
 
-      <span className="ml-auto text-xs text-zinc-500">
-        {total} project{total === 1 ? "" : "s"}
-      </span>
-    </div>
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="secondary">
+          <SlidersHorizontal className="size-4" />
+          Filters
+          {activeCount > 0 ? (
+            <span className="ml-1 grid size-5 place-items-center rounded-full bg-teal-500/15 text-[11px] font-semibold text-teal-300">
+              {activeCount}
+            </span>
+          ) : null}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="flex w-64 flex-col gap-3 p-3">
+          <FilterField label="Kind" value={filters.kind} onValueChange={(v) => setFilter("kind", v)} options={opts(KINDS, "All kinds")} />
+          <FilterField label="Lifecycle" value={filters.lifecycle} onValueChange={(v) => setFilter("lifecycle", v)} options={opts(LIFECYCLES, "Any lifecycle")} />
+          <FilterField label="Tier" value={filters.tier} onValueChange={(v) => setFilter("tier", v)} options={opts(TIERS, "Any tier")} />
+          {owners.length > 0 ? (
+            <FilterField label="Owner" value={filters.owner} onValueChange={(v) => setFilter("owner", v)} options={opts(owners, "Any owner")} />
+          ) : null}
+          {domains.length > 0 ? (
+            <FilterField label="Domain" value={filters.domain} onValueChange={(v) => setFilter("domain", v)} options={opts(domains, "Any domain")} />
+          ) : null}
+          {anyFilter ? (
+            <button
+              type="button"
+              onClick={onClear}
+              className="mt-1 self-start text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200"
+            >
+              Clear all filters
+            </button>
+          ) : null}
+        </PopoverContent>
+      </Popover>
   );
 }
 
@@ -434,7 +478,7 @@ function UsagePanel({
       <ProductUsageBreakdown series={usage?.series ?? []} />
 
       <p className="text-xs text-zinc-600">
-        Usage across every product. Reads and checks are free.
+        Usage across every product. Checks are free; exposures are metered.
       </p>
     </section>
   );

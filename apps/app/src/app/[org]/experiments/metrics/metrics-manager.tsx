@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Target, Trash2 } from "lucide-react";
+import { Pencil, Plus, Target, Trash2 } from "lucide-react";
 import {
   Button,
   Field,
@@ -14,9 +14,15 @@ import {
   SegmentedControl,
   Select,
   Textarea,
+  useConfirm,
 } from "@flagon/design";
-import type { ExperimentMetric, MetricDirection, MetricType } from "@/lib/experiments-api";
-import { createMetricAction, deleteMetricAction } from "../actions";
+import type {
+  ExperimentMetric,
+  MetricBody,
+  MetricDirection,
+  MetricType,
+} from "@/lib/experiments-api";
+import { createMetricAction, deleteMetricAction, updateMetricAction } from "../actions";
 
 const TYPE_HELP: Record<MetricType, string> = {
   conversion: "Did the unit fire the event at least once (a rate).",
@@ -44,8 +50,10 @@ export function MetricsManager({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<ExperimentMetric | null>(null);
   const [pending, start] = useTransition();
 
   const filtered = useMemo(() => {
@@ -56,8 +64,19 @@ export function MetricsManager({
     );
   }, [metrics, q]);
 
-  const remove = (key: string, name: string) => {
-    if (!confirm(`Delete metric "${name}"? Experiments referencing it lose the attachment.`)) return;
+  const remove = async (key: string, name: string) => {
+    const ok = await confirm({
+      title: "Delete metric?",
+      message: (
+        <>
+          Deleting <strong className="text-zinc-200">{name}</strong> detaches it from every
+          experiment that references it. Running experiments keep their frozen snapshot; drafts lose
+          the attachment.
+        </>
+      ),
+      confirmLabel: "Delete metric",
+    });
+    if (!ok) return;
     start(async () => {
       await deleteMetricAction(slug, key);
       router.refresh();
@@ -118,55 +137,84 @@ export function MetricsManager({
                 </span>
               </div>
               {canManage ? (
-                <button
-                  type="button"
-                  onClick={() => remove(m.key, m.name)}
-                  disabled={pending}
-                  className="grid size-9 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-40"
-                  aria-label={`Delete ${m.name}`}
-                >
-                  <Trash2 className="size-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setEditing(m)}
+                    disabled={pending}
+                    className="grid size-9 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 disabled:opacity-40"
+                    aria-label={`Edit ${m.name}`}
+                  >
+                    <Pencil className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(m.key, m.name)}
+                    disabled={pending}
+                    className="grid size-9 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-40"
+                    aria-label={`Delete ${m.name}`}
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
               ) : null}
             </div>
           ))}
         </div>
       )}
 
-      {creating ? (
-        <CreateMetricModal slug={slug} onClose={() => setCreating(false)} />
+      {creating ? <MetricModal slug={slug} onClose={() => setCreating(false)} /> : null}
+      {editing ? (
+        <MetricModal slug={slug} metric={editing} onClose={() => setEditing(null)} />
       ) : null}
+      {confirmDialog}
     </div>
   );
 }
 
-function CreateMetricModal({ slug, onClose }: { slug: string; onClose: () => void }) {
+function MetricModal({
+  slug,
+  metric,
+  onClose,
+}: {
+  slug: string;
+  metric?: ExperimentMetric;
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(metric?.name ?? "");
   const [keyTouched, setKeyTouched] = useState(false);
-  const [key, setKey] = useState("");
-  const [eventName, setEventName] = useState("");
-  const [type, setType] = useState<MetricType>("conversion");
-  const [direction, setDirection] = useState<MetricDirection>("increase");
-  const [description, setDescription] = useState("");
+  const [key, setKey] = useState(metric?.key ?? "");
+  const [eventName, setEventName] = useState(metric?.eventName ?? "");
+  const [type, setType] = useState<MetricType>(metric?.type ?? "conversion");
+  const [valueField, setValueField] = useState(metric?.valueField ?? "");
+  const [direction, setDirection] = useState<MetricDirection>(metric?.direction ?? "increase");
+  const [description, setDescription] = useState(metric?.description ?? "");
   const [error, setError] = useState<string | null>(null);
 
-  const effectiveKey = keyTouched ? key : slugify(name);
+  // The key is immutable once a metric exists; only derive it while creating.
+  const effectiveKey = metric ? metric.key : keyTouched ? key : slugify(name);
+  // A numeric value only means something for sum/mean; conversion/count ignore it.
+  const usesValue = type === "sum" || type === "mean";
 
   function submit() {
     setError(null);
     if (!name.trim()) return setError("Give the metric a name.");
     if (!eventName.trim()) return setError("Name the track() event this metric measures.");
     start(async () => {
-      const res = await createMetricAction(slug, {
+      const body: MetricBody = {
         key: effectiveKey,
         name: name.trim(),
         description: description.trim() || null,
         type,
         eventName: eventName.trim(),
+        valueField: usesValue && valueField.trim() ? valueField.trim() : null,
         direction,
-      });
+      };
+      const res = metric
+        ? await updateMetricAction(slug, metric.key, body)
+        : await createMetricAction(slug, body);
       if (res.error) return setError(res.error);
       onClose();
       router.refresh();
@@ -176,7 +224,7 @@ function CreateMetricModal({ slug, onClose }: { slug: string; onClose: () => voi
   return (
     <Modal onClose={onClose} size="xl">
       <ModalHeader
-        title="Create Metric"
+        title={metric ? "Edit Metric" : "Create Metric"}
         description="Define a goal your experiments can measure."
         onClose={onClose}
       />
@@ -200,6 +248,7 @@ function CreateMetricModal({ slug, onClose }: { slug: string; onClose: () => voi
                 }}
                 placeholder="checkout-completed"
                 className="font-mono"
+                disabled={metric != null}
               />
             </Field>
           </div>
@@ -228,6 +277,21 @@ function CreateMetricModal({ slug, onClose }: { slug: string; onClose: () => voi
           </Field>
 
           <p className="-mt-1 text-xs text-zinc-500">{TYPE_HELP[type]}</p>
+
+          <Field label="Value field">
+            <Input
+              value={valueField}
+              onChange={(e) => setValueField(e.target.value)}
+              placeholder="amount"
+              className="font-mono"
+              disabled={!usesValue}
+            />
+          </Field>
+          <p className="-mt-1 text-xs text-zinc-500">
+            {usesValue
+              ? "Dot-path into the event properties for the number to sum/average (e.g. amount, order.total). Leave blank to use the event's direct value."
+              : "Only sum and mean metrics read a value field."}
+          </p>
 
           <Field label="Direction">
             <SegmentedControl
@@ -259,7 +323,7 @@ function CreateMetricModal({ slug, onClose }: { slug: string; onClose: () => voi
           Cancel
         </Button>
         <Button variant="primary" onClick={submit} disabled={pending || !name.trim()}>
-          {pending ? "Creating…" : "Create"}
+          {pending ? (metric ? "Saving…" : "Creating…") : metric ? "Save" : "Create"}
         </Button>
       </ModalFooter>
     </Modal>

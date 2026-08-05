@@ -62,26 +62,42 @@ export function NewOrgForm({ hasHobby }: { hasHobby: boolean }) {
     }
 
     setPending(true);
-    // `plan` is a server-side additional field (input: true). BetterAuth's
-    // generated client type does not surface additional org fields, so pass the
-    // payload as a variable (excess-property checks only fire on literals); the
-    // server validates and persists it.
-    const payload = { name: orgName, slug: orgSlug, plan };
-    const created = await authClient.organization.create(payload);
-    if (created.error) {
-      setError(
-        created.error.message ??
-          "We could not create your organization. The URL may be taken.",
-      );
-      setPending(false);
-      return;
-    }
+    try {
+      // `plan` is a server-side additional field (input: true). BetterAuth's
+      // generated client type does not surface additional org fields, so pass the
+      // payload as a variable (excess-property checks only fire on literals); the
+      // server validates and persists it.
+      const payload = { name: orgName, slug: orgSlug, plan };
+      const created = await authClient.organization.create(payload);
+      if (created.error) {
+        setError(
+          created.error.message ??
+            "We could not create your organization. The URL may be taken.",
+        );
+        setPending(false);
+        return;
+      }
 
-    await authClient.organization.setActive({
-      organizationId: created.data.id,
-    });
-    router.push(`/${orgSlug}`);
-    router.refresh();
+      const activated = await authClient.organization.setActive({
+        organizationId: created.data.id,
+      });
+      if (activated.error) {
+        setError(
+          activated.error.message ??
+            "Your organization was created, but we couldn't open it. Try selecting it.",
+        );
+        setPending(false);
+        return;
+      }
+
+      router.push(`/${orgSlug}`);
+      router.refresh();
+    } catch {
+      // Never leave the button spinning on a rejected request; surface it and
+      // re-enable so the user can retry.
+      setError("We couldn't reach the server. Check your connection and try again.");
+      setPending(false);
+    }
   }
 
   return (

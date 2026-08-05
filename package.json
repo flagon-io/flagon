@@ -17,11 +17,15 @@
         "lint": "turbo run lint",
         "test": "vitest run",
         "test:watch": "vitest",
+        "e2e": "playwright test",
+        "e2e:ui": "playwright test --ui",
+        "e2e:report": "playwright show-report",
         "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
         "compose:up": "docker compose up -d",
         "compose:down": "docker compose down"
     },
     "devDependencies": {
+        "@playwright/test": "^1.62.1",
         "eslint-plugin-better-tailwindcss": "^4.7.0",
         "prettier": "^3.8.1",
         "turbo": "^2.10.8",

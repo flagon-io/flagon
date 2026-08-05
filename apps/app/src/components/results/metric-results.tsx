@@ -87,14 +87,54 @@ function ProbBar({ p, good }: { p: number; good: boolean }) {
   );
 }
 
+/** Below this many units in the smallest arm the readout is not trustworthy: we
+ *  suppress significance pills and the "safe to call it" verdict and show a
+ *  collecting-data state instead (matches Statsig/LaunchDarkly small-sample gating). */
+const MIN_UNITS_PER_ARM = 100;
+
+/** The smallest arm's unit count — the sample the whole comparison is bounded by. */
+function smallestArm(analysis: SharedMetricAnalysis): number {
+  if (analysis.variants.length === 0) return 0;
+  return Math.min(...analysis.variants.map((v) => v.units));
+}
+
+/** Did this arm move in the metric's HARMFUL direction (a regression)? */
+function regressed(v: SharedVariantAnalysis, direction: SharedMetricAnalysis["direction"]): boolean {
+  const lift = v.relativeLift ?? 0;
+  if (lift === 0) return false;
+  return direction === "increase" ? lift < 0 : lift > 0;
+}
+
 function verdict(
   analysis: SharedMetricAnalysis,
   sequential: boolean,
+  role: string,
 ): { tone: "win" | "loss" | "flat"; text: string } {
   const treatments = analysis.variants.filter((v) => !v.isControl);
   const enrolled = analysis.variants.reduce((s, v) => s + v.units, 0);
   if (treatments.length === 0 || enrolled === 0) {
     return { tone: "flat", text: "Gathering data, no exposures yet." };
+  }
+  // Small-sample floor: don't call anything until every arm has enough data.
+  const smallest = smallestArm(analysis);
+  if (smallest < MIN_UNITS_PER_ARM) {
+    return {
+      tone: "flat",
+      text: `Collecting data: ~${smallest.toLocaleString()} in the smallest arm. Results are unreliable below ${MIN_UNITS_PER_ARM} per arm, so no call yet.`,
+    };
+  }
+  // Guardrails are pass/regression, never "winning": the goal is no harm.
+  if (role === "guardrail") {
+    const hit = treatments.find(
+      (v) => (sequential ? v.sequentiallySignificant : v.significant) && regressed(v, analysis.direction),
+    );
+    if (hit) {
+      return {
+        tone: "loss",
+        text: `Guardrail regressed: ${hit.variantKey} moved ${signedPct(hit.relativeLift ?? 0)} the wrong way (significant).`,
+      };
+    }
+    return { tone: "flat", text: "No guardrail regression detected." };
   }
   const best = treatments.reduce((a, b) =>
     (b.probabilityToBeatControl ?? 0) > (a.probabilityToBeatControl ?? 0) ? b : a,
@@ -127,11 +167,14 @@ function VariantRow({
   direction,
   v,
   sequential,
+  underpowered,
 }: {
   family: SharedMetricAnalysis["family"];
   direction: SharedMetricAnalysis["direction"];
   v: SharedVariantAnalysis;
   sequential: boolean;
+  /** The comparison's smallest arm is below the sample floor — hide significance. */
+  underpowered: boolean;
 }) {
   if (v.isControl) {
     return (
@@ -159,7 +202,11 @@ function VariantRow({
     <tr className="border-b border-white/6 last:border-0">
       <td className="px-4 py-3">
         <span className="font-mono text-zinc-200">{v.variantKey}</span>
-        {(sequential ? v.sequentiallySignificant : v.significant) ? (
+        {underpowered ? (
+          <span className="ml-2 rounded-full border border-white/12 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
+            low sample
+          </span>
+        ) : (sequential ? v.sequentiallySignificant : v.significant) ? (
           <span className="ml-2 rounded-full border border-teal-500/30 bg-teal-500/10 px-2 py-0.5 text-[11px] font-medium text-teal-300">
             significant
           </span>
@@ -198,7 +245,9 @@ function VariantRow({
 
 function MetricCard({ metric, sequential }: { metric: SharedMetricResult; sequential: boolean }) {
   const { analysis } = metric;
-  const v = verdict(analysis, sequential);
+  const v = verdict(analysis, sequential, metric.role);
+  const underpowered =
+    analysis.variants.length > 0 && smallestArm(analysis) < MIN_UNITS_PER_ARM;
   const valueHeader = analysis.family === "conversion" ? "Rate" : "Mean";
   return (
     <div className="overflow-hidden rounded-xl border border-white/10">
@@ -260,6 +309,7 @@ function MetricCard({ metric, sequential }: { metric: SharedMetricResult; sequen
                     direction={analysis.direction}
                     v={row}
                     sequential={sequential}
+                    underpowered={underpowered}
                   />
                 ))}
               </tbody>

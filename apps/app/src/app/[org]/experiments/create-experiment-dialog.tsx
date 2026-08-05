@@ -169,6 +169,15 @@ function CreateExperimentDialog({
             />
           </Field>
 
+          <Field label="Hypothesis">
+            <Textarea
+              value={hypothesis}
+              onChange={(e) => setHypothesis(e.target.value)}
+              placeholder="We believe a green button will increase checkout completion…"
+              rows={2}
+            />
+          </Field>
+
           {flags.length === 0 ? (
             <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-300">
               Create a flag first: an experiment measures a flag&apos;s variants.
@@ -195,36 +204,26 @@ function CreateExperimentDialog({
             </div>
           )}
 
-          {variants.length > 0 ? (
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Control (baseline arm)">
-                <Select
-                  value={control}
-                  onValueChange={setControl}
-                  options={variantOptions}
-                  placeholder="Select control"
-                  ariaLabel="Control variant"
-                />
-              </Field>
-              <Field label="Primary metric">
-                <Select
-                  value={primaryMetric}
-                  onValueChange={setPrimaryMetric}
-                  options={metricOptions}
-                  ariaLabel="Primary metric"
-                />
-              </Field>
-            </div>
-          ) : null}
-
-          <Field label="Hypothesis">
-            <Textarea
-              value={hypothesis}
-              onChange={(e) => setHypothesis(e.target.value)}
-              placeholder="We believe a green button will increase checkout completion…"
-              rows={2}
-            />
-          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Control (baseline arm)">
+              <Select
+                value={control}
+                onValueChange={setControl}
+                options={variantOptions}
+                placeholder={flag ? "Select control" : "Choose a flag first"}
+                ariaLabel="Control variant"
+                disabled={variants.length === 0}
+              />
+            </Field>
+            <Field label="Primary metric">
+              <Select
+                value={primaryMetric}
+                onValueChange={setPrimaryMetric}
+                options={metricOptions}
+                ariaLabel="Primary metric"
+              />
+            </Field>
+          </div>
         </div>
 
         {error ? <p className="mt-4 text-sm text-red-400">{error}</p> : null}

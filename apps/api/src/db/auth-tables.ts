@@ -144,6 +144,10 @@ export const organizations = pgTable(
     ssoDefaultRole: text("sso_default_role").notNull().default("member"),
     scimEnabled: boolean("scim_enabled").notNull().default(false),
     metadata: text("metadata"),
+    // Soft delete (DDL owned by the console, migration 0005). A non-null deletedAt
+    // hides the org; the API filters it out in org resolution so a deleted org 404s.
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedByUserId: uuid("deleted_by_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

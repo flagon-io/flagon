@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useConfirm } from "@flagon/design";
 import { authClient } from "@/lib/auth-client";
 import { FormError } from "@/components/form-error";
 
@@ -20,10 +21,27 @@ export function InvitationsList({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function cancel(id: string) {
+  async function cancel(invite: InviteRow) {
+    if (
+      !(await confirm({
+        title: "Cancel invitation?",
+        message: (
+          <>
+            The pending invitation for{" "}
+            <strong className="text-zinc-200">{invite.email}</strong> will be
+            revoked. Its link will stop working.
+          </>
+        ),
+        confirmLabel: "Cancel invitation",
+        tone: "danger",
+      }))
+    )
+      return;
+    const id = invite.id;
     setBusy(id);
     setError(null);
     const { error } = await authClient.organization.cancelInvitation({
@@ -53,7 +71,7 @@ export function InvitationsList({
               <button
                 type="button"
                 disabled={busy === i.id}
-                onClick={() => cancel(i.id)}
+                onClick={() => cancel(i)}
                 className="text-xs font-medium text-zinc-500 hover:text-red-400 disabled:opacity-50"
               >
                 Cancel
@@ -62,6 +80,7 @@ export function InvitationsList({
           </li>
         ))}
       </ul>
+      {confirmDialog}
     </div>
   );
 }

@@ -37,9 +37,16 @@ export function SegmentRules({
   const router = useRouter();
   const [pending, start] = useTransition();
   const init = initialState(segment.conditions);
+  // Partition the leaves into editable rows and RAW (nested all/any groups that the
+  // flat row editor can't represent). The raw leaves are preserved verbatim and
+  // re-emitted on save, so opening + saving a segment with advanced conditions never
+  // silently discards them (mirrors the flag RulesEditor's raw safeguard).
   const [combinator, setCombinator] = useState<"all" | "any">(init.combinator);
-  const [conds, setConds] = useState<CondDraft[]>(
+  const [conds, setConds] = useState<CondDraft[]>(() =>
     init.leaves.map(fromPredicate).filter((c): c is CondDraft => c !== null),
+  );
+  const [raw] = useState<Predicate[]>(() =>
+    init.leaves.filter((leaf) => fromPredicate(leaf) === null),
   );
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,14 +59,14 @@ export function SegmentRules({
 
   function save() {
     setError(null);
-    if (conds.length === 0) return setError("Add at least one filter.");
+    if (conds.length === 0 && raw.length === 0) return setError("Add at least one filter.");
     const built = buildConditions(conds);
     if ("error" in built) return setError(`Please ${built.error}.`);
+    // Editable rows plus any preserved advanced (nested) leaves.
+    const leaves: Predicate[] = [...built.conditions, ...raw];
     // AND is a flat list; OR wraps the leaves in a single `any` group.
     const conditions: Predicate[] =
-      combinator === "any" && built.conditions.length > 0
-        ? [{ any: built.conditions }]
-        : built.conditions;
+      combinator === "any" && leaves.length > 0 ? [{ any: leaves }] : leaves;
     start(async () => {
       const res = await updateSegmentAction(slug, segment.key, { conditions });
       if (res.error) return setError(res.error);
@@ -101,6 +108,14 @@ export function SegmentRules({
         joiner={combinator === "any" ? "Or" : "And"}
         leadWord=""
       />
+
+      {raw.length > 0 ? (
+        <p className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300/90">
+          This segment has {raw.length} advanced condition{raw.length === 1 ? "" : "s"} (nested
+          groups) that can&apos;t be edited here. They&apos;re shown read-only and preserved when you
+          save.
+        </p>
+      ) : null}
 
       {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
 

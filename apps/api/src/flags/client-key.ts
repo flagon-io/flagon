@@ -60,6 +60,7 @@ export async function resolveClientKey(
       revokedAt: clientKeys.revokedAt,
       autoExpose: clientKeys.autoExpose,
       plan: organizations.plan,
+      orgDeletedAt: organizations.deletedAt,
     })
     .from(clientKeys)
     // LEFT join: a valid key always has an org in production, but resolution must
@@ -70,7 +71,10 @@ export async function resolveClientKey(
     .limit(1);
 
   const key = rows[0];
-  if (!key || key.revokedAt) return null;
+  // Revoked key, or a SOFT-DELETED org: deny. A soft-deleted org must serve no
+  // flags and write no billable events, so its keys resolve to nothing (401). A
+  // join miss leaves orgDeletedAt null and still resolves (unchanged behavior).
+  if (!key || key.revokedAt || key.orgDeletedAt) return null;
 
   void db
     .update(clientKeys)

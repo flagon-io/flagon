@@ -90,6 +90,8 @@ export async function decideExperimentAction(
   const res = await decideExperiment(slug, key, decision);
   if (res.error) return { error: res.error };
   revalidatePath(`/${slug}/experiments/${key}`);
+  // A decision can stop a running experiment, so the list's status is stale too.
+  revalidatePath(`/${slug}/experiments`);
   return {};
 }
 

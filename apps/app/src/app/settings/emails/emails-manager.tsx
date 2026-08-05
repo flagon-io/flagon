@@ -2,6 +2,7 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { useConfirm } from "@flagon/design";
 import { submitButtonClass } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
 import {
@@ -27,6 +28,7 @@ export function EmailsManager({
   banner: Banner;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
   const [banner, setBanner] = useState<Banner>(initialBanner);
   const [newEmail, setNewEmail] = useState("");
@@ -60,6 +62,24 @@ export function EmailsManager({
     const fd = new FormData();
     fd.set("email", email);
     run(action, fd);
+  }
+
+  async function removeEmail(email: string) {
+    if (
+      !(await confirm({
+        title: "Remove email address?",
+        message: (
+          <>
+            <strong className="text-zinc-200">{email}</strong> will be removed
+            from your account. You will no longer be able to sign in with it.
+          </>
+        ),
+        confirmLabel: "Remove email",
+        tone: "danger",
+      }))
+    )
+      return;
+    act(removeEmailAction, email);
   }
 
   return (
@@ -112,7 +132,7 @@ export function EmailsManager({
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => act(removeEmailAction, e.email)}
+                  onClick={() => removeEmail(e.email)}
                   className="font-medium text-zinc-500 hover:text-red-400 disabled:opacity-50"
                 >
                   Remove
@@ -146,6 +166,7 @@ export function EmailsManager({
           Add
         </button>
       </form>
+      {confirmDialog}
     </div>
   );
 }

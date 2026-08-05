@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { withOrg } from "../db/tenant.js";
 import type { TenantTx } from "../db/tenant.js";
 import { sql } from "../db/schema.js";
@@ -30,14 +31,20 @@ import { effectiveRetentionDays, retentionSinceDay } from "../lib/retention.js";
 /**
  * The outcome analysis read-model, shared by flag-level impact and experiments.
  *
- * Attribution is always-on and flag-keyed (flag_exposures), so BOTH a plain flag's
- * impact and an experiment analyze the same table — a flag by its default variant,
- * an experiment by a designated control — and both are RETROACTIVE: they analyze
- * all history within the org's retention window (a paid lever; lib/retention.ts),
- * not "since the experiment started." A unit's goal events count only if they
- * occurred at/after its first exposure, so pre-exposure behavior never leaks in.
- * Conversion metrics count distinct converted units; mean/sum/count build a
- * per-unit value (zeros included) and reduce to n / sum / sum-of-squares.
+ * Both read from an ENROLLMENT source — a relation of (organization_id, unit_hash,
+ * variant_key, first_seen_at), one row per enrolled unit:
+ *   - a FLAG'S impact reads flag_exposures (the always-on, flag-lifetime assignment
+ *     log) scoped to (flag, environment) — a correctly RETROACTIVE observational
+ *     read over the org's retention window (a paid lever; lib/retention.ts);
+ *   - an EXPERIMENT reads experiment_exposures scoped to the experiment, so it only
+ *     ever analyzes units enrolled DURING its own run (start→stop), not the flag's
+ *     pre-experiment history. A stopped experiment additionally caps the response
+ *     window at its stop time, freezing the result.
+ * A unit's goal events count only if they occurred at/after its enrollment
+ * (first_seen_at), so pre-enrollment behavior never leaks in (and is instead the
+ * CUPED pre-period covariate). Conversion metrics count distinct converted units;
+ * mean/sum/count build a per-unit value (zeros included) and reduce to n / sum /
+ * sum-of-squares.
  */
 
 export interface MetricResult {
@@ -106,45 +113,57 @@ type MetricInput = {
   metricName: string;
   metricType: string;
   eventName: string;
+  /** Dot-path into the event properties for the numeric value (sum/mean); null =
+   *  use the event's direct `value`. */
+  valueField: string | null;
   direction: Direction;
   role: string;
 };
 
 /**
- * Aggregate one metric across a flag's arms within (flag, environment) and the
- * retention window. Per unit it derives the response Y from POST-exposure events
- * and, for CUPED, the covariate X from PRE-exposure events (same metric, before
- * the unit's first exposure): `conversion` uses "any event" (0/1), `count` the
- * event count, `sum`/`mean` the summed value. Zeros for inactive units come from
- * the LEFT JOIN. Returns per-arm sufficient statistics for both the raw analysis
- * (units, conversions, Σy, Σy²) and the CUPED adjustment (Σx, Σx², Σxy).
+ * Aggregate one metric across the arms of an ENROLLMENT relation (`ee`, exposing
+ * organization_id, unit_hash, variant_key, first_seen_at). Per unit it derives the
+ * response Y from POST-enrollment events and, for CUPED, the covariate X from
+ * PRE-enrollment events (same metric, before the unit's enrollment): `conversion`
+ * uses "any event" (0/1), `count` the event count, `sum`/`mean` the summed value.
+ * When `until` is set (a stopped experiment) the response window is capped at the
+ * stop time, freezing the result. Zeros for inactive units come from the LEFT JOIN.
+ * Returns per-arm sufficient statistics for both the raw analysis (units,
+ * conversions, Σy, Σy²) and the CUPED adjustment (Σx, Σx², Σxy).
  */
 async function aggregateImpact(
   tx: TenantTx,
-  organizationId: string,
-  flagId: string,
-  environmentId: string,
+  enrollment: SQL,
   eventName: string,
   metricType: string,
-  sinceDay: string | null,
+  valueField: string | null,
+  until: Date | null,
 ): Promise<AggRow[]> {
-  const dayFilter = sinceDay ? sql`and ee.day >= ${sinceDay}` : sql``;
-  // Split the unit's events into post-exposure (the response Y) and pre-exposure
-  // (the covariate X) with FILTER, so one scan yields both without row blow-up.
-  const post = sql`me.occurred_at >= ee.first_seen_at`;
+  // Split the unit's events into post-enrollment (the response Y) and pre-enrollment
+  // (the covariate X) with FILTER, so one scan yields both without row blow-up. A
+  // stopped experiment additionally caps the response at its stop time.
+  const untilCap = until ? sql`and me.occurred_at <= ${until.toISOString()}` : sql``;
+  const post = sql`me.occurred_at >= ee.first_seen_at ${untilCap}`;
   const pre = sql`me.occurred_at < ee.first_seen_at`;
+  // For sum/mean, the per-event number: the metric's value_field (a dot-path) into
+  // the event properties when set and numeric, else the event's direct `value`.
+  const num = valueField
+    ? sql`(case when jsonb_typeof(me.properties #> string_to_array(${valueField}, '.')) = 'number'
+                then (me.properties #> string_to_array(${valueField}, '.'))::text::double precision
+                else me.value end)`
+    : sql`me.value`;
   const yv =
     metricType === "conversion"
       ? sql`((count(me.id) filter (where ${post})) > 0)::int::double precision`
       : metricType === "count"
         ? sql`(count(me.id) filter (where ${post}))::double precision`
-        : sql`coalesce(sum(me.value) filter (where ${post}), 0)::double precision`;
+        : sql`coalesce(sum(${num}) filter (where ${post}), 0)::double precision`;
   const xv =
     metricType === "conversion"
       ? sql`((count(me.id) filter (where ${pre})) > 0)::int::double precision`
       : metricType === "count"
         ? sql`(count(me.id) filter (where ${pre}))::double precision`
-        : sql`coalesce(sum(me.value) filter (where ${pre}), 0)::double precision`;
+        : sql`coalesce(sum(${num}) filter (where ${pre}), 0)::double precision`;
 
   const rows = await tx.execute(sql`
     with per_unit as (
@@ -152,15 +171,11 @@ async function aggregateImpact(
              ee.unit_hash as unit_hash,
              ${yv} as yv,
              ${xv} as xv
-      from flag_exposures ee
+      from (${enrollment}) ee
       left join experiment_metric_events me
         on me.organization_id = ee.organization_id
        and me.unit_hash = ee.unit_hash
        and me.event_name = ${eventName}
-      where ee.flag_id = ${flagId}
-        and ee.environment_id = ${environmentId}
-        and ee.organization_id = ${organizationId}
-        ${dayFilter}
       group by ee.variant_key, ee.unit_hash
     )
     select variant_key,
@@ -187,15 +202,13 @@ async function aggregateImpact(
   }));
 }
 
-/** Run every metric for a (flag, environment) against a control, in the window. */
+/** Run every metric against a control over an ENROLLMENT relation, in the window. */
 async function computeMetrics(
   tx: TenantTx,
-  organizationId: string,
-  flagId: string,
-  environmentId: string,
+  enrollment: SQL,
   controlKey: string | null,
   metrics: MetricInput[],
-  sinceDay: string | null,
+  until: Date | null,
   confidence = 0.95,
   cuped = false,
 ): Promise<{ metrics: MetricResult[]; totalUnits: number }> {
@@ -203,15 +216,7 @@ async function computeMetrics(
   let totalUnits = 0;
 
   for (const m of metrics) {
-    const agg = await aggregateImpact(
-      tx,
-      organizationId,
-      flagId,
-      environmentId,
-      m.eventName,
-      m.metricType,
-      sinceDay,
-    );
+    const agg = await aggregateImpact(tx, enrollment, m.eventName, m.metricType, m.valueField, until);
 
     let analysis: MetricAnalysis;
     if (cuped) {
@@ -281,22 +286,10 @@ function powerFrom(metrics: MetricResult[]): PowerReadout | null {
   };
 }
 
-/** Distinct exposed units for a (flag, env) in the window — enrollment before any metric. */
-async function exposedUnits(
-  tx: TenantTx,
-  organizationId: string,
-  flagId: string,
-  environmentId: string,
-  sinceDay: string | null,
-): Promise<number> {
-  const dayFilter = sinceDay ? sql`and day >= ${sinceDay}` : sql``;
+/** Distinct enrolled units in an enrollment relation — enrollment before any metric. */
+async function exposedUnits(tx: TenantTx, enrollment: SQL): Promise<number> {
   const rows = await tx.execute(sql`
-    select count(distinct unit_hash)::int as units
-    from flag_exposures
-    where flag_id = ${flagId}
-      and environment_id = ${environmentId}
-      and organization_id = ${organizationId}
-      ${dayFilter}
+    select count(distinct unit_hash)::int as units from (${enrollment}) ee
   `);
   return Number((rows as unknown as { units: number }[])[0]?.units ?? 0);
 }
@@ -304,7 +297,9 @@ async function exposedUnits(
 /**
  * Compute the statistical readout for an EXPERIMENT: its attached metrics (with
  * roles), each analyzed across the flag's arms with the experiment's control as
- * baseline, retroactively over the retention window.
+ * baseline. Scoped to the experiment's OWN enrollment (experiment_exposures) — only
+ * units enrolled during the run — with retention as an outer clamp and the stop
+ * time (if any) freezing the response window.
  */
 export async function analyzeExperiment(
   organizationId: string,
@@ -331,9 +326,16 @@ export async function analyzeExperiment(
         metricId: experimentMetrics.id,
         metricKey: experimentMetrics.key,
         metricName: experimentMetrics.name,
-        metricType: experimentMetrics.type,
-        eventName: experimentMetrics.eventName,
-        direction: experimentMetrics.direction,
+        // The FROZEN snapshot for this experiment (0035); fall back to the live
+        // metric only for older links whose snapshot is null.
+        snapType: experimentMetricLinks.metricType,
+        snapEvent: experimentMetricLinks.eventName,
+        snapValueField: experimentMetricLinks.valueField,
+        snapDirection: experimentMetricLinks.direction,
+        liveType: experimentMetrics.type,
+        liveEvent: experimentMetrics.eventName,
+        liveValueField: experimentMetrics.valueField,
+        liveDirection: experimentMetrics.direction,
         role: experimentMetricLinks.role,
       })
       .from(experimentMetricLinks)
@@ -345,15 +347,33 @@ export async function analyzeExperiment(
         ),
       );
 
-    const metricInputs: MetricInput[] = attached.map((m) => ({
-      metricId: m.metricId,
-      metricKey: m.metricKey,
-      metricName: m.metricName,
-      metricType: m.metricType,
-      eventName: m.eventName,
-      direction: m.direction === "decrease" ? "decrease" : "increase",
-      role: m.role,
-    }));
+    const metricInputs: MetricInput[] = attached.map((m) => {
+      const direction = m.snapDirection ?? m.liveDirection;
+      // Snapshot type/event travel together; use the snapshot's value_field only when
+      // the snapshot itself is present, else the live definition's.
+      const snapshotted = m.snapType !== null;
+      return {
+        metricId: m.metricId,
+        metricKey: m.metricKey,
+        metricName: m.metricName,
+        metricType: m.snapType ?? m.liveType,
+        eventName: m.snapEvent ?? m.liveEvent,
+        valueField: snapshotted ? m.snapValueField : m.liveValueField,
+        direction: direction === "decrease" ? "decrease" : "increase",
+        role: m.role,
+      };
+    });
+
+    // Enrollment = this experiment's own frozen assignments, retention-clamped.
+    const enrollment = sql`
+      select organization_id, unit_hash, variant_key, first_seen_at
+      from experiment_exposures
+      where experiment_id = ${experimentId}
+        and organization_id = ${organizationId}
+        ${sinceDay ? sql`and day >= ${sinceDay}` : sql``}
+    `;
+    // A stopped experiment freezes: no response events past the stop time.
+    const until = exp.status === "stopped" ? exp.stoppedAt : null;
 
     const confidenceLevel = exp.confidenceLevel ?? 95;
     const correction: Correction =
@@ -361,12 +381,10 @@ export async function analyzeExperiment(
     const cuped = exp.cuped ?? false;
     const { metrics, totalUnits } = await computeMetrics(
       tx,
-      organizationId,
-      exp.flagId,
-      exp.environmentId,
+      enrollment,
       exp.controlVariantKey,
       metricInputs,
-      sinceDay,
+      until,
       confidenceLevel / 100,
       cuped,
     );
@@ -415,9 +433,7 @@ export async function analyzeExperiment(
         cuped,
       },
       totalUnits:
-        metrics.length > 0
-          ? totalUnits
-          : await exposedUnits(tx, organizationId, exp.flagId, exp.environmentId, sinceDay),
+        metrics.length > 0 ? totalUnits : await exposedUnits(tx, enrollment),
       retentionDays,
       power: powerFrom(metrics),
       metrics,
@@ -474,6 +490,7 @@ export async function analyzeFlag(
         metricName: experimentMetrics.name,
         metricType: experimentMetrics.type,
         eventName: experimentMetrics.eventName,
+        valueField: experimentMetrics.valueField,
         direction: experimentMetrics.direction,
       })
       .from(flagMetricLinks)
@@ -491,18 +508,27 @@ export async function analyzeFlag(
       metricName: m.metricName,
       metricType: m.metricType,
       eventName: m.eventName,
+      valueField: m.valueField,
       direction: m.direction === "decrease" ? "decrease" : "increase",
       role: "watched",
     }));
 
+    // Flag-level impact is the always-on, retroactive read over flag_exposures.
+    const enrollment = sql`
+      select organization_id, unit_hash, variant_key, first_seen_at
+      from flag_exposures
+      where flag_id = ${flag.id}
+        and environment_id = ${env.id}
+        and organization_id = ${organizationId}
+        ${sinceDay ? sql`and day >= ${sinceDay}` : sql``}
+    `;
+
     const { metrics, totalUnits } = await computeMetrics(
       tx,
-      organizationId,
-      flag.id,
-      env.id,
+      enrollment,
       controlKey,
       metricInputs,
-      sinceDay,
+      null,
     );
 
     return {
@@ -510,9 +536,7 @@ export async function analyzeFlag(
       environment: environmentKey,
       controlVariantKey: controlKey,
       totalUnits:
-        metrics.length > 0
-          ? totalUnits
-          : await exposedUnits(tx, organizationId, flag.id, env.id, sinceDay),
+        metrics.length > 0 ? totalUnits : await exposedUnits(tx, enrollment),
       retentionDays,
       metrics,
     };

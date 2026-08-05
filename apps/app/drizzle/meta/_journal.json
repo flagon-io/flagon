@@ -36,6 +36,20 @@
       "when": 1785600000000,
       "tag": "0004_sso_scim_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785700000000,
+      "tag": "0005_org_soft_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785800000000,
+      "tag": "0006_org_deleted_members",
+      "breakpoints": true
     }
   ]
 }

@@ -931,13 +931,6 @@ const DURATION_UNITS: { value: DurationUnit; label: string }[] = [
   { value: "days", label: "days" },
 ];
 
-/**
- * When the rollout clock starts. We only support "Upon saving" (the schedule
- * runs from the moment the flag is saved), matching how Flagon persists `start`
- * at save time; the field exists so the model reads like Vercel's.
- */
-const START_OPTIONS = [{ value: "upon-saving", label: "Upon saving" }];
-
 /** A left-labelled control row (Vercel-style): narrow label column, controls right. */
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -1036,13 +1029,11 @@ export function ProgressiveEditor({
         </FieldRow>
         {errors?.form ? <ErrorText>{errors.form}</ErrorText> : null}
         <FieldRow label="Start">
-          <Select
-            value="upon-saving"
-            onValueChange={() => {}}
-            ariaLabel="When the rollout starts"
-            options={START_OPTIONS}
-            className="h-8 w-52"
-          />
+          {/* Scheduling isn't supported yet — show it as a fixed fact, not a dead
+              dropdown that implies choices you can't make. */}
+          <span className="inline-flex h-8 w-52 items-center rounded-md border border-white/10 bg-white/2 px-3 text-sm text-zinc-400">
+            Upon saving
+          </span>
         </FieldRow>
       </div>
 
