@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, count, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { withOrg, type TenantTx } from "../../db/tenant.js";
 import {
@@ -8,12 +8,13 @@ import {
   oncallOverrides,
   oncallEscalationPolicies,
   oncallEscalationLevels,
+  incidents,
   teams,
 } from "../../db/schema.js";
 import { users } from "../../db/auth-tables.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
-import { resolveOrg, requireManager } from "../../lib/org-context.js";
+import { resolveOrg, requireManager, nonMembers } from "../../lib/org-context.js";
 import { isValidSlug } from "../../lib/slug.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 import { resolveOnCall } from "../../oncall/schedule.js";
@@ -83,7 +84,7 @@ const scheduleSchema = z.object({
   anchorAt: z.string(),
   memberCount: z.number(),
 });
-const currentSchema = z.object({ current: z.string().nullable(), next: z.string().nullable() });
+const currentSchema = z.object({ current: z.string().nullable(), next: z.string().nullable(), until: z.string().nullable() });
 registerComponentSchema("OncallSchedule", scheduleSchema);
 registerComponentSchema("OncallScheduleListResponse", z.array(scheduleSchema));
 registerComponentSchema(
@@ -144,7 +145,7 @@ async function teamRef(tx: TenantTx, teamId: string | null) {
 }
 async function loadRotation(tx: TenantTx, scheduleId: string) {
   const members = await tx.select({ userId: oncallScheduleMembers.userId, position: oncallScheduleMembers.position }).from(oncallScheduleMembers).where(eq(oncallScheduleMembers.scheduleId, scheduleId)).orderBy(oncallScheduleMembers.position);
-  const overrides = await tx.select({ id: oncallOverrides.id, userId: oncallOverrides.userId, startsAt: oncallOverrides.startsAt, endsAt: oncallOverrides.endsAt }).from(oncallOverrides).where(eq(oncallOverrides.scheduleId, scheduleId));
+  const overrides = await tx.select({ id: oncallOverrides.id, userId: oncallOverrides.userId, startsAt: oncallOverrides.startsAt, endsAt: oncallOverrides.endsAt }).from(oncallOverrides).where(eq(oncallOverrides.scheduleId, scheduleId)).orderBy(desc(oncallOverrides.createdAt));
   return { members, overrides };
 }
 type ScheduleRow = typeof oncallSchedules.$inferSelect;
@@ -162,7 +163,7 @@ async function scheduleDetail(tx: TenantTx, sched: ScheduleRow) {
     schedule: { key: sched.key, name: sched.name, team, rotationIntervalHours: sched.rotationIntervalHours, anchorAt: sched.anchorAt.toISOString(), memberCount: members.length },
     members: members.map((m) => ({ userId: m.userId, name: identBy.get(m.userId)?.name ?? "", email: identBy.get(m.userId)?.email ?? "", position: m.position })),
     overrides: overrides.map((o) => ({ id: o.id, userId: o.userId, startsAt: o.startsAt.toISOString(), endsAt: o.endsAt.toISOString() })),
-    current: { current: resolution.current, next: resolution.next },
+    current: { current: resolution.current, next: resolution.next, until: resolution.until?.toISOString() ?? null },
   };
 }
 
@@ -256,13 +257,22 @@ oncall_.delete("/schedules/:key", async (c) => {
   if (ctx instanceof Response) return ctx;
   const denied = requireManager(c, ctx);
   if (denied) return denied;
-  const ok = await withOrg(ctx.orgId, async (tx) => {
+  const result = await withOrg(ctx.orgId, async (tx) => {
     const sched = await scheduleByKey(tx, c.req.param("key"));
-    if (!sched) return false;
+    if (!sched) return "not_found" as const;
+    // A schedule is a polymorphic escalation target (no FK). Refuse to delete one
+    // that a policy still points at, or the level would dangle and page nobody.
+    const [ref] = await tx
+      .select({ id: oncallEscalationLevels.id })
+      .from(oncallEscalationLevels)
+      .where(and(eq(oncallEscalationLevels.targetType, "schedule"), eq(oncallEscalationLevels.targetId, sched.id)))
+      .limit(1);
+    if (ref) return "in_use" as const;
     await tx.delete(oncallSchedules).where(eq(oncallSchedules.id, sched.id));
-    return true;
+    return "ok" as const;
   });
-  if (!ok) return jsonError(c, 404, "Schedule not found.");
+  if (result === "not_found") return jsonError(c, 404, "Schedule not found.");
+  if (result === "in_use") return jsonError(c, 409, "This schedule is an escalation target. Remove it from the policy's levels first.");
   return c.json({ ok: true });
 });
 
@@ -273,6 +283,8 @@ oncall_.put("/schedules/:key/members", async (c) => {
   if (denied) return denied;
   const parsed = membersBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
+  const bad = await nonMembers(ctx.orgId, parsed.data.userIds);
+  if (bad.length) return jsonError(c, 400, "Every rotation member must be a member of this organization.");
   const ok = await withOrg(ctx.orgId, async (tx) => {
     const sched = await scheduleByKey(tx, c.req.param("key"));
     if (!sched) return false;
@@ -298,6 +310,7 @@ oncall_.post("/schedules/:key/overrides", async (c) => {
   const parsed = overrideBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
   if (new Date(parsed.data.endsAt) <= new Date(parsed.data.startsAt)) return jsonError(c, 422, "The override must end after it starts.");
+  if ((await nonMembers(ctx.orgId, [parsed.data.userId])).length) return jsonError(c, 400, "The override user must be a member of this organization.");
   const ok = await withOrg(ctx.orgId, async (tx) => {
     const sched = await scheduleByKey(tx, c.req.param("key"));
     if (!sched) return false;
@@ -335,7 +348,7 @@ oncall_.get("/schedules/:key/current", async (c) => {
     return resolveOnCall({ rotationIntervalHours: sched.rotationIntervalHours, anchorAt: sched.anchorAt }, members, overrides, new Date());
   });
   if (!result) return jsonError(c, 404, "Schedule not found.");
-  return c.json({ current: result.current, next: result.next });
+  return c.json({ current: result.current, next: result.next, until: result.until?.toISOString() ?? null });
 });
 
 oncall_.get("/teams/:team/current", async (c) => {
@@ -345,10 +358,10 @@ oncall_.get("/teams/:team/current", async (c) => {
     const t = await tx.select({ id: teams.id }).from(teams).where(eq(teams.key, c.req.param("team"))).limit(1).then((r) => r[0]);
     if (!t) return null;
     const [sched] = await tx.select().from(oncallSchedules).where(eq(oncallSchedules.teamId, t.id)).limit(1);
-    if (!sched) return { current: null, next: null };
+    if (!sched) return { current: null, next: null, until: null };
     const { members, overrides } = await loadRotation(tx, sched.id);
     const r = resolveOnCall({ rotationIntervalHours: sched.rotationIntervalHours, anchorAt: sched.anchorAt }, members, overrides, new Date());
-    return { current: r.current, next: r.next };
+    return { current: r.current, next: r.next, until: r.until?.toISOString() ?? null };
   });
   if (!result) return jsonError(c, 404, "No schedule for that team.");
   return c.json(result);
@@ -439,13 +452,22 @@ oncall_.delete("/escalation-policies/:key", async (c) => {
   if (ctx instanceof Response) return ctx;
   const denied = requireManager(c, ctx);
   if (denied) return denied;
-  const ok = await withOrg(ctx.orgId, async (tx) => {
+  const result = await withOrg(ctx.orgId, async (tx) => {
     const pol = await policyByKey(tx, c.req.param("key"));
-    if (!pol) return false;
+    if (!pol) return "not_found" as const;
+    // Deleting a policy an open incident uses would SET NULL its escalationPolicyId
+    // and silently drop it out of the escalation sweep. Refuse while it's in use.
+    const [inUse] = await tx
+      .select({ id: incidents.id })
+      .from(incidents)
+      .where(and(eq(incidents.escalationPolicyId, pol.id), ne(incidents.status, "resolved")))
+      .limit(1);
+    if (inUse) return "in_use" as const;
     await tx.delete(oncallEscalationPolicies).where(eq(oncallEscalationPolicies.id, pol.id));
-    return true;
+    return "ok" as const;
   });
-  if (!ok) return jsonError(c, 404, "Policy not found.");
+  if (result === "not_found") return jsonError(c, 404, "Policy not found.");
+  if (result === "in_use") return jsonError(c, 409, "This policy is in use by an open incident. Resolve or reassign it first.");
   return c.json({ ok: true });
 });
 
@@ -456,6 +478,11 @@ oncall_.put("/escalation-policies/:key/levels", async (c) => {
   if (denied) return denied;
   const parsed = levelsBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
+  // A user escalation target must be an org member (same identity/paging leak as a
+  // rotation member). Validate before touching the DB; malformed uuids fall through
+  // to the in-tx "unknown_target" check.
+  const userRefs = parsed.data.levels.filter((l) => l.targetType === "user" && UUID_RE.test(l.targetRef)).map((l) => l.targetRef);
+  if ((await nonMembers(ctx.orgId, userRefs)).length) return jsonError(c, 400, "A user escalation target must be a member of this organization.");
   const result = await withOrg(ctx.orgId, async (tx) => {
     const pol = await policyByKey(tx, c.req.param("key"));
     if (!pol) return "not_found" as const;

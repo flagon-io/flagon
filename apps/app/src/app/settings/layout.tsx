@@ -3,15 +3,30 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FlagonMark } from "@flagon/design";
 import { getSession } from "@/lib/auth";
-import { SettingsNav } from "@/components/settings/settings-nav";
+import { SettingsNav, type NavSection } from "@/components/settings/settings-nav";
 import { AccountMenu } from "@/components/workspace/account-menu";
 
-const ITEMS = [
-  { href: "/settings", label: "Profile" },
-  { href: "/settings/emails", label: "Emails" },
-  { href: "/settings/notifications", label: "Notifications" },
-  { href: "/settings/security", label: "Security" },
-  { href: "/settings/tokens", label: "Access tokens" },
+// GitHub-style grouped nav. The first (untitled) group is the account basics;
+// "Access" holds identity/sign-in surfaces; "Developer settings" is its own home
+// for programmatic access (tokens today; OAuth apps / webhooks as we grow).
+const SECTIONS: NavSection[] = [
+  {
+    items: [
+      { href: "/settings", label: "Profile" },
+      { href: "/settings/notifications", label: "Notifications" },
+    ],
+  },
+  {
+    heading: "Access",
+    items: [
+      { href: "/settings/emails", label: "Emails" },
+      { href: "/settings/security", label: "Security" },
+    ],
+  },
+  {
+    heading: "Developer settings",
+    items: [{ href: "/settings/tokens", label: "Personal access tokens" }],
+  },
 ];
 
 /**
@@ -52,8 +67,8 @@ export default async function SettingsLayout({
       </header>
 
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 px-6 py-8 sm:flex-row">
-        <aside className="sm:w-52 sm:shrink-0">
-          <SettingsNav items={ITEMS} />
+        <aside className="sm:w-56 sm:shrink-0">
+          <SettingsNav sections={SECTIONS} />
         </aside>
         <div className="min-w-0 flex-1">{children}</div>
       </div>

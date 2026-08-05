@@ -76,6 +76,7 @@ export function ProjectsView({
   entitlement,
   usage,
   teams,
+  initialCreate,
 }: {
   slug: string;
   projects: Project[];
@@ -83,8 +84,9 @@ export function ProjectsView({
   entitlement: Entitlement | null;
   usage: OrgUsage | null;
   teams: TeamOption[];
+  initialCreate?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState((initialCreate ?? false) && canCreate);
   const [view, setView] = useState<View>("grid");
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState({

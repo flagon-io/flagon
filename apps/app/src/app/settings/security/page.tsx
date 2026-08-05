@@ -12,7 +12,11 @@ export default async function SecuritySettingsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const sessions = await getSessions();
+  const listed = await getSessions();
+  // Never show a signed-in user an empty device list: if listSessions fails or
+  // briefly returns nothing (e.g. a stale cookie-cache identity), fall back to the
+  // current session so "This device" always appears.
+  const sessions = listed.length > 0 ? listed : [session.session];
 
   return (
     <div className="flex flex-col gap-6">

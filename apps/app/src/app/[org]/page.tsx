@@ -19,10 +19,13 @@ function dayString(offset: number): string {
  */
 export default async function OrgProjects({
   params,
+  searchParams,
 }: {
   params: Promise<{ org: string }>;
+  searchParams: Promise<{ create?: string }>;
 }) {
   const { org: slug } = await params;
+  const sp = await searchParams;
   const session = await getSession();
   if (!session) redirect("/login");
   const membership = await getMembershipBySlug(session.user.id, slug);
@@ -58,6 +61,7 @@ export default async function OrgProjects({
       entitlement={entitlement}
       usage={usage}
       teams={teamOptions}
+      initialCreate={Boolean(sp.create)}
     />
   );
 }

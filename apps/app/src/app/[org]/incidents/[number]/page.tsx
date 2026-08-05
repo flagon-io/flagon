@@ -8,7 +8,6 @@ import { listPolicies } from "@/lib/oncall-api";
 import { listRunbooks } from "@/lib/runbooks-api";
 import { listProjects } from "@/lib/projects-api";
 import { listMembers } from "@/lib/flags-api";
-import { listTeamMembers } from "@/lib/teams-api";
 import { IncidentDetail } from "./incident-detail";
 
 /**
@@ -34,12 +33,11 @@ export default async function IncidentPage({ params }: { params: Promise<{ org: 
   ]);
   if (!detail) notFound();
 
-  // Resolve the responder's name from the owning team's roster.
-  let responderName: string | null = null;
-  if (detail.responderUserId && detail.incident.ownerTeam) {
-    const roster = await listTeamMembers(slug, detail.incident.ownerTeam.key);
-    responderName = roster.find((m) => m.userId === detail.responderUserId)?.name ?? null;
-  }
+  // Resolve the responder's name from the org roster (the responder can be an
+  // escalation-policy target who is not on the owning team, so use every member).
+  const responderName = detail.responderUserId
+    ? orgMembers.find((m) => m.userId === detail.responderUserId)?.name ?? null
+    : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -50,6 +48,7 @@ export default async function IncidentPage({ params }: { params: Promise<{ org: 
         slug={slug}
         detail={detail}
         responderName={responderName}
+        responderVia={detail.responderVia}
         orgMembers={orgMembers.map((m) => ({ userId: m.userId, name: m.name }))}
         projects={projects.map((p) => ({ key: p.key, name: p.name }))}
         runbooks={runbooks.map((r) => ({ key: r.key, name: r.name }))}

@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations, users } from "../db/auth-tables.js";
 import { notificationChannels } from "../db/schema.js";
@@ -30,7 +30,9 @@ export async function notifyIncident(opts: {
     const [org] = await db
       .select({ name: organizations.name, slug: organizations.slug })
       .from(organizations)
-      .where(eq(organizations.id, opts.organizationId))
+      // Never page on behalf of a soft-deleted org (keeps the invariant local even
+      // if a future caller doesn't pre-filter, as declare + the sweep both do).
+      .where(and(eq(organizations.id, opts.organizationId), isNull(organizations.deletedAt)))
       .limit(1);
     if (!org) return;
     // A page routes through each responder's notification channels. Email delivers

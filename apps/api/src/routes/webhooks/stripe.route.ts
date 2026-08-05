@@ -20,7 +20,7 @@ import { captureError } from "../../lib/monitoring.js";
 /**
  * Best-effort: add the metered events item to an entitled sub that lacks it (self-heal
  * subs predating metered billing). Never breaks the plan sync — a missing metered
- * price (setup-metered not run) or Stripe error is logged and swallowed.
+ * price (stripe:sync not run) or Stripe error is logged and swallowed.
  */
 async function selfHealMeteredItem(subscription: Stripe.Subscription): Promise<void> {
   if (!isBillingConfigured() || !statusEntitlesPro(subscription.status)) return;

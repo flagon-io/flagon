@@ -30,12 +30,14 @@ export function ExperimentsTable({
   flags,
   metrics,
   environments,
+  initialCreate,
 }: {
   slug: string;
   experiments: Experiment[];
   flags: { key: string; name: string }[];
   metrics: { key: string; name: string }[];
   environments: { key: string; name: string }[];
+  initialCreate?: boolean;
 }) {
   const [q, setQ] = useState("");
 
@@ -75,6 +77,7 @@ export function ExperimentsTable({
           flags={flags}
           metrics={metrics}
           environments={environments}
+          initialCreate={initialCreate}
         />
       </div>
 

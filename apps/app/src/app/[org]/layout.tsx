@@ -88,7 +88,7 @@ export default async function OrgLayout({
         initialCollapsed={initialCollapsed}
       />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <WorkspaceTopbar user={user} />
+        <WorkspaceTopbar user={user} slug={slug} />
         {!session.user.emailVerified ? (
           <VerifyEmailBanner email={session.user.email} />
         ) : null}

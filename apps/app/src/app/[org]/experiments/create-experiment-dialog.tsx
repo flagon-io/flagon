@@ -27,13 +27,15 @@ export function CreateExperimentButton({
   flags,
   metrics,
   environments,
+  initialCreate,
 }: {
   slug: string;
   flags: { key: string; name: string }[];
   metrics: { key: string; name: string }[];
   environments: EnvOption[];
+  initialCreate?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialCreate ?? false);
   return (
     <>
       <Button variant="primary" onClick={() => setOpen(true)}>

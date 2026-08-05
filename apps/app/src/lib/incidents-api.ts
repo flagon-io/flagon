@@ -53,6 +53,7 @@ export type IncidentDetail = {
   updates: IncidentUpdate[];
   checklist: ChecklistItem[];
   responderUserId: string | null;
+  responderVia: string | null;
   rccaRequired: boolean;
   rccaTemplate: { requiredSeverities: string[]; fields: RccaField[] };
   rcca: { values: Record<string, string> };

@@ -1235,6 +1235,30 @@ export const oncallSchedules = pgTable(
   ],
 );
 
+/**
+ * Which teams an on-call schedule serves (many-to-many). A shared rotation can be
+ * bound to several teams; each surfaces it on its On-call tab. Supersedes the single
+ * `oncall_schedules.team_id` (now dormant) as the source of truth for team binding.
+ */
+export const oncallScheduleTeams = pgTable(
+  "oncall_schedule_teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    scheduleId: uuid("schedule_id")
+      .notNull()
+      .references(() => oncallSchedules.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    uniqueIndex("oncall_schedule_teams_sched_team_key").on(t.scheduleId, t.teamId),
+    index("oncall_schedule_teams_team_idx").on(t.teamId),
+    index("oncall_schedule_teams_org_idx").on(t.organizationId),
+  ],
+);
+
 /** The ordered participants in an on-call rotation. */
 export const oncallScheduleMembers = pgTable(
   "oncall_schedule_members",

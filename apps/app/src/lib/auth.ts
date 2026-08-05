@@ -350,11 +350,19 @@ export async function requireUser() {
   return session.user;
 }
 
-/** Device sessions for the current user (security page). Empty on any failure. */
+/**
+ * Device sessions for the current user (security page). Empty on failure — but the
+ * failure is LOGGED, not silently swallowed: a blank device list while you are
+ * signed in almost always means `listSessions` threw (e.g. a stale cookie-cache
+ * identity the DB can't reconcile), and hiding that turns a real error into a
+ * confusing empty state. The page falls back to the current session so you always
+ * see "This device".
+ */
 export async function getSessions() {
   try {
     return await auth.api.listSessions({ headers: await headers() });
-  } catch {
+  } catch (err) {
+    console.error("[auth] listSessions failed", err);
     return [];
   }
 }

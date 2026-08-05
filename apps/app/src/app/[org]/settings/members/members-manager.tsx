@@ -7,6 +7,7 @@ import { authClient } from "@/lib/auth-client";
 import { ASSIGNABLE_ORG_ROLES, orgRoleLabel } from "@/lib/roles";
 import { submitButtonClass } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
+import { MemberAvatar } from "@/components/member-avatar";
 import { setMemberRoleAction } from "./actions";
 
 type MemberRow = {
@@ -111,6 +112,17 @@ export function MembersList({
   const { confirm, confirmDialog } = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+
+  const q = query.trim().toLowerCase();
+  const shown = q
+    ? members.filter(
+        (m) =>
+          m.name.toLowerCase().includes(q) ||
+          m.email.toLowerCase().includes(q) ||
+          (m.username?.toLowerCase().includes(q) ?? false),
+      )
+    : members;
 
   async function changeRole(m: MemberRow, role: string) {
     setBusy(m.memberId);
@@ -153,8 +165,17 @@ export function MembersList({
   return (
     <div className="flex flex-col gap-3">
       {error ? <FormError>{error}</FormError> : null}
+      {members.length > 6 ? (
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Find a member…"
+          className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/20"
+        />
+      ) : null}
       <ul className="flex flex-col divide-y divide-white/8 rounded-lg border border-white/8">
-        {members.map((m) => {
+        {shown.map((m) => {
           const isSelf = m.userId === currentUserId;
           const isOwner = m.role === "owner";
           const editable = canManage && !isOwner && !isSelf;
@@ -163,17 +184,20 @@ export function MembersList({
               key={m.memberId}
               className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
             >
-              <div className="min-w-0">
-                <p className="truncate text-sm text-zinc-100">
-                  {m.name}
-                  {isSelf ? (
-                    <span className="ml-2 text-xs text-zinc-500">You</span>
-                  ) : null}
-                </p>
-                <p className="truncate text-xs text-zinc-500">
-                  {m.username ? `@${m.username} · ` : ""}
-                  {m.email}
-                </p>
+              <div className="flex min-w-0 items-center gap-2.5">
+                <MemberAvatar name={m.name} size="sm" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-zinc-100">
+                    {m.name}
+                    {isSelf ? (
+                      <span className="ml-2 text-xs text-zinc-500">You</span>
+                    ) : null}
+                  </p>
+                  <p className="truncate text-xs text-zinc-500">
+                    {m.username ? `@${m.username} · ` : ""}
+                    {m.email}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-3">
                 {editable ? (

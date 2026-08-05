@@ -151,4 +151,61 @@ describe.skipIf(!DATABASE_URL)("reliability: incidents + on-call", () => {
     detail = await (await get(`/incidents/${n}`)).json();
     expect(detail.incident.escalatedLevel).toBe(1);
   });
+
+  it("rejects a non-member from on-call rotations, overrides, and user escalation targets", async () => {
+    const stranger = randomUUID(); // a valid uuid that is NOT a member of this org
+    expect((await put("/oncall/schedules/primary/members", { userIds: [u1, stranger] })).status).toBe(400);
+    expect(
+      (
+        await post("/oncall/schedules/primary/overrides", {
+          userId: stranger,
+          startsAt: new Date().toISOString(),
+          endsAt: new Date(Date.now() + 3_600_000).toISOString(),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await put("/oncall/escalation-policies/sev1/levels", { levels: [{ targetType: "user", targetRef: stranger, delayMinutes: 0 }] })).status,
+    ).toBe(400);
+    // The real member still works (the levels were left intact by the rejected write).
+    expect((await put("/oncall/schedules/primary/members", { userIds: [u1, u2] })).status).toBe(200);
+  });
+
+  it("guards destructive deletes: an in-use schedule target and an in-use policy return 409", async () => {
+    const del = (p: string) => app.request(`/v1/orgs/${slug}${p}`, { method: "DELETE", headers: auth });
+    // "primary" is a level target of the sev1 policy (set earlier) -> can't delete it.
+    expect((await del("/oncall/schedules/primary")).status).toBe(409);
+    // An open incident using sev1 -> the policy can't be deleted out from under it.
+    const declared = await post("/incidents", { title: "Guarded", severity: "sev3", escalationPolicyKey: "sev1" });
+    expect(declared.status).toBe(201);
+    expect((await del("/oncall/escalation-policies/sev1")).status).toBe(409);
+    await post(`/incidents/${(await declared.json()).incident.number}/resolve`, {});
+  });
+
+  it("declare and the sweep fall back to the owner team when an escalation level resolves to nobody", async () => {
+    await post("/oncall/schedules", { key: "ghost", name: "Ghost", rotationIntervalHours: 168 }); // no members
+    await post("/oncall/escalation-policies", { key: "fb", name: "FB" });
+    // level 0 = the empty schedule (declare pages it -> nobody -> owner-team fallback),
+    // level 1 = a real user so the sweep also has a step to climb.
+    await put("/oncall/escalation-policies/fb/levels", {
+      levels: [
+        { targetType: "schedule", targetRef: "ghost", delayMinutes: 5 },
+        { targetType: "user", targetRef: u2, delayMinutes: 5 },
+      ],
+    });
+    const declared = await post("/incidents", { title: "Ghost page", severity: "sev2", affectedProjectKeys: ["web"], escalationPolicyKey: "fb" });
+    const body = await declared.json();
+    // Declare's level-0 target (empty schedule) fell back to the owner team's on-call.
+    expect(body.responderUserId).toBe(u1);
+    const n = body.incident.number;
+
+    await withOrg(orgId, (tx) =>
+      tx.update(schema.incidents).set({ startedAt: new Date(Date.now() - 20 * 60_000) }).where(eq(schema.incidents.number, n)),
+    );
+    const sweep = await sweepEscalations();
+    expect(sweep.paged).toBeGreaterThanOrEqual(1); // the sweep advanced past the level, did not stall
+    const detail = await (await get(`/incidents/${n}`)).json();
+    expect(detail.incident.escalatedLevel).toBe(1);
+    await post(`/incidents/${n}/resolve`, {});
+  });
 });

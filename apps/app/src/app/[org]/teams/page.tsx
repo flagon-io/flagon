@@ -11,10 +11,13 @@ import { TeamsView } from "./teams-view";
  */
 export default async function TeamsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ org: string }>;
+  searchParams: Promise<{ create?: string }>;
 }) {
   const { org: slug } = await params;
+  const sp = await searchParams;
   const session = await getSession();
   if (!session) redirect("/login");
   const membership = await getMembershipBySlug(session.user.id, slug);
@@ -22,6 +25,11 @@ export default async function TeamsPage({
 
   const teams = await listTeams(slug);
   return (
-    <TeamsView slug={slug} teams={teams} canCreate={canManageOrg(membership.role)} />
+    <TeamsView
+      slug={slug}
+      teams={teams}
+      canCreate={canManageOrg(membership.role)}
+      initialCreate={Boolean(sp.create)}
+    />
   );
 }

@@ -66,6 +66,7 @@ export function IncidentsView({
   policies,
   filterProject,
   autoDeclareService,
+  autoDeclare,
 }: {
   slug: string;
   incidents: Incident[];
@@ -75,8 +76,13 @@ export function IncidentsView({
   policies: Opt[];
   filterProject?: string;
   autoDeclareService?: string;
+  autoDeclare?: boolean;
 }) {
-  const [open, setOpen] = useState(Boolean(autoDeclareService));
+  // Open on a service deep-link, or on a bare ?declare=1 from the quick-create
+  // menu (managers only, mirroring the declare button's own gate).
+  const [open, setOpen] = useState(
+    Boolean(autoDeclareService) || (Boolean(autoDeclare) && canManage),
+  );
   const openIncidents = incidents.filter((i) => i.status !== "resolved");
   const resolved = incidents.filter((i) => i.status === "resolved");
   const projectName = filterProject ? projects.find((p) => p.key === filterProject)?.name ?? filterProject : null;
@@ -97,11 +103,11 @@ export function IncidentsView({
             </p>
           )}
         </div>
-        {canManage ? (
-          <Button variant="primary" onClick={() => setOpen(true)}>
+        <span title={canManage ? undefined : "Only organization owners and admins can declare incidents"}>
+          <Button variant="primary" disabled={!canManage} onClick={() => setOpen(true)}>
             <Siren className="size-4" /> Declare incident
           </Button>
-        ) : null}
+        </span>
       </div>
 
       {incidents.length === 0 ? (

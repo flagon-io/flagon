@@ -27,6 +27,7 @@ export function IncidentDetail({
   slug,
   detail,
   responderName,
+  responderVia,
   orgMembers,
   projects,
   runbooks,
@@ -36,6 +37,7 @@ export function IncidentDetail({
   slug: string;
   detail: Detail;
   responderName: string | null;
+  responderVia: string | null;
   orgMembers: { userId: string; name: string }[];
   projects: { key: string; name: string }[];
   runbooks: { key: string; name: string }[];
@@ -182,8 +184,9 @@ export function IncidentDetail({
           <Panel title="Responder">
             <p className="inline-flex items-center gap-2 text-sm text-zinc-200">
               <BellRing className="size-4 text-zinc-500" />
-              {responderName ?? (detail.responderUserId ? "On-call assigned" : "No on-call")}
+              {responderName ?? (detail.responderUserId ? "On-call assigned" : "Nobody assigned")}
             </p>
+            {responderVia ? <p className="mt-0.5 pl-6 text-xs text-zinc-500">{responderVia}</p> : null}
           </Panel>
           <Panel title="Owner">
             {incident.ownerTeam ? (
@@ -193,6 +196,11 @@ export function IncidentDetail({
             )}
             {incident.escalationPolicyKey ? (
               <p className="mt-1 text-xs text-zinc-500">Escalation: {policyName}</p>
+            ) : null}
+            {incident.escalatedLevel > 0 ? (
+              <span className="mt-1.5 inline-flex items-center rounded-md border border-amber-400/20 bg-amber-400/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-300">
+                Escalated to level {incident.escalatedLevel + 1}
+              </span>
             ) : null}
           </Panel>
           <Panel title="Affected services">

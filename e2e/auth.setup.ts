@@ -94,6 +94,12 @@ setup("authenticate and provision the E2E org", async ({ page }) => {
         await sql`delete from experiments where organization_id = ${org.id}`;
         await sql`delete from experiment_metrics where organization_id = ${org.id}`;
         await sql`delete from flags where organization_id = ${org.id}`;
+        // Reliability: incidents (cascade their services/updates/checklist/rcca),
+        // then the on-call config. Incidents first so a policy delete never SET-NULLs
+        // a live one mid-purge.
+        await sql`delete from incidents where organization_id = ${org.id}`;
+        await sql`delete from oncall_escalation_policies where organization_id = ${org.id}`;
+        await sql`delete from oncall_schedules where organization_id = ${org.id}`;
       }
     } catch {
       // Non-fatal: a purge failure just leaves prior data; tests still run.

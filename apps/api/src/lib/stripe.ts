@@ -23,11 +23,13 @@ const API_VERSION = "2026-06-24.dahlia" satisfies Stripe.StripeConfig["apiVersio
 export const PRO_PRICE_LOOKUP_KEY = "flagon_pro_monthly";
 
 /**
- * The metered events price + its Billing Meter. Created by scripts/setup-metered.ts:
- * a Billing Meter named `flagon_events` and a metered per-unit price with lookup key
- * `flagon_events_metered` (at $0.03/1K) attached to the Pro product. Usage is reported
- * to the meter (billing.meterEvents.create with event_name = the meter name) and the
- * price turns it into an invoice line; the $50 credit grant offsets it.
+ * The metered events price + its Billing Meter. Reconciled by scripts/sync-stripe.ts
+ * (`npm run stripe:sync`, run in the Vercel build): a Billing Meter named `flagon_events`
+ * and a metered per-unit price with lookup key `flagon_events_metered` (at the code rate,
+ * EVENTS_METER.pricePerMillionCents) attached to the SEPARATE "Flagon Platform Usage"
+ * product — not the Pro product — so the metered line reads distinctly at checkout. Usage
+ * is reported to the meter (billing.meterEvents.create with event_name = the meter name)
+ * and the price turns it into an invoice line; the $50 credit grant offsets it.
  */
 export const EVENTS_METER_EVENT_NAME = "flagon_events";
 export const EVENTS_METERED_PRICE_LOOKUP_KEY = "flagon_events_metered";
@@ -88,7 +90,7 @@ let cachedMeteredPriceId: string | null = null;
 
 /**
  * Resolve the metered events price id from its `lookup_key`. Same caching/behavior as
- * `getProPriceId`. Throws if setup-metered.ts hasn't created the meter + price yet.
+ * `getProPriceId`. Throws if `npm run stripe:sync` hasn't created the meter + price yet.
  */
 export async function getMeteredPriceId(): Promise<string> {
   if (cachedMeteredPriceId) return cachedMeteredPriceId;
@@ -101,7 +103,7 @@ export async function getMeteredPriceId(): Promise<string> {
   const price = prices.data[0];
   if (!price) {
     throw new Error(
-      `No active Stripe price with lookup_key "${EVENTS_METERED_PRICE_LOOKUP_KEY}". Run scripts/setup-metered.ts to create the events meter + metered price.`,
+      `No active Stripe price with lookup_key "${EVENTS_METERED_PRICE_LOOKUP_KEY}". Run "npm run stripe:sync" to create the events meter + metered price.`,
     );
   }
   cachedMeteredPriceId = price.id;

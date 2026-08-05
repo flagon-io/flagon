@@ -35,8 +35,8 @@ const VALUE_PLACEHOLDER: Record<FlagType, string> = {
 
 type VariantDraft = { value: string; label: string };
 
-export function CreateFlagButton({ slug }: { slug: string }) {
-  const [open, setOpen] = useState(false);
+export function CreateFlagButton({ slug, initialCreate }: { slug: string; initialCreate?: boolean }) {
+  const [open, setOpen] = useState(initialCreate ?? false);
   return (
     <>
       <Button variant="primary" onClick={() => setOpen(true)}>

@@ -11,10 +11,13 @@ import { FlagsTable } from "./flags-table";
  */
 export default async function FlagsOverview({
   params,
+  searchParams,
 }: {
   params: Promise<{ org: string }>;
+  searchParams: Promise<{ create?: string }>;
 }) {
   const { org: slug } = await params;
+  const sp = await searchParams;
   const session = await getSession();
   if (!session) redirect("/login");
   const membership = await getMembershipBySlug(session.user.id, slug);
@@ -22,5 +25,5 @@ export default async function FlagsOverview({
 
   const flags = await listFlags(slug);
 
-  return <FlagsTable slug={slug} flags={flags} />;
+  return <FlagsTable slug={slug} flags={flags} initialCreate={Boolean(sp.create)} />;
 }

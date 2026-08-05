@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
 import { oncallEscalationLevels, oncallEscalationPolicies, teamMembers } from "../db/schema.js";
-import { scheduleCurrentOnCall } from "../oncall/resolve.js";
+import { scheduleCurrentOnCall, teamCurrentOnCall } from "../oncall/resolve.js";
 import type { EscalationLevel } from "../oncall/escalation.js";
 
 /** Load a policy's ordered levels + repeat count (what the escalation engine wants). */
@@ -53,5 +53,26 @@ export async function resolveLevelTargets(
     .select({ userId: teamMembers.userId })
     .from(teamMembers)
     .where(eq(teamMembers.teamId, level.targetId));
+  return rows.map((r) => r.userId);
+}
+
+/**
+ * The responders for a team: its on-call (via the team's schedule) when there is
+ * one, else the whole team. Shared by the declare path (first page) and the
+ * escalation sweep's fallback when a level resolves to nobody, so a real incident
+ * is never silently un-paged.
+ */
+export async function teamResponders(
+  tx: TenantTx,
+  teamId: string | null,
+  now: Date,
+): Promise<string[]> {
+  if (!teamId) return [];
+  const onCall = await teamCurrentOnCall(tx, teamId, now);
+  if (onCall) return [onCall];
+  const rows = await tx
+    .select({ userId: teamMembers.userId })
+    .from(teamMembers)
+    .where(eq(teamMembers.teamId, teamId));
   return rows.map((r) => r.userId);
 }

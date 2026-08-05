@@ -47,11 +47,11 @@ export function ProjectIncidents({
             Reliability events affecting <span className="text-zinc-300">{projectName}</span>.
           </p>
         </div>
-        {canManage ? (
-          <Button variant="primary" onClick={() => setOpen(true)}>
+        <span title={canManage ? undefined : "Only organization owners and admins can declare incidents"}>
+          <Button variant="primary" disabled={!canManage} onClick={() => setOpen(true)}>
             <Siren className="size-4" /> Declare incident
           </Button>
-        ) : null}
+        </span>
       </div>
 
       {incidents.length === 0 ? (

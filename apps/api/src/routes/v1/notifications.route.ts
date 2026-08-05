@@ -30,11 +30,17 @@ function requireUserId(c: Context): string | Response {
   return auth.user.id;
 }
 
-const addBody = z.object({
-  type: z.enum(CHANNEL_TYPES),
-  value: z.string().trim().min(1).max(320),
-  label: z.string().trim().max(60).optional(),
-});
+const addBody = z
+  .object({
+    type: z.enum(CHANNEL_TYPES),
+    value: z.string().trim().min(1).max(320),
+    label: z.string().trim().max(60).optional(),
+  })
+  // An email channel is emailed as-is when paging, so it must be a real address.
+  .refine((v) => v.type !== "email" || z.string().email().safeParse(v.value).success, {
+    message: "Enter a valid email address.",
+    path: ["value"],
+  });
 
 const channelSchema = z.object({
   id: z.string(),

@@ -29,12 +29,14 @@ export function TeamsView({
   slug,
   teams,
   canCreate,
+  initialCreate,
 }: {
   slug: string;
   teams: Team[];
   canCreate: boolean;
+  initialCreate?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState((initialCreate ?? false) && canCreate);
 
   return (
     <div className="flex flex-col gap-6">

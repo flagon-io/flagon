@@ -2,45 +2,48 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { BellRing, CalendarClock, Plus, Trash2, Users, X } from "lucide-react";
-import { Button, Field, Input, Select } from "@flagon/design";
+import Link from "next/link";
+import { BellRing, CalendarClock, Pencil, Plus, Users } from "lucide-react";
+import { Button, Field, Input, Modal, ModalHeader, ModalBody, ModalFooter, Select } from "@flagon/design";
 import type { OncallScheduleDetail } from "@/lib/oncall-api";
-import {
-  addOverrideAction,
-  createScheduleAction,
-  deleteScheduleAction,
-  removeOverrideAction,
-  setScheduleMembersAction,
-} from "../actions";
+import { createScheduleAction } from "../actions";
 
 type Opt = { key: string; name: string };
 type OrgMember = { userId: string; name: string };
 const NONE = "__none__";
+const NO_MANAGE = "Only organization owners and admins can manage schedules.";
 
 function slugify(v: string) {
   return v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
 }
 
-function whenRange(startsAt: string, endsAt: string): string {
-  const fmt = (iso: string) =>
-    new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  return `${fmt(startsAt)} → ${fmt(endsAt)}`;
+/** The on-call handoff moment (weekday + time), for "on-call until …". */
+function handoff(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * On-call schedules index: a read-only grid of schedule cards. Each card
+ * summarizes a rotation (name, binding, interval, size) and its current
+ * on-call line, and links to the dedicated editor. Creating opens a small
+ * modal, then routes straight to the new schedule's editor.
+ */
 export function SchedulesManager({
   slug,
   schedules,
   teams,
   orgMembers,
   canManage,
+  initialCreate,
 }: {
   slug: string;
   schedules: OncallScheduleDetail[];
   teams: Opt[];
   orgMembers: OrgMember[];
   canManage: boolean;
+  initialCreate?: boolean;
 }) {
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState((initialCreate ?? false) && canManage);
   const nameBy = new Map(orgMembers.map((m) => [m.userId, m.name]));
 
   return (
@@ -50,31 +53,97 @@ export function SchedulesManager({
           <h1 className="text-xl font-semibold tracking-tight text-zinc-100">On-call schedules</h1>
           <p className="mt-1 text-sm text-zinc-500">Rotations that decide who responds. Bind one to a team or leave it standalone.</p>
         </div>
-        {canManage ? (
-          <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus className="size-4" /> New schedule
-          </Button>
-        ) : null}
+        <Button
+          variant="primary"
+          onClick={() => setCreating(true)}
+          disabled={!canManage}
+          title={canManage ? undefined : NO_MANAGE}
+        >
+          <Plus className="size-4" /> New schedule
+        </Button>
       </div>
 
-      {schedules.length === 0 && !creating ? (
-        <p className="rounded-xl border border-dashed border-white/12 bg-white/2 px-6 py-12 text-center text-sm text-zinc-500">
-          No schedules yet. Create one and add people to the rotation.
-        </p>
-      ) : null}
+      {schedules.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-white/12 bg-white/2 px-6 py-14 text-center">
+          <span className="grid size-11 place-items-center rounded-xl bg-white/5 text-zinc-300"><CalendarClock className="size-5" /></span>
+          <p className="text-base font-medium text-zinc-100">No schedules</p>
+          <p className="max-w-sm text-sm text-zinc-500">Create a rotation and add people to it. Whoever it lands on gets paged when a matching incident is declared.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {schedules.map((d) => (
+            <ScheduleCard key={d.schedule.key} slug={slug} detail={d} nameBy={nameBy} canManage={canManage} />
+          ))}
+        </div>
+      )}
 
-      {creating ? <CreateForm slug={slug} teams={teams} onDone={() => setCreating(false)} /> : null}
+      {creating ? <CreateModal slug={slug} teams={teams} onClose={() => setCreating(false)} /> : null}
+    </div>
+  );
+}
 
-      <div className="flex flex-col gap-4">
-        {schedules.map((s) => (
-          <ScheduleCard key={s.schedule.key} slug={slug} detail={s} orgMembers={orgMembers} nameBy={nameBy} canManage={canManage} />
-        ))}
+function ScheduleCard({
+  slug,
+  detail,
+  nameBy,
+  canManage,
+}: {
+  slug: string;
+  detail: OncallScheduleDetail;
+  nameBy: Map<string, string>;
+  canManage: boolean;
+}) {
+  const { schedule, current } = detail;
+  const href = `/${slug}/incidents/on-call/${schedule.key}`;
+  const currentName = current.current ? nameBy.get(current.current) ?? "On-call" : null;
+  const nextName = current.next ? nameBy.get(current.next) : null;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/2 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="inline-flex items-center gap-2 text-sm font-medium text-zinc-100">
+            <CalendarClock className="size-4 shrink-0 text-zinc-500" />
+            <span className="truncate">{schedule.name}</span>
+          </p>
+          <p className="mt-0.5 text-xs text-zinc-500">
+            {schedule.team ? `Team ${schedule.team.name}` : "Standalone"} · every {schedule.rotationIntervalHours}h
+          </p>
+        </div>
+        <Link
+          href={href}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10"
+        >
+          <Pencil className="size-3.5" /> {canManage ? "Edit" : "View"}
+        </Link>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs text-zinc-500">
+          <Users className="size-3.5" /> {schedule.memberCount} {schedule.memberCount === 1 ? "person" : "people"}
+        </span>
+      </div>
+
+      <div className="rounded-lg border border-white/8 bg-white/2 px-3 py-2">
+        {currentName ? (
+          <>
+            <p className="inline-flex items-center gap-1.5 text-sm text-zinc-200">
+              <BellRing className="size-3.5 text-teal-400" />
+              <span>
+                <span className="text-teal-300">{currentName}</span> on-call{nextName ? <>, then {nextName}</> : null}
+              </span>
+            </p>
+            {current.until ? <p className="mt-0.5 text-[11px] text-zinc-600">until {handoff(current.until)}</p> : null}
+          </>
+        ) : (
+          <p className="text-sm text-zinc-500">Nobody on-call yet.</p>
+        )}
       </div>
     </div>
   );
 }
 
-function CreateForm({ slug, teams, onDone }: { slug: string; teams: Opt[]; onDone: () => void }) {
+function CreateModal({ slug, teams, onClose }: { slug: string; teams: Opt[]; onClose: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [name, setName] = useState("");
@@ -86,218 +155,60 @@ function CreateForm({ slug, teams, onDone }: { slug: string; teams: Opt[]; onDon
 
   function create() {
     setError(null);
-    if (!name.trim()) return setError("Name the schedule.");
+    const finalName = name.trim();
+    if (!finalName) return setError("Name the schedule.");
+    const finalKey = key.trim() || slugify(finalName);
     start(async () => {
       const res = await createScheduleAction(slug, {
-        name: name.trim(),
-        key: key.trim() || slugify(name),
+        name: finalName,
+        key: finalKey,
         teamKey: team === NONE ? undefined : team,
         rotationIntervalHours: Number(interval) || 168,
       });
       if (res.error) return setError(res.error);
-      onDone();
-      router.refresh();
+      router.push(`/${slug}/incidents/on-call/${res.key ?? finalKey}`);
     });
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/2 p-4">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Name"><Input value={name} onChange={(e) => { setName(e.target.value); if (!keyEdited) setKey(slugify(e.target.value)); }} placeholder="Primary" /></Field>
-        <Field label="Key"><Input value={key} onChange={(e) => { setKeyEdited(true); setKey(slugify(e.target.value)); }} placeholder="primary" className="font-mono" /></Field>
-        <Field label="Team" hint="Optional; standalone if unset.">
-          <Select ariaLabel="Team" value={team} onValueChange={setTeam} className="w-full" options={[{ value: NONE, label: "Standalone" }, ...teams.map((t) => ({ value: t.key, label: t.name }))]} />
-        </Field>
-        <Field label="Rotation (hours)"><Input value={interval} onChange={(e) => setIntervalH(e.target.value.replace(/[^0-9]/g, ""))} /></Field>
-      </div>
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
-      <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={onDone}>Cancel</Button>
-        <Button variant="primary" onClick={create} disabled={pending || !name.trim()}>{pending ? "Creating…" : "Create"}</Button>
-      </div>
-    </div>
-  );
-}
-
-function ScheduleCard({
-  slug,
-  detail,
-  orgMembers,
-  nameBy,
-  canManage,
-}: {
-  slug: string;
-  detail: OncallScheduleDetail;
-  orgMembers: OrgMember[];
-  nameBy: Map<string, string>;
-  canManage: boolean;
-}) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [members, setMembers] = useState<string[]>(detail.members.map((m) => m.userId));
-  const [error, setError] = useState<string | null>(null);
-  const [ovUser, setOvUser] = useState("");
-  const [ovStart, setOvStart] = useState("");
-  const [ovEnd, setOvEnd] = useState("");
-  const { schedule, current, overrides } = detail;
-
-  function toggle(userId: string) {
-    setMembers((m) => (m.includes(userId) ? m.filter((u) => u !== userId) : [...m, userId]));
-  }
-  function addOverrideRow() {
-    setError(null);
-    if (!ovUser) return setError("Pick who covers.");
-    if (!ovStart || !ovEnd) return setError("Set a start and end.");
-    if (new Date(ovEnd) <= new Date(ovStart)) return setError("End must be after start.");
-    start(async () => {
-      const res = await addOverrideAction(slug, schedule.key, {
-        userId: ovUser,
-        startsAt: new Date(ovStart).toISOString(),
-        endsAt: new Date(ovEnd).toISOString(),
-      });
-      if (res.error) {
-        setError(res.error);
-        return;
-      }
-      setOvUser("");
-      setOvStart("");
-      setOvEnd("");
-      router.refresh();
-    });
-  }
-  function removeOverrideRow(id: string) {
-    setError(null);
-    start(async () => {
-      const res = await removeOverrideAction(slug, schedule.key, id);
-      if (res.error) {
-        setError(res.error);
-        return;
-      }
-      router.refresh();
-    });
-  }
-  function save() {
-    setError(null);
-    start(async () => {
-      const res = await setScheduleMembersAction(slug, schedule.key, members);
-      if (res.error) return setError(res.error);
-      router.refresh();
-    });
-  }
-  function remove() {
-    start(async () => {
-      await deleteScheduleAction(slug, schedule.key);
-      router.refresh();
-    });
-  }
-
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/2 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium text-zinc-100">{schedule.name}</p>
-          <p className="mt-0.5 text-xs text-zinc-500">
-            {schedule.team ? `Team ${schedule.team.name}` : "Standalone"} · every {schedule.rotationIntervalHours}h
-          </p>
+    <Modal onClose={onClose} size="md">
+      <ModalHeader title="New schedule" description="Name it now. You will build the rotation on the next screen." onClose={onClose} />
+      <ModalBody>
+        <div className="flex flex-col gap-4">
+          <Field label="Name">
+            <Input
+              value={name}
+              autoFocus
+              onChange={(e) => { setName(e.target.value); if (!keyEdited) setKey(slugify(e.target.value)); }}
+              placeholder="Primary"
+            />
+          </Field>
+          <Field label="Key" hint="Stable identifier. Auto-fills from the name.">
+            <Input
+              value={key}
+              onChange={(e) => { setKeyEdited(true); setKey(slugify(e.target.value)); }}
+              placeholder="primary"
+              className="font-mono"
+            />
+          </Field>
+          <Field label="Team" hint="Optional. Standalone if unset.">
+            <Select
+              ariaLabel="Team"
+              value={team}
+              onValueChange={setTeam}
+              options={[{ value: NONE, label: "Standalone" }, ...teams.map((t) => ({ value: t.key, label: t.name }))]}
+            />
+          </Field>
+          <Field label="Rotation interval (hours)" hint="How long each person holds the pager. 168 = one week.">
+            <Input value={interval} onChange={(e) => setIntervalH(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" />
+          </Field>
+          {error ? <p className="text-sm text-red-400">{error}</p> : null}
         </div>
-        <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
-            <BellRing className="size-3.5 text-teal-400" /> {current.current ? nameBy.get(current.current) ?? "On-call" : "Nobody on-call"}
-          </span>
-          {canManage ? (
-            <button type="button" onClick={remove} disabled={pending} className="text-zinc-500 hover:text-red-400" aria-label="Delete schedule">
-              <Trash2 className="size-4" />
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-3">
-        <p className="mb-1.5 text-xs font-medium text-zinc-500">Rotation ({members.length})</p>
-        {canManage ? (
-          <div className="flex flex-wrap gap-1.5">
-            {orgMembers.map((m) => {
-              const on = members.includes(m.userId);
-              const order = members.indexOf(m.userId);
-              return (
-                <button
-                  key={m.userId}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => toggle(m.userId)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${on ? "border-teal-400/30 bg-teal-400/10 text-teal-200" : "border-white/10 bg-white/5 text-zinc-400 hover:text-zinc-200"}`}
-                >
-                  {on ? <span className="tabular-nums">{order + 1}.</span> : null}
-                  {m.name}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {detail.members.map((m) => (
-              <span key={m.userId} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-zinc-300">
-                <Users className="size-3 text-zinc-500" /> {m.name || nameBy.get(m.userId)}
-              </span>
-            ))}
-          </div>
-        )}
-        {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
-        {canManage ? (
-          <div className="mt-2">
-            <Button variant="secondary" size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save rotation"}</Button>
-          </div>
-        ) : null}
-      </div>
-
-      {/* Overrides: temporary "cover for me" swaps that win over the rotation. */}
-      <div className="mt-4 border-t border-white/8 pt-3">
-        <p className="mb-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500">
-          <CalendarClock className="size-3.5" /> Overrides
-        </p>
-        {overrides.length === 0 ? (
-          <p className="text-xs text-zinc-500">No overrides. The rotation decides who is on-call.</p>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {overrides.map((o) => (
-              <li key={o.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/8 bg-white/2 px-2.5 py-1.5">
-                <div className="min-w-0">
-                  <p className="truncate text-sm text-zinc-200">{nameBy.get(o.userId) ?? "Member"}</p>
-                  <p className="text-xs text-zinc-500 tabular-nums">{whenRange(o.startsAt, o.endsAt)}</p>
-                </div>
-                {canManage ? (
-                  <button type="button" onClick={() => removeOverrideRow(o.id)} disabled={pending} className="shrink-0 text-zinc-500 hover:text-red-400 disabled:opacity-50" aria-label="Remove override">
-                    <X className="size-4" />
-                  </button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-        {canManage ? (
-          <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-            <Field label="Who covers">
-              <Select
-                ariaLabel="Override member"
-                value={ovUser}
-                onValueChange={setOvUser}
-                placeholder="Pick a member…"
-                className="w-full"
-                options={orgMembers.map((m) => ({ value: m.userId, label: m.name }))}
-              />
-            </Field>
-            <Field label="From">
-              <Input type="datetime-local" value={ovStart} onChange={(e) => setOvStart(e.target.value)} />
-            </Field>
-            <Field label="Until">
-              <Input type="datetime-local" value={ovEnd} onChange={(e) => setOvEnd(e.target.value)} />
-            </Field>
-            <Button variant="secondary" onClick={addOverrideRow} disabled={pending || !ovUser || !ovStart || !ovEnd}>
-              <Plus className="size-4" /> Add
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="secondary" onClick={onClose} disabled={pending}>Cancel</Button>
+        <Button variant="primary" onClick={create} disabled={pending || !name.trim()}>{pending ? "Creating…" : "Create schedule"}</Button>
+      </ModalFooter>
+    </Modal>
   );
 }

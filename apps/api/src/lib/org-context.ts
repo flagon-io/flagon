@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   members,
@@ -11,6 +11,25 @@ import type { AuthIdentity } from "./auth-context.js";
 import { getAuth } from "./auth-context.js";
 import { isOrgLocked } from "./entitlement.js";
 import { jsonError } from "./http.js";
+
+/**
+ * The subset of `userIds` that are NOT current members of `orgId`. Used to reject
+ * user-id inputs (on-call rotation members, overrides, user escalation targets,
+ * action-item assignees) that reference a non-member: those ids are resolved
+ * against the global, RLS-free `users` table for display (name + email) and paged
+ * by email, so an unchecked outside uuid would leak another org's identity. Queried
+ * on the auth `members` table (no RLS) with an explicit org filter.
+ */
+export async function nonMembers(orgId: string, userIds: string[]): Promise<string[]> {
+  const unique = [...new Set(userIds)];
+  if (unique.length === 0) return [];
+  const rows = await db
+    .select({ userId: members.userId })
+    .from(members)
+    .where(and(eq(members.organizationId, orgId), inArray(members.userId, unique)));
+  const found = new Set(rows.map((r) => r.userId));
+  return unique.filter((id) => !found.has(id));
+}
 
 /**
  * Resolve and AUTHORIZE the organization a management request targets (the

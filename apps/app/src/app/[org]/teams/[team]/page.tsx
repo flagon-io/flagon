@@ -1,13 +1,26 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, Boxes } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug, getOrgMembers } from "@/lib/org";
 import { getTeam, listTeamMembers } from "@/lib/teams-api";
 import { listProjects } from "@/lib/projects-api";
-import { SettingsSection } from "@/components/settings/section";
+import { getSchedule, listSchedules } from "@/lib/oncall-api";
 import { TeamHeader } from "./team-header";
 import { TeamMembersManager } from "./team-members-manager";
+import { TeamOncallCreate } from "./team-oncall-create";
+import { TeamTabs, type TeamScheduleVM } from "./team-tabs";
+
+/** The on-call handoff moment (weekday + time), for "on-call until …". */
+function handoff(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 /**
  * Team detail — its membership (with maintainer/member roles) and the projects it
@@ -28,10 +41,11 @@ export default async function TeamDetail({
   const team = await getTeam(slug, key);
   if (!team) notFound();
 
-  const [teamMembers, orgMembers, projects] = await Promise.all([
+  const [teamMembers, orgMembers, projects, schedules] = await Promise.all([
     listTeamMembers(slug, key),
     getOrgMembers(membership.id),
     listProjects(slug),
+    listSchedules(slug),
   ]);
 
   const isManager = canManageOrg(membership.role);
@@ -41,10 +55,32 @@ export default async function TeamDetail({
   const canManageTeam = isManager || isMaintainer;
 
   const ownedProjects = projects.filter((p) => p.ownerTeam?.key === key);
+
+  // Schedules bound to this team surface here; the rotations themselves stay
+  // first-class over in the reliability section. Resolve details (who's on now)
+  // only for the bound ones so we do not fan out across every org schedule.
+  const teamSchedules = schedules.filter((s) => s.team?.key === key);
+  const details = (
+    await Promise.all(teamSchedules.map((s) => getSchedule(slug, s.key)))
+  ).filter((d): d is NonNullable<typeof d> => d !== null);
+  const nameBy = new Map(orgMembers.map((m) => [m.userId, m.name]));
   const onTeam = new Set(teamMembers.map((m) => m.userId));
   const available = orgMembers
     .filter((m) => !onTeam.has(m.userId))
     .map((m) => ({ userId: m.userId, name: m.name, email: m.email, username: m.username }));
+
+  // Resolve the bound schedules into plain view models server-side so the tab
+  // client component gets serializable props (no Map crosses the boundary).
+  const scheduleVMs: TeamScheduleVM[] = details.map((d) => ({
+    key: d.schedule.key,
+    name: d.schedule.name,
+    rotationIntervalHours: d.schedule.rotationIntervalHours,
+    currentName: d.current.current
+      ? nameBy.get(d.current.current) ?? "On-call"
+      : null,
+    nextName: d.current.next ? nameBy.get(d.current.next) ?? null : null,
+    untilLabel: d.current.until ? handoff(d.current.until) : null,
+  }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -62,55 +98,32 @@ export default async function TeamDetail({
         canDelete={isManager}
       />
 
-      <SettingsSection
-        title="Members"
-        description={`${team.memberCount} ${team.memberCount === 1 ? "person" : "people"} on this team`}
-      >
-        <TeamMembersManager
-          slug={slug}
-          teamKey={team.key}
-          members={teamMembers.map((m) => ({
-            userId: m.userId,
-            name: m.name,
-            email: m.email,
-            username: m.username,
-            role: m.role,
-          }))}
-          available={available}
-          canManage={canManageTeam}
-        />
-      </SettingsSection>
-
-      <SettingsSection
-        title="Owned projects"
-        description="Projects in the catalog this team owns."
-      >
-        {ownedProjects.length === 0 ? (
-          <p className="text-sm text-zinc-500">
-            No projects yet. Assign this team as the owner from a project&apos;s
-            settings.
-          </p>
-        ) : (
-          <ul className="flex flex-col divide-y divide-white/8 rounded-lg border border-white/8">
-            {ownedProjects.map((p) => (
-              <li key={p.key}>
-                <Link
-                  href={`/${slug}/projects/${p.key}`}
-                  className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/3"
-                >
-                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-white/5 text-zinc-400">
-                    <Boxes className="size-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm text-zinc-100">{p.name}</p>
-                    <p className="truncate font-mono text-xs text-zinc-500">{p.key}</p>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </SettingsSection>
+      <TeamTabs
+        slug={slug}
+        memberCount={team.memberCount}
+        ownedCount={ownedProjects.length}
+        canManageTeam={canManageTeam}
+        schedules={scheduleVMs}
+        ownedProjects={ownedProjects.map((p) => ({ key: p.key, name: p.name }))}
+        membersManager={
+          <TeamMembersManager
+            slug={slug}
+            teamKey={team.key}
+            members={teamMembers.map((m) => ({
+              userId: m.userId,
+              name: m.name,
+              email: m.email,
+              username: m.username,
+              role: m.role,
+            }))}
+            available={available}
+            canManage={canManageTeam}
+          />
+        }
+        oncallCreate={
+          <TeamOncallCreate slug={slug} teamKey={key} canManage={canManageTeam} />
+        }
+      />
     </div>
   );
 }

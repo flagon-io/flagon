@@ -31,7 +31,7 @@ export type OncallScheduleDetail = {
   schedule: OncallSchedule;
   members: OncallMember[];
   overrides: OncallOverride[];
-  current: { current: string | null; next: string | null };
+  current: { current: string | null; next: string | null; until: string | null };
 };
 export type EscalationLevel = { position: number; targetType: string; targetKey: string; targetLabel: string; delayMinutes: number };
 export type EscalationPolicy = { key: string; name: string; repeatCount: number };

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
 import { oncallSchedules, oncallScheduleMembers, oncallOverrides } from "../db/schema.js";
 import { resolveOnCall } from "./schedule.js";
@@ -30,7 +30,10 @@ export async function scheduleCurrentOnCall(
       endsAt: oncallOverrides.endsAt,
     })
     .from(oncallOverrides)
-    .where(eq(oncallOverrides.scheduleId, scheduleId));
+    .where(eq(oncallOverrides.scheduleId, scheduleId))
+    // Most-recently-created first, so when two overrides cover the same instant the
+    // newer one deterministically wins (resolveOnCall takes the first active match).
+    .orderBy(desc(oncallOverrides.createdAt));
   return resolveOnCall(
     { rotationIntervalHours: sched.rotationIntervalHours, anchorAt: sched.anchorAt },
     members,

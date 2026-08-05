@@ -260,6 +260,27 @@
       "when": 1788300000000,
       "tag": "0036_metric_event_properties",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1788400000000,
+      "tag": "0037_reliability_enum_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788500000000,
+      "tag": "0038_runbook_webhook_steps",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788600000000,
+      "tag": "0039_schedule_teams",
+      "breakpoints": true
     }
   ]
 }

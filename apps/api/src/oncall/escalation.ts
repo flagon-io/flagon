@@ -51,6 +51,33 @@ export function activeStep(
 }
 
 /**
+ * Every step in `(afterStep, activeStep]` that should be paged *now*, in order.
+ * The cron records the last GLOBAL step it paged; when several delay thresholds
+ * elapse between two sweeps (short delays, a coarse/backlogged cron), the frontier
+ * `activeStep` alone would skip the intermediate levels and page only the top one
+ * — so the primary on-call never hears about it. This returns each skipped step so
+ * the caller pages them all exactly once. Empty when acknowledged or already caught
+ * up. `afterStep` is the incident's `escalated_level`; step 0 is paged at declare.
+ */
+export function stepsToPage(
+  levels: EscalationLevel[],
+  repeatCount: number,
+  declaredAt: Date,
+  acknowledgedAt: Date | null,
+  now: Date,
+  afterStep: number,
+): ActiveStep[] {
+  const active = activeStep(levels, repeatCount, declaredAt, acknowledgedAt, now);
+  if (!active) return [];
+  const seq = sequence(levels, repeatCount);
+  const out: ActiveStep[] = [];
+  for (let s = Math.max(afterStep + 1, 0); s <= active.step; s++) {
+    out.push({ step: s, level: seq[s] });
+  }
+  return out;
+}
+
+/**
  * Resolve a level's target to concrete user ids. The caller supplies the lookups
  * (a schedule's current on-call, a team's members) so this stays pure.
  */

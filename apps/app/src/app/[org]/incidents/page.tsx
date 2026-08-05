@@ -27,6 +27,7 @@ export default async function IncidentsPage({
 
   const filterProject = typeof sp.project === "string" ? sp.project : undefined;
   const autoDeclareService = sp.declare && typeof sp.service === "string" ? sp.service : undefined;
+  const autoDeclare = Boolean(sp.declare);
 
   const [incidents, teams, projects, policies] = await Promise.all([
     listIncidents(slug, filterProject ? { project: filterProject } : undefined),
@@ -45,6 +46,7 @@ export default async function IncidentsPage({
       policies={policies.map((p) => ({ key: p.key, name: p.name }))}
       filterProject={filterProject}
       autoDeclareService={autoDeclareService}
+      autoDeclare={autoDeclare}
     />
   );
 }

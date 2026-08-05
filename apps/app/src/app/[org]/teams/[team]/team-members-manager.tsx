@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
-import { Button, Select } from "@flagon/design";
+import { Search } from "lucide-react";
+import { Select } from "@flagon/design";
+import { MemberAvatar } from "@/components/member-avatar";
+import { MemberPicker } from "@/components/member-picker";
 import {
   addTeamMemberAction,
   removeTeamMemberAction,
@@ -23,6 +25,10 @@ const TEAM_ROLES = [
   { value: "maintainer", label: "Maintainer" },
   { value: "member", label: "Member" },
 ];
+const NO_MANAGE = "Only organization owners and admins and this team's maintainers can manage members.";
+// Small teams stay clean; the filter appears only once a roster is long enough
+// that scanning it by eye gets tedious.
+const FILTER_THRESHOLD = 6;
 
 export function TeamMembersManager({
   slug,
@@ -40,9 +46,8 @@ export function TeamMembersManager({
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [addUser, setAddUser] = useState("");
-  const [addRole, setAddRole] = useState<"maintainer" | "member">("member");
-  const [adding, startAdd] = useTransition();
+  const [filter, setFilter] = useState("");
+  const [, startAdd] = useTransition();
 
   function run(id: string, fn: () => Promise<{ error?: string }>) {
     setBusy(id);
@@ -54,67 +59,78 @@ export function TeamMembersManager({
     });
   }
 
-  function add() {
-    if (!addUser) return;
+  function add(userId: string) {
     setError(null);
+    setBusy(userId);
     startAdd(async () => {
-      const res = await addTeamMemberAction(slug, teamKey, addUser, addRole);
+      const res = await addTeamMemberAction(slug, teamKey, userId, "member");
+      setBusy(null);
       if (res.error) return setError(res.error);
-      setAddUser("");
-      setAddRole("member");
       router.refresh();
     });
   }
+
+  const q = filter.trim().toLowerCase();
+  const shown = useMemo(() => {
+    if (!q) return members;
+    return members.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        m.email.toLowerCase().includes(q) ||
+        (m.username ? `@${m.username}`.toLowerCase().includes(q) : false),
+    );
+  }, [members, q]);
+
+  const showFilter = members.length > FILTER_THRESHOLD;
 
   return (
     <div className="flex flex-col gap-3">
       {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
-      {canManage && available.length > 0 ? (
-        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-white/8 bg-white/2 p-3">
-          <div className="flex min-w-52 flex-1 flex-col gap-1.5">
-            <span className="text-xs font-medium text-zinc-400">Add a member</span>
-            <Select
-              ariaLabel="Org member to add"
-              value={addUser}
-              onValueChange={setAddUser}
-              placeholder="Choose a person…"
-              options={available.map((a) => ({
-                value: a.userId,
-                label: a.username ? `${a.name} (@${a.username})` : `${a.name} · ${a.email}`,
-              }))}
+      <div className="flex flex-wrap items-center gap-2">
+        <MemberPicker
+          options={available}
+          onPick={add}
+          disabled={!canManage || available.length === 0}
+          disabledReason={
+            !canManage
+              ? NO_MANAGE
+              : "Everyone in the organization is already on this team."
+          }
+        />
+        {showFilter ? (
+          <div className="flex min-w-52 flex-1 items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 transition-colors focus-within:border-teal-500/50 focus-within:ring-2 focus-within:ring-teal-500/20">
+            <Search className="size-3.5 shrink-0 text-zinc-500" />
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Find a member…"
+              className="h-10 w-full bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-zinc-400">Role</span>
-            <Select
-              ariaLabel="Team role"
-              value={addRole}
-              onValueChange={(v) => setAddRole(v as "maintainer" | "member")}
-              options={TEAM_ROLES}
-            />
-          </div>
-          <Button variant="secondary" onClick={add} disabled={adding || !addUser}>
-            <Plus className="size-4" /> Add
-          </Button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       {members.length === 0 ? (
         <p className="text-sm text-zinc-500">No members yet.</p>
+      ) : shown.length === 0 ? (
+        <p className="text-sm text-zinc-500">No members match “{filter}”.</p>
       ) : (
         <ul className="flex flex-col divide-y divide-white/8 rounded-lg border border-white/8">
-          {members.map((m) => (
+          {shown.map((m) => (
             <li
               key={m.userId}
               className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
             >
-              <div className="min-w-0">
-                <p className="truncate text-sm text-zinc-100">{m.name}</p>
-                <p className="truncate text-xs text-zinc-500">
-                  {m.username ? `@${m.username} · ` : ""}
-                  {m.email}
-                </p>
+              <div className="flex min-w-0 items-center gap-3">
+                <MemberAvatar name={m.name} />
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-zinc-100">{m.name}</p>
+                  <p className="truncate text-xs text-zinc-500">
+                    {m.username ? `@${m.username} · ` : ""}
+                    {m.email}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-3">
                 {canManage ? (
@@ -127,6 +143,7 @@ export function TeamMembersManager({
                         setTeamMemberRoleAction(slug, teamKey, m.userId, v as "maintainer" | "member"),
                       )
                     }
+                    fullWidth={false}
                     className="px-2 py-1 text-xs"
                     options={TEAM_ROLES}
                   />

@@ -2,42 +2,40 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { BookText, ChevronDown, ChevronUp, Link2, ListChecks, Plus, Trash2 } from "lucide-react";
-import { Button, Field, Input, Select, Textarea } from "@flagon/design";
+import Link from "next/link";
+import { BookText, ListChecks, Pencil, Plus } from "lucide-react";
+import { Button, Field, Input, Modal, ModalHeader, ModalBody, ModalFooter } from "@flagon/design";
 import { SEVERITIES } from "@/lib/incidents";
-import type { RunbookDetail } from "@/lib/runbooks-api";
-import {
-  createRunbookAction,
-  deleteRunbookAction,
-  setRunbookServicesAction,
-  setRunbookStepsAction,
-  updateRunbookAction,
-} from "../actions";
+import type { Runbook } from "@/lib/runbooks-api";
+import { createRunbookAction } from "../actions";
 
-type Opt = { key: string; name: string };
-type StepDraft = { title: string; body: string; kind: string; url: string };
-const NONE = "__none__";
-const STEP_KINDS = [
-  { value: "task", label: "Task" },
-  { value: "link", label: "Link" },
-];
+const NO_MANAGE = "Only organization owners and admins can manage runbooks.";
 
 function slugify(v: string) {
   return v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
 }
 
+function severityLabel(value: string) {
+  return SEVERITIES.find((s) => s.value === value)?.label ?? value.toUpperCase();
+}
+
+/**
+ * Runbooks index: a read-only list of runbook cards. Each card summarizes a
+ * playbook (name, key, trigger, step count, covered services) and links to its
+ * dedicated editor page. Creating opens a small modal, then routes to the editor.
+ */
 export function RunbooksManager({
   slug,
   runbooks,
-  projects,
   canManage,
+  initialCreate,
 }: {
   slug: string;
-  runbooks: RunbookDetail[];
-  projects: Opt[];
+  runbooks: Runbook[];
   canManage: boolean;
+  initialCreate?: boolean;
 }) {
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState((initialCreate ?? false) && canManage);
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-3">
@@ -45,210 +43,121 @@ export function RunbooksManager({
           <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Runbooks</h1>
           <p className="mt-1 text-sm text-zinc-500">Playbooks that become an incident&apos;s checklist. Attach by service or severity.</p>
         </div>
-        {canManage ? <Button variant="primary" onClick={() => setCreating(true)}><Plus className="size-4" /> New runbook</Button> : null}
+        <Button
+          variant="primary"
+          onClick={() => setCreating(true)}
+          disabled={!canManage}
+          title={canManage ? undefined : NO_MANAGE}
+        >
+          <Plus className="size-4" /> New runbook
+        </Button>
       </div>
 
-      {runbooks.length === 0 && !creating ? (
+      {runbooks.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-white/12 bg-white/2 px-6 py-14 text-center">
           <span className="grid size-11 place-items-center rounded-xl bg-white/5 text-zinc-300"><BookText className="size-5" /></span>
           <p className="text-base font-medium text-zinc-100">No runbooks</p>
           <p className="max-w-sm text-sm text-zinc-500">Write the steps once. When a matching incident is declared, they land on it as a checklist.</p>
         </div>
-      ) : null}
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {runbooks.map((r) => (
+            <RunbookCard key={r.key} slug={slug} runbook={r} canManage={canManage} />
+          ))}
+        </div>
+      )}
 
-      {creating ? <CreateForm slug={slug} onDone={() => setCreating(false)} /> : null}
+      {creating ? <CreateModal slug={slug} onClose={() => setCreating(false)} /> : null}
+    </div>
+  );
+}
 
-      <div className="flex flex-col gap-4">
-        {runbooks.map((r) => (
-          <RunbookCard key={r.runbook.key} slug={slug} detail={r} projects={projects} canManage={canManage} />
-        ))}
+function RunbookCard({ slug, runbook, canManage }: { slug: string; runbook: Runbook; canManage: boolean }) {
+  const href = `/${slug}/incidents/runbooks/${runbook.key}`;
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/2 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="inline-flex items-center gap-2 text-sm font-medium text-zinc-100">
+            <BookText className="size-4 shrink-0 text-zinc-500" />
+            <span className="truncate">{runbook.name}</span>
+          </p>
+          <p className="mt-0.5 font-mono text-xs text-zinc-500">{runbook.key}</p>
+        </div>
+        {canManage ? (
+          <Link
+            href={href}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10"
+          >
+            <Pencil className="size-3.5" /> Edit
+          </Link>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {runbook.triggerSeverity ? (
+          <span className="inline-flex items-center rounded-full border border-teal-400/30 bg-teal-400/10 px-2.5 py-0.5 text-xs text-teal-200">
+            Triggers at ≥ {severityLabel(runbook.triggerSeverity)}
+          </span>
+        ) : (
+          <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs text-zinc-400">Manual</span>
+        )}
+        <span className="inline-flex items-center gap-1.5 text-xs text-zinc-500">
+          <ListChecks className="size-3.5" /> {runbook.stepCount} {runbook.stepCount === 1 ? "step" : "steps"}
+        </span>
       </div>
     </div>
   );
 }
 
-function CreateForm({ slug, onDone }: { slug: string; onDone: () => void }) {
+function CreateModal({ slug, onClose }: { slug: string; onClose: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [name, setName] = useState("");
   const [key, setKey] = useState("");
   const [keyEdited, setKeyEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   function create() {
     setError(null);
-    if (!name.trim()) return setError("Name the runbook.");
+    const finalName = name.trim();
+    if (!finalName) return setError("Name the runbook.");
+    const finalKey = key.trim() || slugify(finalName);
     start(async () => {
-      const res = await createRunbookAction(slug, { name: name.trim(), key: key.trim() || slugify(name) });
+      const res = await createRunbookAction(slug, { name: finalName, key: finalKey });
       if (res.error) return setError(res.error);
-      onDone();
-      router.refresh();
-    });
-  }
-  return (
-    <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/2 p-4">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Name"><Input value={name} onChange={(e) => { setName(e.target.value); if (!keyEdited) setKey(slugify(e.target.value)); }} placeholder="Database outage" /></Field>
-        <Field label="Key"><Input value={key} onChange={(e) => { setKeyEdited(true); setKey(slugify(e.target.value)); }} placeholder="database-outage" className="font-mono" /></Field>
-      </div>
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
-      <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={onDone}>Cancel</Button>
-        <Button variant="primary" onClick={create} disabled={pending || !name.trim()}>{pending ? "Creating…" : "Create"}</Button>
-      </div>
-    </div>
-  );
-}
-
-function RunbookCard({
-  slug,
-  detail,
-  projects,
-  canManage,
-}: {
-  slug: string;
-  detail: RunbookDetail;
-  projects: Opt[];
-  canManage: boolean;
-}) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const [trigger, setTrigger] = useState(detail.runbook.triggerSeverity ?? NONE);
-  const [services, setServices] = useState<string[]>(detail.runbook.services.map((s) => s.key));
-  const [steps, setSteps] = useState<StepDraft[]>(
-    detail.steps.map((s) => ({ title: s.title, body: s.body ?? "", kind: s.kind, url: s.url ?? "" })),
-  );
-
-  function setStep(i: number, patch: Partial<StepDraft>) {
-    setSteps((ss) => ss.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
-  }
-  function moveStep(i: number, dir: -1 | 1) {
-    setSteps((ss) => {
-      const j = i + dir;
-      if (j < 0 || j >= ss.length) return ss;
-      const next = ss.slice();
-      [next[i], next[j]] = [next[j], next[i]];
-      return next;
-    });
-  }
-  function toggleService(key: string) {
-    setServices((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
-  }
-  function save() {
-    setError(null);
-    const cleanSteps = steps
-      .filter((s) => s.title.trim())
-      .map((s) => ({ title: s.title.trim(), body: s.body.trim() || undefined, kind: s.kind, url: s.kind === "link" && s.url.trim() ? s.url.trim() : undefined }));
-    start(async () => {
-      if (trigger !== (detail.runbook.triggerSeverity ?? NONE)) {
-        const up = await updateRunbookAction(slug, detail.runbook.key, { triggerSeverity: trigger === NONE ? null : trigger });
-        if (up.error) return setError(up.error);
-      }
-      const st = await setRunbookStepsAction(slug, detail.runbook.key, cleanSteps);
-      if (st.error) return setError(st.error);
-      const sv = await setRunbookServicesAction(slug, detail.runbook.key, services);
-      if (sv.error) return setError(sv.error);
-      router.refresh();
-    });
-  }
-  function remove() {
-    start(async () => {
-      await deleteRunbookAction(slug, detail.runbook.key);
-      router.refresh();
+      router.push(`/${slug}/incidents/runbooks/${res.key ?? finalKey}`);
     });
   }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/2 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="inline-flex items-center gap-2 text-sm font-medium text-zinc-100"><BookText className="size-4 text-zinc-500" /> {detail.runbook.name}</p>
-          <p className="mt-0.5 font-mono text-xs text-zinc-500">{detail.runbook.key}</p>
+    <Modal onClose={onClose} size="md">
+      <ModalHeader title="New runbook" description="Name it now. You will write the steps on the next screen." onClose={onClose} />
+      <ModalBody>
+        <div className="flex flex-col gap-4">
+          <Field label="Name">
+            <Input
+              value={name}
+              autoFocus
+              onChange={(e) => { setName(e.target.value); if (!keyEdited) setKey(slugify(e.target.value)); }}
+              placeholder="Database outage"
+            />
+          </Field>
+          <Field label="Key" hint="Stable identifier. Auto-fills from the name.">
+            <Input
+              value={key}
+              onChange={(e) => { setKeyEdited(true); setKey(slugify(e.target.value)); }}
+              placeholder="database-outage"
+              className="font-mono"
+            />
+          </Field>
+          {error ? <p className="text-sm text-red-400">{error}</p> : null}
         </div>
-        {canManage ? (
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
-              Trigger ≥
-              <Select ariaLabel="Trigger severity" value={trigger} onValueChange={setTrigger} options={[{ value: NONE, label: "Off" }, ...SEVERITIES.map((s) => ({ value: s.value, label: s.label }))]} />
-            </span>
-            <button type="button" onClick={remove} disabled={pending} className="text-zinc-500 hover:text-red-400" aria-label="Delete runbook"><Trash2 className="size-4" /></button>
-          </div>
-        ) : detail.runbook.triggerSeverity ? (
-          <span className="text-xs text-zinc-500">Triggers at ≥ {detail.runbook.triggerSeverity.toUpperCase()}</span>
-        ) : null}
-      </div>
-
-      {/* Services */}
-      <div className="mt-3">
-        <p className="mb-1.5 text-xs font-medium text-zinc-500">Covers services</p>
-        {canManage ? (
-          <div className="flex flex-wrap gap-1.5">
-            {projects.length === 0 ? <span className="text-xs text-zinc-500">No projects.</span> : null}
-            {projects.map((p) => {
-              const on = services.includes(p.key);
-              return (
-                <button key={p.key} type="button" aria-pressed={on} onClick={() => toggleService(p.key)} className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${on ? "border-teal-400/30 bg-teal-400/10 text-teal-200" : "border-white/10 bg-white/5 text-zinc-400 hover:text-zinc-200"}`}>{p.name}</button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {detail.runbook.services.length === 0 ? <span className="text-xs text-zinc-500">None.</span> : null}
-            {detail.runbook.services.map((s) => <span key={s.key} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-zinc-300">{s.name}</span>)}
-          </div>
-        )}
-      </div>
-
-      {/* Steps */}
-      <div className="mt-4">
-        <p className="mb-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500"><ListChecks className="size-3.5" /> Steps</p>
-        {canManage ? (
-          <div className="flex flex-col gap-2">
-            {steps.map((s, i) => (
-              <div key={i} className="flex flex-col gap-2 rounded-lg border border-white/8 bg-white/2 p-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="flex shrink-0 flex-col">
-                    <button type="button" onClick={() => moveStep(i, -1)} disabled={i === 0} className="text-zinc-600 hover:text-zinc-300 disabled:opacity-30" aria-label="Move step up">
-                      <ChevronUp className="size-3.5" />
-                    </button>
-                    <button type="button" onClick={() => moveStep(i, 1)} disabled={i === steps.length - 1} className="text-zinc-600 hover:text-zinc-300 disabled:opacity-30" aria-label="Move step down">
-                      <ChevronDown className="size-3.5" />
-                    </button>
-                  </div>
-                  <Input value={s.title} onChange={(e) => setStep(i, { title: e.target.value })} placeholder="Step title" className="flex-1" />
-                  <Select ariaLabel="Step kind" value={s.kind} onValueChange={(v) => setStep(i, { kind: v })} options={STEP_KINDS} />
-                  <button type="button" onClick={() => setSteps((ss) => ss.filter((_, idx) => idx !== i))} className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-red-400" aria-label="Remove step"><Trash2 className="size-4" /></button>
-                </div>
-                {s.kind === "link" ? (
-                  <Input value={s.url} onChange={(e) => setStep(i, { url: e.target.value })} placeholder="https://dashboard…" />
-                ) : (
-                  <Textarea value={s.body} onChange={(e) => setStep(i, { body: e.target.value })} rows={2} placeholder="Instructions (markdown)…" />
-                )}
-              </div>
-            ))}
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setSteps((ss) => [...ss, { title: "", body: "", kind: "task", url: "" }])}><Plus className="size-4" /> Add step</Button>
-            </div>
-          </div>
-        ) : (
-          <ol className="flex flex-col gap-1.5">
-            {detail.steps.map((s) => (
-              <li key={s.position} className="flex items-start gap-2 text-sm text-zinc-300">
-                <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded bg-white/5 text-[10px] text-zinc-400">{s.position + 1}</span>
-                {s.kind === "link" && s.url ? (
-                  <a href={s.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-teal-400 hover:text-teal-300"><Link2 className="size-3.5" /> {s.title}</a>
-                ) : (
-                  <span>{s.title}</span>
-                )}
-              </li>
-            ))}
-          </ol>
-        )}
-        {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
-        {canManage ? (
-          <div className="mt-3"><Button variant="secondary" size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save runbook"}</Button></div>
-        ) : null}
-      </div>
-    </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="secondary" onClick={onClose} disabled={pending}>Cancel</Button>
+        <Button variant="primary" onClick={create} disabled={pending || !name.trim()}>{pending ? "Creating…" : "Create runbook"}</Button>
+      </ModalFooter>
+    </Modal>
   );
 }

@@ -101,7 +101,15 @@ function StaleBadge() {
   );
 }
 
-export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[] }) {
+export function FlagsTable({
+  slug,
+  flags,
+  initialCreate,
+}: {
+  slug: string;
+  flags: FlagSummary[];
+  initialCreate?: boolean;
+}) {
   const [q, setQ] = useState("");
   const [type, setType] = useState<"all" | FlagType>("all");
   const [creator, setCreator] = useState("all");
@@ -182,7 +190,7 @@ export function FlagsTable({ slug, flags }: { slug: string; flags: FlagSummary[]
             className="w-32 shrink-0"
           />
         ) : null}
-        <CreateFlagButton slug={slug} />
+        <CreateFlagButton slug={slug} initialCreate={initialCreate} />
       </div>
 
       {flags.length === 0 ? (

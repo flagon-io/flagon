@@ -7,8 +7,15 @@ import { listTeams } from "@/lib/teams-api";
 import { SchedulesManager } from "./schedules-manager";
 
 /** On-call schedules — rotations (team-bound or standalone) with overrides. */
-export default async function OnCallPage({ params }: { params: Promise<{ org: string }> }) {
+export default async function OnCallPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ org: string }>;
+  searchParams: Promise<{ create?: string }>;
+}) {
   const { org: slug } = await params;
+  const sp = await searchParams;
   const session = await getSession();
   if (!session) redirect("/login");
   const membership = await getMembershipBySlug(session.user.id, slug);
@@ -28,6 +35,7 @@ export default async function OnCallPage({ params }: { params: Promise<{ org: st
       teams={teams.map((t) => ({ key: t.key, name: t.name }))}
       orgMembers={orgMembers.map((m) => ({ userId: m.userId, name: m.name }))}
       canManage={canManageOrg(membership.role)}
+      initialCreate={Boolean(sp.create)}
     />
   );
 }

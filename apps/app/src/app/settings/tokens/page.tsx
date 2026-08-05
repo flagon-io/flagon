@@ -9,7 +9,7 @@ import {
   revokePersonalTokenAction,
 } from "./actions";
 
-export const metadata: Metadata = { title: "Access tokens · Settings" };
+export const metadata: Metadata = { title: "Personal access tokens · Settings" };
 
 export default async function TokensSettingsPage() {
   const session = await getSession();

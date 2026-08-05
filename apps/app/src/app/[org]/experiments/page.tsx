@@ -13,10 +13,13 @@ import { ExperimentsTable } from "./experiments-table";
  */
 export default async function ExperimentsOverview({
   params,
+  searchParams,
 }: {
   params: Promise<{ org: string }>;
+  searchParams: Promise<{ create?: string }>;
 }) {
   const { org: slug } = await params;
+  const sp = await searchParams;
   const session = await getSession();
   if (!session) redirect("/login");
   const membership = await getMembershipBySlug(session.user.id, slug);
@@ -35,6 +38,7 @@ export default async function ExperimentsOverview({
       flags={flags.map((f) => ({ key: f.key, name: f.name }))}
       metrics={metrics.map((m) => ({ key: m.key, name: m.name }))}
       environments={FLAG_ENVIRONMENTS.map((e) => ({ key: e.key, name: e.name }))}
+      initialCreate={Boolean(sp.create)}
     />
   );
 }

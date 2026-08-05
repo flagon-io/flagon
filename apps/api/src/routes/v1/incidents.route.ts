@@ -12,18 +12,17 @@ import {
   runbooks,
   projects,
   teams,
-  teamMembers,
   oncallEscalationPolicies,
   type RccaSnapshot,
 } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
-import { resolveOrg, requireManager } from "../../lib/org-context.js";
+import { resolveOrg, requireManager, nonMembers } from "../../lib/org-context.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 import { teamCurrentOnCall } from "../../oncall/resolve.js";
 import { activeStep } from "../../oncall/escalation.js";
 import { notifyIncident } from "../../incidents/notify.js";
-import { loadPolicy, resolveLevelTargets } from "../../incidents/escalate.js";
+import { loadPolicy, resolveLevelTargets, teamResponders } from "../../incidents/escalate.js";
 import { attachRunbook, autoAttachRunbooks } from "../../incidents/runbook-attach.js";
 import { ensureRccaTemplate } from "../../incidents/rcca-template.js";
 
@@ -108,6 +107,7 @@ registerComponentSchema(
     updates: z.array(updateSchema),
     checklist: z.array(checklistItemSchema),
     responderUserId: z.string().nullable(),
+    responderVia: z.string().nullable(),
     // RCCA: the org template fields + this incident's values + tracked actions.
     rccaRequired: z.boolean(),
     rccaTemplate: z.object({ requiredSeverities: z.array(z.string()), fields: z.array(rccaFieldSchema) }),
@@ -194,15 +194,6 @@ async function policyKeyFor(tx: TenantTx, policyId: string | null) {
   return row?.key ?? null;
 }
 
-/** The users to page for an incident: the owner team's on-call, else the whole team. */
-async function ownerResponders(tx: TenantTx, teamId: string | null, now: Date): Promise<string[]> {
-  if (!teamId) return [];
-  const onCall = await teamCurrentOnCall(tx, teamId, now);
-  if (onCall) return [onCall];
-  const rows = await tx.select({ userId: teamMembers.userId }).from(teamMembers).where(eq(teamMembers.teamId, teamId));
-  return rows.map((r) => r.userId);
-}
-
 // --- OpenAPI ----------------------------------------------------------------
 const pParams = { org: "The organization slug." };
 const nParams = { ...pParams, number: "The incident number." };
@@ -219,6 +210,18 @@ registerRoute({ method: "delete", path: "/v1/orgs/{org}/incidents/{number}/servi
 function parseNumber(raw: string): number | null {
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** A Postgres unique-violation (23505) on the incident number index — the signal
+ *  to retry number allocation. Checks the error and its cause; the driver surfaces
+ *  the SQLSTATE as `.code`. */
+function isNumberConflict(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string }; message?: string };
+  return (
+    e?.code === "23505" ||
+    e?.cause?.code === "23505" ||
+    (typeof e?.message === "string" && e.message.includes("incidents_org_number_key"))
+  );
 }
 
 // --- List / get -------------------------------------------------------------
@@ -265,6 +268,32 @@ async function policyKeyMap(tx: TenantTx): Promise<Map<string, string>> {
   return new Map(rows.map((r) => [r.id, r.key]));
 }
 
+/**
+ * Who is responsible for an incident RIGHT NOW, for the detail rail — not just the
+ * owner team's on-call. Order: the person who acknowledged (escalation has stopped),
+ * else the escalation policy's CURRENT step target (who is actively being paged),
+ * else the owning team's on-call. Returns the user id + a short "via" label so the
+ * UI can say who and why. `via` is null only when nobody resolves.
+ */
+async function currentResponder(tx: TenantTx, incident: IncidentRow, now: Date): Promise<{ userId: string | null; via: string | null }> {
+  if (incident.acknowledgedAt && incident.acknowledgedByUserId) {
+    return { userId: incident.acknowledgedByUserId, via: "Acknowledged" };
+  }
+  if (!incident.acknowledgedAt && incident.escalationPolicyId) {
+    const { levels, repeatCount } = await loadPolicy(tx, incident.escalationPolicyId);
+    const active = activeStep(levels, repeatCount, incident.startedAt, incident.acknowledgedAt, now);
+    if (active) {
+      const targets = await resolveLevelTargets(tx, active.level, now);
+      if (targets[0]) return { userId: targets[0], via: `On-call · escalation level ${active.step + 1}` };
+    }
+  }
+  if (incident.ownerTeamId) {
+    const onCall = await teamCurrentOnCall(tx, incident.ownerTeamId, now);
+    if (onCall) return { userId: onCall, via: "Owner team on-call" };
+  }
+  return { userId: null, via: null };
+}
+
 incidents_.get("/:number", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
@@ -285,13 +314,14 @@ incidents_.get("/:number", async (c) => {
       .from(incidentUpdates)
       .where(eq(incidentUpdates.incidentId, incident.id))
       .orderBy(desc(incidentUpdates.createdAt));
-    const responderUserId = incident.ownerTeamId ? await teamCurrentOnCall(tx, incident.ownerTeamId, new Date()) : null;
+    const responder = await currentResponder(tx, incident, new Date());
     return {
       incident: serialize(incident, ownerTeam, await policyKeyFor(tx, incident.escalationPolicyId)),
       services,
       updates: updates.map((u) => ({ ...u, createdAt: u.createdAt.toISOString() })),
       checklist: await checklistFor(tx, incident.id),
-      responderUserId,
+      responderUserId: responder.userId,
+      responderVia: responder.via,
       ...(await rccaBlockFor(tx, ctx.orgId, incident.id, incident.severity)),
     };
   });
@@ -309,7 +339,7 @@ incidents_.post("/", async (c) => {
   if (!parsed.success) return validationError(c, parsed.error);
   const { title, severity, summary, affectedProjectKeys, ownerTeamKey, escalationPolicyKey } = parsed.data;
 
-  const result = await withOrg(ctx.orgId, async (tx) => {
+  const declareOnce = () => withOrg(ctx.orgId, async (tx) => {
     // Resolve affected services first (so owner can auto-derive from the first).
     const serviceRows: { id: string }[] = [];
     for (const key of affectedProjectKeys ?? []) {
@@ -349,19 +379,37 @@ incidents_.post("/", async (c) => {
     // Freeze the RCCA template onto this incident now, so a later template edit
     // never rewrites this incident's postmortem form.
     await tx.insert(incidentRccas).values({ organizationId: ctx.orgId, incidentId: incident.id, template: await snapshotTemplate(tx, ctx.orgId) }).onConflictDoNothing();
-    // Who to page first: the escalation policy's level 0 when set, else the owner
-    // team's on-call (falling back to the whole team). The cron climbs from here.
+    // Who to page first: the escalation policy's level 0 (step 0) when set, else the
+    // owner team's on-call (falling back to the whole team). `escalated_level` stays
+    // 0 so the cron climbs from step 1. If level 0 resolves to nobody (empty/deleted
+    // target), fall back to the owner team so the first page is never black-holed.
     const now = new Date();
     let responders: string[];
     if (escalationPolicyId) {
-      const { levels, repeatCount } = await loadPolicy(tx, escalationPolicyId);
-      const active = activeStep(levels, repeatCount, now, null, now);
-      responders = active ? await resolveLevelTargets(tx, active.level, now) : [];
+      const { levels } = await loadPolicy(tx, escalationPolicyId);
+      responders = levels.length ? await resolveLevelTargets(tx, levels[0], now) : [];
+      if (responders.length === 0) responders = await teamResponders(tx, ownerTeamId, now);
     } else {
-      responders = await ownerResponders(tx, ownerTeamId, now);
+      responders = await teamResponders(tx, ownerTeamId, now);
     }
     return { incident, responders } as const;
   });
+
+  // `number` is allocated as max()+1 under a unique (org, number) index. Two truly
+  // concurrent declares in the same org can pick the same number; the loser hits the
+  // unique violation — retry (re-reading max) a few times instead of 500ing during
+  // exactly the busy moment incidents get declared.
+  let result: Awaited<ReturnType<typeof declareOnce>> | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      result = await declareOnce();
+      break;
+    } catch (err) {
+      if (attempt < 3 && isNumberConflict(err)) continue;
+      throw err;
+    }
+  }
+  if (!result) return jsonError(c, 409, "Could not allocate an incident number, please retry.");
 
   if ("error" in result) {
     if (result.error === "unknown_team") return jsonError(c, 400, "That owning team does not exist.");
@@ -604,12 +652,18 @@ incidents_.put("/:number/rcca", async (c) => {
   const ok = await withOrg(ctx.orgId, async (tx) => {
     const incident = await incidentByNumber(tx, number);
     if (!incident) return false;
-    const existing = await tx.select({ id: incidentRccas.id }).from(incidentRccas).where(eq(incidentRccas.incidentId, incident.id)).limit(1).then((r) => r[0]);
+    const existing = await tx.select({ id: incidentRccas.id, template: incidentRccas.template }).from(incidentRccas).where(eq(incidentRccas.incidentId, incident.id)).limit(1).then((r) => r[0]);
+    // Persist ONLY values keyed to the incident's frozen template fields — drop
+    // unknown keys so the jsonb can't be inflated with arbitrary keys (the template
+    // caps field count) and never renders junk.
+    const template = existing?.template ?? (await snapshotTemplate(tx, ctx.orgId));
+    const allowed = new Set(template.fields.map((f) => f.key));
+    const values = Object.fromEntries(Object.entries(parsed.data.values).filter(([k]) => allowed.has(k)));
     if (existing) {
-      await tx.update(incidentRccas).set({ values: parsed.data.values, updatedByUserId: ctx.actorUserId, updatedAt: new Date() }).where(eq(incidentRccas.id, existing.id));
+      await tx.update(incidentRccas).set({ values, updatedByUserId: ctx.actorUserId, updatedAt: new Date() }).where(eq(incidentRccas.id, existing.id));
     } else {
       // Legacy incident with no snapshot yet: freeze the current template as we save.
-      await tx.insert(incidentRccas).values({ organizationId: ctx.orgId, incidentId: incident.id, template: await snapshotTemplate(tx, ctx.orgId), values: parsed.data.values, updatedByUserId: ctx.actorUserId });
+      await tx.insert(incidentRccas).values({ organizationId: ctx.orgId, incidentId: incident.id, template, values, updatedByUserId: ctx.actorUserId });
     }
     return true;
   });
@@ -624,6 +678,7 @@ incidents_.post("/:number/action-items", async (c) => {
   if (number === null) return jsonError(c, 404, "Incident not found.");
   const parsed = addActionBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
+  if (parsed.data.assigneeUserId && (await nonMembers(ctx.orgId, [parsed.data.assigneeUserId])).length) return jsonError(c, 400, "The assignee must be a member of this organization.");
   const ok = await withOrg(ctx.orgId, async (tx) => {
     const incident = await incidentByNumber(tx, number);
     if (!incident) return false;
@@ -642,6 +697,7 @@ incidents_.patch("/:number/action-items/:itemId", async (c) => {
   if (number === null || !CHECKLIST_UUID_RE.test(itemId)) return jsonError(c, 404, "Action item not found.");
   const parsed = patchActionBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
+  if (parsed.data.assigneeUserId && (await nonMembers(ctx.orgId, [parsed.data.assigneeUserId])).length) return jsonError(c, 400, "The assignee must be a member of this organization.");
   const ok = await withOrg(ctx.orgId, async (tx) => {
     const incident = await incidentByNumber(tx, number);
     if (!incident) return false;
