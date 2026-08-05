@@ -3,7 +3,8 @@ import { headers } from "next/headers";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
-import { organization, username } from "better-auth/plugins";
+import { organization, twoFactor, username } from "better-auth/plugins";
+import { sso } from "@better-auth/sso";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -19,6 +20,7 @@ import { isReserved } from "@/lib/reserved";
 import { uuidv7 } from "@/lib/uuid";
 import { DEFAULT_PLAN, isSelectablePlan, planAllowsInvites } from "@/lib/plans";
 import { resolvePrimaryEmail } from "@/lib/user-emails";
+import { provisioningRoleFor, stampSsoSession } from "@/lib/org-security";
 import { APP_URL, WEB_URL, API_URL } from "@/lib/urls";
 
 /**
@@ -217,6 +219,46 @@ export const auth = betterAuth({
             });
           }
         },
+      },
+    }),
+    // Two-factor (TOTP + backup codes). Enrollment is opt-in per user on the
+    // account security page; an org can then REQUIRE it of its members (see the
+    // enforcement gate in [org]/layout.tsx). `issuer` is what shows in the
+    // member's authenticator app.
+    twoFactor({ issuer: "Flagon" }),
+    // Organization SSO (SAML 2.0 + OIDC). A provider is linked to an ORG
+    // (organizationId); members keep their own personal accounts. On SSO login
+    // the plugin JIT-provisions org membership, and we stamp a per-org SSO
+    // session so the enforcement gate can require an active one.
+    sso({
+      // Auto-add the SSO user to the linked org. BetterAuth provisioning only
+      // supports member|admin, so the org's `sso_default_role` maps through
+      // provisioningRoleFor (read-only roles are assigned manually or via SCIM).
+      organizationProvisioning: {
+        disabled: false,
+        getRole: async ({ provider }) =>
+          provider.organizationId
+            ? provisioningRoleFor(provider.organizationId)
+            : "member",
+      },
+      // Refresh the SSO session (and re-sync membership) on every login, not
+      // just first registration — this is what keeps the enforcement TTL alive.
+      provisionUserOnEveryLogin: true,
+      provisionUser: async ({ user, provider }) => {
+        if (!provider.organizationId) return;
+        // Record/renew the org SSO session the enforcement gate checks.
+        await stampSsoSession(provider.organizationId, user.id);
+        // Belt-and-suspenders: keep the multi-email source of truth seeded for
+        // JIT users (mirrors the databaseHooks.user.create.after seed).
+        await db
+          .insert(userEmails)
+          .values({
+            userId: user.id,
+            email: user.email.toLowerCase(),
+            verified: user.emailVerified ?? false,
+            isPrimary: true,
+          })
+          .onConflictDoNothing();
       },
     }),
     // nextCookies must be the LAST plugin so it can attach Set-Cookie headers

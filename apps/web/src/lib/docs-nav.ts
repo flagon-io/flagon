@@ -69,6 +69,7 @@ export const nav: NavSection[] = [
         title: "Security",
         items: [
           { title: "Authentication & tokens", href: "/docs/platform/authentication" },
+          { title: "Single sign-on & SCIM", href: "/docs/platform/security/sso" },
           { title: "Permissions & roles", href: "/docs/platform/security/permissions" },
           { title: "Tenant isolation", href: "/docs/platform/security/isolation" },
         ],

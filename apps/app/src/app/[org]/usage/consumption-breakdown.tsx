@@ -28,8 +28,14 @@ type Bucket = { key: string; label: string; full: string };
 // could legitimately be keyed "key").
 type BucketDatum = { __bucket: string } & Record<string, number | string>;
 
-const MARGIN = { top: 8, right: 8, bottom: 28, left: 48 };
+// A little top headroom so the "Today" marker label clears the plot area.
+const MARGIN = { top: 18, right: 8, bottom: 28, left: 48 };
 const HEIGHT = 300;
+
+/** Today as a UTC YYYY-MM-DD, to align with the UTC period/bucket keys. */
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 /**
  * The Consumption Breakdown: a stacked bar chart over time, one stack per series
@@ -109,6 +115,7 @@ export function ConsumptionBreakdown({
                   max={max}
                   cumulative={cumulative}
                   metric={metric}
+                  interval={interval}
                 />
               ) : null
             }
@@ -152,6 +159,7 @@ function Chart({
   max,
   cumulative,
   metric,
+  interval,
 }: {
   width: number;
   buckets: Bucket[];
@@ -159,6 +167,7 @@ function Chart({
   max: number;
   cumulative: boolean;
   metric: Metric;
+  interval: Interval;
 }) {
   const innerW = Math.max(0, width - MARGIN.left - MARGIN.right);
   const innerH = HEIGHT - MARGIN.top - MARGIN.bottom;
@@ -214,6 +223,14 @@ function Chart({
   });
 
   const step = buckets.length > 0 ? innerW / buckets.length : 0;
+
+  // The current day's x on the band axis — a full-height "today" marker so the
+  // cycle-to-date position is always legible, even before any data lands. Null
+  // when today falls outside the visible range (a past window).
+  const todayKey = bucketKeyOf(todayUtc(), interval);
+  const todayX = xScale.domain().includes(todayKey)
+    ? (xScale(todayKey) ?? 0) + xScale.bandwidth() / 2
+    : null;
 
   return (
     <div ref={containerRef} className="relative">
@@ -272,6 +289,32 @@ function Chart({
               onMouseLeave={hideTooltip}
             />
           ))}
+
+          {/* Full-height "today" marker, drawn over the bars. */}
+          {todayX !== null ? (
+            <g className="pointer-events-none">
+              <line
+                x1={todayX}
+                x2={todayX}
+                y1={0}
+                y2={innerH}
+                stroke="#ffffff"
+                strokeOpacity={0.28}
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+              />
+              <text
+                x={todayX}
+                y={-6}
+                fill="#a1a1aa"
+                fontSize={10}
+                fontWeight={500}
+                textAnchor="middle"
+              >
+                Today
+              </text>
+            </g>
+          ) : null}
 
           <AxisBottom
             top={innerH}

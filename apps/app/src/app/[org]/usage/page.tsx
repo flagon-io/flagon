@@ -16,7 +16,7 @@ import {
   type UsageSeries,
 } from "@/lib/flags-api";
 import { MAX_SERIES, OTHER_COLOR, seriesColor } from "./colors";
-import { compact, usd } from "./format";
+import { charge, compact, rate, usd } from "./format";
 import { ConsumptionBreakdown } from "./consumption-breakdown";
 import { UsageFilters } from "./filters";
 import { Sparkline } from "./sparkline";
@@ -326,22 +326,33 @@ function UsageTable({
                         className="size-2.5 shrink-0 rounded-full"
                         style={{ backgroundColor: color }}
                       />
-                      <span className="truncate text-sm text-zinc-200">
-                        {s.label}
-                      </span>
-                      {!s.billable ? (
-                        <span className="rounded border border-white/10 px-1 py-0.5 text-[9px] font-medium tracking-wide text-zinc-500 uppercase">
-                          Free
-                        </span>
-                      ) : !s.tracked ? (
-                        <span className="rounded border border-amber-500/20 px-1 py-0.5 text-[9px] font-medium tracking-wide text-amber-400/80 uppercase">
-                          Not metered yet
-                        </span>
-                      ) : !bills ? (
-                        <span className="rounded border border-white/10 px-1 py-0.5 text-[9px] font-medium tracking-wide text-zinc-500 uppercase">
-                          Included
-                        </span>
-                      ) : null}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm text-zinc-200">
+                            {s.label}
+                          </span>
+                          {!s.billable ? (
+                            <span className="rounded border border-white/10 px-1 py-0.5 text-[9px] font-medium tracking-wide text-zinc-500 uppercase">
+                              Free
+                            </span>
+                          ) : !s.tracked ? (
+                            <span className="rounded border border-amber-500/20 px-1 py-0.5 text-[9px] font-medium tracking-wide text-amber-400/80 uppercase">
+                              Not metered yet
+                            </span>
+                          ) : !bills ? (
+                            <span className="rounded border border-white/10 px-1 py-0.5 text-[9px] font-medium tracking-wide text-zinc-500 uppercase">
+                              Included
+                            </span>
+                          ) : null}
+                        </div>
+                        {/* The per-unit rate, so the price is visible on every
+                            billable meter — used or not — and reads as it adds up. */}
+                        {s.billable && bills ? (
+                          <span className="block text-[11px] text-zinc-600 tabular-nums">
+                            {rate(s.pricePerMillionCents, s.unit)}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                     <span className="hidden justify-end sm:flex">
                       <Sparkline
@@ -356,7 +367,7 @@ function UsageTable({
                       </span>
                     </span>
                     <span className="text-right text-sm text-zinc-400 tabular-nums">
-                      {s.billable && bills ? usd(s.chargeCents) : "Free"}
+                      {s.billable ? (bills ? charge(s.chargeCents) : "Free") : "Free"}
                     </span>
                   </li>
                 );
@@ -393,13 +404,13 @@ function UsageTable({
             <Row
               key={g.product}
               label={`${g.product} Subtotal`}
-              value={usd(productCharge(g.lines))}
+              value={charge(productCharge(g.lines))}
             />
           ))}
         {bills && includedEvents > 0 ? (
           <Row
             label="Included Events Applied"
-            value={`-${usd(includedAppliedCents)}`}
+            value={`-${charge(includedAppliedCents)}`}
             muted
           />
         ) : null}

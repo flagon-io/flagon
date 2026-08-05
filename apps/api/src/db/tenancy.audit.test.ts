@@ -31,6 +31,20 @@ const AUTH_LAYER_EXEMPT = new Set([
   // context exists, so it can't be gated by app.current_org_id RLS. Looked up by
   // unique high-entropy hash; management is org-scoped in the app layer.
   "client_keys",
+  // Auth-layer security tables (migration 0003, owned by the console's drizzle_auth
+  // pipeline like users/orgs/members). Their isolation is enforced by the app/API
+  // authorization layer, not RLS:
+  //  - sso_providers / org_sso_sessions: read on the auth path (SSO sign-in,
+  //    enforcement gate) before any org context/session exists.
+  //  - scim_tokens: a CREDENTIAL table — the SCIM bearer must resolve to its org
+  //    before org context exists (looked up by hash), exactly like access_tokens.
+  //  - scim_users / scim_groups: written only by SCIM handlers already scoped to
+  //    the org their bearer token resolved to; every query filters organization_id.
+  "sso_providers",
+  "org_sso_sessions",
+  "scim_tokens",
+  "scim_users",
+  "scim_groups",
 ]);
 
 type Row = {

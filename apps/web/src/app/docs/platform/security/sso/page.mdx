@@ -1,0 +1,120 @@
+export const metadata = {
+  title: "Single sign-on & SCIM",
+  description:
+    "Connect your identity provider with SAML or OIDC, enforce single sign-on and two-factor authentication, and provision members automatically with SCIM.",
+};
+
+# Single sign-on & SCIM
+
+Flagon follows the same identity model as GitHub. A person is always just a
+Flagon user with their own personal account: they can create their own
+organizations, accept invitations, and sign in with a password. An
+**organization** can link an identity provider (IdP) and, once it does, require
+its members to authenticate through that IdP before they can see the
+organization's resources. The account stays personal; the SSO link belongs to
+the organization.
+
+Single sign-on, SCIM provisioning, and required two-factor are available on
+**Pro and Enterprise** organizations. You configure them under
+**Organization settings → Authentication**.
+
+## The model, briefly
+
+- Members keep their **own accounts**. Linking SSO does not replace anyone's
+  login or create managed accounts.
+- Configuring a provider **does not change anything** on its own. You can test
+  sign-in first, then enforce as a separate, deliberate step.
+- Enforcing SSO requires every member **except the owner** to hold an active SSO
+  session. The owner always keeps a fallback, so a misconfigured IdP can never
+  lock an organization out of itself.
+- SCIM deprovisioning removes a member's **organization membership**, never their
+  personal Flagon account.
+
+## Connect an identity provider
+
+Open **Organization settings → Authentication → Single sign-on** and choose a
+protocol.
+
+### SAML 2.0
+
+Create a SAML application in your IdP (Okta, Microsoft Entra ID / Azure AD,
+OneLogin, Ping, or any SAML 2.0 provider), then paste these Flagon service
+provider values into it:
+
+| Flagon shows you | Paste into your IdP as |
+| --- | --- |
+| Assertion Consumer Service (ACS) URL | Single sign-on URL / Reply URL |
+| Service Provider Entity ID | Audience URI / Identifier |
+
+Then copy three values back from your IdP into Flagon:
+
+- **Sign-on URL** — where members are forwarded to authenticate (your IdP's SSO
+  URL).
+- **Issuer** — the unique issuer/identifier your IdP generates.
+- **Public certificate** — the X.509 signing certificate (PEM).
+
+Set the **email domain** for the organization (for example `acme.com`) and save.
+This configures the connection; it does not require SSO yet.
+
+### OpenID Connect (OIDC)
+
+Choose **OpenID Connect** and provide your provider's **Issuer URL**, a
+**Client ID**, and a **Client secret**. Flagon reads the rest from the issuer's
+`/.well-known/openid-configuration` discovery document. Set the email domain and
+save.
+
+## Test, then enforce
+
+With a provider configured, sign in through it once to confirm it works
+end-to-end. When you are confident, turn on **Require single sign-on**. From then
+on, any non-owner member without an active SSO session is asked to authenticate
+with your IdP before they can access the organization. The owner is never
+blocked.
+
+## SCIM provisioning
+
+SCIM lets your IdP create, update, and deactivate members automatically, so
+onboarding and offboarding happen in one place.
+
+1. Under **SCIM provisioning**, turn it on and **generate a token**. The token is
+   shown once. Copy it.
+2. In your IdP's provisioning settings, set the **SCIM base URL** shown in Flagon
+   and paste the token as the bearer credential.
+
+| Flagon shows you | Use in your IdP as |
+| --- | --- |
+| SCIM base URL | SCIM connector base URL |
+| Provisioning token | OAuth bearer token / secret token |
+
+When your IdP assigns someone to the Flagon application, they are added to the
+organization. When you unassign or deactivate them, their **membership is
+removed** but their personal Flagon account remains intact. Group assignments can
+map to a Flagon role; the organization's default role applies otherwise.
+
+Flagon implements SCIM 2.0 Users and Groups plus the discovery endpoints
+(`ServiceProviderConfig`, `ResourceTypes`, `Schemas`) that Okta and Entra ID read
+during setup.
+
+## Require two-factor authentication
+
+Independently of SSO, an organization can require every member to have
+two-factor authentication enabled. Under **Two-factor authentication**, turn on
+**Require two-factor authentication**. Members without 2FA stay members but
+cannot access the organization until they enable it under their own
+**Settings → Security**. As with SSO, the owner is never locked out.
+
+## Managing it from the API
+
+The security posture and SCIM tokens are part of the management API, so you can
+automate them:
+
+```http
+GET   /v1/orgs/{org}/security
+PATCH /v1/orgs/{org}/security
+GET   /v1/orgs/{org}/security/scim-tokens
+POST  /v1/orgs/{org}/security/scim-tokens
+DELETE /v1/orgs/{org}/security/scim-tokens/{id}
+```
+
+The SAML/OIDC sign-in handshake itself lives on Flagon's authentication
+endpoints, like the rest of sign-in. See the [API overview](/docs/platform/api).

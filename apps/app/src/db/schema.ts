@@ -2,7 +2,9 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  customType,
   index,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -10,6 +12,25 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { uuidv7 } from "../lib/uuid";
+import { decryptField, encryptField } from "../lib/crypto/field-encryption";
+
+/**
+ * A `text` column whose value is AES-256-GCM encrypted AT REST and transparently
+ * decrypted on read. Used for SSO provider secrets (OIDC client secret, SAML
+ * config) so the plugin still sees plaintext while the database never holds it.
+ * drizzle skips the transforms for NULL, so nullable columns stay null.
+ */
+const encryptedText = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return "text";
+  },
+  toDriver(value: string): string {
+    return encryptField(value);
+  },
+  fromDriver(value: string): string {
+    return decryptField(value);
+  },
+});
 
 /**
  * The console's authentication schema.
@@ -47,6 +68,10 @@ export const users = pgTable("users", {
   // enforces that one is always supplied (see the signup flow).
   username: text("username").unique(),
   displayUsername: text("display_username"),
+  // Set by the two-factor plugin when TOTP enrollment is verified. This is the
+  // flag an org's "require 2FA" gate consults (see lib/org-security.ts); the
+  // secret + backup codes live in `two_factors`, never here.
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -151,6 +176,19 @@ export const organizations = pgTable("organizations", {
   // Org base permission (GitHub-style): who may create projects. 'managers'
   // (owner/admin) by default; 'members' opens it to any member. Set via the API.
   projectCreationPolicy: text("project_creation_policy").notNull().default("managers"),
+  // --- Security posture (GitHub-style, Pro+ only) --------------------------
+  // When true, non-owner members must hold an active per-org SSO session
+  // (org_sso_sessions) to reach org resources; the owner always keeps a
+  // password fallback so a misconfigured IdP can never lock an org out.
+  ssoEnforced: boolean("sso_enforced").notNull().default(false),
+  // When true, non-owner members must have 2FA enrolled to reach org resources.
+  require2fa: boolean("require_2fa").notNull().default(false),
+  // Role granted to members provisioned via SSO/SCIM when no group mapping
+  // applies. Never 'owner' (transferred, not assigned).
+  ssoDefaultRole: text("sso_default_role").notNull().default("member"),
+  // Whether the org's SCIM provisioning endpoint is live (a token still gates
+  // it; this is the on/off switch surfaced in settings).
+  scimEnabled: boolean("scim_enabled").notNull().default(false),
   // BetterAuth stores arbitrary org metadata as a JSON string here.
   metadata: text("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -296,6 +334,185 @@ export const accessTokens = pgTable(
   ],
 );
 
+// --- BetterAuth SSO plugin (@better-auth/sso) --------------------------------
+
+/**
+ * A configured SAML 2.0 or OIDC identity provider. Owned by an ORGANIZATION
+ * (organizationId) in the GitHub model: the org links its IdP, members keep
+ * their own personal accounts. Exactly one of `oidc_config` / `saml_config`
+ * holds the connection details as a JSON string (issuer, endpoints, certs,
+ * client secret — plaintext, since they are needed to talk to the IdP).
+ *
+ * JS property names are camelCase to match BetterAuth's field names (its
+ * drizzle adapter indexes the table object by field name); the SQL columns are
+ * snake_case like the rest of the schema. Registered via authClient.sso.register.
+ */
+export const ssoProviders = pgTable(
+  "sso_providers",
+  {
+    id: uuid("id").primaryKey(),
+    issuer: text("issuer").notNull(),
+    domain: text("domain").notNull(),
+    // Connection details incl. secrets (OIDC client secret, SAML cert/keys):
+    // encrypted at rest, transparently decrypted for the SSO plugin. The SQL
+    // type stays `text`, so no migration change is needed.
+    oidcConfig: encryptedText("oidc_config"),
+    samlConfig: encryptedText("saml_config"),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    providerId: text("provider_id").notNull().unique(),
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "cascade",
+    }),
+    // Reserved for optional DNS domain verification (feature currently off). The
+    // column exists now so enabling it later needs no migration.
+    domainVerified: boolean("domain_verified").notNull().default(false),
+  },
+  (t) => [index("sso_providers_org_id_idx").on(t.organizationId)],
+);
+
+// --- BetterAuth two-factor plugin --------------------------------------------
+
+/**
+ * TOTP secret + backup codes for a user's 2FA. One row per enrolled user. The
+ * secret and backup codes are never returned to the client by BetterAuth
+ * (returned:false in the plugin schema). `verified` guards the enable flow;
+ * `failed_verification_count` / `locked_until` back the plugin's lockout.
+ */
+export const twoFactors = pgTable(
+  "two_factors",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+    verified: boolean("verified").notNull().default(true),
+    failedVerificationCount: integer("failed_verification_count").default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  },
+  (t) => [index("two_factors_user_id_idx").on(t.userId)],
+);
+
+// --- Ours: per-org SSO session (GitHub-style enforcement) ---------------------
+
+/**
+ * Records that a user established an SSO session for a given org, and when it
+ * expires. The SSO enforcement gate (lib/org-security.ts, consulted by the org
+ * workspace layout) requires an unexpired row here for non-owner members of an
+ * `sso_enforced` org. Upserted by the SSO `provisionUser` hook on every login;
+ * the TTL (SSO_SESSION_TTL_MS) drives periodic re-authentication like GitHub.
+ */
+export const orgSsoSessions = pgTable(
+  "org_sso_sessions",
+  {
+    id: uuid("id").primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    authenticatedAt: timestamp("authenticated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // One current SSO session per (org, user); the hook upserts on this key.
+    uniqueIndex("org_sso_sessions_org_user_key").on(t.organizationId, t.userId),
+  ],
+);
+
+// --- Ours: SCIM 2.0 provisioning ---------------------------------------------
+
+/**
+ * Bearer tokens the IdP presents to the org's SCIM endpoint. Like access
+ * tokens, the plaintext (`flagon_scim_<random>`) is shown once and only its
+ * SHA-256 hash is stored; the SCIM handler resolves the org by hashed lookup.
+ * Revoked (soft) rather than deleted so an audit trail survives.
+ */
+export const scimTokens = pgTable(
+  "scim_tokens",
+  {
+    id: uuid("id").primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    lastFour: text("last_four").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("scim_tokens_org_id_idx").on(t.organizationId)],
+);
+
+/**
+ * Maps an IdP's SCIM user resource to a Flagon user WITHIN one org. SCIM
+ * operates on its own resource ids and an `external_id` scoped to the org, so
+ * this join lets provisioning address a member without touching the global
+ * user. Deactivation (`active=false`) removes org membership but LEAVES the
+ * personal account intact (GitHub model).
+ */
+export const scimUsers = pgTable(
+  "scim_users",
+  {
+    id: uuid("id").primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    externalId: text("external_id"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // A given IdP resource maps to at most one Flagon user per org.
+    uniqueIndex("scim_users_org_external_key").on(t.organizationId, t.externalId),
+    // And a Flagon user is provisioned at most once per org.
+    uniqueIndex("scim_users_org_user_key").on(t.organizationId, t.userId),
+  ],
+);
+
+/**
+ * Maps an IdP SCIM group (or SAML group claim) to a Flagon org role. When a
+ * provisioned user belongs to a mapped group, that role wins over the org's
+ * `sso_default_role`. Never maps to 'owner'.
+ */
+export const scimGroups = pgTable(
+  "scim_groups",
+  {
+    id: uuid("id").primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    externalId: text("external_id"),
+    displayName: text("display_name").notNull(),
+    role: text("role").notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("scim_groups_org_external_key").on(t.organizationId, t.externalId),
+  ],
+);
+
 // Types
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
@@ -304,6 +521,12 @@ export type Member = typeof members.$inferSelect;
 export type Invitation = typeof invitations.$inferSelect;
 export type UserEmail = typeof userEmails.$inferSelect;
 export type AccessToken = typeof accessTokens.$inferSelect;
+export type SsoProvider = typeof ssoProviders.$inferSelect;
+export type TwoFactor = typeof twoFactors.$inferSelect;
+export type OrgSsoSession = typeof orgSsoSessions.$inferSelect;
+export type ScimToken = typeof scimTokens.$inferSelect;
+export type ScimUser = typeof scimUsers.$inferSelect;
+export type ScimGroup = typeof scimGroups.$inferSelect;
 
 /**
  * The query/adapter surface. Keys are BetterAuth's singular model names mapped
@@ -320,6 +543,15 @@ export const schema = {
   invitation: invitations,
   userEmail: userEmails,
   accessToken: accessTokens,
+  // SSO + two-factor plugin models (singular keys → plural tables).
+  ssoProvider: ssoProviders,
+  twoFactor: twoFactors,
+  // Our own tables (not BetterAuth models) — included so the drizzle client
+  // knows about them.
+  orgSsoSession: orgSsoSessions,
+  scimToken: scimTokens,
+  scimUser: scimUsers,
+  scimGroup: scimGroups,
 };
 
 export { sql };

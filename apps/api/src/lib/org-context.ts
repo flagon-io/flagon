@@ -1,7 +1,13 @@
 import type { Context } from "hono";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { members, organizations } from "../db/auth-tables.js";
+import {
+  members,
+  orgSsoSessions,
+  organizations,
+  users,
+} from "../db/auth-tables.js";
+import type { AuthIdentity } from "./auth-context.js";
 import { getAuth } from "./auth-context.js";
 import { isOrgLocked } from "./entitlement.js";
 import { jsonError } from "./http.js";
@@ -154,6 +160,72 @@ function enforceReadOnly(
   );
 }
 
+/**
+ * Enforce an org's SSO / 2FA posture for a USER caller — a browser cookie OR a
+ * personal access token. GitHub-style, a PAT rides on its owner's SSO session:
+ * when an org enforces SSO, the token owner must hold an active SSO session for
+ * that org (established once in the console, valid for the session TTL), and
+ * must have 2FA when required. This closes the machine-token gap.
+ *
+ * ORGANIZATION tokens are exempt: they carry no user, so there is no identity to
+ * hold an SSO session or 2FA — they are a deliberate org-service credential
+ * minted by a manager. The OWNER is always exempt so an org can never lock
+ * itself out. Returns a 403 Response when blocked, or null to proceed.
+ */
+async function enforceOrgSecurity(
+  c: Context,
+  auth: NonNullable<AuthIdentity>,
+  org: { id: string; ssoEnforced: boolean; require2fa: boolean },
+  role: string,
+): Promise<Response | null> {
+  // Only USER identities (cookie session or personal token) are gated; an org
+  // token has no user to authenticate interactively.
+  if (auth.kind !== "user") return null;
+  if (role === "owner") return null;
+
+  if (org.ssoEnforced) {
+    const active = (
+      await db
+        .select({ id: orgSsoSessions.id })
+        .from(orgSsoSessions)
+        .where(
+          and(
+            eq(orgSsoSessions.organizationId, org.id),
+            eq(orgSsoSessions.userId, auth.user.id),
+            gt(orgSsoSessions.expiresAt, new Date()),
+          ),
+        )
+        .limit(1)
+    )[0];
+    if (!active) {
+      return jsonError(
+        c,
+        403,
+        "This organization requires single sign-on. Authenticate through the console, then retry.",
+      );
+    }
+  }
+
+  if (org.require2fa) {
+    const u = (
+      await db
+        .select({ twoFactorEnabled: users.twoFactorEnabled })
+        .from(users)
+        .where(eq(users.id, auth.user.id))
+        .limit(1)
+    )[0];
+    if (!u?.twoFactorEnabled) {
+      return jsonError(
+        c,
+        403,
+        "This organization requires two-factor authentication. Enable it in the console, then retry.",
+      );
+    }
+  }
+
+  return null;
+}
+
 export async function resolveOrg(
   c: Context,
   opts: { allowLocked?: boolean; allowBillingWrite?: boolean } = {},
@@ -178,6 +250,8 @@ export async function resolveOrg(
         plan: organizations.plan,
         subscriptionStatus: organizations.subscriptionStatus,
         projectCreationPolicy: organizations.projectCreationPolicy,
+        ssoEnforced: organizations.ssoEnforced,
+        require2fa: organizations.require2fa,
       })
       .from(organizations)
       .where(eq(organizations.slug, slug))
@@ -214,6 +288,14 @@ export async function resolveOrg(
     role = membership.role;
     actorUserId = auth.user.id;
   }
+
+  // SSO / 2FA enforcement (GitHub-style) for USER callers — a browser cookie or
+  // a personal token, which rides on its owner's SSO session. A non-owner member
+  // of an sso_enforced org needs an active SSO session (established in the
+  // console), and of a require_2fa org needs 2FA enrolled. Organization tokens
+  // (no user) are exempt; the owner is never gated.
+  const security = await enforceOrgSecurity(c, auth, org, role);
+  if (security) return security;
 
   // The caller is an authorized member of a real org. Only now do the lock +
   // read-only gates apply: a locked (lapsed/unpaid) org refuses its own members

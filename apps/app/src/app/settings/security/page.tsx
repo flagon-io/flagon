@@ -4,6 +4,7 @@ import { getSession, getSessions } from "@/lib/auth";
 import { SettingsHeader, SettingsSection } from "@/components/settings/section";
 import { ChangePasswordForm } from "./change-password-form";
 import { SessionsList } from "./sessions-list";
+import { TwoFactorEnrollment } from "./two-factor-enrollment";
 
 export const metadata: Metadata = { title: "Security · Settings" };
 
@@ -25,6 +26,15 @@ export default async function SecuritySettingsPage() {
         description="Choose a strong password you do not use anywhere else."
       >
         <ChangePasswordForm />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Two-factor authentication"
+        description="Require a code from an authenticator app when you sign in."
+      >
+        <TwoFactorEnrollment
+          enabled={session.user.twoFactorEnabled ?? false}
+        />
       </SettingsSection>
 
       <SettingsSection

@@ -9,6 +9,29 @@ export function usd(cents: number): string {
 }
 
 /**
+ * A charge that keeps sub-cent accrual VISIBLE: exactly 0 -> "$0.00", any positive
+ * amount below a cent -> "< $0.01" (so a customer sees the cost is adding up rather
+ * than a flat, misleading $0.00), otherwise the plain dollar amount.
+ */
+export function charge(cents: number): string {
+  if (cents <= 0) return "$0.00";
+  if (cents < 0.5) return "< $0.01";
+  return usd(cents);
+}
+
+/**
+ * The per-unit price as a readable rate, e.g. 3000 (cents / 1,000,000 units) ->
+ * "$0.03 / 1K events". Shown on the (authenticated) usage page so a customer can
+ * see exactly what each meter costs as it adds up — this is their real bill, not
+ * a public pricing promise. 0 -> "Free".
+ */
+export function rate(pricePerMillionCents: number, unit: string): string {
+  if (pricePerMillionCents <= 0) return "Free";
+  const perThousandDollars = pricePerMillionCents / 1000 / 100; // $/1,000 units
+  return `$${perThousandDollars.toFixed(2)} / 1K ${unit}s`;
+}
+
+/**
  * A compact count, e.g. 1234 -> "1.23K", 4_500_000 -> "4.5M". Whole numbers
  * under 1000 print as-is. Mirrors the flag panels' compaction.
  */

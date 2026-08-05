@@ -37,7 +37,9 @@ import {
   SquareCode,
   Target,
   ToggleRight,
+  UserCog,
   Users,
+  Webhook,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
@@ -155,6 +157,9 @@ function buildNav(base: string): {
     ],
   };
 
+  // Grouped GitHub-style: a lead General item, then labelled sections. The
+  // "Soon" rows are implied longer-tail surfaces (custom roles, audit log, org
+  // webhooks) so the shape of the settings area reads complete.
   const settings: NavArea = {
     key: "settings",
     label: "Settings",
@@ -164,10 +169,34 @@ function buildNav(base: string): {
       {
         items: [
           { label: "General", icon: SlidersHorizontal, href: `${base}/settings` },
+        ],
+      },
+      {
+        heading: "Access",
+        items: [
           { label: "Members", icon: Users, href: `${base}/settings/members` },
           { label: "Invitations", icon: Mail, href: `${base}/settings/invitations` },
+          { label: "Roles", icon: UserCog, soon: true },
+        ],
+      },
+      {
+        heading: "Security",
+        items: [
+          { label: "Authentication", icon: Shield, href: `${base}/settings/security` },
+          { label: "Audit log", icon: Logs, soon: true },
+        ],
+      },
+      {
+        heading: "Developer",
+        items: [
           { label: "Tokens", icon: KeyRound, href: `${base}/settings/tokens` },
-          { label: "Billing", icon: CreditCard, href: `${base}/settings/billing` },
+          { label: "Webhooks", icon: Webhook, soon: true },
+        ],
+      },
+      {
+        heading: "Billing",
+        items: [
+          { label: "Billing & plans", icon: CreditCard, href: `${base}/settings/billing` },
         ],
       },
     ],

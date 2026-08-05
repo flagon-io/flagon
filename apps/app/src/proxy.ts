@@ -26,6 +26,9 @@ const AUTH_PAGES = new Set([
   // The email verification landing must work before you're signed in — it's the
   // click target of the verification email, then it signs you in.
   "/verify-email",
+  // The two-factor challenge: reached mid-sign-in, before the full session
+  // exists, so it must be reachable without one.
+  "/2fa",
 ]);
 
 // Prefixes that are always reachable, signed in or out. `/sign-out` must work

@@ -120,7 +120,7 @@ export const PLANS: Plan[] = [
       { text: "Monthly usage included, across every product" },
       { text: "Usage-based pricing, never per-seat" },
       { text: "Priority support" },
-      { text: "SSO with SAML and SCIM", soon: true },
+      { text: "SSO with SAML & OIDC, SCIM, and enforced 2FA" },
       { text: "Audit logs", soon: true },
       { text: "7-day log retention", soon: true },
     ],
@@ -200,18 +200,17 @@ export const EVENT_OVERAGE_PER_MILLION_CENTS = 3000;
 
 /**
  * The feature bullets to render for a plan. For a usage-billed plan (Pro) this injects
- * the overage-rate line — DERIVED from EVENT_OVERAGE_PER_MILLION_CENTS so it can't drift
- * from what the app meters — right after the "usage included" bullet, so the scaling
- * reads as part of the list rather than sitting in the price heading. We deliberately do
- * NOT state an included-events count anywhere public (it moves as we tune; the live
- * number is in the app usage view). Both the pricing table and the create-org picker
- * render this, so they stay in lockstep.
+ * an overage bullet right after the "usage included" line, so the scaling reads as part
+ * of the list rather than sitting in the price heading. We deliberately do NOT publish a
+ * specific per-event RATE or an included-events count on any pre-purchase surface (both
+ * move as we tune pricing; the live rate + allowance are shown on the app usage page for
+ * a customer's ACTUAL bill). Keeping the public copy rate-free avoids promising a number
+ * before it is locked. Both the pricing table and the create-org picker render this.
  */
 export function planFeatures(plan: Plan): PlanFeature[] {
   if (plan.overage !== "bill") return plan.features;
-  const per1k = (EVENT_OVERAGE_PER_MILLION_CENTS / 1000 / 100).toFixed(2);
   const overage: PlanFeature = {
-    text: `Then $${per1k} per 1,000 events beyond that`,
+    text: "Then billed for events past your included usage",
   };
   const at = plan.features.findIndex((f) => /usage included/i.test(f.text));
   return at === -1

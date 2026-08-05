@@ -1,8 +1,10 @@
 import { createAuthClient } from "better-auth/react";
 import {
   organizationClient,
+  twoFactorClient,
   usernameClient,
 } from "better-auth/client/plugins";
+import { ssoClient } from "@better-auth/sso/client";
 import { APP_URL } from "@/lib/urls";
 
 /**
@@ -22,7 +24,18 @@ export const authClient = createAuthClient({
     // an error the caller surfaces (toast + re-enabled button).
     timeout: 15_000,
   },
-  plugins: [usernameClient(), organizationClient()],
+  plugins: [
+    usernameClient(),
+    organizationClient(),
+    // When a signing-in user has 2FA enabled, BetterAuth withholds the session
+    // and signals a challenge; route them to the code page to complete it.
+    twoFactorClient({
+      onTwoFactorRedirect: () => {
+        window.location.href = "/2fa";
+      },
+    }),
+    ssoClient(),
+  ],
 });
 
 export const {
@@ -36,4 +49,6 @@ export const {
   organization,
   useActiveOrganization,
   useListOrganizations,
+  twoFactor,
+  sso,
 } = authClient;

@@ -9,6 +9,7 @@ import { members_ } from "./members.route.js";
 import { billing_ } from "./billing.route.js";
 import { usage_ } from "./usage.route.js";
 import { org_ } from "./org.route.js";
+import { security_ } from "./security.route.js";
 import { orgTokens_ } from "./tokens.route.js";
 import { emailVerify_ } from "./emails.route.js";
 import { projects_ } from "./projects.route.js";
@@ -59,6 +60,8 @@ orgs.route("/:org/incidents", incidents_);
 orgs.route("/:org/oncall", oncall_);
 orgs.route("/:org/runbooks", runbooks_);
 orgs.route("/:org/rcca-template", rcca_);
+// Organization security: SSO enforcement, required 2FA, SCIM provisioning.
+orgs.route("/:org/security", security_);
 // The org resource itself (PATCH /:org rename). Registered last so the more
 // specific sub-resource routes above take precedence.
 orgs.route("/:org", org_);

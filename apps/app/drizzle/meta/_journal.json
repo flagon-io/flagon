@@ -22,6 +22,13 @@
       "when": 1785400000000,
       "tag": "0002_project_creation_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785500000000,
+      "tag": "0003_sso_scim_2fa",
+      "breakpoints": true
     }
   ]
 }

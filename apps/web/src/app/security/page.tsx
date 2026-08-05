@@ -28,6 +28,16 @@ export default function SecurityPage() {
           You can review your active sessions and sign out of other devices from
           your security settings.
         </li>
+        <li>
+          Two-factor authentication (authenticator app plus one-time backup
+          codes) is available on every account, and an organization can require
+          it of all its members.
+        </li>
+        <li>
+          Organizations on Pro and Enterprise can connect their identity provider
+          with SAML 2.0 or OIDC single sign-on, enforce it for members, and
+          provision and deprovision members automatically over SCIM.
+        </li>
       </ul>
 
       <h2>Data and tenancy</h2>

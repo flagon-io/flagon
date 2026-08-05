@@ -39,6 +39,9 @@ export const users = pgTable("users", {
   image: text("image"),
   username: text("username").unique(),
   displayUsername: text("display_username"),
+  // Two-factor plugin flag; consulted by the API's org 2FA enforcement (mirror
+  // of apps/app/src/db/schema.ts, migration 0003).
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -134,6 +137,12 @@ export const organizations = pgTable(
     // Org base permission: who may create projects ('managers' | 'members').
     // See apps/app/src/db/schema.ts (DDL owner) + migration 0002.
     projectCreationPolicy: text("project_creation_policy").notNull().default("managers"),
+    // Security posture (migration 0003). SSO/2FA enforcement is consulted by the
+    // API for cookie-session callers (see lib/org-context.ts).
+    ssoEnforced: boolean("sso_enforced").notNull().default(false),
+    require2fa: boolean("require_2fa").notNull().default(false),
+    ssoDefaultRole: text("sso_default_role").notNull().default("member"),
+    scimEnabled: boolean("scim_enabled").notNull().default(false),
     metadata: text("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -247,6 +256,80 @@ export const accessTokens = pgTable(
       sql`(${t.type} = 'personal' AND ${t.userId} IS NOT NULL AND ${t.organizationId} IS NULL)
         OR (${t.type} = 'organization' AND ${t.organizationId} IS NOT NULL AND ${t.userId} IS NULL)`,
     ),
+  ],
+);
+
+// --- SSO providers -----------------------------------------------------------
+
+/**
+ * Mirror of apps/app's sso_providers (migration 0003). The API reads it only to
+ * enforce the invariant that an org can't turn on SSO enforcement with no
+ * provider configured (see security.route.ts). DDL is owned by the console; the
+ * SSO handshake itself lives on BetterAuth in the console.
+ */
+export const ssoProviders = pgTable("sso_providers", {
+  id: uuid("id").primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id, {
+    onDelete: "cascade",
+  }),
+  providerId: text("provider_id").notNull().unique(),
+});
+
+// --- SCIM provisioning tokens ------------------------------------------------
+
+/**
+ * Mirror of apps/app's scim_tokens (migration 0003). The API owns SCIM token
+ * management (mint/list/revoke); the app owns the SCIM endpoints that
+ * authenticate with them. Both hash identically (sha256, see lib/token-hash).
+ * DDL is owned by the console.
+ */
+export const scimTokens = pgTable(
+  "scim_tokens",
+  {
+    id: uuid("id").primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    lastFour: text("last_four").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("scim_tokens_org_id_idx").on(t.organizationId)],
+);
+
+// --- Per-org SSO session (GitHub-style enforcement) --------------------------
+
+/**
+ * Mirror of apps/app's org_sso_sessions (migration 0003). The API reads it to
+ * enforce SSO for cookie-session callers: a non-owner member of an sso_enforced
+ * org needs an unexpired row here. DDL is owned by the console.
+ */
+export const orgSsoSessions = pgTable(
+  "org_sso_sessions",
+  {
+    id: uuid("id").primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    authenticatedAt: timestamp("authenticated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("org_sso_sessions_org_user_key").on(t.organizationId, t.userId),
   ],
 );
 

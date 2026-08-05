@@ -15,6 +15,7 @@
     "qa": "node --env-file-if-exists=.env.local --env-file-if-exists=.env qa/capture.mjs"
   },
   "dependencies": {
+    "@better-auth/sso": "1.6.25",
     "@flagon/design": "*",
     "@sentry/nextjs": "^10.68.0",
     "@visx/axis": "^4.0.0",
@@ -31,6 +32,7 @@
     "lucide-react": "^1.27.0",
     "next": "16.2.12",
     "postgres": "^3.4.9",
+    "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^9.1.0",
@@ -43,6 +45,7 @@
     "@storybook/react-vite": "^10.5.5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.5",

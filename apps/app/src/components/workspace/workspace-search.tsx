@@ -57,6 +57,7 @@ export function WorkspaceSearch({
     { label: "Organization settings", href: `${base}/settings` },
     { label: "Members", href: `${base}/settings/members` },
     { label: "Invitations", href: `${base}/settings/invitations` },
+    { label: "Authentication security", href: `${base}/settings/security` },
     { label: "Organization tokens", href: `${base}/settings/tokens` },
     { label: "Your settings", href: "/settings" },
     { label: "Emails", href: "/settings/emails" },
