@@ -191,9 +191,13 @@ function CheckIcon({ dim = false }: { dim?: boolean }) {
 function ctaFor(plan: Plan): ReactNode {
   if (plan.id === "enterprise") {
     return (
-      <Cta variant="secondary" size="md" shape="square" href="mailto:sales@flagon.io" className="w-full">
-        {plan.ctaLabel}
-      </Cta>
+      <span
+        aria-disabled="true"
+        title="Enterprise plans open up once Flagon is out of early access."
+        className="inline-flex w-full cursor-not-allowed items-center justify-center rounded-md border border-white/10 bg-white/4 px-5 py-2.5 text-sm font-semibold text-zinc-500"
+      >
+        After early access
+      </span>
     );
   }
   if (plan.available) {

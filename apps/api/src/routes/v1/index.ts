@@ -1,7 +1,5 @@
 import { Hono } from "hono";
 import { healthz } from "./healthz.route.js";
-import { waitlist } from "./waitlist.route.js";
-import { contact } from "./contact.route.js";
 import { me } from "./me.route.js";
 import { flags_ } from "./flags.route.js";
 import { clientKeys_ } from "./client-keys.route.js";
@@ -28,8 +26,6 @@ import { managementWriteLimit } from "../../lib/management-rate-limit.js";
 export const v1 = new Hono();
 
 v1.route("/healthz", healthz);
-v1.route("/waitlist", waitlist);
-v1.route("/contact", contact);
 v1.route("/me", me);
 // Public (token-authed) secondary-email confirmation link target.
 v1.route("/email/verify", emailVerify_);

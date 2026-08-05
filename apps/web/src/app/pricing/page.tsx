@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { BleedBand, brand, GridBackdrop } from "@flagon/design";
+import { BleedBand, brand, GridBackdrop, PageHero } from "@flagon/design";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { PricingTable } from "./pricing-table";
@@ -28,23 +28,24 @@ export default function PricingPage() {
       <SiteHeader />
 
       <main className="relative z-10 flex-1 pb-20">
-        <div className="mx-auto w-full max-w-3xl px-6 pt-24 pb-16 text-center">
-          <h1 className="text-4xl font-semibold tracking-tight text-zinc-50 sm:text-5xl">
-            Simple, usage-based pricing
-          </h1>
-          <p className="mx-auto mt-5 max-w-xl text-base/7 text-zinc-400">
-            One bill for everything you build on Flagon. Every product meters into a
-            shared monthly usage pool, and you pay for usage, never for seats, so
-            adding a teammate never changes the bill. Start free and self-host any time.
-          </p>
-        </div>
+        <PageHero
+          eyebrow="Pricing"
+          rule={false}
+          title={
+            <>
+              Simple, usage-based{" "}
+              <span className="text-zinc-500">pricing.</span>
+            </>
+          }
+          lede="One bill for everything you build on Flagon. Every product meters into a shared monthly usage pool, and you pay for usage, never for seats, so adding a teammate never changes the bill. Start free and self-host any time."
+        />
 
         <PricingTable />
 
         {/* Full-bleed strip directly under the table: the note gets the whole
             width so it sits on one line instead of wrapping for no reason. */}
         <BleedBand>
-          <p className="mx-auto max-w-3xl px-6 py-4 text-center text-sm text-zinc-500">
+          <p className="mx-auto max-w-3xl px-6 py-10 text-center text-sm/7 text-zinc-500">
             You pay for the usage events your products generate, never for seats.
             Hobby includes a free monthly allowance and simply pauses there, never a
             surprise bill. Pro includes your monthly usage and only charges for what

@@ -151,7 +151,6 @@ const TAG_DEFS: { name: string; description: string }[] = [
   { name: "Members", description: "People in an organization." },
   { name: "Account", description: "The authenticated caller." },
   { name: "Emails", description: "The email addresses on your account (GitHub-style multi-email)." },
-  { name: "Waitlist", description: "Public early-access intake." },
   { name: "Health", description: "Liveness and readiness probes." },
 ];
 

@@ -6,7 +6,7 @@
  * Hobby is free (one per account). Pro is a paid, Stripe-backed plan ($50/mo,
  * flat) — creating a Pro org routes through Checkout and the org is locked
  * until the subscription is active. Enterprise stays defined-but-unavailable
- * (Contact Sales), never self-serve.
+ * (it takes shape after early access), never self-serve.
  *
  * Pricing model (Vercel-shaped): flag & config checks are free and unlimited on every
  * plan (the wedge); the billable meter is analytics EVENTS (exposures + experiment goal
@@ -131,22 +131,27 @@ export const PLANS: Plan[] = [
   {
     id: "enterprise",
     name: "Enterprise",
-    description: "Critical security, compliance, support, and SLAs.",
+    description: "For teams with needs beyond Pro.",
     price: { amount: "Custom" },
     baseCents: 0,
     includedEvents: 0,
     overage: "contract",
-    note: "Let's find the right fit for your team.",
-    featuresLead: "All Pro features, plus:",
+    // Everything below is HYPOTHETICAL — ideas we might explore, NOT commitments and
+    // NOT on the roadmap. Enterprise is only defined once Flagon leaves early access,
+    // so nothing here can harden into a broken promise. Keep it lean, don't overinflate,
+    // and don't list anything already on Pro (SSO/SCIM/audit are Pro features).
+    note: "Ideas we might explore, not promises. Nothing here is committed or scheduled until Flagon is out of early access.",
+    featuresLead: "Directions we may explore later:",
     features: [
-      { text: "Dedicated support and SLAs" },
-      { text: "Custom usage volumes" },
-      { text: "Invoicing and procurement" },
-      { text: "Security reviews" },
-      { text: "Data residency options", soon: true },
+      { text: "Priority support with SLAs", soon: true },
+      { text: "Custom volumes and committed-use pricing", soon: true },
+      { text: "Invoicing and net terms", soon: true },
+      { text: "Security reviews and a DPA", soon: true },
+      { text: "Guided onboarding and migration", soon: true },
+      { text: "Self-hosted deployment support", soon: true },
     ],
     available: false,
-    ctaLabel: "Contact sales",
+    ctaLabel: "After early access",
   },
 ];
 

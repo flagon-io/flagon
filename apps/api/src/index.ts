@@ -21,8 +21,8 @@ import { v1 } from "./routes/v1/index.js";
 import { stripeWebhook } from "./routes/webhooks/stripe.route.js";
 import { internal } from "./routes/internal/cron.route.js";
 
-// The API is the control plane: everything that matters (today: the waitlist;
-// soon: projects, flags, auth) lives behind /v1/* and both Next.js apps talk
+// The API is the control plane: everything that matters (projects, flags,
+// experiments, incidents, auth) lives behind /v1/* and both Next.js apps talk
 // to it over plain HTTP — they render screens, the API owns the data.
 //
 // Importing ./routes/v1 also runs each route module, which is what populates

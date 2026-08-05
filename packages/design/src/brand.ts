@@ -25,7 +25,7 @@ export const brand = {
   taglineLead: "Stop building your platform.",
   taglineFollow: "Start shipping on it.",
   description:
-    "One hub for your projects, environments, and teams, with the products you'd otherwise buy or build stitched right in. One catalog, one login, one bill, everything on the same foundation.",
+    "One hub for your projects, environments, and teams, with the products you'd otherwise buy or build stitched right in. Adopt them, or connect the tools you already run: one catalog, one login, one bill, everything on the same foundation.",
 
   colors: {
     bg: "#09090b",
