@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run db:migrate && (npm run stripe:sync || echo 'WARNING stripe:sync FAILED - Stripe prices were NOT reconciled - this tolerance is TEMPORARY, restore fail-closed') && (npm run stripe:reconcile || true) && npm run build",
+  "buildCommand": "npm run db:migrate && (npm run stripe:sync || echo 'WARNING stripe:sync FAILED - Stripe prices were NOT reconciled - this tolerance is TEMPORARY, restore fail-closed') && npm run build",
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../../packages ../../package-lock.json",
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
   "crons": [
