@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { isBillingConfigured } from "../../lib/stripe.js";
 import { sweepUsageReports } from "../../usage/report-sweep.js";
 import { sweepEscalations } from "../../incidents/escalate-sweep.js";
+import { sweepDeliveries } from "../../notifications/deliver-sweep.js";
+import { sweepChecks } from "../../checks/sweep.js";
 import { flushMonitoring } from "../../lib/monitoring.js";
 
 /**
@@ -49,6 +51,37 @@ internal.on(["GET", "POST"], "/cron/escalate", async (c) => {
     return c.json({ error: "unauthorized" }, 401);
   }
   const result = await sweepEscalations();
+  // Per-org failures were captured inside the sweep; flush before the function freezes.
+  await flushMonitoring();
+  return c.json({ ok: true, ...result });
+});
+
+/**
+ * The notification drain sweep. Delivers queued alert-channel notifications (Slack,
+ * webhook, email) with retries + backoff (see notifications/deliver-sweep.ts). The
+ * outbound spine that checks and incidents enqueue onto. Idempotent; runs ~every minute.
+ */
+internal.on(["GET", "POST"], "/cron/notify", async (c) => {
+  if (!cronAuthorized(c.req.header("authorization"))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const result = await sweepDeliveries();
+  // Per-org failures were captured inside the sweep; flush before the function freezes.
+  await flushMonitoring();
+  return c.json({ ok: true, ...result });
+});
+
+/**
+ * The synthetic-checks sweep. Probes every due check, advances its up/down state with
+ * confirmation thresholds, and fires actions (notify channels, open/auto-resolve
+ * incidents) on a confirmed transition (see checks/sweep.ts). Idempotent; runs ~every
+ * minute (coarser check intervals self-gate via next_run_at).
+ */
+internal.on(["GET", "POST"], "/cron/checks", async (c) => {
+  if (!cronAuthorized(c.req.header("authorization"))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const result = await sweepChecks();
   // Per-org failures were captured inside the sweep; flush before the function freezes.
   await flushMonitoring();
   return c.json({ ok: true, ...result });

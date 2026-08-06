@@ -27,6 +27,7 @@ export type Incident = {
   summary: string | null;
   severity: string;
   status: string;
+  source: string;
   ownerTeam: { key: string; name: string } | null;
   escalationPolicyKey: string | null;
   acknowledgedAt: string | null;

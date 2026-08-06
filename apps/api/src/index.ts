@@ -17,6 +17,7 @@ import { baseUrl, jsonError } from "./lib/http.js";
 import { logger } from "./lib/logger.js";
 import { buildOpenApiDocument, buildRootIndex } from "./openapi/registry.js";
 import { ofrep } from "./routes/ofrep/index.js";
+import { ingest } from "./routes/ingest/checks-ping.route.js";
 import { v1 } from "./routes/v1/index.js";
 import { stripeWebhook } from "./routes/webhooks/stripe.route.js";
 import { internal } from "./routes/internal/cron.route.js";
@@ -91,6 +92,10 @@ app.route("/v1", v1);
 // OFREP: the OpenFeature Remote Evaluation Protocol. The flag-evaluation hot
 // path, authenticated by client key rather than the control-plane token/cookie.
 app.route("/ofrep", ofrep);
+
+// Public heartbeat ingest (tokenized dead-man ping for cron/job checks). Outside /v1;
+// the per-check ping token in the URL is the credential. See the route.
+app.route("/ingest", ingest);
 
 // Stripe webhook: authenticated by request signature, not a token/cookie, so it
 // sits outside /v1 and the management middleware. See the route for details.

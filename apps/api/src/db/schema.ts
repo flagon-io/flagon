@@ -1152,7 +1152,16 @@ export const incidents = pgTable(
       () => oncallEscalationPolicies.id,
       { onDelete: "set null" },
     ),
+    // Null for check-declared incidents (no human declarer); set to the actor for
+    // manual declares.
     declaredByUserId: uuid("declared_by_user_id"),
+    // How this incident was created — the intake dimension. `manual` = a human
+    // declared it; `check` = a synthetic monitor opened it (source_check_id
+    // back-links the check). Extensible later (api, external alert integrations).
+    // No DB FK to checks here: it would be circular with checks.active_incident_id,
+    // so the checks migration adds the constraint (ON DELETE SET NULL).
+    source: text("source").notNull().default("manual"),
+    sourceCheckId: uuid("source_check_id"),
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
     acknowledgedByUserId: uuid("acknowledged_by_user_id"),
     escalatedLevel: integer("escalated_level").notNull().default(0),
@@ -1165,6 +1174,8 @@ export const incidents = pgTable(
     index("incidents_org_idx").on(t.organizationId),
     index("incidents_org_status_idx").on(t.organizationId, t.status),
     index("incidents_owner_team_idx").on(t.ownerTeamId),
+    index("incidents_org_source_idx").on(t.organizationId, t.source),
+    index("incidents_source_check_idx").on(t.sourceCheckId),
   ],
 );
 
@@ -1535,6 +1546,258 @@ export const oncallEscalationLevels = pgTable(
   ],
 );
 
+/**
+ * =============================================================================
+ * NOTIFICATIONS SPINE
+ * =============================================================================
+ * The platform's single OUTBOUND notification pipe. Producers (synthetic checks,
+ * incidents, later flag change-events) never talk to Slack/email directly: they
+ * reference an org-level `alert_channels` DESTINATION and enqueue a
+ * `notification_deliveries` row. A drain sweep (notifications/deliver-sweep.ts)
+ * renders and delivers with retries + backoff, so a slow or broken destination
+ * never blocks a producer. Distinct from `notification_channels`, which pages a
+ * HUMAN via on-call; alert channels post to a place (a Slack channel, a webhook, a
+ * shared mailbox). Tenant data (org-scoped, RLS).
+ */
+
+/** A reusable outbound destination's config. Secret URLs are stored ENCRYPTED
+ *  (lib/crypto): the `url` string is ciphertext for slack_webhook/webhook and there
+ *  is no secret for email. The API never returns a decrypted secret to a client. */
+export type AlertChannelConfig = {
+  /** slack_webhook / webhook: the (encrypted) destination URL. */
+  url?: string;
+  /** webhook: HTTP method (default POST) and optional static headers. */
+  method?: string;
+  headers?: Record<string, string>;
+  /** slack_webhook: a human label for the target channel (e.g. "#ops"). */
+  channelLabel?: string;
+  /** email: the recipient addresses (plaintext — not a secret). */
+  addresses?: string[];
+};
+
+export const alertChannels = pgTable(
+  "alert_channels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    // slack_webhook | webhook | email. (An OAuth-app "slack" type is a v2 addition
+    // that will carry a non-null integration_id.)
+    type: text("type").notNull(),
+    // Reserved for v2 authenticated integrations (a Slack OAuth workspace). Null for
+    // every v1 type, which needs no stored connection; no FK yet (org_integrations
+    // lands with the OAuth work).
+    integrationId: uuid("integration_id"),
+    config: jsonb("config").$type<AlertChannelConfig>().notNull().default(sql`'{}'::jsonb`),
+    enabled: boolean("enabled").notNull().default(true),
+    // Delivery health, maintained by the drain sweep: unknown | ok | failing | disabled.
+    health: text("health").notNull().default("unknown"),
+    lastError: text("last_error"),
+    lastDeliveredAt: timestamp("last_delivered_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("alert_channels_org_key_key").on(t.organizationId, t.key),
+    index("alert_channels_org_idx").on(t.organizationId),
+  ],
+);
+
+/** The normalized message a producer hands the spine; each provider renders it into
+ *  Slack Block Kit / a webhook JSON body / an email. */
+export type DeliveryPayload = {
+  title: string;
+  body?: string;
+  severity?: string;
+  url?: string;
+  fields?: { label: string; value: string }[];
+  kind?: string;
+};
+
+/**
+ * The delivery queue + audit log. One row per (event, channel): enqueued by a
+ * producer, drained by the sweep. `dedupe_key` is unique per (event, channel), the
+ * exactly-once guard against overlapping enqueues and flapping producers.
+ */
+export const notificationDeliveries = pgTable(
+  "notification_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => alertChannels.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    // The producing entity: check | incident | flag_event | usage | test.
+    sourceType: text("source_type").notNull(),
+    sourceId: text("source_id"),
+    // Logical event id, e.g. "check.down:<checkId>:<stateChangeId>".
+    eventKey: text("event_key").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    payload: jsonb("payload").$type<DeliveryPayload>().notNull(),
+    // pending | sent | failed | dead.
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(6),
+    statusCode: integer("status_code"),
+    error: text("error"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("notification_deliveries_dedupe_key").on(t.dedupeKey),
+    index("notification_deliveries_org_idx").on(t.organizationId),
+    index("notification_deliveries_channel_idx").on(t.channelId),
+    index("notification_deliveries_due_idx").on(t.status, t.nextAttemptAt),
+  ],
+);
+
+/**
+ * =============================================================================
+ * CHECKS (synthetic monitoring)
+ * =============================================================================
+ * A `check` is a monitor attached to a catalog project (our "service"): it probes a
+ * target on a schedule, keeps an up/degraded/down state with confirmation thresholds
+ * (hysteresis, so one bad probe never alerts), and on a confirmed transition fires an
+ * action — notify alert channels and/or open an incident (the detection layer of the
+ * reliability product). `check_results` is the append-only heartbeat log powering
+ * uptime % and latency. Tenant data (org-scoped, RLS).
+ */
+
+/** Where + how a check probes. Fields used depend on `type`. */
+export type CheckTarget = {
+  /** http/keyword/tls_expiry: the URL (https for tls_expiry). */
+  url?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  followRedirects?: boolean;
+  /** tcp / tls_expiry (when no url): host + port. */
+  host?: string;
+  port?: number;
+};
+
+/** What makes a probe pass. Unset fields use sensible defaults (2xx/3xx status). */
+export type CheckAssertions = {
+  expectedStatusMin?: number;
+  expectedStatusMax?: number;
+  /** keyword mode: substring that must be present (or absent, see keywordAbsent). */
+  keyword?: string;
+  keywordAbsent?: boolean;
+  /** latency assertion: fail if the probe is slower than this. */
+  maxLatencyMs?: number;
+  /** tls_expiry: warn/fail when the cert has fewer than this many days remaining. */
+  tlsMinDaysRemaining?: number;
+  /** heartbeat: extra seconds of lateness tolerated before a missed ping fails. */
+  heartbeatGraceSeconds?: number;
+};
+
+/** The incident a check opens in `incident` mode. Timing/paging over time is the
+ *  escalation policy's job, not the check's. */
+export type CheckIncidentAction = {
+  severity: string;
+  escalationPolicyKey?: string | null;
+  ownerTeamKey?: string | null;
+  /** A runbook to attach to the opened incident (its steps materialize as the checklist). */
+  runbookKey?: string | null;
+  /** Resolve the opened incident automatically when the check recovers (default true). */
+  autoResolve?: boolean;
+};
+/**
+ * What a check DOES on a confirmed failure — ONE response mode (detection and response
+ * are separate layers):
+ *   - track: record status only, no alerting.
+ *   - notify: post the state change to `channelKeys` (destinations: Slack/webhook/email).
+ *   - incident: declare an incident (pages the owning team's on-call or the policy through
+ *     each responder's notification channels; posts opened/resolved to `channelKeys`;
+ *     runs the timeline + runbook; auto-resolves on recovery). All time-based escalation
+ *     lives in the incident's escalation policy, NOT here.
+ * `channelKeys` is shared by notify + incident (both can post to channels).
+ */
+export type CheckAction = {
+  mode?: "track" | "notify" | "incident";
+  channelKeys?: string[];
+  incident?: CheckIncidentAction;
+};
+
+export const checks = pgTable(
+  "checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    // http | keyword | tls_expiry | tcp.
+    type: text("type").notNull(),
+    target: jsonb("target").$type<CheckTarget>().notNull().default(sql`'{}'::jsonb`),
+    assertions: jsonb("assertions").$type<CheckAssertions>().notNull().default(sql`'{}'::jsonb`),
+    intervalSeconds: integer("interval_seconds").notNull().default(300),
+    timeoutMs: integer("timeout_ms").notNull().default(10000),
+    // Confirmation thresholds (hysteresis): N consecutive fails to go down, M
+    // consecutive successes to recover. Asymmetric on purpose (kills flapping).
+    failureThreshold: integer("failure_threshold").notNull().default(3),
+    recoveryThreshold: integer("recovery_threshold").notNull().default(2),
+    action: jsonb("action").$type<CheckAction>().notNull().default(sql`'{}'::jsonb`),
+    enabled: boolean("enabled").notNull().default(true),
+    paused: boolean("paused").notNull().default(false),
+    // Derived health: unknown | up | degraded | down | paused.
+    status: text("status").notNull().default("unknown"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    consecutiveSuccesses: integer("consecutive_successes").notNull().default(0),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    lastStatusChangedAt: timestamp("last_status_changed_at", { withTimezone: true }),
+    lastLatencyMs: integer("last_latency_ms"),
+    // Heartbeat checks: the most recent inbound ping, and the secret token in the ingest
+    // URL. Null for outbound (http/keyword/tls/tcp) checks.
+    lastPingAt: timestamp("last_ping_at", { withTimezone: true }),
+    pingToken: text("ping_token"),
+    // Dispatch cursor: the sweep runs a check when now >= next_run_at, then advances
+    // it by interval. A new check defaults due immediately.
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
+    // The incident this check currently has open (dedupe for the incident action). No
+    // FK here (circular with incidents.source_check_id); the migration adds it SET NULL.
+    activeIncidentId: uuid("active_incident_id"),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("checks_org_key_key").on(t.organizationId, t.key),
+    index("checks_org_idx").on(t.organizationId),
+    index("checks_project_idx").on(t.projectId),
+    index("checks_org_status_idx").on(t.organizationId, t.status),
+    // The sweep selects due, enabled, unpaused checks by next_run_at.
+    index("checks_due_idx").on(t.enabled, t.paused, t.nextRunAt),
+  ],
+);
+
+/** The heartbeat log: one row per probe. Append-only; TTL-pruned later. */
+export const checkResults = pgTable(
+  "check_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    checkId: uuid("check_id")
+      .notNull()
+      .references(() => checks.id, { onDelete: "cascade" }),
+    ranAt: timestamp("ran_at", { withTimezone: true }).notNull().defaultNow(),
+    ok: boolean("ok").notNull(),
+    statusCode: integer("status_code"),
+    responseMs: integer("response_ms"),
+    error: text("error"),
+    // v1 probes from a single region; labeled so multi-region quorum can extend later.
+    region: text("region"),
+  },
+  (t) => [
+    index("check_results_check_idx").on(t.checkId, t.ranAt),
+    index("check_results_org_idx").on(t.organizationId),
+  ],
+);
+
 export type Flag = typeof flags.$inferSelect;
 export type NewFlag = typeof flags.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
@@ -1582,6 +1845,14 @@ export type IncidentChecklistItem = typeof incidentChecklistItems.$inferSelect;
 export type RccaTemplate = typeof rccaTemplates.$inferSelect;
 export type IncidentRcca = typeof incidentRccas.$inferSelect;
 export type IncidentActionItem = typeof incidentActionItems.$inferSelect;
+export type AlertChannel = typeof alertChannels.$inferSelect;
+export type NewAlertChannel = typeof alertChannels.$inferInsert;
+export type NotificationDelivery = typeof notificationDeliveries.$inferSelect;
+export type NewNotificationDelivery = typeof notificationDeliveries.$inferInsert;
+export type Check = typeof checks.$inferSelect;
+export type NewCheck = typeof checks.$inferInsert;
+export type CheckResult = typeof checkResults.$inferSelect;
+export type NewCheckResult = typeof checkResults.$inferInsert;
 
 /** Everything the migrator and query layer should know about. */
 export const schema = {
@@ -1630,6 +1901,10 @@ export const schema = {
   rccaTemplates,
   incidentRccas,
   incidentActionItems,
+  alertChannels,
+  notificationDeliveries,
+  checks,
+  checkResults,
 };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm

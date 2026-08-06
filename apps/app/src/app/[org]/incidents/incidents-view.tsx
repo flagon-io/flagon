@@ -159,6 +159,9 @@ export function Section({ title, incidents, slug, empty }: { title: string; inci
               <SeverityBadge severity={i.severity} />
               <span className="shrink-0 font-mono text-xs text-zinc-500">INC-{i.number}</span>
               <span className="min-w-0 flex-1 truncate text-sm text-zinc-100">{i.title}</span>
+              {i.source === "check" ? (
+                <span className="hidden shrink-0 rounded bg-white/8 px-1.5 py-0.5 text-[11px] font-medium text-zinc-400 sm:inline" title="Opened automatically by a check">Check</span>
+              ) : null}
               <StatusPill status={i.status} />
               {i.ownerTeam ? (
                 <span className="hidden items-center gap-1.5 text-xs text-zinc-500 sm:inline-flex">

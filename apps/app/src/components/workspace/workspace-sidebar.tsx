@@ -199,6 +199,12 @@ function buildNav(base: string): {
         ],
       },
       {
+        heading: "Notifications",
+        items: [
+          { label: "Alert channels", icon: BellRing, href: `${base}/settings/alert-channels` },
+        ],
+      },
+      {
         heading: "Billing",
         items: [
           { label: "Billing & plans", icon: CreditCard, href: `${base}/settings/billing` },
@@ -213,10 +219,14 @@ function buildNav(base: string): {
     label: "Incidents",
     icon: Siren,
     href: `${base}/incidents`,
+    // Checks live at /checks (not under /incidents) but belong to this reliability
+    // area, so alias it in to keep the sub-nav open when viewing the checks board.
+    aliases: [`${base}/checks`],
     groups: [
       {
         items: [
           { label: "Incidents", icon: Siren, href: `${base}/incidents` },
+          { label: "Checks", icon: Activity, href: `${base}/checks` },
           { label: "Runbooks", icon: BookText, href: `${base}/incidents/runbooks` },
         ],
       },
@@ -337,6 +347,7 @@ export function WorkspaceSidebar({
             items: [
               { label: "Deployments", icon: Rocket, soon: true },
               { label: "Logs", icon: Logs, soon: true },
+              { label: "Checks", icon: Activity, href: `${projectBase}/checks` },
               { label: "Incidents", icon: Siren, href: `${projectBase}/incidents` },
             ],
           },

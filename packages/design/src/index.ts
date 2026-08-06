@@ -15,6 +15,7 @@ export { Cta } from "./components/cta";
 export { PageHero } from "./components/page-hero";
 export { PlanCard } from "./components/plan-card";
 export { Select, type SelectOption } from "./components/select";
+export { Slider } from "./components/slider";
 export {
   SegmentedControl,
   type SegmentedOption,

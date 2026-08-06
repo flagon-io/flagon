@@ -131,9 +131,11 @@ export const nav: NavSection[] = [
         title: "Incidents & on-call",
         items: [
           { title: "Incidents", href: "/docs/incidents" },
+          { title: "Checks", href: "/docs/incidents/checks" },
           { title: "Runbooks", href: "/docs/incidents/runbooks" },
           { title: "On-call", href: "/docs/incidents/on-call" },
           { title: "Postmortems (RCCA)", href: "/docs/incidents/postmortems" },
+          { title: "Alert channels", href: "/docs/incidents/alert-channels" },
         ],
       },
       { title: "Deployments", soon: true },
