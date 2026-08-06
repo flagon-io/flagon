@@ -7,22 +7,10 @@ import { authClient } from "@/lib/auth-client";
 import { Field, submitButtonClass } from "@/components/field";
 import { FormError } from "@/components/form-error";
 import { SocialButtons } from "@/components/social-buttons";
-import { isReserved } from "@/lib/reserved";
+import { USERNAME_RULE, validateUsername } from "@/lib/username";
 import { safeRedirect } from "@/lib/safe-redirect";
 import { WEB_URL } from "@/lib/urls";
 import type { OAuthProviders } from "@/lib/oauth";
-
-const USERNAME_RE = /^[a-z0-9](?:[a-z0-9-]{1,37}[a-z0-9])?$/i;
-const USERNAME_RULE =
-  "Username may only contain letters, numbers, or single hyphens, and cannot begin or end with a hyphen.";
-
-function validateUsername(value: string): string | null {
-  if (value.length < 3) return "Username must be at least 3 characters.";
-  if (value.length > 39) return "Username must be at most 39 characters.";
-  if (!USERNAME_RE.test(value)) return USERNAME_RULE;
-  if (isReserved(value)) return "That username is reserved.";
-  return null;
-}
 
 /**
  * GitHub-style registration. Social sign-in on top (disabled until configured),

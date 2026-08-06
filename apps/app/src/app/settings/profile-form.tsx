@@ -7,9 +7,7 @@ import { authClient } from "@/lib/auth-client";
 import { Field } from "@/components/field";
 import { FormError, FormNotice } from "@/components/form-error";
 import { SettingsFooter } from "@/components/settings/section";
-import { isReserved } from "@/lib/reserved";
-
-const USERNAME_RE = /^[a-z0-9](?:[a-z0-9-]{1,37}[a-z0-9])?$/i;
+import { USERNAME_MIN, validateUsername } from "@/lib/username";
 
 /**
  * Edit name and username. Username shape is validated locally; whether a new
@@ -33,10 +31,10 @@ export function ProfileForm({
   const uname = username.trim();
   const usernameChanged =
     uname.toLowerCase() !== initialUsername.trim().toLowerCase();
+  // Stays quiet until there is enough typed to judge, then names the actual rule
+  // that failed rather than reciting all of them.
   const formatHint =
-    usernameChanged && uname.length >= 3 && (!USERNAME_RE.test(uname) || isReserved(uname))
-      ? "Letters, numbers, and single hyphens, and not reserved."
-      : null;
+    usernameChanged && uname.length >= USERNAME_MIN ? validateUsername(uname) : null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -48,8 +46,9 @@ export function ProfileForm({
       setError("Your name cannot be empty.");
       return;
     }
-    if (usernameChanged && (!USERNAME_RE.test(uname) || isReserved(uname))) {
-      setError("That username is not allowed.");
+    const usernameProblem = usernameChanged ? validateUsername(uname) : null;
+    if (usernameProblem) {
+      setError(usernameProblem);
       return;
     }
 

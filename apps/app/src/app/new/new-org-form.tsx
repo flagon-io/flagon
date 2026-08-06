@@ -39,7 +39,7 @@ export function NewOrgForm({ hasHobby }: { hasHobby: boolean }) {
     : !isValidSlug(effectiveSlug)
       ? "Lowercase letters, numbers, and single hyphens."
       : isReserved(effectiveSlug)
-        ? "That name is reserved."
+        ? "That URL is reserved."
         : null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -52,8 +52,14 @@ export function NewOrgForm({ hasHobby }: { hasHobby: boolean }) {
       setError("Give your organization a name.");
       return;
     }
-    if (!isValidSlug(orgSlug) || isReserved(orgSlug)) {
-      setError("Choose a valid, unreserved URL for your organization.");
+    if (!isValidSlug(orgSlug)) {
+      setError(
+        "That URL is invalid. Use lowercase letters, numbers, and single hyphens.",
+      );
+      return;
+    }
+    if (isReserved(orgSlug)) {
+      setError("That URL is reserved. Choose a different one.");
       return;
     }
     if (!plan) {

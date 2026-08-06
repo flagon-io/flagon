@@ -16,7 +16,7 @@ import {
   resetPasswordTemplate,
   verifyEmailTemplate,
 } from "@/lib/email/templates";
-import { isReserved } from "@/lib/reserved";
+import { isValidUsername } from "@/lib/username";
 import { uuidv7 } from "@/lib/uuid";
 import { DEFAULT_PLAN, isSelectablePlan, planAllowsInvites } from "@/lib/plans";
 import { resolvePrimaryEmail } from "@/lib/user-emails";
@@ -129,11 +129,10 @@ export const auth = betterAuth({
     username({
       minUsernameLength: 3,
       maxUsernameLength: 39,
-      usernameValidator: (value) =>
-        // GitHub-style: letters, digits, single hyphens, no leading/trailing
-        // hyphen, and not a reserved word.
-        /^[a-z0-9](?:[a-z0-9-]{1,37}[a-z0-9])?$/i.test(value) &&
-        !isReserved(value),
+      // The backstop. BetterAuth takes a boolean, so it cannot say WHICH rule
+      // failed; the signup and profile forms call validateUsername for that and
+      // share this exact predicate, so the two can never disagree.
+      usernameValidator: isValidUsername,
     }),
     organization({
       // The subscription tier, stored on the org row; set by billing, not users.

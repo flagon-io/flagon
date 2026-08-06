@@ -95,8 +95,16 @@ org_.patch("/", async (c) => {
 
   if (parsed.data.slug !== undefined) {
     const slug = parsed.data.slug.trim().toLowerCase();
-    if (!isValidSlug(slug) || isReserved(slug))
-      return jsonError(c, 422, "That URL is invalid or reserved.");
+    // Two different failures, two different messages: "invalid or reserved"
+    // leaves someone with a perfectly well-formed slug guessing at the shape rule.
+    if (!isValidSlug(slug))
+      return jsonError(
+        c,
+        422,
+        "That URL is invalid. Use lowercase letters, numbers, and single hyphens.",
+      );
+    if (isReserved(slug))
+      return jsonError(c, 422, "That URL is reserved. Choose a different one.");
 
     // Uniqueness (excluding this org).
     const clash = await db
