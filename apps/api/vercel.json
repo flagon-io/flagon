@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run db:migrate && npm run stripe:sync && npm run build",
+  "buildCommand": "npm run db:migrate && npm run stripe:sync && (npm run stripe:reconcile || true) && npm run build",
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../../packages ../../package-lock.json",
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
   "crons": [

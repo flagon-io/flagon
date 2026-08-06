@@ -1,4 +1,8 @@
 import app from "../dist/index.js";
+import {
+  RawBodyUnavailableError,
+  readRequestBody,
+} from "../dist/lib/vercel-request.js";
 
 /**
  * Serverless function entry (Vercel Node runtime).
@@ -10,33 +14,13 @@ import app from "../dist/index.js";
  * body (auth sign-in, waitlist, a real OFREP evaluate) awaits `request.json()`
  * forever — the request just sits at "waiting for response".
  *
- * Instead we read the body EAGERLY here (Vercel's parsed `req.body` when present,
- * else the raw stream), construct a real Web Request with that fully-materialized
- * body, run `app.fetch`, and write the Response back — preserving multiple
- * Set-Cookie headers, which auth depends on. GET/HEAD carry no body and are
- * unaffected. The compiled app is imported from ../dist (build output).
+ * Instead we read the body EAGERLY here, construct a real Web Request with that
+ * fully-materialized body, run `app.fetch`, and write the Response back —
+ * preserving multiple Set-Cookie headers, which auth depends on. Reading the body
+ * without destroying its exact bytes is subtle enough to live in its own module:
+ * see ../src/lib/vercel-request.ts (and the NODEJS_HELPERS=0 requirement it
+ * documents). The compiled app is imported from ../dist (build output).
  */
-
-async function readBody(req) {
-  if (req.method === "GET" || req.method === "HEAD") return undefined;
-
-  // Vercel usually parses the body onto req.body (consuming the stream). Use it.
-  const parsed = req.body;
-  if (parsed !== undefined && parsed !== null && parsed !== "") {
-    if (Buffer.isBuffer(parsed)) return parsed;
-    if (typeof parsed === "string") return parsed;
-    // Parsed JSON/object — re-serialize. The Content-Type header is preserved,
-    // so the app reads it back correctly (our request bodies are all JSON).
-    return JSON.stringify(parsed);
-  }
-
-  // Otherwise drain the raw stream ourselves (fully, before app.fetch).
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-  }
-  return chunks.length ? Buffer.concat(chunks) : undefined;
-}
 
 function toHeaders(nodeHeaders) {
   const headers = new Headers();
@@ -56,7 +40,7 @@ export default async function handler(req, res) {
     const request = new Request(url, {
       method: req.method,
       headers: toHeaders(req.headers),
-      body: await readBody(req),
+      body: await readRequestBody(req),
     });
 
     const response = await app.fetch(request);
@@ -77,11 +61,21 @@ export default async function handler(req, res) {
     const buf = Buffer.from(await response.arrayBuffer());
     res.end(buf);
   } catch (err) {
+    // A misconfigured runtime is not a generic 500 — say exactly what is wrong and
+    // how to fix it, because the alternative (a silently unverifiable body) cost us
+    // four days of dropped Stripe webhooks. 5xx so the sender retries after the fix.
+    const misconfigured = err instanceof RawBodyUnavailableError;
     console.error("[vercel-entry] error:", err);
     if (!res.headersSent) {
-      res.statusCode = 500;
+      res.statusCode = misconfigured ? 503 : 500;
       res.setHeader("content-type", "application/json");
     }
-    res.end(JSON.stringify({ message: "Server Error", status: 500 }));
+    res.end(
+      JSON.stringify(
+        misconfigured
+          ? { message: "Server Misconfigured", status: 503 }
+          : { message: "Server Error", status: 500 },
+      ),
+    );
   }
 }

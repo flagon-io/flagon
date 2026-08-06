@@ -57,3 +57,9 @@ Migrations run in the deploy **build step** via `npm run db:migrate`, so a
 release applies its migrations before it serves traffic. Set `DATABASE_URL`
 (pooled) and `DATABASE_URL_UNPOOLED` (direct) plus `APP_DATABASE_URL` (the
 restricted role, pooled) in the deploy environment.
+
+**`NODEJS_HELPERS=0` is required** (Vercel > Settings > Environment Variables,
+every environment). Vercel's Node helpers parse the request body onto `req.body`,
+which destroys the exact bytes a signature covers — with them on, every Stripe
+webhook delivery fails verification. See `src/lib/vercel-request.ts`; the entry
+now returns 503 rather than serving a body it cannot faithfully reproduce.
