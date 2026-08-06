@@ -13,7 +13,6 @@ import {
   type OrgContext,
 } from "../../lib/org-context.js";
 import { isValidSlug } from "../../lib/slug.js";
-import { isReserved } from "../../lib/reserved.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
 /**
@@ -184,7 +183,7 @@ registerRoute({
   request: { body: createBody },
   responses: {
     201: { description: "The created team.", schemaName: "TeamResponse" },
-    400: { description: "Reserved or invalid key." },
+    400: { description: "Invalid key." },
     409: { description: "A team with that key already exists." },
     422: { description: "Validation failed." },
   },
@@ -356,7 +355,10 @@ teams_.post("/", async (c) => {
   if (!parsed.success) return validationError(c, parsed.error);
   const { name, key, description } = parsed.data;
 
-  if (!isValidSlug(key) || isReserved(key)) {
+  // Shape only — same reasoning as project keys: a team key lives at
+  // /[org]/teams/[team] and shares a namespace with nothing, so the top-level
+  // reserved-word list (org slugs, usernames) does not apply to it.
+  if (!isValidSlug(key)) {
     return jsonError(c, 400, "Choose a different team key (letters, numbers, dashes).");
   }
 

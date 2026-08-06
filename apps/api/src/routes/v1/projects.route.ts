@@ -11,7 +11,6 @@ import {
   requireProjectCreator,
 } from "../../lib/org-context.js";
 import { isValidSlug } from "../../lib/slug.js";
-import { isReserved } from "../../lib/reserved.js";
 import { parseRepo } from "../../lib/repo.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 
@@ -216,7 +215,7 @@ registerRoute({
   request: { body: createBody },
   responses: {
     201: { description: "The created project.", schemaName: "ProjectResponse" },
-    400: { description: "Reserved or invalid key." },
+    400: { description: "Invalid key." },
     409: { description: "A project with that key already exists." },
     422: { description: "The submitted data failed validation." },
   },
@@ -311,7 +310,10 @@ projects_.post("/", async (c) => {
     repoVisibility,
   } = parsed.data;
 
-  if (!isValidSlug(key) || isReserved(key)) {
+  // Shape only. The reserved-word list guards the TOP-LEVEL namespace (org slugs,
+  // usernames); a project key lives at /[org]/projects/[project] and shares a
+  // namespace with nothing, so "api" and "settings" are perfectly good keys.
+  if (!isValidSlug(key)) {
     return jsonError(c, 400, "Choose a different project key (letters, numbers, dashes).");
   }
 
