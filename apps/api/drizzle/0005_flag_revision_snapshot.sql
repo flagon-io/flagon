@@ -1,1 +1,0 @@
-ALTER TABLE "flag_revisions" ADD COLUMN "snapshot" jsonb;

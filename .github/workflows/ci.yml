@@ -86,6 +86,23 @@ jobs:
           npm run db:migrate -w @flagon/api
           npm run db:migrate -w @flagon/app
 
+      # Drift guard: schema.ts is the query-builder source of truth and the migrations
+      # must build exactly it. `db:generate` diffs schema.ts against the committed
+      # snapshot; if they diverge it emits a new migration (additive) or errors on a
+      # drop — either way this step goes RED. Green means "nothing to migrate". Fix by
+      # running `npm run db:generate` locally and committing the result (with any RLS/
+      # grants hand-added to the generated SQL).
+      - name: Migration drift check
+        run: |
+          before=$(ls apps/api/drizzle/*.sql | wc -l)
+          npm run db:generate -w @flagon/api
+          after=$(ls apps/api/drizzle/*.sql | wc -l)
+          if [ "$before" != "$after" ]; then
+            echo "::error::schema.ts drifted from the migrations. Run 'npm run db:generate' and commit it (hand-add RLS/grants to the generated SQL)."
+            git --no-pager diff --stat
+            exit 1
+          fi
+
       # APP_DATABASE_URL (the restricted role) takes precedence in the DB client,
       # so every DB-backed test runs under RLS. --no-file-parallelism keeps the
       # DB-heavy suites off each other's toes.

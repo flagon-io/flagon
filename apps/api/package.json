@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=.env --import tsx src/db/migrate.ts",
+    "db:rebaseline": "node --env-file-if-exists=.env --import tsx scripts/rebaseline-prod.ts",
     "db:studio": "drizzle-kit studio",
     "stripe:sync": "node --env-file-if-exists=.env --import tsx scripts/sync-stripe.ts",
     "stripe:reconcile": "node --env-file-if-exists=.env --import tsx scripts/reconcile-subscriptions.ts",
