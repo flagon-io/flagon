@@ -1,0 +1,141 @@
+export const metadata = {
+  title: "Integrations",
+  description:
+    "Connect outside tools to your org. Bring-your-own-provider integrations let you supply a third party's credentials (like Twilio) that Flagon uses on your behalf, org-scoped and encrypted at rest.",
+};
+
+# Integrations
+
+Integrations connect Flagon to the tools your org already runs. They live under
+**Settings → Integrations** and come in two shapes:
+
+- **Flagon apps.** Something you connect with one click, where Flagon holds the
+  credentials. **Source providers** (GitHub, GitLab, Bitbucket) are the first and
+  most common: connect one at the org level so your projects can build on its
+  repositories. Slack and Discord notifications join them. These are coming soon.
+- **Bring-your-own provider.** You supply a third party's credentials (a Twilio
+  account, say) and Flagon calls that service using **your** account. You own the
+  provider and the bill; Flagon just holds the keys and makes the calls. Available
+  now.
+
+This page covers bring-your-own providers. They're **org-scoped**: one
+configuration per provider per organization, managed by an owner or admin.
+
+## How credentials are stored
+
+A bring-your-own credential (a Twilio auth token, for example) has to be handed
+back to the provider to call it, so unlike an access token, it can't be one-way
+hashed. Flagon **encrypts** it at rest with AES-256-GCM and only ever decrypts it
+to make a call on your behalf.
+
+Secrets are **write-only over the API and the console**. When you save an
+integration the credential goes in; it never comes back out. Afterward you only
+ever see non-secret settings and a masked hint (the last four characters). To
+change a secret, you re-enter it.
+
+When you save, Flagon runs a **live connection test** against the provider and
+records the result, so a bad token surfaces immediately rather than at the first
+page. You can re-run the test anytime from the console or the API.
+
+## Twilio (SMS & voice)
+
+Connect Twilio to page your on-call responders by **SMS and phone call** using
+your own Twilio account. Once connected, incident pages reach responders through
+their [notification channels](/docs/incidents/on-call):
+
+- an **SMS** channel receives a text with the incident summary and a link, and
+- a **voice** channel gets a phone call that speaks the incident aloud.
+
+Both are in addition to email, which always delivers.
+
+You'll need three values from your Twilio console:
+
+| Field | Where it comes from |
+| --- | --- |
+| **Account SID** | Your Twilio dashboard. Starts with `AC`. |
+| **Auth token** | Your Twilio dashboard. Encrypted at rest, never shown again. |
+| **From number or Messaging Service SID** | An E.164 number (`+15551234567`) you own, or a Messaging Service SID (`MG…`). |
+
+Paste them under **Settings → Integrations → Twilio** and save. Flagon verifies
+the credentials with Twilio before storing them. If the status later shows
+**Needs attention**, open the integration and use **Test connection** to see why.
+
+<Callout tone="note" title="Voice needs a phone number">
+  A Messaging Service SID works for SMS but not for voice: a phone call needs a
+  real phone number as the caller ID. If you page by voice, set a phone number as
+  the sender.
+</Callout>
+
+### Choose how Flagon uses it
+
+Connecting Twilio proves the account works; a separate set of toggles under **How
+Flagon uses this** decides what Flagon actually does with it. They're independent
+of your credentials, so you change behavior without re-entering anything:
+
+- **SMS pages** — on by default.
+- **Voice calls** — off by default; turn it on to add phone-call paging.
+
+Turn a capability off and Flagon stops using it, even though the credentials stay
+valid. Delivery honors these choices: a responder only gets a voice call if you've
+enabled voice, and only gets a text if SMS is on.
+
+Removing the integration deletes the stored credentials. Anything relying on it
+(SMS and voice paging) falls back to email until you reconnect.
+
+## Manage over the API
+
+Everything in the console is backed by the [management
+API](/docs/feature-flags/management-api), so you can configure integrations from
+a script. Secrets are write-only here too: the catalog returns config and masked
+hints, never the credential.
+
+List the provider catalog with each provider's current configuration:
+
+```bash
+curl https://api.flagon.io/v1/orgs/$ORG/integrations \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+Configure a provider (this both stores the credentials and runs the connection
+test). The body is a flat map of the field keys shown in the catalog:
+
+```bash
+curl -X PUT https://api.flagon.io/v1/orgs/$ORG/integrations/twilio \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accountSid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "authToken": "your-auth-token",
+    "from": "+15551234567"
+  }'
+```
+
+Change behavior without touching credentials (here, enable voice calls). The
+option keys are in the catalog's `options` for each provider:
+
+```bash
+curl -X PATCH https://api.flagon.io/v1/orgs/$ORG/integrations/twilio \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "options": { "voice": true } }'
+```
+
+Re-run the connection test, or remove the integration:
+
+```bash
+curl -X POST https://api.flagon.io/v1/orgs/$ORG/integrations/twilio/test \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+
+curl -X DELETE https://api.flagon.io/v1/orgs/$ORG/integrations/twilio \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+Configuring and removing an integration requires an owner or admin token. See the
+full endpoint list in the [API reference](/docs/api-reference).
+
+## Roadmap
+
+- **Slack & Discord apps** for change and incident notifications.
+
+General **outbound webhooks** for system events are a separate capability, not an
+integration; they'll arrive on their own track.

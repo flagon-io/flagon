@@ -1340,6 +1340,56 @@ export const notificationChannels = pgTable(
 );
 
 /**
+ * A bring-your-own-provider integration an org has configured: the org supplies
+ * credentials for a third-party service (Twilio for SMS/voice today) and Flagon
+ * calls that service on their behalf, using THEIR account. Tenant data (org-scoped,
+ * RLS). Secrets live encrypted in `secretCiphertext` (AES-256-GCM, see
+ * lib/crypto/secret-box); only non-secret `config` + masked `hints` ever leave the
+ * API. One row per (org, provider).
+ *
+ * This is deliberately distinct from Flagon-built "app" integrations (Slack /
+ * Discord OAuth installs, where FLAGON owns the credentials) and from the general
+ * outbound-webhook surface — both land separately. Here the customer owns the
+ * account and the bill; we just hold the keys and make the calls.
+ */
+export const orgIntegrations = pgTable(
+  "org_integrations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    // Provider key from the registry (e.g. "twilio"). One config per provider.
+    provider: text("provider").notNull(),
+    // Lifecycle: "connected" (credentials present, last test/use OK), "error"
+    // (last test/delivery failed — see lastError), "disabled" (kept, not used).
+    status: text("status").notNull().default("connected"),
+    // Non-secret, displayable settings (e.g. Twilio fromNumber, accountSid).
+    config: jsonb("config")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    // Masked hints for the console (e.g. { authTokenLast4: "1234" }). Never secret.
+    hints: jsonb("hints")
+      .$type<Record<string, string>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    // AES-256-GCM ciphertext of the provider's secret credentials (a JSON blob).
+    secretCiphertext: text("secret_ciphertext"),
+    // Diagnostics from the last connection test / delivery attempt.
+    lastError: text("last_error"),
+    lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("org_integrations_org_provider_key").on(
+      t.organizationId,
+      t.provider,
+    ),
+    index("org_integrations_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
  * A runbook: a reusable playbook of ordered steps a responder follows during an
  * incident. Attaches to services (runbook_services) and/or triggers at a severity
  * threshold; on declare, matching runbooks' steps materialize onto the incident as

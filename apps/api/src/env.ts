@@ -78,6 +78,14 @@ const schema = z
     // Email (verification / reset / invites now send from the API).
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
+    // Bring-your-own integration secrets (e.g. a customer's Twilio auth token)
+    // are encrypted at rest with AES-256-GCM keyed off this value. OPTIONAL: the
+    // API boots without it; configuring a BYO integration's credentials returns
+    // 503 until it's set. Any sufficiently-long, high-entropy string works (the
+    // AES key is derived via scrypt). Rotating it makes stored credentials
+    // undecryptable — customers re-enter them — which is the correct fail-closed
+    // behavior for a secret store.
+    INTEGRATIONS_SECRET_KEY: z.string().min(16).optional(),
     // Object storage (Cloudflare R2 / any S3-compatible store) is OPTIONAL: the
     // API boots and serves without it; upload endpoints return 503 until it's
     // configured. Provider-neutral by design, so the SAME vars point at ministack

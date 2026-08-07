@@ -78,4 +78,5 @@ export {
   IconGitLab,
   IconBitbucket,
   IconDiscord,
+  IconSlack,
 } from "./components/icons";

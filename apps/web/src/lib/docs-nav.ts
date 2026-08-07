@@ -49,6 +49,7 @@ export const nav: NavSection[] = [
     items: [
       { title: "What is Flagon", href: "/docs/platform" },
       { title: "Usage & billing", href: "/docs/platform/billing" },
+      { title: "Integrations", href: "/docs/platform/integrations" },
       {
         title: "Architecture",
         items: [

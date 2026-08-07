@@ -25,6 +25,7 @@ import { runbooks_ } from "./runbooks.route.js";
 import { rcca_ } from "./rcca.route.js";
 import { severityLevels_ } from "./severity-levels.route.js";
 import { objectives_ } from "./objectives.route.js";
+import { integrations_ } from "./integrations.route.js";
 import { managementWriteLimit } from "../../lib/management-rate-limit.js";
 
 export const v1 = new Hono();
@@ -68,6 +69,9 @@ orgs.route("/:org/severity-levels", severityLevels_);
 orgs.route("/:org/objectives", objectives_);
 // Organization security: SSO enforcement, required 2FA, SCIM provisioning.
 orgs.route("/:org/security", security_);
+// Bring-your-own-provider integrations (Twilio, …): customer-supplied
+// credentials Flagon uses on their behalf. Slack/Discord app-installs are separate.
+orgs.route("/:org/integrations", integrations_);
 // The org resource itself (PATCH /:org rename). Registered last so the more
 // specific sub-resource routes above take precedence.
 orgs.route("/:org", org_);

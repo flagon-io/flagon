@@ -59,19 +59,19 @@ export function UptimeView({ slug, report, windowDays }: { slug: string; report:
 
       {/* Platform headline */}
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-xl border border-white/10 bg-white/2 px-4 py-4">
+        <div className="rounded-xl border border-white/10 bg-white/2 p-4">
           <p className="text-xs tracking-wide text-zinc-500 uppercase">Platform uptime</p>
           <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone(report.totals.uptimePct)}`}>{pct(report.totals.uptimePct)}</p>
           <p className="mt-0.5 text-xs text-zinc-600">across {report.totalServices} {report.totalServices === 1 ? "service" : "services"}</p>
         </div>
-        <div className="rounded-xl border border-white/10 bg-white/2 px-4 py-4">
+        <div className="rounded-xl border border-white/10 bg-white/2 p-4">
           <p className="text-xs tracking-wide text-zinc-500 uppercase">Weighted downtime</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-100">{duration(report.totals.weightedDowntimeSeconds)}</p>
+          <p className="mt-1 text-2xl font-semibold text-zinc-100 tabular-nums">{duration(report.totals.weightedDowntimeSeconds)}</p>
           <p className="mt-0.5 text-xs text-zinc-600">platform-level, this window</p>
         </div>
-        <div className="rounded-xl border border-white/10 bg-white/2 px-4 py-4">
+        <div className="rounded-xl border border-white/10 bg-white/2 p-4">
           <p className="text-xs tracking-wide text-zinc-500 uppercase">Incidents</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-100">{report.totals.incidentCount}</p>
+          <p className="mt-1 text-2xl font-semibold text-zinc-100 tabular-nums">{report.totals.incidentCount}</p>
           <p className="mt-0.5 text-xs text-zinc-600">affecting a service</p>
         </div>
       </div>

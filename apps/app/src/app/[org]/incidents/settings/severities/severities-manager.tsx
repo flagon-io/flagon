@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronUp, Plus, SignalHigh, Trash2 } from "lucide-react";
-import { Button, Field, Input, Select, Switch } from "@flagon/design";
+import { Button, Field, Input, Select } from "@flagon/design";
 import { severityStyle, type PlatformMode, type SeverityLevel } from "@/lib/incidents";
 import { putSeverityLevelsAction } from "./actions";
 
@@ -187,7 +187,7 @@ export function SeveritiesManager({ slug, levels, canManage }: { slug: string; l
                   <Field label="Color">
                     <div className="flex flex-wrap gap-1.5">
                       {PALETTE.map((c) => (
-                        <button key={c} type="button" onClick={() => patch(i, { color: c })} disabled={!canManage} aria-label={`Color ${c}`} aria-pressed={r.color.toLowerCase() === c} className={`size-6 rounded-full border transition-transform ${r.color.toLowerCase() === c ? "border-white/60 scale-110" : "border-white/10 hover:scale-105"}`} style={{ backgroundColor: c }} />
+                        <button key={c} type="button" onClick={() => patch(i, { color: c })} disabled={!canManage} aria-label={`Color ${c}`} aria-pressed={r.color.toLowerCase() === c} className={`size-6 rounded-full border transition-transform ${r.color.toLowerCase() === c ? "scale-110 border-white/60" : "border-white/10 hover:scale-105"}`} style={{ backgroundColor: c }} />
                       ))}
                     </div>
                   </Field>
