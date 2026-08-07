@@ -39,14 +39,16 @@ page. You can re-run the test anytime from the console or the API.
 
 ## Twilio (SMS & voice)
 
-Connect Twilio to page your on-call responders by **SMS and phone call** using
-your own Twilio account. Once connected, incident pages reach responders through
-their [notification channels](/docs/incidents/on-call):
+Connect your own Twilio account as a bring-your-own **SMS and voice** provider.
+Flagon stores the credentials encrypted, runs a live connection test, and detects
+what your sender can actually do, so it's ready to deliver SMS and phone calls
+through your account.
 
-- an **SMS** channel receives a text with the incident summary and a link, and
-- a **voice** channel gets a phone call that speaks the incident aloud.
-
-Both are in addition to email, which always delivers.
+<Callout tone="note" title="No feature consumes this yet">
+Incident on-call paging is being rebuilt as its own feature set. Connecting Twilio
+now brings your provider so SMS and voice delivery light up the moment on-call
+ships; today nothing pages through it.
+</Callout>
 
 You'll need three values from your Twilio console:
 
@@ -57,8 +59,11 @@ You'll need three values from your Twilio console:
 | **From number or Messaging Service SID** | An E.164 number (`+15551234567`) you own, or a Messaging Service SID (`MG…`). |
 
 Paste them under **Settings → Integrations → Twilio** and save. Flagon verifies
-the credentials with Twilio before storing them. If the status later shows
-**Needs attention**, open the integration and use **Test connection** to see why.
+the credentials with Twilio and **detects what your sender can actually do** (SMS,
+voice) from the number's Twilio capabilities, so it only ever uses what the number
+supports. The setup page shows the detected capabilities under **Sender supports**.
+If the status later shows **Needs attention**, open the integration and use **Test
+connection** to re-check and refresh detection.
 
 <Callout tone="note" title="Voice needs a phone number">
   A Messaging Service SID works for SMS but not for voice: a phone call needs a
@@ -69,18 +74,17 @@ the credentials with Twilio before storing them. If the status later shows
 ### Choose how Flagon uses it
 
 Connecting Twilio proves the account works; a separate set of toggles under **How
-Flagon uses this** decides what Flagon actually does with it. They're independent
+Flagon uses this** decides which capabilities Flagon may use. They're independent
 of your credentials, so you change behavior without re-entering anything:
 
-- **SMS pages** — on by default.
-- **Voice calls** — off by default; turn it on to add phone-call paging.
+- **SMS** — on by default.
+- **Voice calls** — off by default.
 
-Turn a capability off and Flagon stops using it, even though the credentials stay
-valid. Delivery honors these choices: a responder only gets a voice call if you've
-enabled voice, and only gets a text if SMS is on.
+A capability your sender doesn't support can't be turned on (an SMS-only number
+can't place calls). Turn a supported one off and Flagon won't use it, even though
+the credentials stay valid.
 
-Removing the integration deletes the stored credentials. Anything relying on it
-(SMS and voice paging) falls back to email until you reconnect.
+Removing the integration deletes the stored credentials.
 
 ## Manage over the API
 

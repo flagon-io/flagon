@@ -12,6 +12,7 @@ import {
   ModalBody,
   ModalFooter,
   ModalHeader,
+  MultiSelect,
   Select,
   Textarea,
 } from "@flagon/design";
@@ -35,12 +36,16 @@ export function SeverityBadge({ severity, levels }: { severity: string; levels: 
   );
 }
 
+// Everything at or past "resolved" reads as settled (impact over): teal, like the
+// old resolved pill; "closed" is the terminal, filed state.
+const SETTLED_STATUSES = new Set(["resolved", "retrospective", "closed"]);
+
 export function StatusPill({ status }: { status: string }) {
-  const resolved = status === "resolved";
+  const settled = SETTLED_STATUSES.has(status);
   return (
     <span
       className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase ${
-        resolved ? "border-teal-400/20 bg-teal-400/10 text-teal-300" : "border-white/10 bg-white/5 text-zinc-400"
+        settled ? "border-teal-400/20 bg-teal-400/10 text-teal-300" : "border-white/10 bg-white/5 text-zinc-400"
       }`}
     >
       {labelFor(STATUSES, status)}
@@ -65,7 +70,6 @@ export function IncidentsView({
   canManage,
   teams,
   projects,
-  policies,
   filterProject,
   autoDeclareService,
   autoDeclare,
@@ -76,7 +80,6 @@ export function IncidentsView({
   canManage: boolean;
   teams: Opt[];
   projects: Opt[];
-  policies: Opt[];
   filterProject?: string;
   autoDeclareService?: string;
   autoDeclare?: boolean;
@@ -86,8 +89,10 @@ export function IncidentsView({
   const [open, setOpen] = useState(
     Boolean(autoDeclareService) || (Boolean(autoDeclare) && canManage),
   );
-  const openIncidents = incidents.filter((i) => i.status !== "resolved");
-  const resolved = incidents.filter((i) => i.status === "resolved");
+  // Active = impact still ongoing (no resolvedAt); settled = resolved/retrospective/
+  // closed. Keyed on resolvedAt so post-resolution milestones don't read as open.
+  const openIncidents = incidents.filter((i) => !i.resolvedAt);
+  const resolved = incidents.filter((i) => i.resolvedAt);
   const projectName = filterProject ? projects.find((p) => p.key === filterProject)?.name ?? filterProject : null;
 
   return (
@@ -120,8 +125,8 @@ export function IncidentsView({
           </span>
           <p className="text-base font-medium text-zinc-100">No incidents</p>
           <p className="max-w-sm text-sm text-zinc-500">
-            Declare one when something breaks. It routes to the owning team and pages
-            the on-call responder.
+            Declare one when something breaks. It routes to the owning team and its
+            runbooks land on it as a checklist.
           </p>
         </div>
       ) : (
@@ -137,7 +142,6 @@ export function IncidentsView({
           levels={levels}
           teams={teams}
           projects={projects}
-          policies={policies}
           initialServices={autoDeclareService ? [autoDeclareService] : []}
           onClose={() => setOpen(false)}
         />
@@ -182,20 +186,16 @@ function withNone(opts: Opt[], label: string) {
   return [{ value: NONE, label }, ...opts.map((o) => ({ value: o.key, label: o.name }))];
 }
 
-export function DeclareModal({ slug, levels, teams, projects, policies, initialServices, onClose }: { slug: string; levels: SeverityLevel[]; teams: Opt[]; projects: Opt[]; policies: Opt[]; initialServices?: string[]; onClose: () => void }) {
+export function DeclareModal({ slug, levels, teams, projects, initialServices, onClose }: { slug: string; levels: SeverityLevel[]; teams: Opt[]; projects: Opt[]; initialServices?: string[]; onClose: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState("");
   const [severity, setSeverity] = useState(() => levels.find((l) => l.isDefault)?.key ?? levels[0]?.key ?? "");
   const [summary, setSummary] = useState("");
   const [ownerTeam, setOwnerTeam] = useState(NONE);
-  const [policy, setPolicy] = useState(NONE);
   const [services, setServices] = useState<string[]>(initialServices ?? []);
   const [error, setError] = useState<string | null>(null);
 
-  function toggleService(key: string) {
-    setServices((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
-  }
   function declare() {
     setError(null);
     if (!title.trim()) return setError("Give the incident a title.");
@@ -206,7 +206,6 @@ export function DeclareModal({ slug, levels, teams, projects, policies, initialS
         summary: summary.trim() || undefined,
         affectedProjectKeys: services.length ? services : undefined,
         ownerTeamKey: ownerTeam === NONE ? undefined : ownerTeam,
-        escalationPolicyKey: policy === NONE ? undefined : policy,
       });
       if (res.error) return setError(res.error);
       router.push(`/${slug}/incidents/${res.number}`);
@@ -229,29 +228,17 @@ export function DeclareModal({ slug, levels, teams, projects, policies, initialS
             <Select ariaLabel="Owning team" value={ownerTeam} onValueChange={setOwnerTeam} className="w-full" options={withNone(teams, "Auto")} />
           </Field>
         </div>
-        <Field label="Escalation policy" hint="Optional. Who to page as time passes.">
-          <Select ariaLabel="Escalation policy" value={policy} onValueChange={setPolicy} className="w-full" options={withNone(policies, "None")} />
-        </Field>
         <Field label="Affected services" hint="The catalog projects this impacts.">
           {projects.length === 0 ? (
             <p className="text-sm text-zinc-500">No projects yet.</p>
           ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {projects.map((p) => {
-                const on = services.includes(p.key);
-                return (
-                  <button
-                    key={p.key}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => toggleService(p.key)}
-                    className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${on ? "border-teal-400/30 bg-teal-400/10 text-teal-200" : "border-white/10 bg-white/5 text-zinc-400 hover:text-zinc-200"}`}
-                  >
-                    {p.name}
-                  </button>
-                );
-              })}
-            </div>
+            <MultiSelect
+              ariaLabel="Affected services"
+              placeholder="Select services…"
+              options={projects.map((p) => ({ value: p.key, label: p.name }))}
+              selected={services}
+              onChange={setServices}
+            />
           )}
         </Field>
         <Field label="Summary" hint="Optional.">

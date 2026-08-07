@@ -12,18 +12,14 @@ import {
   runbooks,
   projects,
   teams,
-  oncallEscalationPolicies,
   type RccaSnapshot,
 } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
 import { resolveOrg, requireManager, nonMembers } from "../../lib/org-context.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
-import { teamCurrentOnCall } from "../../oncall/resolve.js";
-import { activeStep } from "../../oncall/escalation.js";
-import { notifyIncident } from "../../incidents/notify.js";
-import { loadPolicy, resolveLevelTargets, teamResponders } from "../../incidents/escalate.js";
-import { attachRunbook, autoAttachRunbooks } from "../../incidents/runbook-attach.js";
+import { attachRunbook, attachMatchingRunbooks, ensureDefaultRunbook } from "../../incidents/runbook-attach.js";
+import { afterStatusChange, evaluateChecklist } from "../../incidents/checklist-eval.js";
 import { ensureRccaTemplate } from "../../incidents/rcca-template.js";
 import { getSeverityLevels, defaultKey } from "../../incidents/severity-levels.js";
 import { computeDowntime } from "../../incidents/downtime.js";
@@ -40,7 +36,30 @@ export const incidents_ = new Hono();
 incidents_.use("*", authContext);
 
 const TAG = "Incidents";
-const STATUSES = ["open", "investigating", "identified", "monitoring", "resolved"] as const;
+// The incident lifecycle (FireHydrant-style milestones). "resolved" ends impact;
+// "retrospective" is the post-incident review phase (the RCCA is worked here, though
+// it's editable throughout); "closed" is the terminal, filed state. Anything at or
+// past "resolved" keeps `resolvedAt` set — see `resolvedAtFor`.
+const STATUSES = [
+  "open",
+  "investigating",
+  "identified",
+  "monitoring",
+  "resolved",
+  "retrospective",
+  "closed",
+] as const;
+const RESOLVED_OR_AFTER = new Set<string>(["resolved", "retrospective", "closed"]);
+
+/**
+ * The `resolvedAt` a status transition implies: stamped when first reaching resolved
+ * (or any later milestone), preserved once set while at/after resolved, and cleared
+ * only when an incident is REOPENED to a pre-resolution status.
+ */
+function resolvedAtFor(newStatus: string, current: Date | null): Date | null {
+  if (RESOLVED_OR_AFTER.has(newStatus)) return current ?? new Date();
+  return null;
+}
 
 // Severity is a free-form key validated per-org against the incident_severity_levels
 // ladder (see incidents/severity-levels.ts), not a fixed enum: an org may name its
@@ -51,7 +70,6 @@ const declareBody = z.object({
   summary: z.string().trim().max(2000).optional(),
   affectedProjectKeys: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
   ownerTeamKey: z.string().trim().min(1).max(100).optional(),
-  escalationPolicyKey: z.string().trim().min(1).max(100).optional(),
 });
 const updateBody = z
   .object({
@@ -60,7 +78,6 @@ const updateBody = z
     summary: z.string().trim().max(2000).nullable().optional(),
     status: z.enum(STATUSES).optional(),
     ownerTeamKey: z.string().trim().min(1).max(100).nullable().optional(),
-    escalationPolicyKey: z.string().trim().min(1).max(100).nullable().optional(),
   })
   .strict();
 const addUpdateBody = z.object({
@@ -77,9 +94,6 @@ const incidentSchema = z.object({
   severity: z.string(),
   status: z.string(),
   ownerTeam: ownerTeamSchema,
-  escalationPolicyKey: z.string().nullable(),
-  acknowledgedAt: z.string().nullable(),
-  escalatedLevel: z.number(),
   startedAt: z.string(),
   resolvedAt: z.string().nullable(),
   createdAt: z.string(),
@@ -98,6 +112,13 @@ const checklistItemSchema = z.object({
   body: z.string().nullable(),
   kind: z.string(),
   url: z.string().nullable(),
+  provider: z.string().describe("Step-catalog provider ('core' for native steps)."),
+  action: z.string().describe("Step-catalog action key."),
+  conditions: z
+    .array(z.record(z.string(), z.unknown()))
+    .describe("Execution conditions evaluated against the live incident."),
+  state: z.enum(["pending", "active", "skipped"]).describe("Execution lifecycle state."),
+  skippedReason: z.string().nullable(),
   done: z.boolean(),
 });
 registerComponentSchema("Incident", incidentSchema);
@@ -111,8 +132,6 @@ registerComponentSchema(
     services: z.array(serviceSchema),
     updates: z.array(updateSchema),
     checklist: z.array(checklistItemSchema),
-    responderUserId: z.string().nullable(),
-    responderVia: z.string().nullable(),
     // RCCA: the org template fields + this incident's values + tracked actions.
     rccaRequired: z.boolean(),
     rccaTemplate: z.object({ requiredSeverities: z.array(z.string()), fields: z.array(rccaFieldSchema) }),
@@ -124,7 +143,7 @@ registerComponentSchema(
 const CHECKLIST_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function checklistFor(tx: TenantTx, incidentId: string) {
   const rows = await tx
-    .select({ id: incidentChecklistItems.id, runbookName: incidentChecklistItems.runbookName, title: incidentChecklistItems.title, body: incidentChecklistItems.body, kind: incidentChecklistItems.kind, url: incidentChecklistItems.url, done: incidentChecklistItems.done })
+    .select({ id: incidentChecklistItems.id, runbookName: incidentChecklistItems.runbookName, title: incidentChecklistItems.title, body: incidentChecklistItems.body, kind: incidentChecklistItems.kind, url: incidentChecklistItems.url, provider: incidentChecklistItems.provider, action: incidentChecklistItems.action, conditions: incidentChecklistItems.conditions, state: incidentChecklistItems.state, skippedReason: incidentChecklistItems.skippedReason, done: incidentChecklistItems.done })
     .from(incidentChecklistItems)
     .where(eq(incidentChecklistItems.incidentId, incidentId))
     .orderBy(incidentChecklistItems.position);
@@ -159,11 +178,7 @@ async function rccaBlockFor(tx: TenantTx, orgId: string, incidentId: string, sev
 }
 
 type IncidentRow = typeof incidents.$inferSelect;
-function serialize(
-  i: IncidentRow,
-  ownerTeam: { key: string; name: string } | null,
-  policyKey: string | null,
-) {
+function serialize(i: IncidentRow, ownerTeam: { key: string; name: string } | null) {
   return {
     number: i.number,
     title: i.title,
@@ -171,9 +186,6 @@ function serialize(
     severity: i.severity,
     status: i.status,
     ownerTeam,
-    escalationPolicyKey: policyKey,
-    acknowledgedAt: i.acknowledgedAt?.toISOString() ?? null,
-    escalatedLevel: i.escalatedLevel,
     startedAt: i.startedAt.toISOString(),
     resolvedAt: i.resolvedAt?.toISOString() ?? null,
     createdAt: i.createdAt.toISOString(),
@@ -186,28 +198,19 @@ async function incidentByNumber(tx: TenantTx, number: number) {
 async function teamByKey(tx: TenantTx, key: string) {
   return tx.select({ id: teams.id, key: teams.key, name: teams.name }).from(teams).where(eq(teams.key, key)).limit(1).then((r) => r[0] ?? null);
 }
-async function policyByKey(tx: TenantTx, key: string) {
-  return tx.select({ id: oncallEscalationPolicies.id, key: oncallEscalationPolicies.key }).from(oncallEscalationPolicies).where(eq(oncallEscalationPolicies.key, key)).limit(1).then((r) => r[0] ?? null);
-}
 async function ownerTeamFor(tx: TenantTx, teamId: string | null) {
   if (!teamId) return null;
   return tx.select({ key: teams.key, name: teams.name }).from(teams).where(eq(teams.id, teamId)).limit(1).then((r) => r[0] ?? null);
-}
-async function policyKeyFor(tx: TenantTx, policyId: string | null) {
-  if (!policyId) return null;
-  const row = await tx.select({ key: oncallEscalationPolicies.key }).from(oncallEscalationPolicies).where(eq(oncallEscalationPolicies.id, policyId)).limit(1).then((r) => r[0]);
-  return row?.key ?? null;
 }
 
 // --- OpenAPI ----------------------------------------------------------------
 const pParams = { org: "The organization slug." };
 const nParams = { ...pParams, number: "The incident number." };
 registerRoute({ method: "get", path: "/v1/orgs/{org}/incidents", summary: "List incidents", description: "Every incident in the organization (filter with ?status=open|resolved). Visible to any member.", tags: [TAG], auth: true, paramDescriptions: pParams, responses: { 200: { description: "Incidents.", schemaName: "IncidentListResponse" } } });
-registerRoute({ method: "get", path: "/v1/orgs/{org}/incidents/{number}", summary: "Get an incident", description: "One incident with its affected services, timeline, and current responder.", tags: [TAG], auth: true, paramDescriptions: nParams, responses: { 200: { description: "The incident.", schemaName: "IncidentResponse" }, 404: { description: "No such incident." } } });
-registerRoute({ method: "post", path: "/v1/orgs/{org}/incidents", summary: "Declare an incident", description: "Declare an incident and attach affected services. Owner auto-derives from the first affected service's team when not given. Owner/admin only.", tags: [TAG], auth: true, paramDescriptions: pParams, request: { body: declareBody }, responses: { 201: { description: "Declared.", schemaName: "IncidentResponse" }, 400: { description: "Unknown team, policy, or service." }, 422: { description: "Validation failed." } } });
-registerRoute({ method: "patch", path: "/v1/orgs/{org}/incidents/{number}", summary: "Update an incident", description: "Edit an incident's metadata (title/severity/status/summary/owner/policy). Owner/admin only.", tags: [TAG], auth: true, paramDescriptions: nParams, request: { body: updateBody }, responses: { 200: { description: "Updated.", schemaName: "IncidentResponse" }, 404: { description: "No such incident." }, 422: { description: "Validation failed." } } });
+registerRoute({ method: "get", path: "/v1/orgs/{org}/incidents/{number}", summary: "Get an incident", description: "One incident with its affected services, timeline, and runbook checklist.", tags: [TAG], auth: true, paramDescriptions: nParams, responses: { 200: { description: "The incident.", schemaName: "IncidentResponse" }, 404: { description: "No such incident." } } });
+registerRoute({ method: "post", path: "/v1/orgs/{org}/incidents", summary: "Declare an incident", description: "Declare an incident and attach affected services. Owner auto-derives from the first affected service's team when not given. Owner/admin only.", tags: [TAG], auth: true, paramDescriptions: pParams, request: { body: declareBody }, responses: { 201: { description: "Declared.", schemaName: "IncidentResponse" }, 400: { description: "Unknown team or service." }, 422: { description: "Validation failed." } } });
+registerRoute({ method: "patch", path: "/v1/orgs/{org}/incidents/{number}", summary: "Update an incident", description: "Edit an incident's metadata (title/severity/status/summary/owner). Owner/admin only.", tags: [TAG], auth: true, paramDescriptions: nParams, request: { body: updateBody }, responses: { 200: { description: "Updated.", schemaName: "IncidentResponse" }, 404: { description: "No such incident." }, 422: { description: "Validation failed." } } });
 registerRoute({ method: "post", path: "/v1/orgs/{org}/incidents/{number}/updates", summary: "Post an incident update", description: "Append an update to the timeline, optionally changing status. Any member.", tags: [TAG], auth: true, paramDescriptions: nParams, request: { body: addUpdateBody }, responses: { 201: { description: "Posted.", schemaName: "DeleteAck" }, 404: { description: "No such incident." }, 422: { description: "Validation failed." } } });
-registerRoute({ method: "post", path: "/v1/orgs/{org}/incidents/{number}/acknowledge", summary: "Acknowledge an incident", description: "Acknowledge the incident, stopping escalation. Any member.", tags: [TAG], auth: true, paramDescriptions: nParams, responses: { 200: { description: "Acknowledged.", schemaName: "DeleteAck" }, 404: { description: "No such incident." } } });
 registerRoute({ method: "post", path: "/v1/orgs/{org}/incidents/{number}/resolve", summary: "Resolve an incident", description: "Mark the incident resolved. Any member.", tags: [TAG], auth: true, paramDescriptions: nParams, responses: { 200: { description: "Resolved.", schemaName: "DeleteAck" }, 404: { description: "No such incident." } } });
 registerRoute({ method: "post", path: "/v1/orgs/{org}/incidents/{number}/services", summary: "Attach a service", description: "Add an affected service (project) to the incident. Owner/admin only.", tags: [TAG], auth: true, paramDescriptions: nParams, request: { body: addServiceBody }, responses: { 201: { description: "Attached.", schemaName: "DeleteAck" }, 400: { description: "Unknown service." }, 404: { description: "No such incident." }, 409: { description: "Already attached." } } });
 registerRoute({ method: "delete", path: "/v1/orgs/{org}/incidents/{number}/services/{projectKey}", summary: "Detach a service", description: "Remove an affected service from the incident. Owner/admin only.", tags: [TAG], auth: true, paramDescriptions: { ...nParams, projectKey: "The project key." }, responses: { 200: { description: "Detached.", schemaName: "DeleteAck" }, 404: { description: "No such incident or service." } } });
@@ -256,48 +259,15 @@ incidents_.get("/", async (c) => {
         .leftJoin(teams, eq(teams.id, incidents.ownerTeamId))
         .where(where)
         .orderBy(desc(incidents.number));
-      const policyKeys = await policyKeyMap(tx);
       return rows.map((r) =>
         serialize(
           r.incident,
           r.teamKey && r.teamName ? { key: r.teamKey, name: r.teamName } : null,
-          r.incident.escalationPolicyId ? (policyKeys.get(r.incident.escalationPolicyId) ?? null) : null,
         ),
       );
     }),
   );
 });
-
-async function policyKeyMap(tx: TenantTx): Promise<Map<string, string>> {
-  const rows = await tx.select({ id: oncallEscalationPolicies.id, key: oncallEscalationPolicies.key }).from(oncallEscalationPolicies);
-  return new Map(rows.map((r) => [r.id, r.key]));
-}
-
-/**
- * Who is responsible for an incident RIGHT NOW, for the detail rail — not just the
- * owner team's on-call. Order: the person who acknowledged (escalation has stopped),
- * else the escalation policy's CURRENT step target (who is actively being paged),
- * else the owning team's on-call. Returns the user id + a short "via" label so the
- * UI can say who and why. `via` is null only when nobody resolves.
- */
-async function currentResponder(tx: TenantTx, incident: IncidentRow, now: Date): Promise<{ userId: string | null; via: string | null }> {
-  if (incident.acknowledgedAt && incident.acknowledgedByUserId) {
-    return { userId: incident.acknowledgedByUserId, via: "Acknowledged" };
-  }
-  if (!incident.acknowledgedAt && incident.escalationPolicyId) {
-    const { levels, repeatCount } = await loadPolicy(tx, incident.escalationPolicyId);
-    const active = activeStep(levels, repeatCount, incident.startedAt, incident.acknowledgedAt, now);
-    if (active) {
-      const targets = await resolveLevelTargets(tx, active.level, now);
-      if (targets[0]) return { userId: targets[0], via: `On-call · escalation level ${active.step + 1}` };
-    }
-  }
-  if (incident.ownerTeamId) {
-    const onCall = await teamCurrentOnCall(tx, incident.ownerTeamId, now);
-    if (onCall) return { userId: onCall, via: "Owner team on-call" };
-  }
-  return { userId: null, via: null };
-}
 
 // --- Uptime & weighted downtime (any member) -------------------------------
 const projectUptimeSchema = z.object({ projectKey: z.string(), name: z.string(), uptimePct: z.number(), weightedDowntimeSeconds: z.number(), incidentCount: z.number() });
@@ -341,14 +311,11 @@ incidents_.get("/:number", async (c) => {
       .from(incidentUpdates)
       .where(eq(incidentUpdates.incidentId, incident.id))
       .orderBy(desc(incidentUpdates.createdAt));
-    const responder = await currentResponder(tx, incident, new Date());
     return {
-      incident: serialize(incident, ownerTeam, await policyKeyFor(tx, incident.escalationPolicyId)),
+      incident: serialize(incident, ownerTeam),
       services,
       updates: updates.map((u) => ({ ...u, createdAt: u.createdAt.toISOString() })),
       checklist: await checklistFor(tx, incident.id),
-      responderUserId: responder.userId,
-      responderVia: responder.via,
       ...(await rccaBlockFor(tx, ctx.orgId, incident.id, incident.severity)),
     };
   });
@@ -364,7 +331,7 @@ incidents_.post("/", async (c) => {
   if (denied) return denied;
   const parsed = declareBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
-  const { title, severity, summary, affectedProjectKeys, ownerTeamKey, escalationPolicyKey } = parsed.data;
+  const { title, severity, summary, affectedProjectKeys, ownerTeamKey } = parsed.data;
 
   const declareOnce = () => withOrg(ctx.orgId, async (tx) => {
     // Resolve severity against the org's configured ladder; default when omitted.
@@ -387,43 +354,24 @@ incidents_.post("/", async (c) => {
       const [first] = await tx.select({ ownerTeamId: projects.ownerTeamId }).from(projects).where(eq(projects.id, serviceRows[0].id)).limit(1);
       ownerTeamId = first?.ownerTeamId ?? null;
     }
-    let escalationPolicyId: string | null = null;
-    if (escalationPolicyKey) {
-      const p = await policyByKey(tx, escalationPolicyKey);
-      if (!p) return { error: "unknown_policy" } as const;
-      escalationPolicyId = p.id;
-    }
-
     const [{ max } = { max: 0 }] = await tx.select({ max: sql<number>`coalesce(max(${incidents.number}), 0)` }).from(incidents);
     const number = Number(max) + 1;
 
     const [incident] = await tx
       .insert(incidents)
-      .values({ organizationId: ctx.orgId, number, title, severity: sev, summary: summary ?? null, ownerTeamId, escalationPolicyId, declaredByUserId: ctx.actorUserId })
+      .values({ organizationId: ctx.orgId, number, title, severity: sev, summary: summary ?? null, ownerTeamId, declaredByUserId: ctx.actorUserId })
       .returning();
     for (const s of serviceRows) {
       await tx.insert(incidentServices).values({ organizationId: ctx.orgId, incidentId: incident.id, projectId: s.id });
     }
-    // Attach matching runbooks' steps as the incident checklist (by severity
-    // threshold or affected-service coverage) — the playbook, ready on declare.
-    await autoAttachRunbooks(tx, ctx.orgId, incident.id, incident.severity, serviceRows.map((s) => s.id));
+    // Attach the playbook: seed the org's Default runbook if it has none, then
+    // attach every runbook whose conditions match this incident (empty = all).
+    await ensureDefaultRunbook(tx, ctx.orgId);
+    await attachMatchingRunbooks(tx, ctx.orgId, incident.id, incident.severity, incident.status);
     // Freeze the RCCA template onto this incident now, so a later template edit
     // never rewrites this incident's postmortem form.
     await tx.insert(incidentRccas).values({ organizationId: ctx.orgId, incidentId: incident.id, template: await snapshotTemplate(tx, ctx.orgId) }).onConflictDoNothing();
-    // Who to page first: the escalation policy's level 0 (step 0) when set, else the
-    // owner team's on-call (falling back to the whole team). `escalated_level` stays
-    // 0 so the cron climbs from step 1. If level 0 resolves to nobody (empty/deleted
-    // target), fall back to the owner team so the first page is never black-holed.
-    const now = new Date();
-    let responders: string[];
-    if (escalationPolicyId) {
-      const { levels } = await loadPolicy(tx, escalationPolicyId);
-      responders = levels.length ? await resolveLevelTargets(tx, levels[0], now) : [];
-      if (responders.length === 0) responders = await teamResponders(tx, ownerTeamId, now);
-    } else {
-      responders = await teamResponders(tx, ownerTeamId, now);
-    }
-    return { incident, responders } as const;
+    return { incident } as const;
   });
 
   // `number` is allocated as max()+1 under a unique (org, number) index. Two truly
@@ -444,17 +392,14 @@ incidents_.post("/", async (c) => {
 
   if ("error" in result) {
     if (result.error === "unknown_team") return jsonError(c, 400, "That owning team does not exist.");
-    if (result.error === "unknown_policy") return jsonError(c, 400, "That escalation policy does not exist.");
     if (result.error === "unknown_severity") return jsonError(c, 400, "That severity level does not exist.");
     return jsonError(c, 400, "One of the affected services does not exist.");
   }
-  // Page the responders (deferred-style; notifyIncident never throws).
-  await notifyIncident({ organizationId: ctx.orgId, userIds: result.responders, number: result.incident.number, title: result.incident.title, severity: result.incident.severity, status: result.incident.status, kind: "declared" });
 
   const detail = await withOrg(ctx.orgId, async (tx) => {
     const ownerTeam = await ownerTeamFor(tx, result.incident.ownerTeamId);
     const services = await tx.select({ key: projects.key, name: projects.name }).from(incidentServices).innerJoin(projects, eq(projects.id, incidentServices.projectId)).where(eq(incidentServices.incidentId, result.incident.id));
-    return { incident: serialize(result.incident, ownerTeam, await policyKeyFor(tx, result.incident.escalationPolicyId)), services, updates: [], checklist: await checklistFor(tx, result.incident.id), responderUserId: result.responders[0] ?? null, ...(await rccaBlockFor(tx, ctx.orgId, result.incident.id, result.incident.severity)) };
+    return { incident: serialize(result.incident, ownerTeam), services, updates: [], checklist: await checklistFor(tx, result.incident.id), ...(await rccaBlockFor(tx, ctx.orgId, result.incident.id, result.incident.severity)) };
   });
   return c.json(detail, 201);
 });
@@ -469,7 +414,7 @@ incidents_.patch("/:number", async (c) => {
   if (number === null) return jsonError(c, 404, "Incident not found.");
   const parsed = updateBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return validationError(c, parsed.error);
-  const { ownerTeamKey, escalationPolicyKey, ...rest } = parsed.data;
+  const { ownerTeamKey, ...rest } = parsed.data;
 
   const result = await withOrg(ctx.orgId, async (tx) => {
     const incident = await incidentByNumber(tx, number);
@@ -479,8 +424,7 @@ incidents_.patch("/:number", async (c) => {
       if (!levels.some((l) => l.key === rest.severity)) return "unknown_severity" as const;
     }
     const set: Record<string, unknown> = { ...rest, updatedAt: new Date() };
-    if (rest.status === "resolved" && !incident.resolvedAt) set.resolvedAt = new Date();
-    if (rest.status && rest.status !== "resolved") set.resolvedAt = null;
+    if (rest.status) set.resolvedAt = resolvedAtFor(rest.status, incident.resolvedAt);
     if (ownerTeamKey !== undefined) {
       if (ownerTeamKey === null) set.ownerTeamId = null;
       else {
@@ -489,21 +433,21 @@ incidents_.patch("/:number", async (c) => {
         set.ownerTeamId = team.id;
       }
     }
-    if (escalationPolicyKey !== undefined) {
-      if (escalationPolicyKey === null) set.escalationPolicyId = null;
-      else {
-        const p = await policyByKey(tx, escalationPolicyKey);
-        if (!p) return "unknown_policy" as const;
-        set.escalationPolicyId = p.id;
-      }
-    }
     const [row] = await tx.update(incidents).set(set).where(eq(incidents.id, incident.id)).returning();
+    // A severity change can newly match a runbook (dynamic attach), so re-attach for
+    // the fresh severity; a status change fires milestone-gated steps + starts the
+    // retro. Both re-evaluate the checklist (idempotent).
+    if (rest.severity && rest.severity !== incident.severity) {
+      await attachMatchingRunbooks(tx, ctx.orgId, incident.id, row.severity, row.status);
+    }
+    if (rest.status && rest.status !== incident.status) {
+      await afterStatusChange(tx, ctx.orgId, { incidentId: incident.id, severity: row.severity, status: row.status });
+    }
     const ownerTeam = await ownerTeamFor(tx, row.ownerTeamId);
-    return { incident: serialize(row, ownerTeam, await policyKeyFor(tx, row.escalationPolicyId)) };
+    return { incident: serialize(row, ownerTeam) };
   });
   if (result === "not_found") return jsonError(c, 404, "Incident not found.");
   if (result === "unknown_team") return jsonError(c, 400, "That owning team does not exist.");
-  if (result === "unknown_policy") return jsonError(c, 400, "That escalation policy does not exist.");
   if (result === "unknown_severity") return jsonError(c, 400, "That severity level does not exist.");
   return c.json(result);
 });
@@ -521,10 +465,12 @@ incidents_.post("/:number/updates", async (c) => {
     const incident = await incidentByNumber(tx, number);
     if (!incident) return false;
     await tx.insert(incidentUpdates).values({ organizationId: ctx.orgId, incidentId: incident.id, body: parsed.data.body, status: parsed.data.status ?? null, createdByUserId: ctx.actorUserId });
-    if (parsed.data.status) {
-      const set: Record<string, unknown> = { status: parsed.data.status, updatedAt: new Date() };
-      if (parsed.data.status === "resolved" && !incident.resolvedAt) set.resolvedAt = new Date();
-      await tx.update(incidents).set(set).where(eq(incidents.id, incident.id));
+    if (parsed.data.status && parsed.data.status !== incident.status) {
+      await tx
+        .update(incidents)
+        .set({ status: parsed.data.status, resolvedAt: resolvedAtFor(parsed.data.status, incident.resolvedAt), updatedAt: new Date() })
+        .where(eq(incidents.id, incident.id));
+      await afterStatusChange(tx, ctx.orgId, { incidentId: incident.id, severity: incident.severity, status: parsed.data.status });
     }
     return true;
   });
@@ -532,24 +478,7 @@ incidents_.post("/:number/updates", async (c) => {
   return c.json({ ok: true }, 201);
 });
 
-// --- Acknowledge / resolve (any member) ------------------------------------
-incidents_.post("/:number/acknowledge", async (c) => {
-  const ctx = await resolveOrg(c);
-  if (ctx instanceof Response) return ctx;
-  const number = parseNumber(c.req.param("number"));
-  if (number === null) return jsonError(c, 404, "Incident not found.");
-  const ok = await withOrg(ctx.orgId, async (tx) => {
-    const incident = await incidentByNumber(tx, number);
-    if (!incident) return false;
-    if (!incident.acknowledgedAt) {
-      await tx.update(incidents).set({ acknowledgedAt: new Date(), acknowledgedByUserId: ctx.actorUserId, updatedAt: new Date() }).where(eq(incidents.id, incident.id));
-    }
-    return true;
-  });
-  if (!ok) return jsonError(c, 404, "Incident not found.");
-  return c.json({ ok: true });
-});
-
+// --- Resolve (any member) --------------------------------------------------
 incidents_.post("/:number/resolve", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
@@ -559,6 +488,9 @@ incidents_.post("/:number/resolve", async (c) => {
     const incident = await incidentByNumber(tx, number);
     if (!incident) return false;
     await tx.update(incidents).set({ status: "resolved", resolvedAt: incident.resolvedAt ?? new Date(), updatedAt: new Date() }).where(eq(incidents.id, incident.id));
+    if (incident.status !== "resolved") {
+      await afterStatusChange(tx, ctx.orgId, { incidentId: incident.id, severity: incident.severity, status: "resolved" });
+    }
     return true;
   });
   if (!ok) return jsonError(c, 404, "Incident not found.");
@@ -631,6 +563,8 @@ incidents_.post("/:number/runbooks", async (c) => {
     const rb = await tx.select().from(runbooks).where(eq(runbooks.key, parsed.data.runbookKey)).limit(1).then((r) => r[0]);
     if (!rb) return "unknown_runbook" as const;
     await attachRunbook(tx, ctx.orgId, incident.id, rb);
+    // Fire whatever is already eligible given the incident's current state.
+    await evaluateChecklist(tx, ctx.orgId, { incidentId: incident.id, severity: incident.severity, status: incident.status });
     return "ok" as const;
   });
   if (result === "not_found") return jsonError(c, 404, "Incident not found.");
@@ -647,12 +581,17 @@ incidents_.post("/:number/checklist/:itemId/toggle", async (c) => {
   const ok = await withOrg(ctx.orgId, async (tx) => {
     const incident = await incidentByNumber(tx, number);
     if (!incident) return false;
-    const item = await tx.select({ id: incidentChecklistItems.id, done: incidentChecklistItems.done }).from(incidentChecklistItems).where(and(eq(incidentChecklistItems.id, itemId), eq(incidentChecklistItems.incidentId, incident.id))).limit(1).then((r) => r[0]);
+    const item = await tx.select({ id: incidentChecklistItems.id, done: incidentChecklistItems.done, state: incidentChecklistItems.state }).from(incidentChecklistItems).where(and(eq(incidentChecklistItems.id, itemId), eq(incidentChecklistItems.incidentId, incident.id))).limit(1).then((r) => r[0]);
     if (!item) return false;
+    // Only a live (active) step can be checked off — pending/skipped aren't actionable.
+    if (item.state !== "active") return "not_actionable" as const;
     const done = !item.done;
     await tx.update(incidentChecklistItems).set({ done, doneByUserId: done ? ctx.actorUserId : null, doneAt: done ? new Date() : null }).where(eq(incidentChecklistItems.id, itemId));
+    // Completing a step can satisfy a `previous_step` condition downstream.
+    await evaluateChecklist(tx, ctx.orgId, { incidentId: incident.id, severity: incident.severity, status: incident.status });
     return true;
   });
+  if (ok === "not_actionable") return jsonError(c, 409, "That step isn't active yet.");
   if (!ok) return jsonError(c, 404, "Checklist item not found.");
   return c.json({ ok: true });
 });

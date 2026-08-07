@@ -20,7 +20,6 @@ import { experiments_ } from "./experiments.route.js";
 import { experimentMetrics_ } from "./experiment-metrics.route.js";
 import { holdouts_ } from "./holdouts.route.js";
 import { incidents_ } from "./incidents.route.js";
-import { oncall_ } from "./oncall.route.js";
 import { runbooks_ } from "./runbooks.route.js";
 import { rcca_ } from "./rcca.route.js";
 import { severityLevels_ } from "./severity-levels.route.js";
@@ -60,9 +59,8 @@ orgs.route("/:org/uploads", uploads_);
 orgs.route("/:org/experiments", experiments_);
 orgs.route("/:org/experiment-metrics", experimentMetrics_);
 orgs.route("/:org/holdouts", holdouts_);
-// Reliability: incidents + on-call (schedules, overrides, escalation policies).
+// Reliability: incidents + their runbooks.
 orgs.route("/:org/incidents", incidents_);
-orgs.route("/:org/oncall", oncall_);
 orgs.route("/:org/runbooks", runbooks_);
 orgs.route("/:org/rcca-template", rcca_);
 orgs.route("/:org/severity-levels", severityLevels_);

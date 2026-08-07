@@ -1,50 +1,32 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
-import { runbooks, runbookSteps, runbookServices, incidentChecklistItems } from "../db/schema.js";
-import { getSeverityLevels, rankOf } from "./severity-levels.js";
+import { runbooks, runbookSteps, incidentChecklistItems, type AttachCondition } from "../db/schema.js";
+import { evaluateChecklist } from "./checklist-eval.js";
 
 type RunbookRow = typeof runbooks.$inferSelect;
 
 /**
- * Runbooks that should attach to an incident of `severity` affecting `projectIds`:
- *   - severity trigger: the runbook's `triggerSeverity` is a live level and the
- *     incident is AT LEAST that severe (lower rank = more severe), OR
- *   - service coverage: the runbook covers one of the affected services.
- * Deduped by runbook id. `levels` is the org's configured severity ladder (rank source);
- * a trigger referencing an unknown/archived severity matches nothing.
+ * Whether a runbook's attach conditions hold for an incident of `severity`. ALL
+ * conditions must match, so EMPTY conditions match every incident (the "Default").
  */
-export async function matchingRunbooks(
-  tx: TenantTx,
-  levels: Array<{ key: string; rank: number }>,
-  severity: string,
-  projectIds: string[],
-): Promise<RunbookRow[]> {
-  const incidentRank = rankOf(levels, severity);
-  const all = await tx.select().from(runbooks);
-  const bySev = all.filter(
-    (rb) =>
-      rb.triggerSeverity &&
-      levels.some((l) => l.key === rb.triggerSeverity) &&
-      rankOf(levels, rb.triggerSeverity) >= incidentRank,
-  );
-  let byService: RunbookRow[] = [];
-  if (projectIds.length > 0) {
-    const svc = await tx
-      .select({ runbookId: runbookServices.runbookId })
-      .from(runbookServices)
-      .where(inArray(runbookServices.projectId, projectIds));
-    const ids = new Set(svc.map((r) => r.runbookId));
-    byService = all.filter((rb) => ids.has(rb.id));
-  }
-  const map = new Map<string, RunbookRow>();
-  for (const rb of [...bySev, ...byService]) map.set(rb.id, rb);
-  return [...map.values()];
+export function attachMatches(conditions: AttachCondition[], severity: string): boolean {
+  return conditions.every((c) => c.type === "severity" && c.values.includes(severity));
 }
 
 /**
- * Copy a runbook's steps onto an incident as checklist items. Idempotent per
- * runbook (a runbook already attached is skipped), and it COPIES — editing the
- * runbook later never mutates a live incident. Returns how many steps were added.
+ * The runbooks that should auto-attach to an incident of `severity`: every runbook
+ * that isn't manual-only and whose conditions match (empty = all). Re-checked as the
+ * incident evolves, so a severity-scoped runbook attaches the moment it applies.
+ */
+export async function matchingRunbooks(tx: TenantTx, severity: string): Promise<RunbookRow[]> {
+  const all = await tx.select().from(runbooks);
+  return all.filter((rb) => !rb.manualOnly && attachMatches(rb.attachConditions, severity));
+}
+
+/**
+ * Copy a runbook's steps onto an incident as checklist items. Idempotent per runbook
+ * (an already-attached runbook is skipped), and it COPIES — editing the runbook later
+ * never mutates a live incident. Returns how many steps were added.
  */
 export async function attachRunbook(
   tx: TenantTx,
@@ -78,20 +60,68 @@ export async function attachRunbook(
       body: s.body,
       kind: s.kind,
       url: s.url,
+      // Carry the step's execution model onto the incident's own copy. Everything
+      // starts `pending`; evaluateChecklist activates whatever is already eligible.
+      provider: s.provider,
+      action: s.action,
+      conditions: s.conditions,
+      state: "pending",
     });
   }
   return steps.length;
 }
 
-/** Attach every runbook that matches this incident (used on declare). */
-export async function autoAttachRunbooks(
+/**
+ * Attach every runbook that currently matches the incident, then evaluate the
+ * checklist so eligible steps fire. Shared by declare (`status` = open) and by the
+ * on-progress re-evaluation when severity or milestone changes — a runbook only ever
+ * attaches once (attachRunbook is idempotent), so calling this repeatedly is safe.
+ */
+export async function attachMatchingRunbooks(
   tx: TenantTx,
   orgId: string,
   incidentId: string,
   severity: string,
-  projectIds: string[],
+  status: string,
 ): Promise<void> {
-  const levels = await getSeverityLevels(tx, orgId);
-  const rbs = await matchingRunbooks(tx, levels, severity, projectIds);
+  const rbs = await matchingRunbooks(tx, severity);
   for (const rb of rbs) await attachRunbook(tx, orgId, incidentId, rb);
+  await evaluateChecklist(tx, orgId, { incidentId, severity, status });
+}
+
+/** The starter steps a freshly-seeded Default runbook ships with. */
+const DEFAULT_STEPS: Array<{ title: string; action: string }> = [
+  { title: "Assign an incident commander", action: "assign-role" },
+  { title: "Open a comms channel", action: "task" },
+  { title: "Update the status page", action: "status-page" },
+  { title: "Start the retrospective", action: "start-retro" },
+];
+
+/**
+ * Ensure the org has at least a "Default" runbook — an always-attach playbook (no
+ * conditions) with a few starter steps. Seeded lazily when the org has none, so every
+ * org has a sensible default that lands on every incident. Idempotent; if the org
+ * deleted all runbooks it's re-seeded (there is always a default to fall back on).
+ */
+export async function ensureDefaultRunbook(tx: TenantTx, orgId: string): Promise<void> {
+  const any = await tx.select({ id: runbooks.id }).from(runbooks).limit(1).then((r) => r[0]);
+  if (any) return;
+  const [rb] = await tx
+    .insert(runbooks)
+    .values({ organizationId: orgId, key: "default", name: "Default", description: "Runs on every incident.", manualOnly: false, attachConditions: [] })
+    .returning();
+  let position = 0;
+  for (const s of DEFAULT_STEPS) {
+    await tx.insert(runbookSteps).values({
+      organizationId: orgId,
+      runbookId: rb.id,
+      position: position++,
+      title: s.title,
+      kind: "task",
+      provider: "core",
+      action: s.action,
+      // The retro step waits for resolution; the rest run on attach.
+      conditions: s.action === "start-retro" ? [{ type: "milestone", values: ["resolved"] }] : [],
+    });
+  }
 }

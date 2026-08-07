@@ -4,7 +4,6 @@
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../../packages ../../package-lock.json",
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
   "crons": [
-    { "path": "/internal/cron/report", "schedule": "*/5 * * * *" },
-    { "path": "/internal/cron/escalate", "schedule": "*/5 * * * *" }
+    { "path": "/internal/cron/report", "schedule": "*/5 * * * *" }
   ]
 }

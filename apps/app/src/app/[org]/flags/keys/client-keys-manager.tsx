@@ -2,16 +2,20 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Eye, EyeOff, Pencil, Plus, Trash2 } from "lucide-react";
+import { Activity, Check, Copy, Eye, EyeOff, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   Button,
   Field,
   Input,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
-  SegmentedControl,
   Select,
   toast,
   useConfirm,
@@ -103,8 +107,8 @@ export function ClientKeysManager({
                 <div className="flex items-center justify-between p-4">
                   <span className="text-sm text-zinc-500">No client keys for {env.name}</span>
                   {canManage ? (
-                    <Button variant="secondary" size="sm" onClick={() => setModalEnv(env.key)}>
-                      <Plus className="size-3.5" /> Create Client Key
+                    <Button variant="secondary" onClick={() => setModalEnv(env.key)}>
+                      <Plus className="size-4" /> Create Client Key
                     </Button>
                   ) : null}
                 </div>
@@ -122,9 +126,9 @@ export function ClientKeysManager({
                     />
                   ))}
                   {canManage ? (
-                    <div className="border-t border-white/6 px-2.5 py-2">
-                      <Button variant="secondary" size="sm" onClick={() => setModalEnv(env.key)}>
-                        <Plus className="size-3.5" /> Create Client Key
+                    <div className="flex justify-end border-t border-white/6 p-3">
+                      <Button variant="secondary" onClick={() => setModalEnv(env.key)}>
+                        <Plus className="size-4" /> Create Client Key
                       </Button>
                     </div>
                   ) : null}
@@ -178,16 +182,17 @@ function KeyRow({
   onRevoke: () => void;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [labelDraft, setLabelDraft] = useState(k.name);
   const [savingLabel, saveLabel] = useTransition();
-  const [savingExpose, saveExpose] = useTransition();
+  const [, saveExpose] = useTransition();
   const hasToken = Boolean(k.token);
   const shown = hasToken && revealed ? (k.token as string) : k.masked;
 
-  function toggleExpose(next: boolean) {
+  function setExpose(next: boolean) {
     if (next === k.autoExpose) return;
     saveExpose(async () => {
       const res = await updateSdkKeyAction(slug, k.id, { autoExpose: next });
@@ -197,6 +202,25 @@ function KeyRow({
       }
       router.refresh();
     });
+  }
+
+  // Turning auto exposures OFF is deliberately gated behind a confirmation: it's a
+  // billing/analytics signal we want on by default. Turning it back on is one click.
+  async function disableExposures() {
+    const ok = await confirm({
+      title: "Turn off auto exposures?",
+      message: (
+        <>
+          Auto exposures logs one billable exposure per user, flag, and variant each
+          hour. It&apos;s what powers your usage and experiment analysis
+          automatically. Turn it off and this key bills only exposures you send
+          yourself, and experiment results that rely on it may be incomplete.
+        </>
+      ),
+      confirmLabel: "Turn off",
+      tone: "danger",
+    });
+    if (ok) setExpose(false);
   }
 
   function copy() {
@@ -296,48 +320,56 @@ function KeyRow({
           ) : null}
         </div>
 
-        <p className="mt-1.5 text-xs text-zinc-600">
-          {savingLabel
-            ? "Saving…"
-            : k.lastUsedAt
-              ? `Last used ${relativeTime(k.lastUsedAt)}`
-              : "Never used"}
-          <span className="text-zinc-700"> · Added {relativeTime(k.createdAt)}</span>
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-1 text-xs text-zinc-600">
+          <span>
+            {savingLabel
+              ? "Saving…"
+              : k.lastUsedAt
+                ? `Last used ${relativeTime(k.lastUsedAt)}`
+                : "Never used"}
+          </span>
+          <span className="text-zinc-700">· Added {relativeTime(k.createdAt)}</span>
+          {!k.autoExpose ? (
+            <span className="ml-1 rounded border border-amber-500/25 bg-amber-500/5 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-amber-400/90 uppercase">
+              Auto exposures off
+            </span>
+          ) : null}
         </p>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1">
-        <span className="text-[10px] font-medium tracking-wide text-zinc-600 uppercase">
-          Auto exposures
-        </span>
-        {canManage ? (
-          <SegmentedControl
-            size="sm"
-            sizing="content"
-            value={k.autoExpose ? "on" : "off"}
-            onValueChange={(v) => toggleExpose(v === "on")}
-            options={[
-              { value: "on", label: "On" },
-              { value: "off", label: "Off" },
-            ]}
-            ariaLabel="Auto-log exposures"
-            className={savingExpose ? "pointer-events-none opacity-60" : ""}
-          />
-        ) : (
-          <span className="text-xs text-zinc-400">{k.autoExpose ? "On" : "Off"}</span>
-        )}
-      </div>
       {canManage ? (
-        <button
-          type="button"
-          onClick={onRevoke}
-          disabled={pending}
-          title="Revoke"
-          aria-label={`Revoke ${k.name || "client key"}`}
-          className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-red-400 disabled:opacity-50"
-        >
-          <Trash2 className="size-4" />
-        </button>
+        <Menu>
+          <MenuTrigger asChild>
+            <button
+              type="button"
+              disabled={pending}
+              title="Key options"
+              aria-label={`Options for ${k.name || "client key"}`}
+              className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 disabled:opacity-50"
+            >
+              <MoreHorizontal className="size-4" />
+            </button>
+          </MenuTrigger>
+          <MenuContent align="end">
+            {k.autoExpose ? (
+              <MenuItem onSelect={disableExposures}>
+                <Activity className="size-3.5" /> Turn off auto exposures
+              </MenuItem>
+            ) : (
+              <MenuItem onSelect={() => setExpose(true)}>
+                <Activity className="size-3.5" /> Turn on auto exposures
+              </MenuItem>
+            )}
+            <MenuSeparator />
+            <MenuItem
+              onSelect={onRevoke}
+              className="text-red-400 data-highlighted:text-red-300"
+            >
+              <Trash2 className="size-3.5" /> Revoke key
+            </MenuItem>
+          </MenuContent>
+        </Menu>
       ) : null}
+      {confirmDialog}
     </div>
   );
 }

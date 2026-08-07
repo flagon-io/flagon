@@ -129,13 +129,12 @@ export const nav: NavSection[] = [
         ],
       },
       {
-        title: "Incidents & on-call",
+        title: "Incidents",
         items: [
           { title: "Incidents", href: "/docs/incidents" },
           { title: "Severity levels", href: "/docs/incidents/severity-levels" },
           { title: "Uptime & objectives", href: "/docs/incidents/uptime" },
           { title: "Runbooks", href: "/docs/incidents/runbooks" },
-          { title: "On-call", href: "/docs/incidents/on-call" },
           { title: "Postmortems (RCCA)", href: "/docs/incidents/postmortems" },
         ],
       },

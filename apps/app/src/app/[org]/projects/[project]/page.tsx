@@ -1,12 +1,11 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { BellRing, ChevronRight, Rocket, Settings, Siren } from "lucide-react";
+import { ChevronRight, Rocket, Settings, Siren } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { getProject, listProjectRelations } from "@/lib/projects-api";
 import { listOpenIncidentsForProject, type Incident } from "@/lib/incidents-api";
-import { teamCurrentOnCall } from "@/lib/oncall-api";
-import { listTeams, listTeamMembers } from "@/lib/teams-api";
+import { listTeams } from "@/lib/teams-api";
 import { getSeverityLevels } from "@/lib/severity-levels-api";
 import { getUptime } from "@/lib/uptime-api";
 import { severityStyle, findLevel, type SeverityLevel } from "@/lib/incidents";
@@ -46,16 +45,6 @@ export default async function ProjectOverview({
   const canManage = canManageOrg(membership.role);
   const teamOptions = teams.map((t) => ({ key: t.key, name: t.name }));
   const relHref = `/${slug}/projects/${key}/relationships`;
-
-  // The owning team's current on-call responder (name resolved from the roster).
-  let onCallName: string | null = null;
-  if (project.ownerTeam) {
-    const [oncall, roster] = await Promise.all([
-      teamCurrentOnCall(slug, project.ownerTeam.key),
-      listTeamMembers(slug, project.ownerTeam.key),
-    ]);
-    if (oncall?.current) onCallName = roster.find((m) => m.userId === oncall.current)?.name ?? "On-call";
-  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -110,7 +99,6 @@ export default async function ProjectOverview({
 
         <aside className="flex flex-col gap-5">
           <IncidentsCard slug={slug} projectKey={project.key} incidents={openIncidents} levels={levels} uptimePct={uptimePct} canManage={canManage} />
-          {project.ownerTeam ? <OnCallCard slug={slug} teamKey={project.ownerTeam.key} name={onCallName} /> : null}
           <EditableRepository slug={slug} projectKey={project.key} repo={project.repo} canManage={canManage} />
           <EditableLinks slug={slug} projectKey={project.key} links={project.links} canManage={canManage} />
           <SoonCard icon={<Rocket className="size-4" />} title="Deployments" />
@@ -176,26 +164,6 @@ function IncidentsCard({ slug, projectKey, incidents, levels, uptimePct, canMana
   );
 }
 
-function OnCallCard({ slug, teamKey, name }: { slug: string; teamKey: string; name: string | null }) {
-  return (
-    <Card>
-      <CardHead
-        title="On-call"
-        action={
-          <Link href={`/${slug}/incidents/on-call`} className="text-xs text-zinc-400 hover:text-zinc-200">
-            Schedules
-          </Link>
-        }
-      />
-      <div className="px-4 py-3.5">
-        <p className="inline-flex items-center gap-2 text-sm text-zinc-200">
-          <BellRing className="size-4 text-teal-400" />
-          {name ?? <span className="text-zinc-500">No on-call for {teamKey}</span>}
-        </p>
-      </div>
-    </Card>
-  );
-}
 
 function SoonCard({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (

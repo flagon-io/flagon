@@ -1,4 +1,5 @@
 import {
+  detectSenderCapabilities,
   placeCall as twilioPlaceCall,
   sendSms as twilioSendSms,
   verifyCredentials,
@@ -60,7 +61,17 @@ export type NormalizedConfig = {
   secrets: Record<string, string>;
 };
 
-export type ProviderTestResult = { ok: boolean; message?: string };
+export type ProviderTestResult = {
+  ok: boolean;
+  message?: string;
+  /**
+   * The capabilities the provider DETECTED the configured account/sender can
+   * actually use (e.g. Twilio: whether the number does SMS and/or voice). Stored
+   * so delivery only ever attempts what the sender supports — not just what the
+   * org toggled on.
+   */
+  detected?: IntegrationCapability[];
+};
 
 export type IntegrationProvider = {
   key: string;
@@ -125,21 +136,21 @@ const twilio: IntegrationProvider = {
   label: "Twilio",
   category: "Notifications",
   summary:
-    "Send SMS and voice pages through your own Twilio account. Lights up SMS delivery for incident on-call.",
+    "Bring your own Twilio account for SMS and voice delivery. Connect it now; the features that send through it are on the way.",
   docsPath: "/docs/platform/integrations",
   capabilities: ["sms", "voice"],
   options: [
     {
       key: "sms",
-      label: "SMS pages",
-      help: "Text responders their incident pages.",
+      label: "SMS",
+      help: "Let Flagon send text messages through this account.",
       default: true,
       gatesCapability: "sms",
     },
     {
       key: "voice",
       label: "Voice calls",
-      help: "Call responders and read the incident aloud. Needs a phone number as the sender, not a Messaging Service SID.",
+      help: "Let Flagon place phone calls through this account. Needs a phone number as the sender, not a Messaging Service SID.",
       default: false,
       gatesCapability: "voice",
     },
@@ -169,7 +180,7 @@ const twilio: IntegrationProvider = {
       type: "tel",
       required: true,
       placeholder: "+15551234567 or MG…",
-      help: "The sender pages come from. SMS can use an E.164 number or a Messaging Service SID; voice calls need a phone number.",
+      help: "The sender messages come from. SMS can use an E.164 number or a Messaging Service SID; voice calls need a phone number.",
       secret: false,
     },
   ],
@@ -182,10 +193,20 @@ const twilio: IntegrationProvider = {
     return out;
   },
   async test({ config, secrets }) {
-    return verifyCredentials({
+    const creds = {
       accountSid: config.accountSid ?? "",
       authToken: secrets.authToken ?? "",
-    });
+      from: config.from ?? "",
+    };
+    // First prove the credentials, then detect what the sender can actually do.
+    const auth = await verifyCredentials(creds);
+    if (!auth.ok) return auth;
+    const caps = await detectSenderCapabilities(creds);
+    if (!caps.ok) return { ok: false, message: caps.message };
+    const detected: IntegrationCapability[] = [];
+    if (caps.capabilities?.sms) detected.push("sms");
+    if (caps.capabilities?.voice) detected.push("voice");
+    return { ok: true, detected };
   },
   async sendSms({ config, secrets }, to, body) {
     return twilioSendSms(
@@ -249,17 +270,43 @@ export function optionEnabled(
   return typeof stored === "boolean" ? stored : opt.default;
 }
 
+/** The capabilities we detected the sender actually supports, or null if unknown. */
+function detectedCapabilities(
+  config: Record<string, unknown> | undefined,
+): string[] | null {
+  const raw = config?.detected;
+  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : null;
+}
+
+/**
+ * Whether the configured account/sender actually SUPPORTS a capability, per what
+ * we detected on connect (e.g. an SMS-only Twilio number doesn't support voice).
+ * Unknown detection (legacy config) is treated as supported — delivery records a
+ * failure if it turns out not to be. This is about the provider side, independent
+ * of the org's on/off option.
+ */
+export function capabilitySupported(
+  provider: IntegrationProvider,
+  config: Record<string, unknown> | undefined,
+  capability: IntegrationCapability,
+): boolean {
+  if (!provider.capabilities.includes(capability)) return false;
+  const detected = detectedCapabilities(config);
+  return detected ? detected.includes(capability) : true;
+}
+
 /**
  * Whether a capability is currently ENABLED for this integration — the provider
- * supports it AND the org hasn't turned off the option that gates it. Delivery
- * paths use this so an org's on/off choice is honored, not just the credentials.
+ * supports it, the SENDER actually supports it (detected), AND the org hasn't
+ * turned off the option that gates it. Delivery paths use this so we only ever
+ * attempt what the account can do and what the org asked for.
  */
 export function capabilityEnabled(
   provider: IntegrationProvider,
   config: Record<string, unknown> | undefined,
   capability: IntegrationCapability,
 ): boolean {
-  if (!provider.capabilities.includes(capability)) return false;
+  if (!capabilitySupported(provider, config, capability)) return false;
   const gate = provider.options.find((o) => o.gatesCapability === capability);
   if (!gate) return true;
   return optionEnabled(provider, config, gate.key);

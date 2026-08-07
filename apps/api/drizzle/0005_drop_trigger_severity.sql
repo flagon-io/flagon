@@ -1,0 +1,1 @@
+ALTER TABLE "runbooks" DROP COLUMN "trigger_severity";

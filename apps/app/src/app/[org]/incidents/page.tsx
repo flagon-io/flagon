@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { listIncidents } from "@/lib/incidents-api";
-import { listPolicies } from "@/lib/oncall-api";
 import { listProjects } from "@/lib/projects-api";
 import { listTeams } from "@/lib/teams-api";
 import { getSeverityLevels } from "@/lib/severity-levels-api";
@@ -30,11 +29,10 @@ export default async function IncidentsPage({
   const autoDeclareService = sp.declare && typeof sp.service === "string" ? sp.service : undefined;
   const autoDeclare = Boolean(sp.declare);
 
-  const [incidents, teams, projects, policies, levels] = await Promise.all([
+  const [incidents, teams, projects, levels] = await Promise.all([
     listIncidents(slug, filterProject ? { project: filterProject } : undefined),
     listTeams(slug),
     listProjects(slug),
-    listPolicies(slug),
     getSeverityLevels(slug),
   ]);
 
@@ -46,7 +44,6 @@ export default async function IncidentsPage({
       canManage={canManageOrg(membership.role)}
       teams={teams.map((t) => ({ key: t.key, name: t.name }))}
       projects={projects.map((p) => ({ key: p.key, name: p.name }))}
-      policies={policies.map((p) => ({ key: p.key, name: p.name }))}
       filterProject={filterProject}
       autoDeclareService={autoDeclareService}
       autoDeclare={autoDeclare}

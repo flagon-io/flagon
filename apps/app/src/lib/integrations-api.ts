@@ -41,12 +41,17 @@ export type IntegrationView = {
   updatedAt: string;
 };
 
+export type IntegrationConnectionModel = "byo" | "oauth";
+export type IntegrationStatus = "available" | "planned";
+
 export type IntegrationCatalogEntry = {
   key: string;
   label: string;
   category: string;
   summary: string;
   docsPath?: string;
+  connection: IntegrationConnectionModel;
+  status: IntegrationStatus;
   capabilities: string[];
   fields: IntegrationField[];
   options: IntegrationOption[];
@@ -60,15 +65,21 @@ export type IntegrationCatalog = {
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const cookie = (await headers()).get("cookie") ?? "";
-  return fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      cookie,
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
+  try {
+    return await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", cookie, ...(init?.headers ?? {}) },
+      cache: "no-store",
+    });
+  } catch {
+    // The API is briefly unreachable (e.g. a dev restart, or a transient network
+    // blip). Degrade to a controlled 503 so readers fall back and writers surface
+    // a toast — never an unhandled "fetch failed" that crashes the route.
+    return new Response(
+      JSON.stringify({ message: "The service is temporarily unreachable. Try again in a moment." }),
+      { status: 503, headers: { "content-type": "application/json" } },
+    );
+  }
 }
 
 async function unwrap<T>(res: Response): Promise<{ data?: T; error?: string }> {
@@ -83,6 +94,34 @@ export async function getIntegrations(slug: string): Promise<IntegrationCatalog 
   const res = await apiFetch(`/v1/orgs/${slug}/integrations`);
   if (!res.ok) return null;
   return (await res.json()) as IntegrationCatalog;
+}
+
+/**
+ * The provider keys this org has connected — the real, reusable "is this
+ * integration set up?" check. Any surface that gates on a provider being wired up
+ * (runbook step providers, and future features) reads this rather than re-deriving
+ * it from the full catalog. Empty on error, so callers degrade to "nothing
+ * connected" instead of throwing.
+ */
+export async function getConnectedProviders(slug: string): Promise<string[]> {
+  const res = await apiFetch(`/v1/orgs/${slug}/integrations/connected`);
+  if (!res.ok) return [];
+  const body = (await res.json()) as { providers?: string[] };
+  return body.providers ?? [];
+}
+
+export type OrgCapabilities = { sms: boolean; voice: boolean };
+
+/**
+ * The paging capabilities this org can currently deliver — the cheap, secret-free
+ * gate for features like voice escalation ("Not configured" when a capability
+ * isn't available). Defaults to all-off if the API can't be reached.
+ */
+export async function getIntegrationCapabilities(slug: string): Promise<OrgCapabilities> {
+  const res = await apiFetch(`/v1/orgs/${slug}/integrations/capabilities`);
+  if (!res.ok) return { sms: false, voice: false };
+  const body = (await res.json()) as { capabilities?: OrgCapabilities };
+  return body.capabilities ?? { sms: false, voice: false };
 }
 
 export async function configureIntegration(

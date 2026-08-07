@@ -23,7 +23,6 @@ export function ProjectIncidents({
   canManage,
   teams,
   projects,
-  policies,
   autoDeclare,
 }: {
   slug: string;
@@ -34,7 +33,6 @@ export function ProjectIncidents({
   canManage: boolean;
   teams: Opt[];
   projects: Opt[];
-  policies: Opt[];
   autoDeclare?: boolean;
 }) {
   const [open, setOpen] = useState(Boolean(autoDeclare));
@@ -65,7 +63,7 @@ export function ProjectIncidents({
           <p className="text-base font-medium text-zinc-100">No incidents for this service</p>
           <p className="max-w-sm text-sm text-zinc-500">
             When something breaks here, declare an incident. It routes to the owning
-            team and pages the on-call responder.
+            team and its runbooks land on it as a checklist.
           </p>
         </div>
       ) : (
@@ -81,7 +79,6 @@ export function ProjectIncidents({
           levels={levels}
           teams={teams}
           projects={projects}
-          policies={policies}
           initialServices={[projectKey]}
           onClose={() => setOpen(false)}
         />

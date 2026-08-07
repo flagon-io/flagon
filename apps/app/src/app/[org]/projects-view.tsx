@@ -198,12 +198,14 @@ export function ProjectsView({
           </div>
 
           {/* Body: usage sidebar + projects */}
-          <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
-            <aside className="order-2 flex flex-col gap-6 lg:order-1">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+            {/* Usage summary sits on the right on desktop (order-2), and drops
+                below the projects on mobile. */}
+            <aside className="order-2 flex flex-col gap-6">
               <UsagePanel slug={slug} entitlement={entitlement} usage={usage} />
             </aside>
 
-            <div className="order-1 min-w-0 lg:order-2">
+            <div className="order-1 min-w-0">
               {filtered.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-white/12 bg-white/2 px-6 py-16 text-center text-sm text-zinc-500">
                   {query.trim()

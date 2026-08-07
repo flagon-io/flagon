@@ -1127,15 +1127,14 @@ export const experimentResults = pgTable(
 
 /**
  * =============================================================================
- * RELIABILITY (Incidents + On-call). All tables are `incident_*` / `oncall_*`
- * prefixed (schema naming discipline, like experiment_*) so generic words like
- * "schedule"/"members" never collide with a future product. Tenant data (RLS).
+ * RELIABILITY (Incidents). All tables are `incident_*` prefixed (schema naming
+ * discipline, like experiment_*) so generic words never collide with a future
+ * product. Tenant data (RLS).
  */
 
 /**
  * An incident: a declared reliability event affecting one or more catalog
- * projects. `number` is a per-org sequential id (INC-N). Routes to an owning
- * team and (optionally) an escalation policy; ack stops escalation.
+ * projects. `number` is a per-org sequential id (INC-N). Routes to an owning team.
  */
 export const incidents = pgTable(
   "incidents",
@@ -1148,14 +1147,7 @@ export const incidents = pgTable(
     severity: text("severity").notNull(),
     status: text("status").notNull().default("open"),
     ownerTeamId: uuid("owner_team_id").references(() => teams.id, { onDelete: "set null" }),
-    escalationPolicyId: uuid("escalation_policy_id").references(
-      () => oncallEscalationPolicies.id,
-      { onDelete: "set null" },
-    ),
     declaredByUserId: uuid("declared_by_user_id"),
-    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
-    acknowledgedByUserId: uuid("acknowledged_by_user_id"),
-    escalatedLevel: integer("escalated_level").notNull().default(0),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     ...timestamps,
@@ -1207,114 +1199,6 @@ export const incidentUpdates = pgTable(
   (t) => [
     index("incident_updates_incident_idx").on(t.incidentId, t.createdAt),
     index("incident_updates_org_idx").on(t.organizationId),
-  ],
-);
-
-/**
- * An on-call schedule: a rotation of users. `teamId` is OPTIONAL — set for a
- * team rotation, null for a standalone/individual one. Members are explicit
- * users (any user), so team, cross-team, and single-person rotations are all
- * just member lists.
- */
-export const oncallSchedules = pgTable(
-  "oncall_schedules",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }),
-    key: text("key").notNull(),
-    name: text("name").notNull(),
-    rotationIntervalHours: integer("rotation_interval_hours").notNull().default(168),
-    anchorAt: timestamp("anchor_at", { withTimezone: true }).notNull().defaultNow(),
-    ...timestamps,
-  },
-  (t) => [
-    uniqueIndex("oncall_schedules_org_key_key").on(t.organizationId, t.key),
-    index("oncall_schedules_org_idx").on(t.organizationId),
-    index("oncall_schedules_team_idx").on(t.teamId),
-  ],
-);
-
-/**
- * Which teams an on-call schedule serves (many-to-many). A shared rotation can be
- * bound to several teams; each surfaces it on its On-call tab. Supersedes the single
- * `oncall_schedules.team_id` (now dormant) as the source of truth for team binding.
- */
-export const oncallScheduleTeams = pgTable(
-  "oncall_schedule_teams",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    scheduleId: uuid("schedule_id")
-      .notNull()
-      .references(() => oncallSchedules.id, { onDelete: "cascade" }),
-    teamId: uuid("team_id")
-      .notNull()
-      .references(() => teams.id, { onDelete: "cascade" }),
-  },
-  (t) => [
-    uniqueIndex("oncall_schedule_teams_sched_team_key").on(t.scheduleId, t.teamId),
-    index("oncall_schedule_teams_team_idx").on(t.teamId),
-    index("oncall_schedule_teams_org_idx").on(t.organizationId),
-  ],
-);
-
-/** The ordered participants in an on-call rotation. */
-export const oncallScheduleMembers = pgTable(
-  "oncall_schedule_members",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    scheduleId: uuid("schedule_id")
-      .notNull()
-      .references(() => oncallSchedules.id, { onDelete: "cascade" }),
-    userId: uuid("user_id").notNull(),
-    position: integer("position").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("oncall_schedule_members_schedule_user_key").on(t.scheduleId, t.userId),
-    index("oncall_schedule_members_org_idx").on(t.organizationId),
-    index("oncall_schedule_members_schedule_idx").on(t.scheduleId),
-  ],
-);
-
-/** A one-off override: a user covers a schedule for a time window (wins over the rotation). */
-export const oncallOverrides = pgTable(
-  "oncall_overrides",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    scheduleId: uuid("schedule_id")
-      .notNull()
-      .references(() => oncallSchedules.id, { onDelete: "cascade" }),
-    userId: uuid("user_id").notNull(),
-    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
-    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
-    createdByUserId: uuid("created_by_user_id"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    index("oncall_overrides_schedule_idx").on(t.scheduleId),
-    index("oncall_overrides_org_idx").on(t.organizationId),
-  ],
-);
-
-/** An escalation policy: an ordered set of levels an unacked incident climbs. */
-export const oncallEscalationPolicies = pgTable(
-  "oncall_escalation_policies",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    key: text("key").notNull(),
-    name: text("name").notNull(),
-    // How many times to REPEAT the whole ladder if still unacknowledged (0 = one pass).
-    repeatCount: integer("repeat_count").notNull().default(0),
-    ...timestamps,
-  },
-  (t) => [
-    uniqueIndex("oncall_escalation_policies_org_key_key").on(t.organizationId, t.key),
-    index("oncall_escalation_policies_org_idx").on(t.organizationId),
   ],
 );
 
@@ -1391,10 +1275,21 @@ export const orgIntegrations = pgTable(
 
 /**
  * A runbook: a reusable playbook of ordered steps a responder follows during an
- * incident. Attaches to services (runbook_services) and/or triggers at a severity
- * threshold; on declare, matching runbooks' steps materialize onto the incident as
- * a checklist. Tenant data (org-scoped, RLS).
+ * incident. Auto-attaches to matching incidents (empty conditions = ALL — the
+ * "Default" playbook), unless `manualOnly`; attachment is re-checked as the incident
+ * evolves. On attach, its steps materialize onto the incident as a checklist that
+ * then executes by step conditions. Tenant data (org-scoped, RLS).
  */
+/**
+ * A condition on WHICH incidents a runbook auto-attaches to (incident.io-style):
+ * a runbook attaches when ALL of its conditions hold, so EMPTY conditions = every
+ * incident (the "Default" playbook). Re-checked as the incident evolves, so a
+ * severity-scoped runbook attaches the moment it becomes relevant. A tagged union in
+ * jsonb — `service`/`priority`/etc. slot in later without a migration.
+ *  - `severity` — the incident's severity key is one of `values`
+ */
+export type AttachCondition = { type: "severity"; values: string[] };
+
 export const runbooks = pgTable(
   "runbooks",
   {
@@ -1403,9 +1298,10 @@ export const runbooks = pgTable(
     key: text("key").notNull(),
     name: text("name").notNull(),
     description: text("description"),
-    // Attach automatically when an incident is AT LEAST this severe (null = never
-    // auto-attach by severity; sev1 highest). Service attachment is independent.
-    triggerSeverity: text("trigger_severity"),
+    // Attachment model. `manualOnly` = never auto-attaches (a user picks it). Else it
+    // auto-attaches to incidents matching `attachConditions`; empty = ALL incidents.
+    manualOnly: boolean("manual_only").notNull().default(false),
+    attachConditions: jsonb("attach_conditions").$type<AttachCondition[]>().notNull().default(sql`'[]'::jsonb`),
     createdByUserId: uuid("created_by_user_id"),
     ...timestamps,
   },
@@ -1416,6 +1312,20 @@ export const runbooks = pgTable(
 );
 
 /** An ordered step in a runbook: a task (with markdown instructions) or a link. */
+/**
+ * A condition on a runbook step's execution, evaluated against the LIVE incident
+ * (FireHydrant-style): a step becomes eligible only when ALL of its conditions
+ * hold. A tagged union stored as jsonb so new condition kinds (e.g. priority) slot
+ * in without a migration.
+ *  - `severity`   — the incident's severity key is one of `values`
+ *  - `milestone`  — the incident's current status/milestone is one of `values`
+ *  - `previous_step` — the immediately preceding step on the incident is completed
+ */
+export type StepCondition =
+  | { type: "severity"; values: string[] }
+  | { type: "milestone"; values: string[] }
+  | { type: "previous_step" };
+
 export const runbookSteps = pgTable(
   "runbook_steps",
   {
@@ -1429,6 +1339,14 @@ export const runbookSteps = pgTable(
     body: text("body"),
     kind: text("kind").notNull().default("task"),
     url: text("url"),
+    // The step-catalog identity: which provider performs it ("core" for native
+    // steps, else an integration key like "twilio"/"slack") and the step type
+    // ("task", "start-retro", "slack-notify", …). Drives the provider badge and
+    // the connected-integration gate.
+    provider: text("provider").notNull().default("core"),
+    action: text("action").notNull().default("task"),
+    // Execution conditions; empty = runs as soon as the runbook attaches.
+    conditions: jsonb("conditions").$type<StepCondition[]>().notNull().default(sql`'[]'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -1437,26 +1355,6 @@ export const runbookSteps = pgTable(
   ],
 );
 
-/** Which catalog services a runbook covers (attach on any of their incidents). */
-export const runbookServices = pgTable(
-  "runbook_services",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    runbookId: uuid("runbook_id")
-      .notNull()
-      .references(() => runbooks.id, { onDelete: "cascade" }),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("runbook_services_runbook_project_key").on(t.runbookId, t.projectId),
-    index("runbook_services_org_idx").on(t.organizationId),
-    index("runbook_services_project_idx").on(t.projectId),
-  ],
-);
 
 /**
  * A materialized runbook step on an incident — a COPY made when a runbook attaches,
@@ -1478,6 +1376,17 @@ export const incidentChecklistItems = pgTable(
     body: text("body"),
     kind: text("kind").notNull().default("task"),
     url: text("url"),
+    // Copied from the source step so the incident evaluates conditions against its
+    // own frozen playbook (editing the runbook later never mutates a live incident).
+    provider: text("provider").notNull().default("core"),
+    action: text("action").notNull().default("task"),
+    conditions: jsonb("conditions").$type<StepCondition[]>().notNull().default(sql`'[]'::jsonb`),
+    // Execution lifecycle, distinct from human completion (`done`):
+    //  - `pending`  conditions not yet met (won't show as actionable)
+    //  - `active`   eligible now: a live to-do (native) or a fired action (integration)
+    //  - `skipped`  became eligible but couldn't run (e.g. its integration isn't connected)
+    state: text("state").notNull().default("active"),
+    skippedReason: text("skipped_reason"),
     done: boolean("done").notNull().default(false),
     doneByUserId: uuid("done_by_user_id"),
     doneAt: timestamp("done_at", { withTimezone: true }),
@@ -1571,6 +1480,10 @@ export const incidentRccas = pgTable(
     // before this column existed; the app backfills from the live template.
     template: jsonb("template").$type<RccaSnapshot>(),
     values: jsonb("values").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    // When the retrospective was started (reaching the retrospective milestone, or a
+    // runbook "start-retro" step firing). Null = not started yet. The writeup itself
+    // is editable throughout the incident; this just marks the retro as underway.
+    startedAt: timestamp("started_at", { withTimezone: true }),
     updatedByUserId: uuid("updated_by_user_id"),
     ...timestamps,
   },
@@ -1631,27 +1544,6 @@ export const reliabilityObjectives = pgTable(
   ],
 );
 
-/** One level of an escalation policy: page a schedule/team/user after N minutes unacked. */
-export const oncallEscalationLevels = pgTable(
-  "oncall_escalation_levels",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id").notNull(),
-    policyId: uuid("policy_id")
-      .notNull()
-      .references(() => oncallEscalationPolicies.id, { onDelete: "cascade" }),
-    position: integer("position").notNull().default(0),
-    targetType: text("target_type").notNull(),
-    targetId: uuid("target_id").notNull(),
-    delayMinutes: integer("delay_minutes").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    index("oncall_escalation_levels_policy_idx").on(t.policyId, t.position),
-    index("oncall_escalation_levels_org_idx").on(t.organizationId),
-  ],
-);
-
 export type Flag = typeof flags.$inferSelect;
 export type NewFlag = typeof flags.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
@@ -1686,15 +1578,9 @@ export type ExperimentResult = typeof experimentResults.$inferSelect;
 export type Incident = typeof incidents.$inferSelect;
 export type IncidentService = typeof incidentServices.$inferSelect;
 export type IncidentUpdate = typeof incidentUpdates.$inferSelect;
-export type OncallSchedule = typeof oncallSchedules.$inferSelect;
-export type OncallScheduleMember = typeof oncallScheduleMembers.$inferSelect;
-export type OncallOverride = typeof oncallOverrides.$inferSelect;
-export type OncallEscalationPolicy = typeof oncallEscalationPolicies.$inferSelect;
-export type OncallEscalationLevel = typeof oncallEscalationLevels.$inferSelect;
 export type NotificationChannel = typeof notificationChannels.$inferSelect;
 export type Runbook = typeof runbooks.$inferSelect;
 export type RunbookStep = typeof runbookSteps.$inferSelect;
-export type RunbookService = typeof runbookServices.$inferSelect;
 export type IncidentChecklistItem = typeof incidentChecklistItems.$inferSelect;
 export type IncidentSeverityLevel = typeof incidentSeverityLevels.$inferSelect;
 export type ReliabilityObjective = typeof reliabilityObjectives.$inferSelect;
@@ -1736,15 +1622,9 @@ export const schema = {
   incidents,
   incidentServices,
   incidentUpdates,
-  oncallSchedules,
-  oncallScheduleMembers,
-  oncallOverrides,
-  oncallEscalationPolicies,
-  oncallEscalationLevels,
   notificationChannels,
   runbooks,
   runbookSteps,
-  runbookServices,
   incidentChecklistItems,
   incidentSeverityLevels,
   reliabilityObjectives,

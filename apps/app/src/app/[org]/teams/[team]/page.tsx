@@ -5,22 +5,9 @@ import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug, getOrgMembers } from "@/lib/org";
 import { getTeam, listTeamMembers } from "@/lib/teams-api";
 import { listProjects } from "@/lib/projects-api";
-import { getSchedule, listSchedules } from "@/lib/oncall-api";
 import { TeamHeader } from "./team-header";
 import { TeamMembersManager } from "./team-members-manager";
-import { TeamOncallCreate } from "./team-oncall-create";
-import { TeamTabs, type TeamScheduleVM } from "./team-tabs";
-
-/** The on-call handoff moment (weekday + time), for "on-call until …". */
-function handoff(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { TeamTabs } from "./team-tabs";
 
 /**
  * Team detail — its membership (with maintainer/member roles) and the projects it
@@ -41,11 +28,10 @@ export default async function TeamDetail({
   const team = await getTeam(slug, key);
   if (!team) notFound();
 
-  const [teamMembers, orgMembers, projects, schedules] = await Promise.all([
+  const [teamMembers, orgMembers, projects] = await Promise.all([
     listTeamMembers(slug, key),
     getOrgMembers(membership.id),
     listProjects(slug),
-    listSchedules(slug),
   ]);
 
   const isManager = canManageOrg(membership.role);
@@ -55,32 +41,10 @@ export default async function TeamDetail({
   const canManageTeam = isManager || isMaintainer;
 
   const ownedProjects = projects.filter((p) => p.ownerTeam?.key === key);
-
-  // Schedules bound to this team surface here; the rotations themselves stay
-  // first-class over in the reliability section. Resolve details (who's on now)
-  // only for the bound ones so we do not fan out across every org schedule.
-  const teamSchedules = schedules.filter((s) => s.team?.key === key);
-  const details = (
-    await Promise.all(teamSchedules.map((s) => getSchedule(slug, s.key)))
-  ).filter((d): d is NonNullable<typeof d> => d !== null);
-  const nameBy = new Map(orgMembers.map((m) => [m.userId, m.name]));
   const onTeam = new Set(teamMembers.map((m) => m.userId));
   const available = orgMembers
     .filter((m) => !onTeam.has(m.userId))
     .map((m) => ({ userId: m.userId, name: m.name, email: m.email, username: m.username }));
-
-  // Resolve the bound schedules into plain view models server-side so the tab
-  // client component gets serializable props (no Map crosses the boundary).
-  const scheduleVMs: TeamScheduleVM[] = details.map((d) => ({
-    key: d.schedule.key,
-    name: d.schedule.name,
-    rotationIntervalHours: d.schedule.rotationIntervalHours,
-    currentName: d.current.current
-      ? nameBy.get(d.current.current) ?? "On-call"
-      : null,
-    nextName: d.current.next ? nameBy.get(d.current.next) ?? null : null,
-    untilLabel: d.current.until ? handoff(d.current.until) : null,
-  }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -102,8 +66,6 @@ export default async function TeamDetail({
         slug={slug}
         memberCount={team.memberCount}
         ownedCount={ownedProjects.length}
-        canManageTeam={canManageTeam}
-        schedules={scheduleVMs}
         ownedProjects={ownedProjects.map((p) => ({ key: p.key, name: p.name }))}
         membersManager={
           <TeamMembersManager
@@ -119,9 +81,6 @@ export default async function TeamDetail({
             available={available}
             canManage={canManageTeam}
           />
-        }
-        oncallCreate={
-          <TeamOncallCreate slug={slug} teamKey={key} canManage={canManageTeam} />
         }
       />
     </div>

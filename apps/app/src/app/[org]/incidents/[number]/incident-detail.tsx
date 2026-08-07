@@ -3,13 +3,12 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BellRing, BookText, Boxes, Check, CircleDot, ListChecks, Link2, Plus, Square, SquareCheckBig, X } from "lucide-react";
+import { Ban, BookText, Boxes, CircleDot, Clock, ListChecks, Link2, Plus, Square, SquareCheckBig, X } from "lucide-react";
 import { Button, Select, Textarea } from "@flagon/design";
 import { STATUSES, labelFor, type SeverityLevel } from "@/lib/incidents";
 import type { IncidentDetail as Detail } from "@/lib/incidents-api";
 import { SeverityBadge, StatusPill } from "../incidents-view";
 import {
-  acknowledgeIncidentAction,
   addServiceAction,
   attachRunbookAction,
   postUpdateAction,
@@ -27,23 +26,17 @@ export function IncidentDetail({
   slug,
   detail,
   levels,
-  responderName,
-  responderVia,
   orgMembers,
   projects,
   runbooks,
-  policies,
   canManage,
 }: {
   slug: string;
   detail: Detail;
   levels: SeverityLevel[];
-  responderName: string | null;
-  responderVia: string | null;
   orgMembers: { userId: string; name: string }[];
   projects: { key: string; name: string }[];
   runbooks: { key: string; name: string }[];
-  policies: { key: string; name: string }[];
   canManage: boolean;
 }) {
   const router = useRouter();
@@ -54,11 +47,7 @@ export function IncidentDetail({
   const [status, setStatus] = useState(incident.status);
   const [pickService, setPickService] = useState("");
   const [pickRunbook, setPickRunbook] = useState("");
-  const acked = Boolean(incident.acknowledgedAt);
   const resolved = incident.status === "resolved";
-  const policyName = incident.escalationPolicyKey
-    ? (policies.find((p) => p.key === incident.escalationPolicyKey)?.name ?? incident.escalationPolicyKey)
-    : null;
   const attachedKeys = new Set(services.map((s) => s.key));
   const addableProjects = projects.filter((p) => !attachedKeys.has(p.key));
 
@@ -113,13 +102,6 @@ export function IncidentDetail({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!acked ? (
-            <Button variant="secondary" onClick={() => run(() => acknowledgeIncidentAction(slug, incident.number))} disabled={pending}>
-              <Check className="size-4" /> Acknowledge
-            </Button>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-xs text-teal-400"><Check className="size-3.5" /> Acknowledged</span>
-          )}
           {!resolved ? (
             <Button variant="primary" onClick={() => run(() => resolveIncidentAction(slug, incident.number))} disabled={pending}>
               Resolve
@@ -183,27 +165,12 @@ export function IncidentDetail({
 
         {/* Rail */}
         <aside className="flex flex-col gap-4">
-          <Panel title="Responder">
-            <p className="inline-flex items-center gap-2 text-sm text-zinc-200">
-              <BellRing className="size-4 text-zinc-500" />
-              {responderName ?? (detail.responderUserId ? "On-call assigned" : "Nobody assigned")}
-            </p>
-            {responderVia ? <p className="mt-0.5 pl-6 text-xs text-zinc-500">{responderVia}</p> : null}
-          </Panel>
           <Panel title="Owner">
             {incident.ownerTeam ? (
               <Link href={`/${slug}/teams/${incident.ownerTeam.key}`} className="text-sm text-zinc-200 hover:text-zinc-100">{incident.ownerTeam.name}</Link>
             ) : (
               <p className="text-sm text-zinc-500">Unowned</p>
             )}
-            {incident.escalationPolicyKey ? (
-              <p className="mt-1 text-xs text-zinc-500">Escalation: {policyName}</p>
-            ) : null}
-            {incident.escalatedLevel > 0 ? (
-              <span className="mt-1.5 inline-flex items-center rounded-md border border-amber-400/20 bg-amber-400/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-300">
-                Escalated to level {incident.escalatedLevel + 1}
-              </span>
-            ) : null}
           </Panel>
           <Panel title="Affected services">
             {services.length === 0 ? (
@@ -284,7 +251,9 @@ function ChecklistCard({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
-  const done = items.filter((i) => i.done).length;
+  // Progress counts only ACTIVE (live) steps — pending/skipped aren't actionable.
+  const active = items.filter((i) => i.state === "active");
+  const done = active.filter((i) => i.done).length;
   const groups: { name: string | null; items: Detail["checklist"] }[] = [];
   for (const it of items) {
     let g = groups.find((x) => x.name === it.runbookName);
@@ -307,7 +276,7 @@ function ChecklistCard({
     <div className="rounded-xl border border-white/10 bg-white/2 p-4">
       <div className="mb-3 flex items-center justify-between">
         <p className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500"><ListChecks className="size-3.5" /> Runbook checklist</p>
-        <span className="text-xs text-zinc-500 tabular-nums">{done}/{items.length} done</span>
+        <span className="text-xs text-zinc-500 tabular-nums">{done}/{active.length} done</span>
       </div>
       <div className="flex flex-col gap-3">
         {groups.map((g, gi) => (
@@ -315,25 +284,73 @@ function ChecklistCard({
             {g.name ? <p className="mb-1 text-[11px] font-medium tracking-wide text-zinc-600 uppercase">{g.name}</p> : null}
             <ul className="flex flex-col gap-1.5">
               {g.items.map((it) => (
-                <li key={it.id} className="flex items-start gap-2">
-                  <button type="button" onClick={() => toggle(it.id)} disabled={busy === it.id} className="mt-0.5 shrink-0 text-zinc-500 hover:text-teal-400 disabled:opacity-50" aria-label={it.done ? "Mark not done" : "Mark done"}>
-                    {it.done ? <SquareCheckBig className="size-4 text-teal-400" /> : <Square className="size-4" />}
-                  </button>
-                  <div className="min-w-0">
-                    {it.kind === "link" && it.url ? (
-                      <a href={it.url} target="_blank" rel="noreferrer" className={`inline-flex items-center gap-1.5 text-sm hover:text-teal-300 ${it.done ? "text-zinc-500 line-through" : "text-teal-400"}`}><Link2 className="size-3.5" /> {it.title}</a>
-                    ) : (
-                      <span className={`text-sm ${it.done ? "text-zinc-500 line-through" : "text-zinc-200"}`}>{it.title}</span>
-                    )}
-                    {it.body && it.kind !== "link" ? <p className="mt-0.5 text-xs whitespace-pre-wrap text-zinc-500">{it.body}</p> : null}
-                  </div>
-                </li>
+                <ChecklistRow key={it.id} it={it} busy={busy === it.id} onToggle={() => toggle(it.id)} />
               ))}
             </ul>
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+/** A short "runs at …" summary for a step still waiting on its conditions. */
+function waitingSummary(conditions: Detail["checklist"][number]["conditions"]): string {
+  if (conditions.length === 0) return "Waiting";
+  const parts = conditions.map((c) => {
+    if (c.type === "previous_step") return "the previous step completes";
+    if (c.type === "milestone") return `milestone reaches ${c.values.map((v) => labelFor(STATUSES, v)).join(" / ")}`;
+    return `severity is ${c.values.join(" / ")}`;
+  });
+  return `Runs when ${parts.join(" and ")}`;
+}
+
+/** One checklist row, rendered by execution state: active (toggle), pending, skipped. */
+function ChecklistRow({
+  it,
+  busy,
+  onToggle,
+}: {
+  it: Detail["checklist"][number];
+  busy: boolean;
+  onToggle: () => void;
+}) {
+  if (it.state === "pending") {
+    return (
+      <li className="flex items-start gap-2">
+        <Clock className="mt-0.5 size-4 shrink-0 text-zinc-600" />
+        <div className="min-w-0">
+          <span className="text-sm text-zinc-500">{it.title}</span>
+          <p className="mt-0.5 text-xs text-zinc-600">{waitingSummary(it.conditions)}</p>
+        </div>
+      </li>
+    );
+  }
+  if (it.state === "skipped") {
+    return (
+      <li className="flex items-start gap-2">
+        <Ban className="mt-0.5 size-4 shrink-0 text-amber-500/70" />
+        <div className="min-w-0">
+          <span className="text-sm text-zinc-500 line-through">{it.title}</span>
+          <p className="mt-0.5 text-xs text-amber-300/80">{it.skippedReason ?? "Skipped"}</p>
+        </div>
+      </li>
+    );
+  }
+  return (
+    <li className="flex items-start gap-2">
+      <button type="button" onClick={onToggle} disabled={busy} className="mt-0.5 shrink-0 text-zinc-500 hover:text-teal-400 disabled:opacity-50" aria-label={it.done ? "Mark not done" : "Mark done"}>
+        {it.done ? <SquareCheckBig className="size-4 text-teal-400" /> : <Square className="size-4" />}
+      </button>
+      <div className="min-w-0">
+        {it.kind === "link" && it.url ? (
+          <a href={it.url} target="_blank" rel="noreferrer" className={`inline-flex items-center gap-1.5 text-sm hover:text-teal-300 ${it.done ? "text-zinc-500 line-through" : "text-teal-400"}`}><Link2 className="size-3.5" /> {it.title}</a>
+        ) : (
+          <span className={`text-sm ${it.done ? "text-zinc-500 line-through" : "text-zinc-200"}`}>{it.title}</span>
+        )}
+        {it.body && it.kind !== "link" ? <p className="mt-0.5 text-xs whitespace-pre-wrap text-zinc-500">{it.body}</p> : null}
+      </div>
+    </li>
   );
 }
 

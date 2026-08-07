@@ -18,7 +18,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { WEB_URL } from "@/lib/urls";
 import { ORG_RETENTION_DAYS, type Settlement } from "@/lib/org-lifecycle-shared";
-import { transferOwnershipAction } from "./members/actions";
+import { transferOwnershipAction } from "../members/actions";
 import { deleteOrgAction } from "./lifecycle-actions";
 
 /** Format cents as a dollar amount. */

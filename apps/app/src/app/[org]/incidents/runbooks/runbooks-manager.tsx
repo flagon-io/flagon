@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { BookText, ListChecks, Pencil, Plus } from "lucide-react";
+import { BookText, ListChecks, Plus } from "lucide-react";
 import { Button, Field, Input, Modal, ModalHeader, ModalBody, ModalFooter } from "@flagon/design";
 import { findLevel, type SeverityLevel } from "@/lib/incidents";
 import type { Runbook } from "@/lib/runbooks-api";
@@ -64,7 +64,7 @@ export function RunbooksManager({
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {runbooks.map((r) => (
-            <RunbookCard key={r.key} slug={slug} runbook={r} levels={levels} canManage={canManage} />
+            <RunbookCard key={r.key} slug={slug} runbook={r} levels={levels} />
           ))}
         </div>
       )}
@@ -74,41 +74,36 @@ export function RunbooksManager({
   );
 }
 
-function RunbookCard({ slug, runbook, levels, canManage }: { slug: string; runbook: Runbook; levels: SeverityLevel[]; canManage: boolean }) {
+function RunbookCard({ slug, runbook, levels }: { slug: string; runbook: Runbook; levels: SeverityLevel[] }) {
   const href = `/${slug}/incidents/runbooks/${runbook.key}`;
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/2 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="inline-flex items-center gap-2 text-sm font-medium text-zinc-100">
-            <BookText className="size-4 shrink-0 text-zinc-500" />
-            <span className="truncate">{runbook.name}</span>
-          </p>
-          <p className="mt-0.5 font-mono text-xs text-zinc-500">{runbook.key}</p>
-        </div>
-        {canManage ? (
-          <Link
-            href={href}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10"
-          >
-            <Pencil className="size-3.5" /> Edit
-          </Link>
-        ) : null}
+    <Link
+      href={href}
+      className="group flex flex-col gap-3 rounded-xl border border-white/10 bg-white/2 p-4 transition-colors hover:border-white/20 hover:bg-white/4"
+    >
+      <div className="min-w-0">
+        <p className="inline-flex items-center gap-2 text-sm font-medium text-zinc-100">
+          <BookText className="size-4 shrink-0 text-zinc-500" />
+          <span className="truncate">{runbook.name}</span>
+        </p>
+        <p className="mt-0.5 font-mono text-xs text-zinc-500">{runbook.key}</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {runbook.triggerSeverity ? (
-          <span className="inline-flex items-center rounded-full border border-teal-400/30 bg-teal-400/10 px-2.5 py-0.5 text-xs text-teal-200">
-            Triggers at ≥ {severityLabel(levels, runbook.triggerSeverity)}
-          </span>
+        {runbook.manualOnly ? (
+          <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs text-zinc-400">Manual only</span>
+        ) : runbook.attachConditions.length === 0 ? (
+          <span className="inline-flex items-center rounded-full border border-teal-400/30 bg-teal-400/10 px-2.5 py-0.5 text-xs text-teal-200">All incidents</span>
         ) : (
-          <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs text-zinc-400">Manual</span>
+          <span className="inline-flex items-center rounded-full border border-teal-400/30 bg-teal-400/10 px-2.5 py-0.5 text-xs text-teal-200">
+            {runbook.attachConditions.flatMap((c) => c.values.map((v) => severityLabel(levels, v))).join(", ")}
+          </span>
         )}
         <span className="inline-flex items-center gap-1.5 text-xs text-zinc-500">
           <ListChecks className="size-3.5" /> {runbook.stepCount} {runbook.stepCount === 1 ? "step" : "steps"}
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
 

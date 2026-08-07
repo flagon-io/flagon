@@ -4,8 +4,11 @@ import { authContext } from "../../lib/auth-context.js";
 import { jsonError } from "../../lib/http.js";
 import { resolveOrg, requireManager } from "../../lib/org-context.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
-import { getProvider, listProviders } from "../../integrations/providers.js";
+import { getProvider } from "../../integrations/providers.js";
+import { INTEGRATION_CATALOG } from "../../integrations/catalog.js";
 import {
+  availableCapabilities,
+  connectedProviderKeys,
   deleteIntegration,
   listIntegrations,
   loadCredentials,
@@ -75,7 +78,9 @@ const catalogEntrySchema = z.object({
   category: z.string(),
   summary: z.string(),
   docsPath: z.string().optional(),
-  capabilities: z.array(z.string()),
+  connection: z.enum(["byo", "oauth"]).describe("byo = org brings credentials; oauth = Flagon app install."),
+  status: z.enum(["available", "planned"]).describe("Whether the provider can be connected today."),
+  capabilities: z.array(z.string()).describe("What the provider can do (product-agnostic taxonomy)."),
   fields: z.array(fieldSchema),
   options: z.array(optionSchema).describe("Behavior toggles (how Flagon uses this integration)."),
   integration: integrationSchema.nullable().describe("The org's config, or null if unconfigured."),
@@ -95,6 +100,22 @@ registerComponentSchema(
   }),
 );
 registerComponentSchema("IntegrationResponse", z.object({ integration: integrationSchema }));
+registerComponentSchema(
+  "IntegrationCapabilities",
+  z.object({
+    capabilities: z
+      .object({ sms: z.boolean(), voice: z.boolean() })
+      .describe("Which paging capabilities the org can currently deliver."),
+  }),
+);
+registerComponentSchema(
+  "IntegrationConnected",
+  z.object({
+    providers: z
+      .array(z.string())
+      .describe("Keys of the providers this org has connected (credentials stored, not disabled)."),
+  }),
+);
 registerComponentSchema(
   "IntegrationTestResponse",
   z.object({
@@ -118,6 +139,34 @@ registerRoute({
   paramDescriptions: params,
   responses: {
     200: { description: "The provider catalog with per-org config.", schemaName: "IntegrationCatalogResponse" },
+  },
+});
+
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/integrations/capabilities",
+  summary: "Get deliverable capabilities",
+  description:
+    "The paging capabilities this org can currently deliver (connected + enabled + supported by the sender), as a simple map. Use this to gate features like voice escalation and show \"Not configured\" — no secrets involved.",
+  tags: [TAG],
+  auth: true,
+  paramDescriptions: { org: params.org },
+  responses: {
+    200: { description: "The org's deliverable capabilities.", schemaName: "IntegrationCapabilities" },
+  },
+});
+
+registerRoute({
+  method: "get",
+  path: "/v1/orgs/{org}/integrations/connected",
+  summary: "List connected providers",
+  description:
+    "The keys of the providers this org has connected (credentials stored and not disabled). The lightweight, secret-free check any feature uses to tell whether an integration is set up — e.g. gating runbook steps that depend on a provider. Any member may read it.",
+  tags: [TAG],
+  auth: true,
+  paramDescriptions: { org: params.org },
+  responses: {
+    200: { description: "The org's connected provider keys.", schemaName: "IntegrationConnected" },
   },
 });
 
@@ -203,18 +252,39 @@ integrations_.get("/", async (c) => {
   const configured = new Map<string, IntegrationView>(
     (await listIntegrations(ctx.orgId)).map((i) => [i.provider, i]),
   );
-  const providers = listProviders().map((p) => ({
-    key: p.key,
-    label: p.label,
-    category: p.category,
-    summary: p.summary,
-    docsPath: p.docsPath,
-    capabilities: p.capabilities,
-    fields: p.fields,
-    options: p.options,
-    integration: configured.get(p.key) ?? null,
-  }));
+  // The canonical catalog is the source of provider metadata; a BYO provider's
+  // executable entry (providers.ts) supplies its credential fields + options.
+  const providers = INTEGRATION_CATALOG.map((def) => {
+    const exec = getProvider(def.key);
+    return {
+      key: def.key,
+      label: def.label,
+      category: def.category,
+      summary: def.summary,
+      docsPath: def.docsPath,
+      connection: def.connection,
+      status: def.status,
+      capabilities: def.capabilities,
+      fields: exec?.fields ?? [],
+      options: exec?.options ?? [],
+      integration: configured.get(def.key) ?? null,
+    };
+  });
   return c.json({ secretsEnabled: secretsEnabled(), providers });
+});
+
+// The org's deliverable capabilities — the cheap, secret-free gate other features
+// use ("can this org page by voice?"). Any member may read it.
+integrations_.get("/connected", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  return c.json({ providers: await connectedProviderKeys(ctx.orgId) });
+});
+
+integrations_.get("/capabilities", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  return c.json({ capabilities: await availableCapabilities(ctx.orgId) });
 });
 
 // Configure (create or replace): validate → live test → store encrypted.

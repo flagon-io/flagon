@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import {
-  acknowledgeIncident,
   addActionItem,
   addIncidentService,
   attachRunbookToIncident,
@@ -20,22 +19,10 @@ import {
 import {
   createRunbook,
   deleteRunbook,
-  setRunbookServices,
   setRunbookSteps,
   updateRunbook,
+  type RunbookStepInput,
 } from "@/lib/runbooks-api";
-import {
-  addOverride,
-  createPolicy,
-  createSchedule,
-  deletePolicy,
-  deleteSchedule,
-  removeOverride,
-  setPolicyLevels,
-  setScheduleMembers,
-  updatePolicy,
-  updateSchedule,
-} from "@/lib/oncall-api";
 
 /**
  * Server actions for the Reliability product. Thin wrappers over the API clients
@@ -62,12 +49,6 @@ export async function postUpdateAction(slug: string, number: number, body: { bod
   if (res.error) return { error: res.error };
   revalidatePath(`/${slug}/incidents/${number}`);
   revalidatePath(`/${slug}/incidents`);
-  return {};
-}
-export async function acknowledgeIncidentAction(slug: string, number: number): Promise<{ error?: string }> {
-  const res = await acknowledgeIncident(slug, number);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/${number}`);
   return {};
 }
 export async function resolveIncidentAction(slug: string, number: number): Promise<{ error?: string }> {
@@ -129,7 +110,7 @@ export async function deleteActionItemAction(slug: string, number: number, itemI
 }
 
 // --- Runbooks ---------------------------------------------------------------
-export async function createRunbookAction(slug: string, body: { key: string; name: string; description?: string; triggerSeverity?: string }): Promise<{ key?: string; error?: string }> {
+export async function createRunbookAction(slug: string, body: { key: string; name: string; description?: string }): Promise<{ key?: string; error?: string }> {
   const res = await createRunbook(slug, body);
   if (res.error) return { error: res.error };
   revalidatePath(`/${slug}/incidents/runbooks`);
@@ -147,79 +128,9 @@ export async function deleteRunbookAction(slug: string, key: string): Promise<{ 
   revalidatePath(`/${slug}/incidents/runbooks`);
   return {};
 }
-export async function setRunbookStepsAction(slug: string, key: string, steps: { title: string; body?: string; kind: string; url?: string }[]): Promise<{ error?: string }> {
+export async function setRunbookStepsAction(slug: string, key: string, steps: RunbookStepInput[]): Promise<{ error?: string }> {
   const res = await setRunbookSteps(slug, key, steps);
   if (res.error) return { error: res.error };
   revalidatePath(`/${slug}/incidents/runbooks`);
-  return {};
-}
-export async function setRunbookServicesAction(slug: string, key: string, projectKeys: string[]): Promise<{ error?: string }> {
-  const res = await setRunbookServices(slug, key, projectKeys);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/runbooks`);
-  return {};
-}
-
-// --- On-call schedules ------------------------------------------------------
-export async function createScheduleAction(slug: string, body: Record<string, unknown>): Promise<{ key?: string; error?: string }> {
-  const res = await createSchedule(slug, body);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/on-call`);
-  return { key: res.data?.schedule.key };
-}
-export async function updateScheduleAction(slug: string, key: string, body: Record<string, unknown>): Promise<{ error?: string }> {
-  const res = await updateSchedule(slug, key, body);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/on-call`);
-  return {};
-}
-export async function deleteScheduleAction(slug: string, key: string): Promise<{ error?: string }> {
-  const res = await deleteSchedule(slug, key);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/on-call`);
-  return {};
-}
-export async function setScheduleMembersAction(slug: string, key: string, userIds: string[]): Promise<{ error?: string }> {
-  const res = await setScheduleMembers(slug, key, userIds);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/on-call`);
-  return {};
-}
-export async function addOverrideAction(slug: string, key: string, body: { userId: string; startsAt: string; endsAt: string }): Promise<{ error?: string }> {
-  const res = await addOverride(slug, key, body);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/on-call`);
-  return {};
-}
-export async function removeOverrideAction(slug: string, key: string, id: string): Promise<{ error?: string }> {
-  const res = await removeOverride(slug, key, id);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/on-call`);
-  return {};
-}
-
-// --- Escalation policies ----------------------------------------------------
-export async function createPolicyAction(slug: string, body: { key: string; name: string }): Promise<{ key?: string; error?: string }> {
-  const res = await createPolicy(slug, body);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/escalation`);
-  return { key: res.data?.policy.key };
-}
-export async function deletePolicyAction(slug: string, key: string): Promise<{ error?: string }> {
-  const res = await deletePolicy(slug, key);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/escalation`);
-  return {};
-}
-export async function updatePolicyAction(slug: string, key: string, body: { name?: string; repeatCount?: number }): Promise<{ error?: string }> {
-  const res = await updatePolicy(slug, key, body);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/escalation`);
-  return {};
-}
-export async function setPolicyLevelsAction(slug: string, key: string, levels: { targetType: string; targetRef: string; delayMinutes: number }[]): Promise<{ error?: string }> {
-  const res = await setPolicyLevels(slug, key, levels);
-  if (res.error) return { error: res.error };
-  revalidatePath(`/${slug}/incidents/escalation`);
   return {};
 }

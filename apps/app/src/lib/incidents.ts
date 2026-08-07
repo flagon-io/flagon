@@ -29,6 +29,8 @@ export const STATUSES: Option[] = [
   { value: "identified", label: "Identified" },
   { value: "monitoring", label: "Monitoring" },
   { value: "resolved", label: "Resolved" },
+  { value: "retrospective", label: "Retrospective" },
+  { value: "closed", label: "Closed" },
 ];
 
 export const TARGET_TYPES: Option[] = [

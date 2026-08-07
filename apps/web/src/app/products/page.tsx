@@ -78,7 +78,7 @@ const live: Cell[] = [
   { icon: Network, title: "Catalog", tag: "Core", href: "/docs/catalog", body: "A live map of your services, their owners, and everything attached to each one." },
   { icon: ToggleRight, title: "Feature Flags", href: "/docs/feature-flags", body: "Change what your app does without a deploy. Rules and rollouts over OpenFeature." },
   { icon: FlaskConical, title: "Experiments", href: "/docs/experiments", body: "Measure impact with metrics tied to the flags serving it. Frequentist and Bayesian." },
-  { icon: Siren, title: "Incidents & on-call", href: "/docs/incidents", body: "Declare against a service, route to its team, page the on-call through escalation." },
+  { icon: Siren, title: "Incidents", href: "/docs/incidents", body: "Declare against a service, route to its team, run the runbooks, and write the retrospective." },
 ];
 
 type RoadmapTier = { eyebrow: string; lede: string; cols: 2 | 3 | 4; items: Cell[] };

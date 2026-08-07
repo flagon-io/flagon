@@ -1,42 +1,44 @@
 export const metadata = {
   title: "Incidents",
   description:
-    "Declare incidents against the services in your catalog, route them to the owning team, page the on-call responder, run the timeline, and resolve.",
+    "Declare incidents against the services in your catalog, route them to the owning team, run the timeline and runbooks, write the retrospective, and resolve.",
 };
 
 # Incidents
 
 **Incidents** turn the catalog into a reliability tool. When something breaks, you
 declare an incident, attach the affected services, and Flagon routes it to the
-owning team and pages the on-call responder. It's the incident.io / Compass story,
-built on the services you already describe in the [Catalog](/docs/catalog).
+owning team and lands the right runbooks on it. It's built on the services you
+already describe in the [Catalog](/docs/catalog).
 
 ## Declaring an incident
 
 From **Incidents**, choose **Declare incident** (owner or admin). You give it:
 
-- **A title and severity** (SEV1 through SEV4).
+- **A title and severity** (SEV1 through SEV4, or whatever your
+  [severity ladder](/docs/incidents/severity-levels) defines).
 - **Affected services**: the catalog projects it impacts. The **owning team**
   auto-fills from the first affected service, so an incident always has an owner.
-- **An optional escalation policy**: who to page, and after how long, if nobody
-  acknowledges (see [On-call](/docs/incidents/on-call)).
 
-On declare, Flagon pages the first responder (the escalation policy's first level,
-or the owning team's on-call) by email, and attaches any matching
-[runbooks](/docs/incidents/runbooks) so the recovery steps are already on the
-incident as a checklist.
+On declare, Flagon attaches every matching
+[runbook](/docs/incidents/runbooks) — the org's default playbook, plus any scoped
+to the incident's severity — so the recovery steps are already on the incident as a
+checklist, and its steps fire as the incident progresses.
 
 ## The lifecycle
 
-- **Timeline**: post updates as you learn more; an update can change the status
-  (open → investigating → identified → monitoring → resolved).
-- **Acknowledge**: any member can acknowledge, which stops escalation and signals
-  someone has taken point.
+- **Timeline**: post updates as you learn more; an update can change the milestone
+  (open → investigating → identified → monitoring → resolved → retrospective →
+  closed). Runbook steps re-evaluate on each change, so a step scoped to "resolved"
+  fires the moment you get there.
+- **Retrospective**: once resolved, work the [RCCA](/docs/incidents/postmortems) —
+  the writeup is editable throughout, and reaching the retrospective milestone marks
+  it underway.
 - **Resolve**: close it out. It drops off the open list and the affected projects'
   overviews.
 
-Each project's overview shows its **open incidents** and **who's on-call**, so the
-catalog reflects live reliability state.
+Each project's overview shows its **open incidents**, so the catalog reflects live
+reliability state.
 
 ## Over the API
 
@@ -45,21 +47,20 @@ catalog reflects live reliability state.
 curl -X POST https://api.flagon.io/v1/orgs/{org}/incidents \
   -H "Authorization: Bearer $FLAGON_TOKEN" -H "Content-Type: application/json" \
   -d '{ "title": "Checkout failing", "severity": "sev1",
-        "affectedProjectKeys": ["web"], "escalationPolicyKey": "sev1" }'
+        "affectedProjectKeys": ["web"] }'
 
-# Timeline + acknowledge + resolve
+# Timeline + resolve
 curl -X POST .../incidents/{number}/updates -d '{ "body": "Rolling back", "status": "identified" }'
-curl -X POST .../incidents/{number}/acknowledge
 curl -X POST .../incidents/{number}/resolve
 ```
 
 ## Next
 
 - **[Runbooks](/docs/incidents/runbooks)**: the playbooks that become an incident's checklist.
-- **[On-call](/docs/incidents/on-call)**: rotations, overrides, and escalation policies.
+- **[Severity levels](/docs/incidents/severity-levels)**: your org's configurable ladder.
 - **[Catalog](/docs/catalog)**: the services incidents attach to.
 
 <Callout tone="note" title="Coming soon">
-A public status page (per-service status derived from open incidents) is the next
-piece of the reliability suite.
+On-call (rotations, escalation, and paging) and a public status page are the next
+pieces of the reliability suite.
 </Callout>

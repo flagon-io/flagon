@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   capabilityEnabled,
+  capabilitySupported,
   defaultOptions,
   getProvider,
   listProviders,
@@ -72,6 +73,20 @@ describe("integration providers", () => {
     expect(capabilityEnabled(twilio, { options: { voice: true } }, "voice")).toBe(true);
     // Explicit opt-out flips sms off.
     expect(capabilityEnabled(twilio, { options: { sms: false } }, "sms")).toBe(false);
+  });
+
+  it("gates a capability on what the sender was detected to support", () => {
+    const twilio = getProvider("twilio")!;
+    // Voice option on, but the sender only detected SMS => not enabled.
+    const smsOnly = { options: { sms: true, voice: true }, detected: ["sms"] };
+    expect(capabilitySupported(twilio, smsOnly, "voice")).toBe(false);
+    expect(capabilityEnabled(twilio, smsOnly, "voice")).toBe(false);
+    expect(capabilityEnabled(twilio, smsOnly, "sms")).toBe(true);
+    // Sender supports both => voice follows the option.
+    const both = { options: { sms: true, voice: true }, detected: ["sms", "voice"] };
+    expect(capabilityEnabled(twilio, both, "voice")).toBe(true);
+    // Unknown detection (legacy) => treated as supported.
+    expect(capabilitySupported(twilio, { options: {} }, "voice")).toBe(true);
   });
 
   it("merges option updates and ignores unknown keys", () => {

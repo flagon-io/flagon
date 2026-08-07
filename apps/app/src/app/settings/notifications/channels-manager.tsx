@@ -15,6 +15,10 @@ const CHANNELS: ChannelDef[] = [
   { value: "push", label: "Mobile push", soon: true, icon: Smartphone, placeholder: "Flagon mobile app" },
 ];
 const defFor = (t: string) => CHANNELS.find((c) => c.value === t) ?? CHANNELS[0];
+// Phone paging (SMS/voice) is configured PER ORGANIZATION now (each org's Members
+// page, against that org's provider), not as an account-global channel — so it's
+// no longer offered here. The display defs above stay so any legacy rows render.
+const ADDABLE = CHANNELS.filter((c) => c.value !== "sms" && c.value !== "voice");
 
 export function ChannelsManager({
   channels,
@@ -108,7 +112,7 @@ export function ChannelsManager({
         <p className="inline-flex items-center gap-2 text-sm font-medium text-zinc-200"><Bell className="size-4 text-zinc-500" /> Add a channel</p>
         <div className="flex flex-wrap items-end gap-2">
           <Field label="Channel">
-            <Select ariaLabel="Channel type" value={type} onValueChange={(v) => setType(v)} options={CHANNELS.map((c) => ({ value: c.value, label: c.soon ? `${c.label} (soon)` : c.label }))} />
+            <Select ariaLabel="Channel type" value={type} onValueChange={(v) => setType(v)} options={ADDABLE.map((c) => ({ value: c.value, label: c.soon ? `${c.label} (soon)` : c.label }))} />
           </Field>
           <Field label="Value" className="min-w-52 flex-1">
             <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={def.placeholder} />
@@ -119,7 +123,7 @@ export function ChannelsManager({
         </div>
         {def.soon ? (
           <p className="text-xs text-zinc-500">
-            {def.label} paging is scaffolded: we store it now and start delivering when the provider lands. Until then, pages arrive by email.
+            {def.label} is scaffolded: we store it now and start using it when delivery for this channel lands. Email is the only channel that delivers today.
           </p>
         ) : null}
         {error ? <p className="text-sm text-red-400">{error}</p> : null}

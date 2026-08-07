@@ -1,6 +1,7 @@
 import "server-only";
 import { headers } from "next/headers";
 import { API_URL } from "./urls";
+import type { StepCondition } from "./runbook-steps";
 
 /**
  * Server-side client for the Incidents endpoints. Mirrors projects-api.ts:
@@ -28,9 +29,6 @@ export type Incident = {
   severity: string;
   status: string;
   ownerTeam: { key: string; name: string } | null;
-  escalationPolicyKey: string | null;
-  acknowledgedAt: string | null;
-  escalatedLevel: number;
   startedAt: string;
   resolvedAt: string | null;
   createdAt: string;
@@ -43,6 +41,11 @@ export type ChecklistItem = {
   body: string | null;
   kind: string;
   url: string | null;
+  provider: string;
+  action: string;
+  conditions: StepCondition[];
+  state: "pending" | "active" | "skipped";
+  skippedReason: string | null;
   done: boolean;
 };
 export type RccaField = { key: string; label: string; description?: string; required?: boolean };
@@ -52,8 +55,6 @@ export type IncidentDetail = {
   services: { key: string; name: string }[];
   updates: IncidentUpdate[];
   checklist: ChecklistItem[];
-  responderUserId: string | null;
-  responderVia: string | null;
   rccaRequired: boolean;
   rccaTemplate: { requiredSeverities: string[]; fields: RccaField[] };
   rcca: { values: Record<string, string> };
@@ -84,7 +85,6 @@ export type DeclareBody = {
   summary?: string;
   affectedProjectKeys?: string[];
   ownerTeamKey?: string;
-  escalationPolicyKey?: string;
 };
 export async function declareIncident(slug: string, body: DeclareBody) {
   return unwrap<IncidentDetail>(await apiFetch(`/v1/orgs/${slug}/incidents`, { method: "POST", body: JSON.stringify(body) }));
@@ -94,9 +94,6 @@ export async function updateIncident(slug: string, number: number, body: Record<
 }
 export async function postIncidentUpdate(slug: string, number: number, body: { body: string; status?: string }) {
   return unwrap<{ ok: true }>(await apiFetch(`/v1/orgs/${slug}/incidents/${number}/updates`, { method: "POST", body: JSON.stringify(body) }));
-}
-export async function acknowledgeIncident(slug: string, number: number) {
-  return unwrap<{ ok: true }>(await apiFetch(`/v1/orgs/${slug}/incidents/${number}/acknowledge`, { method: "POST" }));
 }
 export async function resolveIncident(slug: string, number: number) {
   return unwrap<{ ok: true }>(await apiFetch(`/v1/orgs/${slug}/incidents/${number}/resolve`, { method: "POST" }));

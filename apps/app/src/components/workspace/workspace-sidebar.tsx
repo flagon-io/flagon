@@ -7,7 +7,6 @@ import {
   Activity,
   Archive,
   ArrowUpRight,
-  BellRing,
   BookText,
   Boxes,
   ChevronLeft,
@@ -18,7 +17,6 @@ import {
   Globe,
   KeyRound,
   Logs,
-  Mail,
   Menu,
   MessagesSquare,
   Network,
@@ -39,11 +37,13 @@ import {
   ToggleRight,
   UserCog,
   Users,
+  UsersRound,
   Webhook,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { OrgMembership } from "@/lib/org";
+import { canManageOrg } from "@/lib/roles";
 import { brand } from "@flagon/design";
 import { WEB_URL } from "@/lib/urls";
 import { OrgSwitcher } from "./org-switcher";
@@ -95,7 +95,7 @@ type RootEntry =
  * are GLOBAL to the org (available with your keys across any project), not
  * nested under a project. Settings is likewise its own area with real sub-pages.
  */
-function buildNav(base: string): {
+function buildNav(base: string, canManage: boolean): {
   sections: RootEntry[][];
   areas: NavArea[];
 } {
@@ -165,6 +165,7 @@ function buildNav(base: string): {
     label: "Settings",
     icon: Settings,
     href: `${base}/settings`,
+    // Integrations lives under /settings/integrations (Developer group below).
     groups: [
       {
         items: [
@@ -174,8 +175,6 @@ function buildNav(base: string): {
       {
         heading: "Access",
         items: [
-          { label: "Members", icon: Users, href: `${base}/settings/members` },
-          { label: "Invitations", icon: Mail, href: `${base}/settings/invitations` },
           {
             label: "Member privileges",
             icon: UserCog,
@@ -195,6 +194,7 @@ function buildNav(base: string): {
         heading: "Developer",
         items: [
           { label: "Tokens", icon: KeyRound, href: `${base}/settings/tokens` },
+          { label: "Integrations", icon: Plug, href: `${base}/settings/integrations` },
           { label: "Webhooks", icon: Webhook, soon: true },
         ],
       },
@@ -207,7 +207,8 @@ function buildNav(base: string): {
     ],
   };
 
-  // Reliability: incidents up top, on-call (schedules + escalation) below.
+  // Reliability: incidents, uptime, and their runbooks. (On-call/escalation is a
+  // separate feature set, coming later.)
   const incidents: NavArea = {
     key: "incidents",
     label: "Incidents",
@@ -222,13 +223,6 @@ function buildNav(base: string): {
         ],
       },
       {
-        heading: "On-call",
-        items: [
-          { label: "Schedules", icon: BellRing, href: `${base}/incidents/on-call` },
-          { label: "Escalation", icon: Workflow, href: `${base}/incidents/escalation` },
-        ],
-      },
-      {
         heading: "Settings",
         items: [
           { label: "Severity levels", icon: Signal, href: `${base}/incidents/settings/severities` },
@@ -240,7 +234,7 @@ function buildNav(base: string): {
   };
 
   return {
-    areas: [flags, incidents, settings],
+    areas: canManage ? [flags, incidents, settings] : [flags, incidents],
     sections: [
       [
         // Projects is the org home, so its link always works.
@@ -249,27 +243,34 @@ function buildNav(base: string): {
         { kind: "soon", label: "Deployments", icon: Rocket },
         { kind: "soon", label: "Logs", icon: Logs },
       ],
+      // Functionality: the org-global products. Flags is live; Automations and
+      // the Status Page are next. The reliability suite (Incidents + On-call,
+      // Better Stack-style but Flagon's own) sits inline here rather than in its
+      // own band, so all product surfaces read as one group.
       [
         { kind: "area", area: flags },
         // A first-class feature category (GitHub Actions / Vercel-style): run
         // work on events across every product. Broad enough that it supersedes
         // Runbooks, which is why there is no separate Runbooks entry.
         { kind: "soon", label: "Automations", icon: Workflow },
-        // Org-level integration hub (Slack, issue tracking, observability, source
-        // providers — all coming soon for now).
-        { kind: "link", label: "Integrations", icon: Plug, href: `${base}/integrations` },
-      ],
-      // Reliability suite (Better Stack-style, but Flagon's own product): Incidents
-      // + On-call are live; the Status Page is the next piece.
-      [
         { kind: "area", area: incidents },
         { kind: "soon", label: "Status Page", icon: Signal },
       ],
+      // People, GitHub-style: a top-level band everyone can see (the roster +
+      // your own paging), NOT buried in the admin-only Settings.
       [
-        { kind: "link", label: "Teams", icon: Users, href: `${base}/teams` },
+        { kind: "link", label: "Members", icon: Users, href: `${base}/members` },
+        { kind: "link", label: "Teams", icon: UsersRound, href: `${base}/teams` },
+      ],
+      // Administrative / account plumbing, set off from the people rows above.
+      [
         { kind: "link", label: "Usage", icon: Activity, href: `${base}/usage` },
         { kind: "link", label: "Community", icon: MessagesSquare, href: brand.discord, external: true },
-        { kind: "area", area: settings },
+        // Settings is owner/admin only; members never see it. Integrations lives
+        // inside it (Developer group), so there is no separate top-level row.
+        ...(canManage
+          ? [{ kind: "area" as const, area: settings }]
+          : []),
       ],
     ],
   };
@@ -313,7 +314,7 @@ export function WorkspaceSidebar({
   }
 
   const base = `/${current.slug}`;
-  const { sections, areas } = buildNav(base);
+  const { sections, areas } = buildNav(base, canManageOrg(current.role));
   const staticArea = areas.find((a) => inArea(pathname, a));
 
   // A per-project area is dynamic (keyed on the :project slug in the path), so it

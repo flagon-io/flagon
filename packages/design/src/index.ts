@@ -15,6 +15,7 @@ export { Cta } from "./components/cta";
 export { PageHero } from "./components/page-hero";
 export { PlanCard } from "./components/plan-card";
 export { Select, type SelectOption } from "./components/select";
+export { MultiSelect, type MultiSelectOption } from "./components/multi-select";
 export {
   SegmentedControl,
   type SegmentedOption,
@@ -47,6 +48,7 @@ export {
   MenuSeparator,
   MenuLabel,
 } from "./components/menu";
+export { Tooltip } from "./components/tooltip";
 export {
   Popover,
   PopoverTrigger,

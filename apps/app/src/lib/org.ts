@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db/client";
 import { invitations, members, organizations, users } from "@/db/schema";
 
@@ -137,6 +137,12 @@ export async function getOrgMembers(organizationId: string) {
 }
 
 /** Pending invitations for an org. */
+/**
+ * Every invitation that isn't a done deal: still-pending ones (active or lapsed)
+ * plus the failed history (declined, canceled). Accepted invites are excluded,
+ * since those people are now in the roster. Newest first so the freshest activity
+ * leads. The Members → Invitations tab splits these into active vs. not-accepted.
+ */
 export async function getOrgInvitations(organizationId: string) {
   return db
     .select({
@@ -151,10 +157,10 @@ export async function getOrgInvitations(organizationId: string) {
     .where(
       and(
         eq(invitations.organizationId, organizationId),
-        eq(invitations.status, "pending"),
+        ne(invitations.status, "accepted"),
       ),
     )
-    .orderBy(invitations.createdAt);
+    .orderBy(desc(invitations.createdAt));
 }
 
 /** A single invitation with its organization, for the accept page. */

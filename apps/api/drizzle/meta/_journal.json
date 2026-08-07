@@ -15,6 +15,41 @@
       "when": 1786097775882,
       "tag": "0001_org_integrations",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786118816991,
+      "tag": "0002_org_paging_numbers",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786129112287,
+      "tag": "0003_runbook_step_execution",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786133577884,
+      "tag": "0004_runbook_attach_cols",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786133703744,
+      "tag": "0005_drop_trigger_severity",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786135709500,
+      "tag": "0006_drop_oncall_paging",
+      "breakpoints": true
     }
   ]
 }

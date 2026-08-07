@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
+import { getIntegrations } from "@/lib/integrations-api";
 import { getRunbook } from "@/lib/runbooks-api";
 import { getSeverityLevels } from "@/lib/severity-levels-api";
 import { RunbookEditor } from "./runbook-editor";
@@ -16,7 +17,14 @@ export default async function RunbookEditorPage({ params }: { params: Promise<{ 
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
 
-  const [detail, levels] = await Promise.all([getRunbook(slug, key), getSeverityLevels(slug)]);
+  const canManage = canManageOrg(membership.role);
+  const [detail, levels, catalog] = await Promise.all([
+    getRunbook(slug, key),
+    getSeverityLevels(slug),
+    // The canonical integrations catalog: the Add-step modal derives its step
+    // providers from it (by capability) and gates them on real connection state.
+    getIntegrations(slug),
+  ]);
   if (!detail) notFound();
 
   return (
@@ -24,7 +32,8 @@ export default async function RunbookEditorPage({ params }: { params: Promise<{ 
       slug={slug}
       detail={detail}
       levels={levels}
-      canManage={canManageOrg(membership.role)}
+      canManage={canManage}
+      catalog={catalog?.providers ?? []}
     />
   );
 }

@@ -85,7 +85,7 @@ describe.skipIf(!DATABASE_URL)("integrations store + API", () => {
       provider: twilio,
       values: { config: { accountSid: creds.accountSid, from: creds.from }, secrets: { authToken: creds.authToken } },
       actorUserId: ownerId,
-      test: { ok: true },
+      test: { ok: true, detected: ["sms", "voice"] },
     });
 
     expect(view.provider).toBe("twilio");
@@ -94,6 +94,8 @@ describe.skipIf(!DATABASE_URL)("integrations store + API", () => {
     expect(view.config).toMatchObject({ accountSid: creds.accountSid, from: creds.from });
     // Options seeded to their defaults on first connect.
     expect(view.config.options).toEqual({ sms: true, voice: false });
+    // Detected sender capabilities are persisted for correct delivery.
+    expect(view.config.detected).toEqual(["sms", "voice"]);
     // Masked hint only; never the secret itself.
     expect(view.hints.authToken).toBe("9999");
     expect(JSON.stringify(view)).not.toContain(creds.authToken);
@@ -130,6 +132,26 @@ describe.skipIf(!DATABASE_URL)("integrations store + API", () => {
 
     // Restore defaults for the remaining tests.
     await store.updateOptions(orgId, twilio, { sms: true, voice: false });
+  });
+
+  it("exposes deliverable capabilities without decrypting secrets", async () => {
+    // Defaults: sms deliverable, voice off.
+    expect(await store.availableCapabilities(orgId)).toEqual({ sms: true, voice: false });
+    expect(await store.hasCapability(orgId, "sms")).toBe(true);
+    expect(await store.hasCapability(orgId, "voice")).toBe(false);
+
+    // Over the API, for other surfaces to gate on ("Not configured").
+    const res = await app.request(`/v1/orgs/${slug}/integrations/capabilities`, {
+      headers: auth(memberToken),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).capabilities).toEqual({ sms: true, voice: false });
+
+    // Enabling voice makes it deliverable (the sender supports it).
+    const twilio = getProvider("twilio")!;
+    await store.updateOptions(orgId, twilio, { voice: true });
+    expect(await store.hasCapability(orgId, "voice")).toBe(true);
+    await store.updateOptions(orgId, twilio, { voice: false });
   });
 
   it("never leaks the secret over the API list", async () => {

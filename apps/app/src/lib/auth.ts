@@ -148,6 +148,10 @@ export const auth = betterAuth({
           },
         },
       },
+      // Invitations last a week: long enough that a teammate isn't rushed, short
+      // enough that a stale link doesn't linger forever (BetterAuth defaults to
+      // 48h, which is tight for someone who only checks email on weekdays).
+      invitationExpiresIn: 60 * 60 * 24 * 7,
       sendInvitationEmail: async (data) => {
         const acceptUrl = `${APP_URL}/invite/${data.id}`;
         const { subject, html } = invitationTemplate({

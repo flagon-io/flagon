@@ -14,31 +14,31 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { Button, Field, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Select, Textarea, useConfirm } from "@flagon/design";
-import type { SeverityLevel } from "@/lib/incidents";
+import { Button, Field, Input, Menu, MenuContent, MenuItem, MenuTrigger, SegmentedControl, Select, Textarea, useConfirm } from "@flagon/design";
+import { STATUSES, type SeverityLevel } from "@/lib/incidents";
 import type { RunbookDetail } from "@/lib/runbooks-api";
+import type { CatalogProvider, StepCondition } from "@/lib/runbook-steps";
+import { AddStepModal } from "./add-step-modal";
 import {
   deleteRunbookAction,
   setRunbookStepsAction,
   updateRunbookAction,
 } from "../../actions";
 
-type StepDraft = { id: string; title: string; body: string; kind: string; url: string; collapsed: boolean };
-const NONE = "__none__";
+type StepDraft = {
+  id: string;
+  title: string;
+  body: string;
+  kind: string;
+  url: string;
+  provider: string;
+  action: string;
+  conditions: StepCondition[];
+  collapsed: boolean;
+};
 const STEP_KINDS = [
   { value: "task", label: "Task" },
   { value: "link", label: "Link" },
-];
-// Honest checklist scaffolding (not automations — those arrive with integrations).
-// These prefill a task title so common incident work is one click away.
-const STEP_TEMPLATES = [
-  "Assign an incident commander",
-  "Open a comms channel (war room)",
-  "Notify affected stakeholders",
-  "Capture impact and a running timeline",
-  "Roll back the most recent deploy",
-  "Update the status page",
-  "Start the postmortem",
 ];
 
 let idSeq = 0;
@@ -57,23 +57,31 @@ export function RunbookEditor({
   detail,
   levels,
   canManage,
+  catalog,
 }: {
   slug: string;
   detail: RunbookDetail;
   levels: SeverityLevel[];
   canManage: boolean;
+  /** The org's integrations catalog, for deriving + gating runbook step providers. */
+  catalog: CatalogProvider[];
 }) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const [name, setName] = useState(detail.runbook.name);
   const [description, setDescription] = useState(detail.runbook.description ?? "");
-  const [trigger, setTrigger] = useState(detail.runbook.triggerSeverity ?? NONE);
+  const [manualOnly, setManualOnly] = useState(detail.runbook.manualOnly);
+  // Attach conditions are severity-only for now; empty = every incident.
+  const [attachSeverities, setAttachSeverities] = useState<string[]>(
+    detail.runbook.attachConditions.flatMap((c) => c.values),
+  );
   const [steps, setSteps] = useState<StepDraft[]>(
-    detail.steps.map((s) => ({ id: nextId(), title: s.title, body: s.body ?? "", kind: s.kind, url: s.url ?? "", collapsed: true })),
+    detail.steps.map((s) => ({ id: nextId(), title: s.title, body: s.body ?? "", kind: s.kind, url: s.url ?? "", provider: s.provider, action: s.action, conditions: s.conditions ?? [], collapsed: true })),
   );
 
   const key = detail.runbook.key;
@@ -108,9 +116,28 @@ export function RunbookEditor({
     touch();
     setSteps((ss) => ss.filter((s) => s.id !== id));
   }
-  function addStep(kind: string = "task", title = "") {
+  function addStep(step: {
+    kind?: string;
+    title?: string;
+    provider?: string;
+    action?: string;
+    conditions?: StepCondition[];
+  }) {
     touch();
-    setSteps((ss) => [...ss, { id: nextId(), title, body: "", kind, url: "", collapsed: false }]);
+    setSteps((ss) => [
+      ...ss,
+      {
+        id: nextId(),
+        title: step.title ?? "",
+        body: "",
+        kind: step.kind ?? "task",
+        url: "",
+        provider: step.provider ?? "core",
+        action: step.action ?? "task",
+        conditions: step.conditions ?? [],
+        collapsed: false,
+      },
+    ]);
   }
 
   function save() {
@@ -123,18 +150,29 @@ export function RunbookEditor({
         body: s.body.trim() || undefined,
         kind: s.kind,
         url: s.kind === "link" && s.url.trim() ? s.url.trim() : undefined,
+        provider: s.provider,
+        action: s.action,
+        // Drop empty severity/milestone conditions so a half-filled row never persists.
+        conditions: s.conditions.filter(
+          (c) => c.type === "previous_step" || c.values.length > 0,
+        ),
       }));
     start(async () => {
-      const nextTrigger = trigger === NONE ? null : trigger;
+      const attachConditions = attachSeverities.length
+        ? [{ type: "severity" as const, values: attachSeverities }]
+        : [];
+      const prevSeverities = detail.runbook.attachConditions.flatMap((c) => c.values);
       const metaChanged =
         name.trim() !== detail.runbook.name ||
         (description.trim() || null) !== (detail.runbook.description ?? null) ||
-        nextTrigger !== (detail.runbook.triggerSeverity ?? null);
+        manualOnly !== detail.runbook.manualOnly ||
+        attachSeverities.join(",") !== prevSeverities.join(",");
       if (metaChanged) {
         const up = await updateRunbookAction(slug, key, {
           name: name.trim() || detail.runbook.name,
           description: description.trim() || null,
-          triggerSeverity: nextTrigger,
+          manualOnly,
+          attachConditions,
         });
         if (up.error) return setError(up.error);
       }
@@ -165,6 +203,24 @@ export function RunbookEditor({
   return (
     <div className="flex flex-col gap-6">
       {confirmDialog}
+      {addOpen ? (
+        <AddStepModal
+          slug={slug}
+          catalog={catalog}
+          onAdd={(step) =>
+            addStep({
+              kind: step.persistAs === "link" ? "link" : "task",
+              title: step.defaultTitle ?? "",
+              // Native steps only are addable today, so provider is "core"; the
+              // action is the catalog step key (e.g. "start-retro").
+              provider: "core",
+              action: step.key,
+              conditions: step.defaultConditions ?? [],
+            })
+          }
+          onClose={() => setAddOpen(false)}
+        />
+      ) : null}
 
       {/* Header */}
       <div className="flex flex-col gap-3">
@@ -215,6 +271,7 @@ export function RunbookEditor({
                   index={i}
                   total={steps.length}
                   step={s}
+                  levels={levels}
                   canManage={canManage}
                   onPatch={(patch) => setStep(s.id, patch)}
                   onMove={(dir) => moveStep(i, dir)}
@@ -227,23 +284,9 @@ export function RunbookEditor({
           )}
 
           {canManage ? (
-            <Menu>
-              <MenuTrigger asChild>
-                <Button variant="secondary" size="sm">
-                  <Plus className="size-4" /> Add step <ChevronDown className="size-3.5" />
-                </Button>
-              </MenuTrigger>
-              <MenuContent align="start">
-                <MenuLabel>Blank</MenuLabel>
-                <MenuItem onSelect={() => addStep("task")}><ListChecks className="size-3.5" /> Task</MenuItem>
-                <MenuItem onSelect={() => addStep("link")}><Link2 className="size-3.5" /> Link</MenuItem>
-                <MenuSeparator />
-                <MenuLabel>From a template</MenuLabel>
-                {STEP_TEMPLATES.map((t) => (
-                  <MenuItem key={t} onSelect={() => addStep("task", t)}>{t}</MenuItem>
-                ))}
-              </MenuContent>
-            </Menu>
+            <Button variant="secondary" size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="size-4" /> Add step
+            </Button>
           ) : null}
         </section>
 
@@ -264,22 +307,40 @@ export function RunbookEditor({
               <Textarea value={description} onChange={(e) => { touch(); setDescription(e.target.value); }} rows={3} placeholder="When and why to run this." disabled={!canManage} />
             </Field>
 
-            <Field label="Trigger severity" hint="Attaches automatically at or above this severity.">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-zinc-500">≥</span>
-                <Select
-                  ariaLabel="Trigger severity"
-                  value={trigger}
-                  onValueChange={(v) => { touch(); setTrigger(v); }}
-                  options={[{ value: NONE, label: "Off (manual)" }, ...levels.map((l) => ({ value: l.key, label: l.name }))]}
-                  disabled={!canManage}
+            <Field label="Attachment">
+              <div className={!canManage ? "pointer-events-none opacity-60" : ""}>
+                <SegmentedControl
+                  ariaLabel="Attachment"
+                  value={manualOnly ? "manual" : "auto"}
+                  onValueChange={(v) => { touch(); setManualOnly(v === "manual"); }}
+                  options={[
+                    { value: "auto", label: "Automatic" },
+                    { value: "manual", label: "Manual only" },
+                  ]}
                 />
               </div>
             </Field>
 
-            <p className="rounded-lg border border-white/8 bg-white/2 px-3 py-2 text-xs/relaxed text-zinc-500">
-              When it runs: with a trigger severity set, it attaches automatically to any incident at or above that severity. You can also attach it to any incident by hand from the incident page.
-            </p>
+            {manualOnly ? (
+              <p className="rounded-lg border border-white/8 bg-white/2 px-3 py-2 text-xs/relaxed text-zinc-500">
+                Only attaches when a responder adds it to an incident by hand.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-zinc-500">
+                  {attachSeverities.length === 0
+                    ? "Attaches to every incident."
+                    : "Attaches only to incidents at these severities:"}
+                </p>
+                <ChipMultiSelect
+                  options={levels.map((l) => ({ value: l.key, label: l.name }))}
+                  selected={attachSeverities}
+                  disabled={!canManage}
+                  onChange={(vals) => { touch(); setAttachSeverities(vals); }}
+                />
+                <p className="text-[11px] text-zinc-600">Leave all unselected to attach to every incident.</p>
+              </div>
+            )}
           </div>
 
           {canManage ? (
@@ -301,6 +362,7 @@ function StepCard({
   index,
   total,
   step,
+  levels,
   canManage,
   onPatch,
   onMove,
@@ -311,6 +373,7 @@ function StepCard({
   index: number;
   total: number;
   step: StepDraft;
+  levels: SeverityLevel[];
   canManage: boolean;
   onPatch: (patch: Partial<StepDraft>) => void;
   onMove: (dir: -1 | 1) => void;
@@ -335,14 +398,24 @@ function StepCard({
         ) : null}
         <span className="grid size-5 shrink-0 place-items-center rounded bg-white/6 text-[11px] font-medium text-zinc-400 tabular-nums">{index + 1}</span>
 
-        <button type="button" onClick={onToggleCollapse} className="flex min-w-0 flex-1 items-center gap-2 text-left" aria-label={step.collapsed ? "Expand step" : "Collapse step"}>
-          {step.collapsed ? <ChevronRight className="size-3.5 shrink-0 text-zinc-600" /> : <ChevronDown className="size-3.5 shrink-0 text-zinc-600" />}
-          <span className="truncate text-sm font-medium text-zinc-200">{step.title || <span className="text-zinc-600">Untitled step</span>}</span>
-          <span className="inline-flex shrink-0 items-center gap-1 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
-            {step.kind === "link" ? <Link2 className="size-3" /> : null}
-            {step.kind === "link" ? "Link" : "Task"}
+        <button type="button" onClick={onToggleCollapse} className="flex min-w-0 flex-1 items-start gap-2 text-left" aria-label={step.collapsed ? "Expand step" : "Collapse step"}>
+          {step.collapsed ? <ChevronRight className="mt-1 size-3.5 shrink-0 text-zinc-600" /> : <ChevronDown className="mt-1 size-3.5 shrink-0 text-zinc-600" />}
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="truncate text-sm font-medium text-zinc-200">{step.title || <span className="text-zinc-600">Untitled step</span>}</span>
+              <span className="inline-flex shrink-0 items-center gap-1 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+                {step.kind === "link" ? <Link2 className="size-3" /> : null}
+                {step.kind === "link" ? "Link" : "Task"}
+              </span>
+              {step.collapsed && preview ? <span className="truncate text-xs text-zinc-600">{preview}</span> : null}
+            </span>
+            {/* FireHydrant-style execution line: green "Automatic when runbook added",
+                then any conditional criteria. */}
+            <span className="mt-0.5 block truncate text-xs">
+              <span className="text-teal-500/90">Automatic</span>
+              <span className="text-zinc-500"> {describeConditions(step.conditions, levels)}</span>
+            </span>
           </span>
-          {step.collapsed && preview ? <span className="truncate text-xs text-zinc-600">{preview}</span> : null}
         </button>
 
         {canManage ? (
@@ -369,8 +442,160 @@ function StepCard({
           ) : (
             <Textarea value={step.body} onChange={(e) => onPatch({ body: e.target.value })} rows={3} placeholder="Instructions (markdown)…" disabled={!canManage} />
           )}
+
+          <StepConditionsEditor
+            conditions={step.conditions}
+            levels={levels}
+            canManage={canManage}
+            onChange={(conditions) => onPatch({ conditions })}
+          />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** The severity/status keys used across a step's conditions and its summary. */
+function labelForKey(options: { value: string; label: string }[], key: string): string {
+  return options.find((o) => o.value === key)?.label ?? key;
+}
+
+/**
+ * A one-line, human summary of when a step runs, e.g. "when the runbook is added"
+ * or "when milestone is Resolved and severity is SEV1, SEV2". Powers the collapsed
+ * card line so the execution model reads at a glance.
+ */
+function describeConditions(conditions: StepCondition[], levels: SeverityLevel[]): string {
+  if (conditions.length === 0) return "when the runbook is added";
+  const sevOptions = levels.map((l) => ({ value: l.key, label: l.name }));
+  const parts = conditions.map((c) => {
+    if (c.type === "previous_step") return "the previous step is done";
+    if (c.type === "milestone") {
+      return `milestone is ${c.values.map((v) => labelForKey(STATUSES, v)).join(", ") || "…"}`;
+    }
+    return `severity is ${c.values.map((v) => labelForKey(sevOptions, v)).join(", ") || "…"}`;
+  });
+  return `when ${parts.join(" and ")}`;
+}
+
+const CONDITION_LABELS: Record<StepCondition["type"], string> = {
+  milestone: "Milestone",
+  severity: "Severity",
+  previous_step: "Previous step is done",
+};
+
+/** Per-step FireHydrant-style condition builder: add conditions, pick their values. */
+function StepConditionsEditor({
+  conditions,
+  levels,
+  canManage,
+  onChange,
+}: {
+  conditions: StepCondition[];
+  levels: SeverityLevel[];
+  canManage: boolean;
+  onChange: (conditions: StepCondition[]) => void;
+}) {
+  const sevOptions = levels.map((l) => ({ value: l.key, label: l.name }));
+  const hasType = (t: StepCondition["type"]) => conditions.some((c) => c.type === t);
+
+  function add(type: StepCondition["type"]) {
+    const next: StepCondition =
+      type === "previous_step" ? { type } : { type, values: [] };
+    onChange([...conditions, next]);
+  }
+  function removeAt(i: number) {
+    onChange(conditions.filter((_, j) => j !== i));
+  }
+  function setValues(i: number, values: string[]) {
+    onChange(conditions.map((c, j) => (j === i && c.type !== "previous_step" ? { ...c, values } : c)));
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-white/8 bg-white/2 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-zinc-300">Runs when</span>
+        {conditions.length === 0 ? (
+          <span className="text-xs text-zinc-500">the runbook is added</span>
+        ) : null}
+      </div>
+
+      {conditions.map((c, i) => (
+        <div key={`${c.type}-${i}`} className="flex items-start gap-2">
+          <span className="mt-1.5 w-24 shrink-0 text-xs text-zinc-500">{CONDITION_LABELS[c.type]}</span>
+          <div className="min-w-0 flex-1">
+            {c.type === "previous_step" ? (
+              <p className="py-1 text-xs text-zinc-400">The step above this one has completed.</p>
+            ) : (
+              <ChipMultiSelect
+                options={c.type === "milestone" ? STATUSES : sevOptions}
+                selected={c.values}
+                disabled={!canManage}
+                onChange={(vals) => setValues(i, vals)}
+              />
+            )}
+          </div>
+          {canManage ? (
+            <button type="button" onClick={() => removeAt(i)} className="mt-0.5 grid size-6 shrink-0 place-items-center rounded text-zinc-600 hover:bg-white/5 hover:text-red-400" aria-label="Remove condition">
+              <Trash2 className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
+      ))}
+
+      {canManage ? (
+        <Menu>
+          <MenuTrigger asChild>
+            <button type="button" className="mt-1 inline-flex w-fit items-center gap-1 text-xs font-medium text-teal-500 hover:text-teal-400">
+              <Plus className="size-3.5" /> Add condition
+            </button>
+          </MenuTrigger>
+          <MenuContent align="start">
+            <MenuItem onSelect={() => add("milestone")} disabled={hasType("milestone")}>Milestone is…</MenuItem>
+            <MenuItem onSelect={() => add("severity")} disabled={hasType("severity")}>Severity is…</MenuItem>
+            <MenuItem onSelect={() => add("previous_step")} disabled={hasType("previous_step")}>Previous step is done</MenuItem>
+          </MenuContent>
+        </Menu>
+      ) : null}
+    </div>
+  );
+}
+
+/** A compact multi-select rendered as toggleable chips (used for condition values). */
+function ChipMultiSelect({
+  options,
+  selected,
+  disabled,
+  onChange,
+}: {
+  options: { value: string; label: string }[];
+  selected: string[];
+  disabled: boolean;
+  onChange: (values: string[]) => void;
+}) {
+  function toggle(value: string) {
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5 py-0.5">
+      {options.map((o) => {
+        const on = selected.includes(o.value);
+        return (
+          <button
+            key={o.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => toggle(o.value)}
+            className={`rounded-full border px-2 py-0.5 text-xs transition-colors disabled:opacity-60 ${
+              on
+                ? "border-teal-500/40 bg-teal-500/15 text-teal-200"
+                : "border-white/10 bg-white/5 text-zinc-400 hover:border-white/20 hover:text-zinc-200"
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

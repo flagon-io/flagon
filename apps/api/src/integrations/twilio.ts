@@ -55,6 +55,55 @@ export async function verifyCredentials(
   }
 }
 
+export type TwilioCapabilities = { sms: boolean; voice: boolean };
+
+/**
+ * Detect what the configured sender can actually do, so we use the account
+ * correctly instead of assuming. A Messaging Service SID (`MG…`) is SMS-only by
+ * definition; a phone number's real capabilities come from its
+ * IncomingPhoneNumbers resource (`capabilities: { sms, voice, mms }`). A number
+ * that isn't in the account is a misconfiguration we surface rather than store.
+ * Never throws.
+ */
+export async function detectSenderCapabilities(
+  creds: TwilioCredentials,
+): Promise<{ ok: boolean; capabilities?: TwilioCapabilities; message?: string }> {
+  // A Messaging Service handles SMS/MMS only; it can't place voice calls.
+  if (creds.from.startsWith("MG")) {
+    return { ok: true, capabilities: { sms: true, voice: false } };
+  }
+  try {
+    const url = `${API_BASE}/Accounts/${creds.accountSid}/IncomingPhoneNumbers.json?PhoneNumber=${encodeURIComponent(creds.from)}`;
+    const res = await fetch(url, {
+      headers: { Authorization: authHeader(creds.accountSid, creds.authToken) },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return { ok: false, message: await reason(res) };
+    const body = (await res.json().catch(() => null)) as {
+      incoming_phone_numbers?: Array<{ capabilities?: { sms?: boolean; voice?: boolean } }>;
+    } | null;
+    const number = body?.incoming_phone_numbers?.[0];
+    if (!number) {
+      return {
+        ok: false,
+        message: "That phone number isn't in your Twilio account. Check the sender.",
+      };
+    }
+    return {
+      ok: true,
+      capabilities: {
+        sms: Boolean(number.capabilities?.sms),
+        voice: Boolean(number.capabilities?.voice),
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Could not reach Twilio.",
+    };
+  }
+}
+
 /** Escape text for safe inclusion in a TwiML document. */
 function escapeXml(s: string): string {
   return s
