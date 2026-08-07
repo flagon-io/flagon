@@ -1,27 +1,31 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { TenantTx } from "../db/tenant.js";
 import { runbooks, runbookSteps, runbookServices, incidentChecklistItems } from "../db/schema.js";
+import { getSeverityLevels, rankOf } from "./severity-levels.js";
 
 type RunbookRow = typeof runbooks.$inferSelect;
 
-const SEV_RANK: Record<string, number> = { sev1: 1, sev2: 2, sev3: 3, sev4: 4 };
-
 /**
  * Runbooks that should attach to an incident of `severity` affecting `projectIds`:
- *   - severity trigger: the runbook's `triggerSeverity` is set and the incident is
- *     AT LEAST that severe (sev1 highest), OR
+ *   - severity trigger: the runbook's `triggerSeverity` is a live level and the
+ *     incident is AT LEAST that severe (lower rank = more severe), OR
  *   - service coverage: the runbook covers one of the affected services.
- * Deduped by runbook id.
+ * Deduped by runbook id. `levels` is the org's configured severity ladder (rank source);
+ * a trigger referencing an unknown/archived severity matches nothing.
  */
 export async function matchingRunbooks(
   tx: TenantTx,
+  levels: Array<{ key: string; rank: number }>,
   severity: string,
   projectIds: string[],
 ): Promise<RunbookRow[]> {
-  const incidentRank = SEV_RANK[severity] ?? 99;
+  const incidentRank = rankOf(levels, severity);
   const all = await tx.select().from(runbooks);
   const bySev = all.filter(
-    (rb) => rb.triggerSeverity && (SEV_RANK[rb.triggerSeverity] ?? 0) >= incidentRank,
+    (rb) =>
+      rb.triggerSeverity &&
+      levels.some((l) => l.key === rb.triggerSeverity) &&
+      rankOf(levels, rb.triggerSeverity) >= incidentRank,
   );
   let byService: RunbookRow[] = [];
   if (projectIds.length > 0) {
@@ -87,6 +91,7 @@ export async function autoAttachRunbooks(
   severity: string,
   projectIds: string[],
 ): Promise<void> {
-  const rbs = await matchingRunbooks(tx, severity, projectIds);
+  const levels = await getSeverityLevels(tx, orgId);
+  const rbs = await matchingRunbooks(tx, levels, severity, projectIds);
   for (const rb of rbs) await attachRunbook(tx, orgId, incidentId, rb);
 }

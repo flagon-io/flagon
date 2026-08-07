@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { getRccaTemplate } from "@/lib/rcca-template-api";
+import { getSeverityLevels } from "@/lib/severity-levels-api";
 import { RccaTemplateEditor } from "./rcca-template-editor";
 
 /**
@@ -15,7 +16,7 @@ export default async function RccaTemplatePage({ params }: { params: Promise<{ o
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
 
-  const template = await getRccaTemplate(slug);
+  const [template, levels] = await Promise.all([getRccaTemplate(slug), getSeverityLevels(slug)]);
 
-  return <RccaTemplateEditor slug={slug} template={template} canManage={canManageOrg(membership.role)} />;
+  return <RccaTemplateEditor slug={slug} template={template} levels={levels} canManage={canManageOrg(membership.role)} />;
 }

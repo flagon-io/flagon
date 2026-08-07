@@ -8,6 +8,7 @@ import { jsonError, validationError } from "../../lib/http.js";
 import { resolveOrg, requireManager } from "../../lib/org-context.js";
 import { isValidSlug } from "../../lib/slug.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
+import { getSeverityLevels } from "../../incidents/severity-levels.js";
 
 /**
  * Runbooks — reusable playbooks a responder follows during an incident. Ordered
@@ -19,20 +20,21 @@ export const runbooks_ = new Hono();
 runbooks_.use("*", authContext);
 
 const TAG = "Runbooks";
-const SEVERITIES = ["sev1", "sev2", "sev3", "sev4"] as const;
 const STEP_KINDS = ["task", "link"] as const;
 
+// triggerSeverity is a severity key validated per-org against the configured ladder
+// (incident_severity_levels), not a fixed enum.
 const createBody = z.object({
   key: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(1000).optional(),
-  triggerSeverity: z.enum(SEVERITIES).optional(),
+  triggerSeverity: z.string().trim().min(1).max(40).optional(),
 });
 const updateBody = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     description: z.string().trim().max(1000).nullable().optional(),
-    triggerSeverity: z.enum(SEVERITIES).nullable().optional(),
+    triggerSeverity: z.string().trim().min(1).max(40).nullable().optional(),
   })
   .strict();
 const stepsBody = z.object({
@@ -129,10 +131,15 @@ runbooks_.post("/", async (c) => {
   if (!parsed.success) return validationError(c, parsed.error);
   if (!isValidSlug(parsed.data.key)) return jsonError(c, 400, "Choose a different runbook key (letters, numbers, dashes).");
   const result = await withOrg(ctx.orgId, async (tx) => {
+    if (parsed.data.triggerSeverity) {
+      const levels = await getSeverityLevels(tx, ctx.orgId);
+      if (!levels.some((l) => l.key === parsed.data.triggerSeverity)) return "unknown_severity" as const;
+    }
     if (await runbookByKey(tx, parsed.data.key)) return "conflict" as const;
     const [rb] = await tx.insert(runbooks).values({ organizationId: ctx.orgId, key: parsed.data.key, name: parsed.data.name, description: parsed.data.description ?? null, triggerSeverity: parsed.data.triggerSeverity ?? null, createdByUserId: ctx.actorUserId }).returning();
     return { detail: await detail(tx, rb) };
   });
+  if (result === "unknown_severity") return jsonError(c, 400, "That severity level does not exist.");
   if (result === "conflict") return jsonError(c, 409, "A runbook with that key already exists.");
   return c.json(result.detail, 201);
 });
@@ -146,11 +153,16 @@ runbooks_.patch("/:key", async (c) => {
   if (!parsed.success) return validationError(c, parsed.error);
   const result = await withOrg(ctx.orgId, async (tx) => {
     const rb = await runbookByKey(tx, c.req.param("key"));
-    if (!rb) return null;
+    if (!rb) return "not_found" as const;
+    if (parsed.data.triggerSeverity) {
+      const levels = await getSeverityLevels(tx, ctx.orgId);
+      if (!levels.some((l) => l.key === parsed.data.triggerSeverity)) return "unknown_severity" as const;
+    }
     const [row] = await tx.update(runbooks).set({ ...parsed.data, updatedAt: new Date() }).where(eq(runbooks.id, rb.id)).returning();
     return detail(tx, row);
   });
-  if (!result) return jsonError(c, 404, "Runbook not found.");
+  if (result === "not_found") return jsonError(c, 404, "Runbook not found.");
+  if (result === "unknown_severity") return jsonError(c, 400, "That severity level does not exist.");
   return c.json(result);
 });
 

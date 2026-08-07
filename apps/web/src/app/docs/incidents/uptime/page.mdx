@@ -1,0 +1,74 @@
+export const metadata = {
+  title: "Uptime & objectives",
+  description:
+    "Weighted uptime per service and for the platform, and optional SLO or SLA objectives with error budgets. Measured from incidents, never imposed.",
+};
+
+# Uptime & objectives
+
+Flagon measures uptime from your incidents and their severity weights. It does not push
+you toward an SLA. If you want a target, define one; if you don't, you still get honest
+measured uptime. Find it under **Incidents → Uptime**.
+
+## How downtime is weighted
+
+Downtime is never a raw "was there an incident" flag. Each incident's severity decides how
+much it counts (see [Severity levels](/docs/incidents/severity-levels)):
+
+- **Per service**, downtime is the time the service spent inside an incident, scaled by
+  that severity's **service impact** weight. Overlapping incidents never double-count: at
+  each moment the most impactful one applies.
+- **For the platform**, downtime rolls up by each severity's **platform mode**. A `full`
+  incident counts the whole platform down; a `proportional` incident counts by affected
+  services over total; a `none` incident contributes nothing to the platform even if it
+  dented a service.
+
+Uptime is `1 - weightedDowntime / window`, expressed as a percentage.
+
+## Objectives (optional SLO or SLA)
+
+An **objective** is a target you choose to set. It has a target uptime, a rolling window,
+and a scope (the whole platform or one project), labelled however you frame it ("SLO",
+"SLA", or your own word). Define them under **Incidents → Settings → Objectives**. With
+none defined, the Uptime view simply shows measured uptime.
+
+For each objective Flagon computes the **error budget**: the slice of the window you are
+allowed to be down (`100 - target`), how much has been spent, and how much remains.
+
+## API
+
+```bash
+# Weighted uptime per service + platform, plus objective attainment.
+# window is in days (default 30); project scopes to one service.
+curl "https://api.flagon.io/v1/orgs/$ORG/incidents/uptime?window=30" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```jsonc
+{
+  "windowStart": "...", "windowEnd": "...", "totalServices": 14,
+  "perProject": [
+    { "projectKey": "checkout", "name": "Checkout",
+      "uptimePct": 99.57, "weightedDowntimeSeconds": 1120, "incidentCount": 1 }
+  ],
+  "totals": { "uptimePct": 99.97, "weightedDowntimeSeconds": 260, "incidentCount": 4 },
+  "objectives": [
+    { "key": "checkout-slo", "label": "SLO", "targetPct": 99.9,
+      "measuredUptimePct": 99.57, "attained": false,
+      "errorBudgetPct": 0.1, "errorBudgetRemainingPct": -0.33 }
+  ]
+}
+```
+
+Manage objectives (owner/admin for writes):
+
+```bash
+curl -X POST https://api.flagon.io/v1/orgs/$ORG/objectives \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{ "key": "checkout-slo", "name": "Checkout availability", "label": "SLO",
+        "scopeType": "project", "projectKey": "checkout",
+        "targetPct": 99.9, "windowDays": 30 }'
+```
+
+`GET /v1/orgs/$ORG/objectives` lists them; `PATCH` and `DELETE` on
+`/v1/orgs/$ORG/objectives/{key}` update or remove one.

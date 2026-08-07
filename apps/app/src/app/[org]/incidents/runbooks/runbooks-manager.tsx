@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BookText, ListChecks, Pencil, Plus } from "lucide-react";
 import { Button, Field, Input, Modal, ModalHeader, ModalBody, ModalFooter } from "@flagon/design";
-import { SEVERITIES } from "@/lib/incidents";
+import { findLevel, type SeverityLevel } from "@/lib/incidents";
 import type { Runbook } from "@/lib/runbooks-api";
 import { createRunbookAction } from "../actions";
 
@@ -15,8 +15,8 @@ function slugify(v: string) {
   return v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
 }
 
-function severityLabel(value: string) {
-  return SEVERITIES.find((s) => s.value === value)?.label ?? value.toUpperCase();
+function severityLabel(levels: SeverityLevel[], value: string) {
+  return findLevel(levels, value)?.name ?? value.toUpperCase();
 }
 
 /**
@@ -27,11 +27,13 @@ function severityLabel(value: string) {
 export function RunbooksManager({
   slug,
   runbooks,
+  levels,
   canManage,
   initialCreate,
 }: {
   slug: string;
   runbooks: Runbook[];
+  levels: SeverityLevel[];
   canManage: boolean;
   initialCreate?: boolean;
 }) {
@@ -62,7 +64,7 @@ export function RunbooksManager({
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {runbooks.map((r) => (
-            <RunbookCard key={r.key} slug={slug} runbook={r} canManage={canManage} />
+            <RunbookCard key={r.key} slug={slug} runbook={r} levels={levels} canManage={canManage} />
           ))}
         </div>
       )}
@@ -72,7 +74,7 @@ export function RunbooksManager({
   );
 }
 
-function RunbookCard({ slug, runbook, canManage }: { slug: string; runbook: Runbook; canManage: boolean }) {
+function RunbookCard({ slug, runbook, levels, canManage }: { slug: string; runbook: Runbook; levels: SeverityLevel[]; canManage: boolean }) {
   const href = `/${slug}/incidents/runbooks/${runbook.key}`;
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/2 p-4">
@@ -97,7 +99,7 @@ function RunbookCard({ slug, runbook, canManage }: { slug: string; runbook: Runb
       <div className="flex flex-wrap items-center gap-2">
         {runbook.triggerSeverity ? (
           <span className="inline-flex items-center rounded-full border border-teal-400/30 bg-teal-400/10 px-2.5 py-0.5 text-xs text-teal-200">
-            Triggers at ≥ {severityLabel(runbook.triggerSeverity)}
+            Triggers at ≥ {severityLabel(levels, runbook.triggerSeverity)}
           </span>
         ) : (
           <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs text-zinc-400">Manual</span>

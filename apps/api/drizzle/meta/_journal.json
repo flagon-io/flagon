@@ -309,6 +309,27 @@
       "when": 1789000000000,
       "tag": "0043_check_heartbeat",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1789300000000,
+      "tag": "0044_drop_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1789400000000,
+      "tag": "0045_incident_severity_levels",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1789500000000,
+      "tag": "0046_reliability_objectives",
+      "breakpoints": true
     }
   ]
 }

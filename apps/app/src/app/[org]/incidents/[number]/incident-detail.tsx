@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BellRing, BookText, Boxes, Check, CircleDot, ListChecks, Link2, Plus, Square, SquareCheckBig, X } from "lucide-react";
 import { Button, Select, Textarea } from "@flagon/design";
-import { STATUSES, labelFor } from "@/lib/incidents";
+import { STATUSES, labelFor, type SeverityLevel } from "@/lib/incidents";
 import type { IncidentDetail as Detail } from "@/lib/incidents-api";
 import { SeverityBadge, StatusPill } from "../incidents-view";
 import {
@@ -26,6 +26,7 @@ function when(iso: string): string {
 export function IncidentDetail({
   slug,
   detail,
+  levels,
   responderName,
   responderVia,
   orgMembers,
@@ -36,6 +37,7 @@ export function IncidentDetail({
 }: {
   slug: string;
   detail: Detail;
+  levels: SeverityLevel[];
   responderName: string | null;
   responderVia: string | null;
   orgMembers: { userId: string; name: string }[];
@@ -101,7 +103,7 @@ export function IncidentDetail({
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <SeverityBadge severity={incident.severity} />
+          <SeverityBadge severity={incident.severity} levels={levels} />
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
               <span className="font-mono text-xs text-zinc-500">INC-{incident.number}</span>

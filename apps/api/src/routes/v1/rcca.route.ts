@@ -8,6 +8,7 @@ import { validationError } from "../../lib/http.js";
 import { resolveOrg, requireManager } from "../../lib/org-context.js";
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 import { ensureRccaTemplate } from "../../incidents/rcca-template.js";
+import { getSeverityLevels } from "../../incidents/severity-levels.js";
 
 /**
  * The org's RCCA template — CUSTOMIZABLE: the fields an RCCA captures and which
@@ -18,7 +19,6 @@ export const rcca_ = new Hono();
 rcca_.use("*", authContext);
 
 const TAG = "Runbooks";
-const SEVERITIES = ["sev1", "sev2", "sev3", "sev4"] as const;
 
 const fieldSchema = z.object({
   key: z.string().trim().regex(/^[a-z0-9_]+$/i, "letters, numbers, underscores").min(1).max(60),
@@ -29,7 +29,10 @@ const fieldSchema = z.object({
 const putBody = z
   .object({
     fields: z.array(fieldSchema).max(20),
-    requiredSeverities: z.array(z.enum(SEVERITIES)).max(4),
+    // Severity keys are validated against the org's live ladder in the handler (not a
+    // fixed enum), and unknown/archived keys are dropped so a removed level can't wedge
+    // the template.
+    requiredSeverities: z.array(z.string().trim().min(1).max(40)).max(20),
   })
   .strict();
 
@@ -62,7 +65,10 @@ rcca_.put("/", async (c) => {
   const fields = parsed.data.fields.filter((f) => (seen.has(f.key) ? false : (seen.add(f.key), true)));
   const t = await withOrg(ctx.orgId, async (tx) => {
     await ensureRccaTemplate(tx, ctx.orgId);
-    const [row] = await tx.update(rccaTemplates).set({ fields, requiredSeverities: parsed.data.requiredSeverities, updatedAt: new Date() }).where(eq(rccaTemplates.organizationId, ctx.orgId)).returning();
+    // Keep only severities that are live levels in the org's ladder (dedup preserved).
+    const levelKeys = new Set((await getSeverityLevels(tx, ctx.orgId)).map((l) => l.key));
+    const requiredSeverities = [...new Set(parsed.data.requiredSeverities)].filter((s) => levelKeys.has(s));
+    const [row] = await tx.update(rccaTemplates).set({ fields, requiredSeverities, updatedAt: new Date() }).where(eq(rccaTemplates.organizationId, ctx.orgId)).returning();
     return row;
   });
   return c.json({ requiredSeverities: t.requiredSeverities, fields: t.fields });

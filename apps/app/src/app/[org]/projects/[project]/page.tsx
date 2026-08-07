@@ -7,7 +7,9 @@ import { getProject, listProjectRelations } from "@/lib/projects-api";
 import { listOpenIncidentsForProject, type Incident } from "@/lib/incidents-api";
 import { teamCurrentOnCall } from "@/lib/oncall-api";
 import { listTeams, listTeamMembers } from "@/lib/teams-api";
-import { SEVERITIES, SEVERITY_STYLE, labelFor, severityTone } from "@/lib/incidents";
+import { getSeverityLevels } from "@/lib/severity-levels-api";
+import { getUptime } from "@/lib/uptime-api";
+import { severityStyle, findLevel, type SeverityLevel } from "@/lib/incidents";
 import { ProjectIcon } from "@/components/framework-badge";
 import { Card, CardHead } from "./cards";
 import { EditableLinks, EditableOverview, EditableRepository } from "./overview-cards";
@@ -30,13 +32,16 @@ export default async function ProjectOverview({
   if (!session) redirect("/login");
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
-  const [project, relations, teams, openIncidents] = await Promise.all([
+  const [project, relations, teams, openIncidents, levels, uptime] = await Promise.all([
     getProject(slug, key),
     listProjectRelations(slug, key),
     listTeams(slug),
     listOpenIncidentsForProject(slug, key),
+    getSeverityLevels(slug),
+    getUptime(slug, { project: key, window: 30 }),
   ]);
   if (!project) notFound();
+  const uptimePct = uptime?.perProject?.[0]?.uptimePct ?? null;
 
   const canManage = canManageOrg(membership.role);
   const teamOptions = teams.map((t) => ({ key: t.key, name: t.name }));
@@ -104,7 +109,7 @@ export default async function ProjectOverview({
         </div>
 
         <aside className="flex flex-col gap-5">
-          <IncidentsCard slug={slug} projectKey={project.key} incidents={openIncidents} canManage={canManage} />
+          <IncidentsCard slug={slug} projectKey={project.key} incidents={openIncidents} levels={levels} uptimePct={uptimePct} canManage={canManage} />
           {project.ownerTeam ? <OnCallCard slug={slug} teamKey={project.ownerTeam.key} name={onCallName} /> : null}
           <EditableRepository slug={slug} projectKey={project.key} repo={project.repo} canManage={canManage} />
           <EditableLinks slug={slug} projectKey={project.key} links={project.links} canManage={canManage} />
@@ -115,7 +120,7 @@ export default async function ProjectOverview({
   );
 }
 
-function IncidentsCard({ slug, projectKey, incidents, canManage }: { slug: string; projectKey: string; incidents: Incident[]; canManage: boolean }) {
+function IncidentsCard({ slug, projectKey, incidents, levels, uptimePct, canManage }: { slug: string; projectKey: string; incidents: Incident[]; levels: SeverityLevel[]; uptimePct: number | null; canManage: boolean }) {
   return (
     <Card>
       <CardHead
@@ -133,7 +138,18 @@ function IncidentsCard({ slug, projectKey, incidents, canManage }: { slug: strin
           </span>
         }
       />
-      <div className="px-4 py-3.5">
+      <div className="flex flex-col gap-3 px-4 py-3.5">
+        {uptimePct !== null ? (
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs tracking-wide text-zinc-500 uppercase">Uptime · 30d</span>
+            <Link
+              href={`/${slug}/incidents/uptime`}
+              className={`text-sm font-semibold tabular-nums ${uptimePct >= 99.9 ? "text-teal-300" : uptimePct >= 99 ? "text-amber-300" : "text-red-300"} hover:opacity-80`}
+            >
+              {uptimePct.toFixed(2)}%
+            </Link>
+          </div>
+        ) : null}
         {incidents.length === 0 ? (
           <p className="inline-flex items-center gap-2 text-sm text-zinc-500">
             <Siren className="size-4 text-zinc-600" /> No open incidents
@@ -141,12 +157,12 @@ function IncidentsCard({ slug, projectKey, incidents, canManage }: { slug: strin
         ) : (
           <ul className="flex flex-col gap-2">
             {incidents.slice(0, 4).map((i) => {
-              const s = SEVERITY_STYLE[severityTone(i.severity)];
+              const s = severityStyle(findLevel(levels, i.severity)?.color ?? "#a1a1aa");
               return (
                 <li key={i.number}>
                   <Link href={`/${slug}/incidents/${i.number}`} className="flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100">
                     <span className="shrink-0 rounded border px-1 text-[10px] font-semibold" style={{ backgroundColor: s.bg, color: s.fg, borderColor: s.border }}>
-                      {labelFor(SEVERITIES, i.severity)}
+                      {findLevel(levels, i.severity)?.name ?? i.severity}
                     </span>
                     <span className="truncate">{i.title}</span>
                   </Link>

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { listRunbooks } from "@/lib/runbooks-api";
+import { getSeverityLevels } from "@/lib/severity-levels-api";
 import { RunbooksManager } from "./runbooks-manager";
 
 /**
@@ -24,12 +25,13 @@ export default async function RunbooksPage({
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
 
-  const runbooks = await listRunbooks(slug);
+  const [runbooks, levels] = await Promise.all([listRunbooks(slug), getSeverityLevels(slug)]);
 
   return (
     <RunbooksManager
       slug={slug}
       runbooks={runbooks}
+      levels={levels}
       canManage={canManageOrg(membership.role)}
       initialCreate={Boolean(sp.create)}
     />

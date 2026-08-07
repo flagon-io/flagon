@@ -13,6 +13,7 @@ import {
   projects,
   teams,
   oncallEscalationPolicies,
+  type RccaSnapshot,
 } from "../../db/schema.js";
 import { authContext } from "../../lib/auth-context.js";
 import { jsonError, validationError } from "../../lib/http.js";
@@ -20,9 +21,13 @@ import { resolveOrg, requireManager, nonMembers } from "../../lib/org-context.js
 import { registerRoute, registerComponentSchema } from "../../openapi/registry.js";
 import { teamCurrentOnCall } from "../../oncall/resolve.js";
 import { activeStep } from "../../oncall/escalation.js";
-import { loadPolicy, resolveLevelTargets } from "../../incidents/escalate.js";
-import { attachRunbook } from "../../incidents/runbook-attach.js";
-import { declareIncident, teamByKey, policyByKey, snapshotTemplate } from "../../incidents/declare.js";
+import { notifyIncident } from "../../incidents/notify.js";
+import { loadPolicy, resolveLevelTargets, teamResponders } from "../../incidents/escalate.js";
+import { attachRunbook, autoAttachRunbooks } from "../../incidents/runbook-attach.js";
+import { ensureRccaTemplate } from "../../incidents/rcca-template.js";
+import { getSeverityLevels, defaultKey } from "../../incidents/severity-levels.js";
+import { computeDowntime } from "../../incidents/downtime.js";
+import { attainmentForObjectives } from "../../incidents/objectives.js";
 
 /**
  * Incidents — a declared reliability event affecting one or more catalog projects.
@@ -35,12 +40,14 @@ export const incidents_ = new Hono();
 incidents_.use("*", authContext);
 
 const TAG = "Incidents";
-const SEVERITIES = ["sev1", "sev2", "sev3", "sev4"] as const;
 const STATUSES = ["open", "investigating", "identified", "monitoring", "resolved"] as const;
 
+// Severity is a free-form key validated per-org against the incident_severity_levels
+// ladder (see incidents/severity-levels.ts), not a fixed enum: an org may name its
+// levels P0..P4, sev1..sev4, etc. Omitted on declare = the org's default level.
 const declareBody = z.object({
   title: z.string().trim().min(1).max(200),
-  severity: z.enum(SEVERITIES),
+  severity: z.string().trim().min(1).max(40).optional(),
   summary: z.string().trim().max(2000).optional(),
   affectedProjectKeys: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
   ownerTeamKey: z.string().trim().min(1).max(100).optional(),
@@ -49,7 +56,7 @@ const declareBody = z.object({
 const updateBody = z
   .object({
     title: z.string().trim().min(1).max(200).optional(),
-    severity: z.enum(SEVERITIES).optional(),
+    severity: z.string().trim().min(1).max(40).optional(),
     summary: z.string().trim().max(2000).nullable().optional(),
     status: z.enum(STATUSES).optional(),
     ownerTeamKey: z.string().trim().min(1).max(100).nullable().optional(),
@@ -69,7 +76,6 @@ const incidentSchema = z.object({
   summary: z.string().nullable(),
   severity: z.string(),
   status: z.string(),
-  source: z.string(),
   ownerTeam: ownerTeamSchema,
   escalationPolicyKey: z.string().nullable(),
   acknowledgedAt: z.string().nullable(),
@@ -125,6 +131,12 @@ async function checklistFor(tx: TenantTx, incidentId: string) {
   return rows;
 }
 
+/** A point-in-time copy of the org template, frozen onto an incident at declare. */
+async function snapshotTemplate(tx: TenantTx, orgId: string): Promise<RccaSnapshot> {
+  const t = await ensureRccaTemplate(tx, orgId);
+  return { requiredSeverities: t.requiredSeverities, fields: t.fields };
+}
+
 /**
  * The RCCA block for an incident detail. The template is the SNAPSHOT frozen onto
  * this incident (so a later org-template edit never rewrites it); rows created
@@ -158,7 +170,6 @@ function serialize(
     summary: i.summary,
     severity: i.severity,
     status: i.status,
-    source: i.source,
     ownerTeam,
     escalationPolicyKey: policyKey,
     acknowledgedAt: i.acknowledgedAt?.toISOString() ?? null,
@@ -171,6 +182,12 @@ function serialize(
 
 async function incidentByNumber(tx: TenantTx, number: number) {
   return tx.select().from(incidents).where(eq(incidents.number, number)).limit(1).then((r) => r[0] ?? null);
+}
+async function teamByKey(tx: TenantTx, key: string) {
+  return tx.select({ id: teams.id, key: teams.key, name: teams.name }).from(teams).where(eq(teams.key, key)).limit(1).then((r) => r[0] ?? null);
+}
+async function policyByKey(tx: TenantTx, key: string) {
+  return tx.select({ id: oncallEscalationPolicies.id, key: oncallEscalationPolicies.key }).from(oncallEscalationPolicies).where(eq(oncallEscalationPolicies.key, key)).limit(1).then((r) => r[0] ?? null);
 }
 async function ownerTeamFor(tx: TenantTx, teamId: string | null) {
   if (!teamId) return null;
@@ -198,6 +215,18 @@ registerRoute({ method: "delete", path: "/v1/orgs/{org}/incidents/{number}/servi
 function parseNumber(raw: string): number | null {
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** A Postgres unique-violation (23505) on the incident number index — the signal
+ *  to retry number allocation. Checks the error and its cause; the driver surfaces
+ *  the SQLSTATE as `.code`. */
+function isNumberConflict(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string }; message?: string };
+  return (
+    e?.code === "23505" ||
+    e?.cause?.code === "23505" ||
+    (typeof e?.message === "string" && e.message.includes("incidents_org_number_key"))
+  );
 }
 
 // --- List / get -------------------------------------------------------------
@@ -270,6 +299,28 @@ async function currentResponder(tx: TenantTx, incident: IncidentRow, now: Date):
   return { userId: null, via: null };
 }
 
+// --- Uptime & weighted downtime (any member) -------------------------------
+const projectUptimeSchema = z.object({ projectKey: z.string(), name: z.string(), uptimePct: z.number(), weightedDowntimeSeconds: z.number(), incidentCount: z.number() });
+const objectiveAttainmentSchema = z.object({ key: z.string(), name: z.string(), label: z.string(), scopeType: z.string(), scopeProjectKey: z.string().nullable(), targetPct: z.number(), windowDays: z.number(), measuredUptimePct: z.number(), attained: z.boolean(), errorBudgetPct: z.number(), errorBudgetConsumedPct: z.number(), errorBudgetRemainingPct: z.number(), errorBudgetBurnedRatio: z.number() });
+const uptimeReportSchema = z.object({ windowStart: z.string(), windowEnd: z.string(), windowSeconds: z.number(), totalServices: z.number(), perProject: z.array(projectUptimeSchema), totals: z.object({ uptimePct: z.number(), weightedDowntimeSeconds: z.number(), incidentCount: z.number() }), objectives: z.array(objectiveAttainmentSchema) });
+registerComponentSchema("UptimeReport", uptimeReportSchema);
+registerRoute({ method: "get", path: "/v1/orgs/{org}/incidents/uptime", summary: "Uptime & weighted downtime", description: "Per-project weighted uptime over a rolling window (severity `downtime_weight` weights each incident), plus attainment + error budget for any reliability objectives. Query params: `window` (days, default 30) and `project` (a project key to scope to).", tags: [TAG], auth: true, paramDescriptions: { org: "The organization slug." }, responses: { 200: { description: "The uptime report.", schemaName: "UptimeReport" } } });
+
+incidents_.get("/uptime", async (c) => {
+  const ctx = await resolveOrg(c);
+  if (ctx instanceof Response) return ctx;
+  const rawWindow = c.req.query("window");
+  const parsedWindow = rawWindow ? parseInt(rawWindow.replace(/d$/i, ""), 10) : 30;
+  const windowDays = Number.isFinite(parsedWindow) ? parsedWindow : 30;
+  const projectKey = c.req.query("project") || undefined;
+  const report = await withOrg(ctx.orgId, async (tx) => {
+    const dt = await computeDowntime(tx, ctx.orgId, { windowDays, projectKey });
+    const objectives = await attainmentForObjectives(tx, ctx.orgId);
+    return { ...dt, objectives };
+  });
+  return c.json(report);
+});
+
 incidents_.get("/:number", async (c) => {
   const ctx = await resolveOrg(c);
   if (ctx instanceof Response) return ctx;
@@ -315,28 +366,90 @@ incidents_.post("/", async (c) => {
   if (!parsed.success) return validationError(c, parsed.error);
   const { title, severity, summary, affectedProjectKeys, ownerTeamKey, escalationPolicyKey } = parsed.data;
 
-  // Single shared declare path (see incidents/declare.ts) — the same service the
-  // synthetic-check runner uses, so a manual declare and a check-declared incident
-  // can never drift. `source: "manual"` and the actor id are the only route-specific
-  // inputs; the service allocates the number, attaches services, auto-attaches
-  // runbooks, freezes the RCCA snapshot, and pages the first responders.
-  const result = await declareIncident({
-    orgId: ctx.orgId,
-    title,
-    severity,
-    summary,
-    affectedProjectKeys,
-    ownerTeamKey,
-    escalationPolicyKey,
-    declaredByUserId: ctx.actorUserId,
-    source: "manual",
+  const declareOnce = () => withOrg(ctx.orgId, async (tx) => {
+    // Resolve severity against the org's configured ladder; default when omitted.
+    const levels = await getSeverityLevels(tx, ctx.orgId);
+    const sev = severity ?? defaultKey(levels) ?? undefined;
+    if (!sev || !levels.some((l) => l.key === sev)) return { error: "unknown_severity" } as const;
+    // Resolve affected services first (so owner can auto-derive from the first).
+    const serviceRows: { id: string }[] = [];
+    for (const key of affectedProjectKeys ?? []) {
+      const p = await tx.select({ id: projects.id }).from(projects).where(eq(projects.key, key)).limit(1).then((r) => r[0]);
+      if (!p) return { error: `unknown_service:${key}` } as const;
+      serviceRows.push(p);
+    }
+    let ownerTeamId: string | null = null;
+    if (ownerTeamKey) {
+      const team = await teamByKey(tx, ownerTeamKey);
+      if (!team) return { error: "unknown_team" } as const;
+      ownerTeamId = team.id;
+    } else if (serviceRows.length > 0) {
+      const [first] = await tx.select({ ownerTeamId: projects.ownerTeamId }).from(projects).where(eq(projects.id, serviceRows[0].id)).limit(1);
+      ownerTeamId = first?.ownerTeamId ?? null;
+    }
+    let escalationPolicyId: string | null = null;
+    if (escalationPolicyKey) {
+      const p = await policyByKey(tx, escalationPolicyKey);
+      if (!p) return { error: "unknown_policy" } as const;
+      escalationPolicyId = p.id;
+    }
+
+    const [{ max } = { max: 0 }] = await tx.select({ max: sql<number>`coalesce(max(${incidents.number}), 0)` }).from(incidents);
+    const number = Number(max) + 1;
+
+    const [incident] = await tx
+      .insert(incidents)
+      .values({ organizationId: ctx.orgId, number, title, severity: sev, summary: summary ?? null, ownerTeamId, escalationPolicyId, declaredByUserId: ctx.actorUserId })
+      .returning();
+    for (const s of serviceRows) {
+      await tx.insert(incidentServices).values({ organizationId: ctx.orgId, incidentId: incident.id, projectId: s.id });
+    }
+    // Attach matching runbooks' steps as the incident checklist (by severity
+    // threshold or affected-service coverage) — the playbook, ready on declare.
+    await autoAttachRunbooks(tx, ctx.orgId, incident.id, incident.severity, serviceRows.map((s) => s.id));
+    // Freeze the RCCA template onto this incident now, so a later template edit
+    // never rewrites this incident's postmortem form.
+    await tx.insert(incidentRccas).values({ organizationId: ctx.orgId, incidentId: incident.id, template: await snapshotTemplate(tx, ctx.orgId) }).onConflictDoNothing();
+    // Who to page first: the escalation policy's level 0 (step 0) when set, else the
+    // owner team's on-call (falling back to the whole team). `escalated_level` stays
+    // 0 so the cron climbs from step 1. If level 0 resolves to nobody (empty/deleted
+    // target), fall back to the owner team so the first page is never black-holed.
+    const now = new Date();
+    let responders: string[];
+    if (escalationPolicyId) {
+      const { levels } = await loadPolicy(tx, escalationPolicyId);
+      responders = levels.length ? await resolveLevelTargets(tx, levels[0], now) : [];
+      if (responders.length === 0) responders = await teamResponders(tx, ownerTeamId, now);
+    } else {
+      responders = await teamResponders(tx, ownerTeamId, now);
+    }
+    return { incident, responders } as const;
   });
-  if (!result.ok) {
+
+  // `number` is allocated as max()+1 under a unique (org, number) index. Two truly
+  // concurrent declares in the same org can pick the same number; the loser hits the
+  // unique violation — retry (re-reading max) a few times instead of 500ing during
+  // exactly the busy moment incidents get declared.
+  let result: Awaited<ReturnType<typeof declareOnce>> | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      result = await declareOnce();
+      break;
+    } catch (err) {
+      if (attempt < 3 && isNumberConflict(err)) continue;
+      throw err;
+    }
+  }
+  if (!result) return jsonError(c, 409, "Could not allocate an incident number, please retry.");
+
+  if ("error" in result) {
     if (result.error === "unknown_team") return jsonError(c, 400, "That owning team does not exist.");
     if (result.error === "unknown_policy") return jsonError(c, 400, "That escalation policy does not exist.");
-    if (result.error === "number_conflict") return jsonError(c, 409, "Could not allocate an incident number, please retry.");
+    if (result.error === "unknown_severity") return jsonError(c, 400, "That severity level does not exist.");
     return jsonError(c, 400, "One of the affected services does not exist.");
   }
+  // Page the responders (deferred-style; notifyIncident never throws).
+  await notifyIncident({ organizationId: ctx.orgId, userIds: result.responders, number: result.incident.number, title: result.incident.title, severity: result.incident.severity, status: result.incident.status, kind: "declared" });
 
   const detail = await withOrg(ctx.orgId, async (tx) => {
     const ownerTeam = await ownerTeamFor(tx, result.incident.ownerTeamId);
@@ -361,6 +474,10 @@ incidents_.patch("/:number", async (c) => {
   const result = await withOrg(ctx.orgId, async (tx) => {
     const incident = await incidentByNumber(tx, number);
     if (!incident) return "not_found" as const;
+    if (rest.severity !== undefined) {
+      const levels = await getSeverityLevels(tx, ctx.orgId);
+      if (!levels.some((l) => l.key === rest.severity)) return "unknown_severity" as const;
+    }
     const set: Record<string, unknown> = { ...rest, updatedAt: new Date() };
     if (rest.status === "resolved" && !incident.resolvedAt) set.resolvedAt = new Date();
     if (rest.status && rest.status !== "resolved") set.resolvedAt = null;
@@ -387,6 +504,7 @@ incidents_.patch("/:number", async (c) => {
   if (result === "not_found") return jsonError(c, 404, "Incident not found.");
   if (result === "unknown_team") return jsonError(c, 400, "That owning team does not exist.");
   if (result === "unknown_policy") return jsonError(c, 400, "That escalation policy does not exist.");
+  if (result === "unknown_severity") return jsonError(c, 400, "That severity level does not exist.");
   return c.json(result);
 });
 

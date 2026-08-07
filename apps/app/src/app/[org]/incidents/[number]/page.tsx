@@ -8,6 +8,7 @@ import { listPolicies } from "@/lib/oncall-api";
 import { listRunbooks } from "@/lib/runbooks-api";
 import { listProjects } from "@/lib/projects-api";
 import { listMembers } from "@/lib/flags-api";
+import { getSeverityLevels } from "@/lib/severity-levels-api";
 import { IncidentDetail } from "./incident-detail";
 
 /**
@@ -24,12 +25,13 @@ export default async function IncidentPage({ params }: { params: Promise<{ org: 
   if (!membership) redirect("/");
   if (!Number.isInteger(number)) notFound();
 
-  const [detail, orgMembers, projects, runbooks, policies] = await Promise.all([
+  const [detail, orgMembers, projects, runbooks, policies, levels] = await Promise.all([
     getIncident(slug, number),
     listMembers(slug),
     listProjects(slug),
     listRunbooks(slug),
     listPolicies(slug),
+    getSeverityLevels(slug),
   ]);
   if (!detail) notFound();
 
@@ -47,6 +49,7 @@ export default async function IncidentPage({ params }: { params: Promise<{ org: 
       <IncidentDetail
         slug={slug}
         detail={detail}
+        levels={levels}
         responderName={responderName}
         responderVia={detail.responderVia}
         orgMembers={orgMembers.map((m) => ({ userId: m.userId, name: m.name }))}

@@ -15,21 +15,22 @@ import {
   Select,
   Textarea,
 } from "@flagon/design";
-import { SEVERITIES, SEVERITY_STYLE, STATUSES, labelFor, severityTone } from "@/lib/incidents";
+import { STATUSES, labelFor, severityStyle, findLevel, type SeverityLevel } from "@/lib/incidents";
 import type { Incident } from "@/lib/incidents-api";
 import { declareIncidentAction } from "./actions";
 
 type Opt = { key: string; name: string };
 const NONE = "__none__";
 
-export function SeverityBadge({ severity }: { severity: string }) {
-  const s = SEVERITY_STYLE[severityTone(severity)];
+export function SeverityBadge({ severity, levels }: { severity: string; levels: SeverityLevel[] }) {
+  const level = findLevel(levels, severity);
+  const s = severityStyle(level?.color ?? "#a1a1aa");
   return (
     <span
       className="inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-[11px] font-semibold"
       style={{ backgroundColor: s.bg, color: s.fg, borderColor: s.border }}
     >
-      {labelFor(SEVERITIES, severity)}
+      {level?.name ?? severity}
     </span>
   );
 }
@@ -60,6 +61,7 @@ function relativeTime(iso: string): string {
 export function IncidentsView({
   slug,
   incidents,
+  levels,
   canManage,
   teams,
   projects,
@@ -70,6 +72,7 @@ export function IncidentsView({
 }: {
   slug: string;
   incidents: Incident[];
+  levels: SeverityLevel[];
   canManage: boolean;
   teams: Opt[];
   projects: Opt[];
@@ -123,14 +126,15 @@ export function IncidentsView({
         </div>
       ) : (
         <div className="flex flex-col gap-6">
-          <Section title="Open" incidents={openIncidents} slug={slug} empty="Nothing on fire right now." />
-          {resolved.length > 0 ? <Section title="Resolved" incidents={resolved} slug={slug} /> : null}
+          <Section title="Open" incidents={openIncidents} slug={slug} levels={levels} empty="Nothing on fire right now." />
+          {resolved.length > 0 ? <Section title="Resolved" incidents={resolved} slug={slug} levels={levels} /> : null}
         </div>
       )}
 
       {open ? (
         <DeclareModal
           slug={slug}
+          levels={levels}
           teams={teams}
           projects={projects}
           policies={policies}
@@ -142,7 +146,7 @@ export function IncidentsView({
   );
 }
 
-export function Section({ title, incidents, slug, empty }: { title: string; incidents: Incident[]; slug: string; empty?: string }) {
+export function Section({ title, incidents, slug, levels, empty }: { title: string; incidents: Incident[]; slug: string; levels: SeverityLevel[]; empty?: string }) {
   return (
     <div>
       <p className="mb-2 text-xs font-medium tracking-wide text-zinc-500 uppercase">{title}</p>
@@ -156,12 +160,9 @@ export function Section({ title, incidents, slug, empty }: { title: string; inci
               href={`/${slug}/incidents/${i.number}`}
               className={`flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/3 ${idx === 0 ? "" : "border-t border-white/8"}`}
             >
-              <SeverityBadge severity={i.severity} />
+              <SeverityBadge severity={i.severity} levels={levels} />
               <span className="shrink-0 font-mono text-xs text-zinc-500">INC-{i.number}</span>
               <span className="min-w-0 flex-1 truncate text-sm text-zinc-100">{i.title}</span>
-              {i.source === "check" ? (
-                <span className="hidden shrink-0 rounded bg-white/8 px-1.5 py-0.5 text-[11px] font-medium text-zinc-400 sm:inline" title="Opened automatically by a check">Check</span>
-              ) : null}
               <StatusPill status={i.status} />
               {i.ownerTeam ? (
                 <span className="hidden items-center gap-1.5 text-xs text-zinc-500 sm:inline-flex">
@@ -181,11 +182,11 @@ function withNone(opts: Opt[], label: string) {
   return [{ value: NONE, label }, ...opts.map((o) => ({ value: o.key, label: o.name }))];
 }
 
-export function DeclareModal({ slug, teams, projects, policies, initialServices, onClose }: { slug: string; teams: Opt[]; projects: Opt[]; policies: Opt[]; initialServices?: string[]; onClose: () => void }) {
+export function DeclareModal({ slug, levels, teams, projects, policies, initialServices, onClose }: { slug: string; levels: SeverityLevel[]; teams: Opt[]; projects: Opt[]; policies: Opt[]; initialServices?: string[]; onClose: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState("");
-  const [severity, setSeverity] = useState("sev2");
+  const [severity, setSeverity] = useState(() => levels.find((l) => l.isDefault)?.key ?? levels[0]?.key ?? "");
   const [summary, setSummary] = useState("");
   const [ownerTeam, setOwnerTeam] = useState(NONE);
   const [policy, setPolicy] = useState(NONE);
@@ -222,7 +223,7 @@ export function DeclareModal({ slug, teams, projects, policies, initialServices,
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Severity">
-            <Select ariaLabel="Severity" value={severity} onValueChange={setSeverity} className="w-full" options={SEVERITIES.map((s) => ({ value: s.value, label: s.label }))} />
+            <Select ariaLabel="Severity" value={severity} onValueChange={setSeverity} className="w-full" options={levels.map((l) => ({ value: l.key, label: l.name }))} />
           </Field>
           <Field label="Owning team" hint="Optional; else the first service's owner.">
             <Select ariaLabel="Owning team" value={ownerTeam} onValueChange={setOwnerTeam} className="w-full" options={withNone(teams, "Auto")} />

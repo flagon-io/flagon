@@ -6,6 +6,7 @@ import { listIncidents } from "@/lib/incidents-api";
 import { listPolicies } from "@/lib/oncall-api";
 import { listProjects } from "@/lib/projects-api";
 import { listTeams } from "@/lib/teams-api";
+import { getSeverityLevels } from "@/lib/severity-levels-api";
 import { ProjectIncidents } from "./project-incidents";
 
 /**
@@ -26,12 +27,13 @@ export default async function ProjectIncidentsPage({
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
 
-  const [project, incidents, teams, projects, policies] = await Promise.all([
+  const [project, incidents, teams, projects, policies, levels] = await Promise.all([
     getProject(slug, key),
     listIncidents(slug, { project: key }),
     listTeams(slug),
     listProjects(slug),
     listPolicies(slug),
+    getSeverityLevels(slug),
   ]);
   if (!project) notFound();
 
@@ -41,6 +43,7 @@ export default async function ProjectIncidentsPage({
       projectKey={project.key}
       projectName={project.name}
       incidents={incidents}
+      levels={levels}
       canManage={canManageOrg(membership.role)}
       teams={teams.map((t) => ({ key: t.key, name: t.name }))}
       projects={projects.map((p) => ({ key: p.key, name: p.name }))}

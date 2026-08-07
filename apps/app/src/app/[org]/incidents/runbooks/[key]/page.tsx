@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { getRunbook } from "@/lib/runbooks-api";
+import { getSeverityLevels } from "@/lib/severity-levels-api";
 import { RunbookEditor } from "./runbook-editor";
 
 /**
@@ -15,13 +16,14 @@ export default async function RunbookEditorPage({ params }: { params: Promise<{ 
   const membership = await getMembershipBySlug(session.user.id, slug);
   if (!membership) redirect("/");
 
-  const detail = await getRunbook(slug, key);
+  const [detail, levels] = await Promise.all([getRunbook(slug, key), getSeverityLevels(slug)]);
   if (!detail) notFound();
 
   return (
     <RunbookEditor
       slug={slug}
       detail={detail}
+      levels={levels}
       canManage={canManageOrg(membership.role)}
     />
   );

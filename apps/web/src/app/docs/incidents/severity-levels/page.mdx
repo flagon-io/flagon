@@ -1,0 +1,73 @@
+export const metadata = {
+  title: "Severity levels",
+  description:
+    "Configure your own incident severity ladder: name each level, order it, and set how much it counts against a service's uptime and the platform total.",
+};
+
+# Severity levels
+
+Severity is yours to define. Name the ladder however your team works (`P0`–`P4`,
+`SEV1`–`SEV4`, whatever fits), describe each level, order it, and decide how much each
+level counts against uptime. Every org starts with a standard ladder and edits it under
+**Incidents → Settings → Severity levels**.
+
+## Two independent impacts
+
+Each level carries two separate knobs, because "how badly is this service hurt" and "how
+badly is the whole platform hurt" are different questions:
+
+- **Service impact** (`downtimeWeight`, `0`–`1`): how much a minute at this severity counts
+  against the **affected project's** own uptime. A full outage counts fully (`1`); a minor
+  severity might count a quarter (`0.25`); an informational one counts nothing (`0`).
+- **Platform impact** (`platformMode`): how the incident rolls into the **global** total,
+  decoupled from per-service:
+  - `full`: the whole platform counts as down (a classic SEV1).
+  - `proportional`: it counts by affected services over total services. One of fourteen
+    services down contributes `1/14` to platform downtime.
+  - `none`: no platform impact at all, even though it may still dent the affected service.
+
+That decoupling is the point: a service-scoped severity can move one project's uptime
+while contributing nothing to the platform number.
+
+## Fields
+
+| Field | Meaning |
+| --- | --- |
+| `key` | Stable identifier (immutable once created). |
+| `name` | Display label, for example `P0`. |
+| `description` | What this level means, shown wherever it is used. |
+| `rank` | Order, lower is more severe. Drives "at least this severe" logic. |
+| `color` | Badge color. |
+| `downtimeWeight` | Service impact, `0`–`1`. |
+| `platformMode` | Platform impact: `full`, `proportional`, or `none`. |
+| `isDefault` | The level a new incident gets when none is chosen. Exactly one. |
+
+Removing a level **archives** it rather than deleting it, so past incidents keep their
+severity. Keys never change, so historical data never orphans.
+
+## API
+
+The whole ladder is read and saved as one set.
+
+```bash
+# List the ladder (most severe first)
+curl https://api.flagon.io/v1/orgs/$ORG/severity-levels \
+  -H "Authorization: Bearer $TOKEN"
+
+# Replace the ladder (owner/admin). Omitted keys are archived; exactly one isDefault.
+curl -X PUT https://api.flagon.io/v1/orgs/$ORG/severity-levels \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "levels": [
+      { "key": "p0", "name": "P0", "rank": 0, "color": "#ef4444",
+        "downtimeWeight": 1, "platformMode": "full", "isDefault": false },
+      { "key": "p1", "name": "P1", "rank": 1, "color": "#f97316",
+        "downtimeWeight": 1, "platformMode": "proportional", "isDefault": true },
+      { "key": "p2", "name": "P2", "rank": 2, "color": "#f59e0b",
+        "downtimeWeight": 0.25, "platformMode": "none", "isDefault": false }
+    ]
+  }'
+```
+
+Severity is validated against this ladder everywhere it is used: declaring an incident,
+editing one, a runbook's trigger severity, and which severities require a postmortem.

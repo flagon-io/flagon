@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Siren } from "lucide-react";
 import { Button } from "@flagon/design";
 import type { Incident } from "@/lib/incidents-api";
+import type { SeverityLevel } from "@/lib/incidents";
 import { DeclareModal, Section } from "../../../incidents/incidents-view";
 
 type Opt = { key: string; name: string };
@@ -18,6 +19,7 @@ export function ProjectIncidents({
   projectKey,
   projectName,
   incidents,
+  levels,
   canManage,
   teams,
   projects,
@@ -28,6 +30,7 @@ export function ProjectIncidents({
   projectKey: string;
   projectName: string;
   incidents: Incident[];
+  levels: SeverityLevel[];
   canManage: boolean;
   teams: Opt[];
   projects: Opt[];
@@ -67,14 +70,15 @@ export function ProjectIncidents({
         </div>
       ) : (
         <div className="flex flex-col gap-6">
-          <Section title="Open" incidents={openIncidents} slug={slug} empty="Nothing on fire right now." />
-          {resolved.length > 0 ? <Section title="Resolved" incidents={resolved} slug={slug} /> : null}
+          <Section title="Open" incidents={openIncidents} slug={slug} levels={levels} empty="Nothing on fire right now." />
+          {resolved.length > 0 ? <Section title="Resolved" incidents={resolved} slug={slug} levels={levels} /> : null}
         </div>
       )}
 
       {open ? (
         <DeclareModal
           slug={slug}
+          levels={levels}
           teams={teams}
           projects={projects}
           policies={policies}

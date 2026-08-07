@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronUp, FileCog, Plus, Trash2 } from "lucide-react";
 import { Button, Field, Input, Switch } from "@flagon/design";
-import { SEVERITIES, SEVERITY_STYLE, severityTone } from "@/lib/incidents";
+import { severityStyle, type SeverityLevel } from "@/lib/incidents";
 import type { RccaTemplateData, RccaTemplateField } from "@/lib/rcca-template-api";
 import { putRccaTemplateAction } from "./actions";
 
@@ -30,10 +30,12 @@ type Row = RccaTemplateField & { _edited: boolean };
 export function RccaTemplateEditor({
   slug,
   template,
+  levels,
   canManage,
 }: {
   slug: string;
   template: RccaTemplateData;
+  levels: SeverityLevel[];
   canManage: boolean;
 }) {
   const router = useRouter();
@@ -128,12 +130,12 @@ export function RccaTemplateEditor({
           <p className="mt-0.5 text-xs text-zinc-500">Incidents at these severities are flagged until their RCCA is written.</p>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
-          {SEVERITIES.map((s) => {
-            const on = required.includes(s.value);
-            const c = SEVERITY_STYLE[severityTone(s.value)];
+          {levels.map((l) => {
+            const on = required.includes(l.key);
+            const c = severityStyle(l.color);
             return (
               <div
-                key={s.value}
+                key={l.key}
                 className={`flex items-center justify-between gap-3 rounded-xl border px-3.5 py-3 transition-colors ${
                   on ? "border-white/15 bg-white/6" : "border-white/8 bg-white/2"
                 }`}
@@ -143,11 +145,11 @@ export function RccaTemplateEditor({
                     className="inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-semibold"
                     style={{ backgroundColor: c.bg, color: c.fg, borderColor: c.border }}
                   >
-                    {s.label}
+                    {l.name}
                   </span>
                   <span className={`text-xs ${on ? "text-zinc-300" : "text-zinc-500"}`}>{on ? "Requires RCCA" : "Optional"}</span>
                 </span>
-                <Switch ariaLabel={`Require RCCA for ${s.label}`} checked={on} onCheckedChange={() => toggleSeverity(s.value)} disabled={!canManage} />
+                <Switch ariaLabel={`Require RCCA for ${l.name}`} checked={on} onCheckedChange={() => toggleSeverity(l.key)} disabled={!canManage} />
               </div>
             );
           })}

@@ -15,7 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button, Field, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Select, Textarea, useConfirm } from "@flagon/design";
-import { SEVERITIES } from "@/lib/incidents";
+import type { SeverityLevel } from "@/lib/incidents";
 import type { RunbookDetail } from "@/lib/runbooks-api";
 import {
   deleteRunbookAction,
@@ -55,10 +55,12 @@ function nextId() {
 export function RunbookEditor({
   slug,
   detail,
+  levels,
   canManage,
 }: {
   slug: string;
   detail: RunbookDetail;
+  levels: SeverityLevel[];
   canManage: boolean;
 }) {
   const router = useRouter();
@@ -269,7 +271,7 @@ export function RunbookEditor({
                   ariaLabel="Trigger severity"
                   value={trigger}
                   onValueChange={(v) => { touch(); setTrigger(v); }}
-                  options={[{ value: NONE, label: "Off (manual)" }, ...SEVERITIES.map((s) => ({ value: s.value, label: s.label }))]}
+                  options={[{ value: NONE, label: "Off (manual)" }, ...levels.map((l) => ({ value: l.key, label: l.name }))]}
                   disabled={!canManage}
                 />
               </div>

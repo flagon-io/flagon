@@ -78,19 +78,6 @@ const schema = z
     // Email (verification / reset / invites now send from the API).
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
-    // Integration-secret encryption (Slack webhook URLs, generic webhook signing
-    // secrets). A 32-byte key as hex (64 chars) or base64. OPTIONAL: without it the
-    // API boots and email alert channels work, but creating a secret-bearing channel
-    // (slack_webhook / webhook) returns a clear "configure this" error rather than
-    // storing a bearer secret in plaintext. See lib/crypto.ts.
-    INTEGRATIONS_ENC_KEY: z.string().optional(),
-    // Synthetic-checks runner tunables. The probe deadline per check, the max probes
-    // run concurrently in one sweep, and the max checks processed per sweep (the rest
-    // defer to the next minute and are logged, never silently dropped). Defaults suit
-    // a pilot; raise for scale (and eventually fan out to a queue).
-    CHECKS_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
-    CHECKS_MAX_CONCURRENCY: z.coerce.number().int().positive().default(12),
-    CHECKS_MAX_PER_SWEEP: z.coerce.number().int().positive().default(500),
     // Object storage (Cloudflare R2 / any S3-compatible store) is OPTIONAL: the
     // API boots and serves without it; upload endpoints return 503 until it's
     // configured. Provider-neutral by design, so the SAME vars point at ministack

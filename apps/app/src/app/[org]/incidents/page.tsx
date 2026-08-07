@@ -5,6 +5,7 @@ import { listIncidents } from "@/lib/incidents-api";
 import { listPolicies } from "@/lib/oncall-api";
 import { listProjects } from "@/lib/projects-api";
 import { listTeams } from "@/lib/teams-api";
+import { getSeverityLevels } from "@/lib/severity-levels-api";
 import { IncidentsView } from "./incidents-view";
 
 /**
@@ -29,17 +30,19 @@ export default async function IncidentsPage({
   const autoDeclareService = sp.declare && typeof sp.service === "string" ? sp.service : undefined;
   const autoDeclare = Boolean(sp.declare);
 
-  const [incidents, teams, projects, policies] = await Promise.all([
+  const [incidents, teams, projects, policies, levels] = await Promise.all([
     listIncidents(slug, filterProject ? { project: filterProject } : undefined),
     listTeams(slug),
     listProjects(slug),
     listPolicies(slug),
+    getSeverityLevels(slug),
   ]);
 
   return (
     <IncidentsView
       slug={slug}
       incidents={incidents}
+      levels={levels}
       canManage={canManageOrg(membership.role)}
       teams={teams.map((t) => ({ key: t.key, name: t.name }))}
       projects={projects.map((p) => ({ key: p.key, name: p.name }))}

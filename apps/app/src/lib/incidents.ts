@@ -1,17 +1,27 @@
 /**
- * Reliability vocabulary the console renders. Severity/status slugs stay in
- * lockstep with the API enums in apps/api/src/routes/v1/incidents.route.ts, and
- * escalation target types with oncall.route.ts.
+ * Reliability vocabulary the console renders. Status slugs stay in lockstep with the
+ * API enums in apps/api/src/routes/v1/incidents.route.ts, and escalation target types
+ * with oncall.route.ts. Severity is NOT hardcoded here: it is org-configurable (see
+ * the incident_severity_levels table + severity-levels-api.ts) and threaded in as data.
  */
 export type Option = { value: string; label: string };
 
-export type SeverityTone = "red" | "orange" | "amber" | "muted";
-export const SEVERITIES: (Option & { tone: SeverityTone })[] = [
-  { value: "sev1", label: "SEV1", tone: "red" },
-  { value: "sev2", label: "SEV2", tone: "orange" },
-  { value: "sev3", label: "SEV3", tone: "amber" },
-  { value: "sev4", label: "SEV4", tone: "muted" },
-];
+/** How a severity rolls into the global/platform uptime total. */
+export type PlatformMode = "full" | "proportional" | "none";
+
+/** An org's configured severity level (mirrors the API's /severity-levels shape). */
+export type SeverityLevel = {
+  key: string;
+  name: string;
+  description: string | null;
+  rank: number;
+  color: string;
+  /** Service impact: how much this severity counts against the affected project's uptime (0..1). */
+  downtimeWeight: number;
+  /** Platform impact: how it rolls into the global total (decoupled from per-service). */
+  platformMode: PlatformMode;
+  isDefault: boolean;
+};
 
 export const STATUSES: Option[] = [
   { value: "open", label: "Open" },
@@ -32,14 +42,16 @@ export function labelFor(options: Option[], value: string | null): string {
   return options.find((o) => o.value === value)?.label ?? value;
 }
 
-export function severityTone(value: string): SeverityTone {
-  return SEVERITIES.find((s) => s.value === value)?.tone ?? "muted";
+/** Find a severity level by key (for a badge's label + color). */
+export function findLevel(levels: SeverityLevel[], key: string): SeverityLevel | undefined {
+  return levels.find((l) => l.key === key);
 }
 
-/** Inline styles for a severity pill (metallic tones like the readiness badge). */
-export const SEVERITY_STYLE: Record<SeverityTone, { bg: string; fg: string; border: string }> = {
-  red: { bg: "#f8717122", fg: "#f87171", border: "#f8717144" },
-  orange: { bg: "#fb923c22", fg: "#fb923c", border: "#fb923c44" },
-  amber: { bg: "#fbbf2422", fg: "#fbbf24", border: "#fbbf2444" },
-  muted: { bg: "#a1a1aa22", fg: "#a1a1aa", border: "#a1a1aa44" },
-};
+/**
+ * Inline pill styles derived from a severity level's hex color (metallic tone like the
+ * readiness badge): a translucent fill + border off the same hue. Falls back to zinc.
+ */
+export function severityStyle(color: string): { bg: string; fg: string; border: string } {
+  const hex = /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#a1a1aa";
+  return { bg: `${hex}22`, fg: hex, border: `${hex}44` };
+}

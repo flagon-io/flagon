@@ -23,8 +23,8 @@ import { incidents_ } from "./incidents.route.js";
 import { oncall_ } from "./oncall.route.js";
 import { runbooks_ } from "./runbooks.route.js";
 import { rcca_ } from "./rcca.route.js";
-import { alertChannels_ } from "./alert-channels.route.js";
-import { checks_, orgChecks_ } from "./checks.route.js";
+import { severityLevels_ } from "./severity-levels.route.js";
+import { objectives_ } from "./objectives.route.js";
 import { managementWriteLimit } from "../../lib/management-rate-limit.js";
 
 export const v1 = new Hono();
@@ -51,11 +51,6 @@ orgs.route("/:org/lifecycle", orgLifecycle_);
 orgs.route("/:org/usage", usage_);
 orgs.route("/:org/tokens", orgTokens_);
 orgs.route("/:org/projects", projects_);
-// Synthetic-monitoring checks are project-scoped (a check belongs to a service).
-// Mounted as a deeper path than /projects so it delegates cleanly to its own router.
-orgs.route("/:org/projects/:project/checks", checks_);
-// Org-wide checks overview (the Reliability → Checks board).
-orgs.route("/:org/checks", orgChecks_);
 orgs.route("/:org/teams", teams_);
 orgs.route("/:org/uploads", uploads_);
 // Experiments and their reusable metric definitions. `experiment-metrics` is a
@@ -69,9 +64,8 @@ orgs.route("/:org/incidents", incidents_);
 orgs.route("/:org/oncall", oncall_);
 orgs.route("/:org/runbooks", runbooks_);
 orgs.route("/:org/rcca-template", rcca_);
-// Outbound notification destinations (Slack/webhook/email) that checks + incidents
-// enqueue onto. The org-level half of the notifications spine.
-orgs.route("/:org/alert-channels", alertChannels_);
+orgs.route("/:org/severity-levels", severityLevels_);
+orgs.route("/:org/objectives", objectives_);
 // Organization security: SSO enforcement, required 2FA, SCIM provisioning.
 orgs.route("/:org/security", security_);
 // The org resource itself (PATCH /:org rename). Registered last so the more
