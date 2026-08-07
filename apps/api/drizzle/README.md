@@ -32,7 +32,9 @@ full schema as one file, generated from `pg_dump` of a fully-migrated database a
 byte-for-byte. Its journal `when=1`, so it is **skipped** on any database that already has
 the schema (production) and only runs to build a **fresh** one (CI, local, a new region).
 
-The squash required a one-time reset of production's `drizzle.__drizzle_migrations` (its old
-synthetic high-water mark was ~40 days ahead of real time, which would have skipped new
-migrations) via `npm run db:rebaseline` (`scripts/rebaseline-prod.ts`, `CONFIRM_REBASELINE=1`).
-That is done; the script is idempotent and kept for reference.
+The squash also required a one-time reset of production's `drizzle.__drizzle_migrations` (its
+old synthetic high-water mark was ~40 days ahead of real time, which would otherwise have
+skipped new migrations, whose real-time timestamps sit below it). That reset is **done** (prod
+and local, Aug 2026); the throwaway cutover script has been removed now that it has served its
+purpose. A brand-new database needs no reset — it builds from the baseline and applies forward
+migrations in order.
