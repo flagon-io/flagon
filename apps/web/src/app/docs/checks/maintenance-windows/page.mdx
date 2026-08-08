@@ -1,0 +1,55 @@
+export const metadata = {
+  title: "Maintenance windows",
+  description:
+    "Pause checks during planned downtime so they don't run or alert. Target by tag, and repeat daily, weekly, or monthly.",
+};
+
+# Maintenance windows
+
+A **maintenance window** is a planned span during which the checks it targets are **not
+run** — and therefore never alert. Use one around a deploy, a database migration, or any
+scheduled work that would otherwise trip your monitors and page someone.
+
+## How targeting works
+
+A window targets checks by **tag**. When a window is active, any check whose tags
+**intersect** the window's tags is paused for the duration.
+
+- Give a window the tag `deploy` and every check tagged `deploy` is covered.
+- Leave a window's tags **empty** to pause **every** check in the org.
+
+Checks resume automatically the moment the window ends — nothing to turn back on.
+
+## Scheduling and repeats
+
+A window has a **start** and an **end**. It can also **repeat**:
+
+- **Does not repeat** — a one-off window.
+- **Daily / Weekly / Monthly** — the window recurs from its start at the same time, until
+  an optional **repeat-until** date (leave empty to repeat indefinitely).
+
+The window's length is the gap between its start and end; each occurrence lasts that long.
+
+## What a window does (and doesn't)
+
+- **Does**: skip the scheduled runs of matched checks while active, so no runs are recorded
+  and no alerts (or incidents) fire during planned maintenance.
+- **Doesn't**: stop you from running a check manually. A **Run now** still executes, so you
+  can verify a fix mid-window.
+
+## Managing windows
+
+Create and edit windows under **Checks → Maintenance windows**, or through the API:
+
+```bash
+curl -X POST https://api.flagon.io/v1/orgs/$ORG/maintenance-windows \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Nightly deploy",
+    "tags": ["deploy"],
+    "startsAt": "2026-09-01T02:00:00Z",
+    "endsAt": "2026-09-01T04:00:00Z",
+    "repeat": "daily"
+  }'
+```

@@ -1,0 +1,71 @@
+export const metadata = {
+  title: "Alerting",
+  description:
+    "How Checks decides when to alert you and where: failure thresholds, reminders, recovery, and reusable alert channels backed by your integrations.",
+};
+
+# Alerting
+
+A check runs on its schedule whether or not anyone is watching. **Alerting** is how it
+reaches you when something is wrong, without drowning you in noise.
+
+## When an alert fires
+
+Each check has an alert trigger, set on the check:
+
+- **After N failed runs** (run-based): alert once the check fails N times in a row.
+- **After M minutes failing** (time-based): alert once the check has been failing
+  continuously for M minutes.
+
+By default a **degraded** (slow-but-working) run does not count as a failure. Turn on
+**Alert on degraded** to treat slow runs as failing for alerting.
+
+- **Reminders**: while a check is still failing, an optional reminder re-notifies you on a
+  cadence, so an ongoing outage doesn't fall silent.
+- **Recovery**: when a failing check passes again, Flagon sends a single recovery
+  notification. Recovery only fires if an alert had fired, so a check that self-heals
+  before the threshold never pages you.
+
+## Alert channels
+
+Where alerts go is a **reusable alert channel** that checks select. Create channels under
+**Alert channels**, then pick them on each check.
+
+Unlike tools where every channel is configured in isolation, Flagon channels are **powered
+by your [Integrations](/docs/platform/integrations)**: connect an integration once and its
+channels light up.
+
+- **Email** works out of the box — create an email channel, choose which events it fires
+  on (fail / degrade / recover), and select it on your checks. You can send a **test**
+  notification to verify it.
+- **Webhook** POSTs a JSON payload to any endpoint. Add a signing secret and each request
+  carries an `x-flagon-signature` header (HMAC-SHA256 of the body) so you can verify it.
+- **SMS and phone** deliver through your connected **Twilio** integration — connect Twilio
+  and enable the SMS or voice capability, then the channel type becomes available.
+- **Slack, Microsoft Teams, Discord, PagerDuty, Opsgenie** arrive as their integrations
+  land, each backed by the same model.
+
+Every channel is gated by its own fail / degrade / recover flags, so you can, say, page a
+phone only on failures while email covers everything.
+
+### Webhook payload
+
+```json
+{
+  "check": "Home page",
+  "checkKey": "home",
+  "alertType": "alert",
+  "status": "failing",
+  "responseTime": 1234,
+  "httpStatus": 500,
+  "error": "Internal Server Error",
+  "link": "https://app.flagon.io/acme/checks/home",
+  "org": "acme"
+}
+```
+
+## Muting and pausing
+
+- **Mute** a check to keep it running and recording while suppressing its notifications.
+- **Pause** (deactivate) a check to stop it running entirely. A paused check is not
+  scheduled and is not billed.

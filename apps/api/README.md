@@ -54,9 +54,13 @@ only if that role exists, so single-role local dev is unaffected.
 The API ships as a serverless `fetch` handler (`api/index.ts` serves the
 compiled Hono app; the entry and routing config live in `vercel.json`).
 Migrations run in the deploy **build step** via `npm run db:migrate`, so a
-release applies its migrations before it serves traffic. Set `DATABASE_URL`
-(pooled) and `DATABASE_URL_UNPOOLED` (direct) plus `APP_DATABASE_URL` (the
-restricted role, pooled) in the deploy environment.
+release applies its migrations before it serves traffic. The following
+`npm run db:verify-rls` step connects through `APP_DATABASE_URL` and refuses the
+deploy if that role is a superuser, can bypass RLS, owns tenant tables, or if a
+non-exempt tenant table lacks forced RLS and a policy. Runtime startup also
+refuses an owner-role fallback in production. Set `DATABASE_URL` (pooled),
+`DATABASE_URL_UNPOOLED` (direct), and `APP_DATABASE_URL` (the restricted role,
+pooled) in the deploy environment.
 
 **`NODEJS_HELPERS=0` is required** (Vercel > Settings > Environment Variables,
 every environment). Vercel's Node helpers parse the request body onto `req.body`,

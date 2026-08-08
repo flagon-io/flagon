@@ -130,6 +130,7 @@ const repoSchema = z
   })
   .nullable();
 const projectSchema = z.object({
+  id: z.string(),
   key: z.string(),
   name: z.string(),
   description: z.string().nullable(),
@@ -156,6 +157,7 @@ function serialize(
   ownerTeamName: string | null,
 ) {
   return {
+    id: p.id,
     key: p.key,
     name: p.name,
     description: p.description,

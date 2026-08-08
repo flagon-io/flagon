@@ -29,12 +29,10 @@ if (!url) {
   );
 }
 
-// Loud warning if a PRODUCTION instance is running as the owner because the
-// restricted role hasn't been wired up yet: it works, but RLS is not being
-// enforced. Silent locally, where a single role is expected.
+// A production instance must never fall back to the owner connection.
 if (!process.env.APP_DATABASE_URL && process.env.NODE_ENV === "production") {
-  console.warn(
-    "[db] APP_DATABASE_URL is unset; connecting as the database owner, so RLS is NOT enforced. Add the restricted app role's pooled connection string as APP_DATABASE_URL.",
+  throw new Error(
+    "APP_DATABASE_URL is required in production; refusing to run without the restricted RLS role.",
   );
 }
 

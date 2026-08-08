@@ -4,6 +4,7 @@ import { environments, flagEvalRollups, flags, usageEventRollups } from "../db/s
 import {
   CHECKS_METER,
   EVENTS_METER,
+  METERS,
   SOURCE_METERS,
   chargeCents,
   sourceMeter,
@@ -242,16 +243,16 @@ export async function orgUsage(
 
     for (const [source, counts] of bySource) {
       const sm = sourceMeter(source);
-      const line = toSeries(
-        EVENTS_METER,
-        `events:${source}`,
-        sm?.label ?? EVENTS_METER.label,
-        counts,
-        periods,
-      );
-      // Attribute to the producing product (the meter is platform-level; the source
-      // carries the product). This is what gives the table its per-product bands.
-      line.product = sm?.product ?? EVENTS_METER.product;
+      // Price each source under its OWN meter: exposures/metric events under the
+      // `events` money meter, but check runs under the two-tier check-run meters
+      // (uptime cheap, browser ~25x). The meter drives the rate + billable flag; the
+      // source drives the product band. Falls back to the events meter for a source
+      // with no explicit meter mapping.
+      const meter = (sm && METERS[sm.meterId]) || EVENTS_METER;
+      const line = toSeries(meter, `${meter.id}:${source}`, sm?.label ?? meter.label, counts, periods);
+      // Attribute to the producing product (a meter may be platform-level; the
+      // source carries the product). This is what gives the table its per-product bands.
+      line.product = sm?.product ?? meter.product;
       series.push(line);
     }
   }

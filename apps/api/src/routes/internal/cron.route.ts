@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { isBillingConfigured } from "../../lib/stripe.js";
 import { sweepUsageReports } from "../../usage/report-sweep.js";
+import { sweepDueChecks } from "../../checks/sweep.js";
 import { flushMonitoring } from "../../lib/monitoring.js";
 
 /**
@@ -34,6 +35,20 @@ internal.on(["GET", "POST"], "/cron/report", async (c) => {
   // flush before the serverless function freezes, or those events are lost. `ok` stays
   // endpoint-liveness (did the sweep run) so a single transient org failure that
   // self-heals next sweep doesn't page; `failed` is surfaced as data a monitor can read.
+  await flushMonitoring();
+  return c.json({ ok: true, ...result });
+});
+
+/**
+ * The Checks scheduler sweep — runs every due check (checks/sweep.ts). Idempotent
+ * and safe to run often; Vercel Cron calls it every minute (the sub-minute floor).
+ * Inline monitors run here; browser checks are dispatched to the browser function.
+ */
+internal.on(["GET", "POST"], "/cron/checks", async (c) => {
+  if (!cronAuthorized(c.req.header("authorization"))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const result = await sweepDueChecks();
   await flushMonitoring();
   return c.json({ ok: true, ...result });
 });

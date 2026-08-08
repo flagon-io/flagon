@@ -6,7 +6,7 @@ import {
   STRIPE_WEBHOOK_SECRET,
 } from "../../lib/stripe.js";
 import {
-  ensureMeteredItem,
+  ensureBillingItems,
   handleSubscriptionDeleted,
   orgForSubscription,
   syncSubscription,
@@ -18,16 +18,17 @@ import { logger } from "../../lib/logger.js";
 import { captureError } from "../../lib/monitoring.js";
 
 /**
- * Best-effort: add the metered events item to an entitled sub that lacks it (self-heal
- * subs predating metered billing). Never breaks the plan sync — a missing metered
- * price (stripe:sync not run) or Stripe error is logged and swallowed.
+ * Best-effort: ensure an entitled sub carries every billing item — each metered item
+ * (events, browser check runs) and the licensed uptime-monitors item at the org's count
+ * (self-heal subs predating a meter). Never breaks the plan sync — a missing price
+ * (stripe:sync not run) or Stripe error is logged and swallowed.
  */
 async function selfHealMeteredItem(subscription: Stripe.Subscription): Promise<void> {
   if (!isBillingConfigured() || !statusEntitlesPro(subscription.status)) return;
   try {
-    await ensureMeteredItem(subscription);
+    await ensureBillingItems(subscription);
   } catch (err) {
-    logger.warn("[stripe:webhook] ensureMeteredItem failed", { err });
+    logger.warn("[stripe:webhook] ensureBillingItems failed", { err });
   }
 }
 

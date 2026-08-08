@@ -143,6 +143,8 @@ const TAG_DEFS: { name: string; description: string }[] = [
   { name: "Client keys", description: "Per-environment publishable keys that authenticate OFREP evaluation." },
   { name: "Usage", description: "Org-wide metered usage, priced for the console usage page." },
   { name: "Projects", description: "The service catalog: projects and their ownership + metadata." },
+  { name: "Checks", description: "Uptime + synthetic monitoring: scheduled checks, their runs, and alerting." },
+  { name: "Alert channels", description: "Reusable destinations that check alerts deliver to (email, and more)." },
   { name: "Incidents", description: "Reliability events affecting catalog services, with a timeline and runbook checklist." },
   { name: "Runbooks", description: "Reusable playbooks whose steps become an incident's checklist." },
   { name: "Notifications", description: "Your contact channels (email, and more as providers land)." },

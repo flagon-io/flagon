@@ -27,6 +27,13 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
+/* Workspace routes own their vertical scrolling inside the content pane. The
+   design system's stable root gutter is useful for document-scrolling pages,
+   but here it reserves a second, empty scrollbar lane beside the top bar. */
+html:has([data-workspace-shell]) {
+  scrollbar-gutter: auto;
+}
+
 /* Sidebar drill-in transition: the workspace nav swaps between the root and a
    feature's sub-nav in place, so we slide the incoming panel in directionally
    (from the right when drilling in, from the left when going back). The panel is

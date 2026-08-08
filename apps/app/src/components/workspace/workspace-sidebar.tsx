@@ -7,13 +7,16 @@ import {
   Activity,
   Archive,
   ArrowUpRight,
+  BellRing,
   BookText,
   Boxes,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   CreditCard,
   FileCog,
   FlaskConical,
+  Gauge,
   Globe,
   KeyRound,
   Logs,
@@ -207,6 +210,43 @@ function buildNav(base: string, canManage: boolean): {
     ],
   };
 
+  // Checks: uptime + synthetic monitoring (Checkly-style). One area for now; the
+  // full "Detect / Communicate" split (alert channels, status pages, maintenance
+  // windows, dashboards) lands as the product fills out.
+  const checks: NavArea = {
+    key: "checks",
+    label: "Checks",
+    icon: Gauge,
+    href: `${base}/checks`,
+    groups: [
+      {
+        heading: "Detect",
+        items: [
+          { label: "Checks", icon: Gauge, href: `${base}/checks` },
+        ],
+      },
+      {
+        heading: "Communicate",
+        items: [
+          { label: "Alert channels", icon: BellRing, href: `${base}/checks/alert-channels` },
+          { label: "Maintenance windows", icon: CalendarClock, href: `${base}/checks/maintenance` },
+          { label: "Status pages", icon: Signal, href: `${base}/checks/status-pages` },
+        ],
+      },
+      {
+        heading: "Resources",
+        items: [
+          {
+            label: "Documentation",
+            icon: BookText,
+            href: `${WEB_URL}/docs/checks`,
+            external: true,
+          },
+        ],
+      },
+    ],
+  };
+
   // Reliability: incidents, uptime, and their runbooks. (On-call/escalation is a
   // separate feature set, coming later.)
   const incidents: NavArea = {
@@ -234,7 +274,7 @@ function buildNav(base: string, canManage: boolean): {
   };
 
   return {
-    areas: canManage ? [flags, incidents, settings] : [flags, incidents],
+    areas: canManage ? [flags, checks, incidents, settings] : [flags, checks, incidents],
     sections: [
       [
         // Projects is the org home, so its link always works.
@@ -253,8 +293,8 @@ function buildNav(base: string, canManage: boolean): {
         // work on events across every product. Broad enough that it supersedes
         // Runbooks, which is why there is no separate Runbooks entry.
         { kind: "soon", label: "Automations", icon: Workflow },
+        { kind: "area", area: checks },
         { kind: "area", area: incidents },
-        { kind: "soon", label: "Status Page", icon: Signal },
       ],
       // People, GitHub-style: a top-level band everyone can see (the roster +
       // your own paging), NOT buried in the admin-only Settings.
@@ -343,6 +383,7 @@ export function WorkspaceSidebar({
             items: [
               { label: "Deployments", icon: Rocket, soon: true },
               { label: "Logs", icon: Logs, soon: true },
+              { label: "Checks", icon: Gauge, href: `${projectBase}/checks` },
               { label: "Incidents", icon: Siren, href: `${projectBase}/incidents` },
             ],
           },

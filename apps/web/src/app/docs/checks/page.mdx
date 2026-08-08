@@ -1,0 +1,53 @@
+export const metadata = {
+  title: "Checks",
+  description:
+    "Uptime and synthetic monitoring: schedule checks against your endpoints, services, and user flows, and get alerted the moment they fail.",
+};
+
+# Checks
+
+**Checks** is active monitoring. You point Flagon at an endpoint, a service, or a scripted
+browser flow, and we run it on a schedule from our infrastructure. When it fails or slows
+down, we alert you. When it recovers, we tell you that too.
+
+There are two families, and they are priced differently.
+
+## Uptime monitors
+
+Lightweight protocol probes, billed by the number of active monitors:
+
+- **[URL monitor](/docs/checks/uptime)** requests an HTTP endpoint and evaluates its
+  status code, response time, and [assertions](/docs/checks/assertions).
+- **TCP monitor** opens a connection to a host and port.
+- **DNS monitor** resolves a record and checks the answer.
+- **SSL monitor** verifies the TLS certificate and warns before it expires.
+
+## Synthetic checks
+
+Exercise a real flow, billed per run:
+
+- **[API check](/docs/checks/api-checks)** sends a request with headers and a body and
+  runs full [assertions](/docs/checks/assertions) against the response.
+- **[Browser check](/docs/checks/browser-checks)** runs a Playwright script in a headless
+  browser, so you can test a login, a checkout, or any click path a user takes.
+
+More monitor types (ICMP, gRPC, heartbeat, multistep, Playwright suites) are on the way.
+Every type is an adapter behind the same scheduling, alerting, and billing, so they light
+up without changing anything about how you use Checks.
+
+## How a run is evaluated
+
+Every run resolves to one of three states:
+
+- **Passing**: the check succeeded within its response-time threshold and every assertion
+  held.
+- **Degraded**: it succeeded but was slower than the degraded threshold (or, for SSL, the
+  certificate is nearing expiry). Browser checks have no degraded state.
+- **Failing**: it errored, timed out, or an assertion did not hold.
+
+## What's next
+
+- Set up [uptime monitors](/docs/checks/uptime), [API checks](/docs/checks/api-checks), and
+  [browser checks](/docs/checks/browser-checks).
+- Learn the [assertion model](/docs/checks/assertions) that validates responses.
+- Learn how [alerting](/docs/checks/alerting) reaches you through your channels.

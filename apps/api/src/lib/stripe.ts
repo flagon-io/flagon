@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { SOURCE_METERS } from "../usage/meters.js";
 
 /**
  * The API's Stripe client — the control plane owns billing (checkout, portal,
@@ -33,6 +34,16 @@ export const PRO_PRICE_LOOKUP_KEY = "flagon_pro_monthly";
  */
 export const EVENTS_METER_EVENT_NAME = "flagon_events";
 export const EVENTS_METERED_PRICE_LOOKUP_KEY = "flagon_events_metered";
+
+/**
+ * The Checks product's UPTIME-monitor billing. Metered as a GAUGE: the sweep reports the
+ * org's current active-monitor count to this meter, and Stripe's `last` aggregation bills
+ * that count at the per-monitor rate. Metered (not licensed) so the shared $50 credit
+ * covers it, exactly like events. Provisioned by scripts/sync-stripe.ts; reported by
+ * lib/billing.ts.
+ */
+export const UPTIME_MONITORS_METER_EVENT_NAME = "flagon_uptime_monitors";
+export const UPTIME_MONITORS_PRICE_LOOKUP_KEY = "flagon_uptime_monitors_metered";
 
 /** Signing secret for the Stripe webhook endpoint (raw-body verification). */
 export const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
@@ -108,4 +119,52 @@ export async function getMeteredPriceId(): Promise<string> {
   }
   cachedMeteredPriceId = price.id;
   return price.id;
+}
+
+/** Resolve a price id from a stable lookup key, or null if it doesn't exist yet. */
+async function priceIdByLookupKey(lookupKey: string): Promise<string | null> {
+  const stripe = getStripe();
+  const prices = await stripe.prices.list({ lookup_keys: [lookupKey], active: true, limit: 1 });
+  return prices.data[0]?.id ?? null;
+}
+
+const meteredPriceIdCache = new Map<string, string>();
+
+/**
+ * Resolve every metered price id the code declares (one per distinct SOURCE_METERS
+ * price lookup key: events, browser check runs, …). Used by checkout + subscription
+ * reconciliation so a subscription carries a metered item for each billable meter.
+ * Missing prices are skipped (sync-stripe creates them); cached per lookup key.
+ */
+export async function getMeteredPriceIds(): Promise<string[]> {
+  // Every durable-events source's price, PLUS the uptime-monitors gauge price (which is
+  // metered but reported directly, not through the events spine, so it isn't a source).
+  const keys = [
+    ...new Set(Object.values(SOURCE_METERS).map((s) => s.priceLookupKey)),
+    UPTIME_MONITORS_PRICE_LOOKUP_KEY,
+  ];
+  const ids: string[] = [];
+  for (const key of keys) {
+    const cached = meteredPriceIdCache.get(key);
+    if (cached) {
+      ids.push(cached);
+      continue;
+    }
+    const id = await priceIdByLookupKey(key);
+    if (id) {
+      meteredPriceIdCache.set(key, id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+let cachedUptimePriceId: string | null = null;
+
+/** Resolve the licensed uptime-monitors price id, or null if not provisioned yet. */
+export async function getUptimeMonitorsPriceId(): Promise<string | null> {
+  if (cachedUptimePriceId) return cachedUptimePriceId;
+  const id = await priceIdByLookupKey(UPTIME_MONITORS_PRICE_LOOKUP_KEY);
+  if (id) cachedUptimePriceId = id;
+  return id;
 }

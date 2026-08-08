@@ -1,0 +1,70 @@
+export const metadata = {
+  title: "Uptime monitors",
+  description:
+    "Lightweight protocol probes — URL, TCP, DNS, and SSL — that verify availability, connectivity, resolution, and certificate health on a schedule.",
+};
+
+# Uptime monitors
+
+Uptime monitors are lightweight probes, billed by the number of active monitors rather
+than per run, so run them often and broadly.
+
+## URL monitor
+
+Makes one HTTP request and evaluates the response.
+
+- **URL**, **method** (`GET` default), **follow redirects**.
+- **[Assertions](/docs/checks/assertions)**: validate the status code and response time
+  (default: status < 400). This replaces a single "expected status" field — status code is
+  just one assertion source among several.
+- **Degraded after** (default `3000ms`) and **failed after** (default `5000ms`, capped at
+  30s).
+
+```bash
+curl -X POST https://api.flagon.io/v1/orgs/acme/checks \
+  -H "Authorization: Bearer $FLAGON_TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "name": "Homepage",
+    "type": "url",
+    "config": {
+      "url": "https://acme.com",
+      "assertions": [{ "source": "status", "comparison": "less_than", "target": "400" }],
+      "degradedThresholdMs": 800
+    },
+    "frequencySeconds": 300
+  }'
+```
+
+## TCP monitor
+
+Opens a TCP connection to a **host** and **port** and evaluates on whether it connected
+and how long it took. Use it for databases, message brokers, and other non-HTTP services.
+
+```json
+{ "type": "tcp", "config": { "host": "db.acme.com", "port": 5432 } }
+```
+
+## DNS monitor
+
+Resolves a **hostname** for a **record type** (`A`, `AAAA`, `CNAME`, `MX`, `NS`, `TXT`) and
+optionally asserts the answer contains an **expected** value.
+
+```json
+{ "type": "dns", "config": { "hostname": "acme.com", "recordType": "A", "expected": "93.184.216.34" } }
+```
+
+## SSL monitor
+
+Opens a TLS connection to a **host** (and **port**, default `443`) and checks the
+certificate. The check **fails** if the handshake fails, the certificate is untrusted, or
+it has expired; it goes **degraded** when the certificate expires within
+`expiryThresholdDays` (default 14) — a heads-up before it becomes an outage.
+
+```json
+{ "type": "ssl", "config": { "host": "acme.com", "expiryThresholdDays": 14 } }
+```
+
+## Scheduling
+
+Pick a **frequency** from one minute up to daily; we run the check on that cadence and
+record every result. Sub-minute frequencies are on the way.

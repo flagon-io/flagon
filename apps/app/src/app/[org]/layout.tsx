@@ -81,7 +81,7 @@ export default async function OrgLayout({
   };
 
   return (
-    <div className="flex h-dvh overflow-hidden">
+    <div data-workspace-shell className="flex h-dvh overflow-hidden">
       <WorkspaceSidebar
         orgs={orgs}
         current={membership}

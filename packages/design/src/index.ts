@@ -27,6 +27,7 @@ export { Field } from "./components/field";
 export { TopLoader } from "./components/top-loader";
 export { Button, type ButtonVariant } from "./components/button";
 export { Switch } from "./components/switch";
+export { Slider, type SliderStep } from "./components/slider";
 export { Skeleton } from "./components/skeleton";
 export {
   Toaster,

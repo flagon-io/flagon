@@ -141,3 +141,74 @@ export function isSelectablePlan(value: string): value is PlanId {
 export function planAllowsInvites(id: string): boolean {
   return id !== "hobby";
 }
+
+/**
+ * The Checks product's billing. Both units are USAGE-METERED and draw down the SAME
+ * shared $50 monthly credit as events — there is NO separate free allowance on top of
+ * the credit (Stripe credit grants only apply to metered prices, so everything billable
+ * is metered):
+ *
+ *   - UPTIME monitors bill per ACTIVE MONITOR per month ($0.32), metered as a GAUGE
+ *     (the sweep reports the current count; Stripe's `last` aggregation bills it). The
+ *     $50 credit covers ~156 monitors before any overage — see usage/meters.ts +
+ *     lib/billing.ts + scripts/sync-stripe.ts.
+ *   - SYNTHETIC checks (browser today, API/multistep later) bill per RUN, metered
+ *     through the durable events spine at their own rate (usage/meters.ts).
+ *
+ * `planIncludedUptimeMonitors` is CREDIT-DERIVED for Pro (how many fit in the $50), a
+ * hard FREE cap for Hobby (which has no subscription to meter), and 0/contract for
+ * Enterprise. Mirror in packages/design/src/plans.ts.
+ */
+
+/** Monthly price of one active uptime monitor, in cents — the committed launch rate,
+ *  matching Checkly's ~$0.32/monitor economics. The $50 credit covers the bill; every
+ *  monitor draws it down from #1 (no separate free tier). Mirror of METERS uptime rate. */
+export const UPTIME_MONITOR_CENTS = 32;
+
+const PLAN_UPTIME_MONITORS: Record<PlanId, { included: number; overage: OverageMode; hardCap: boolean }> = {
+  // Hobby has no subscription to meter, so its monitors are genuinely free up to a hard cap.
+  hobby: { included: 10, overage: "cap", hardCap: true },
+  // Pro: credit-derived — how many monitors the $50 credit covers ($50 / $0.32 ≈ 156).
+  pro: { included: Math.floor(PRO_CREDIT_CENTS / UPTIME_MONITOR_CENTS), overage: "bill", hardCap: false },
+  enterprise: { included: 0, overage: "contract", hardCap: false },
+};
+
+/** The monthly included active-uptime-monitor allowance for a plan (credit-derived for
+ *  Pro; a hard free cap for Hobby); 0 for unknown/contracted. */
+export function planIncludedUptimeMonitors(id: string): number {
+  return PLAN_UPTIME_MONITORS[id as PlanId]?.included ?? 0;
+}
+/** How a plan treats uptime monitors past its allowance; unknown plans fail safe to "cap". */
+export function planUptimeOverage(id: string): OverageMode {
+  return PLAN_UPTIME_MONITORS[id as PlanId]?.overage ?? "cap";
+}
+/** Whether a plan HARD-CAPS the active uptime-monitor count at its included allowance
+ *  (Hobby, which can't meter). Unknown plans fail safe to false. */
+export function planUptimeHardCaps(id: string): boolean {
+  return PLAN_UPTIME_MONITORS[id as PlanId]?.hardCap ?? false;
+}
+
+/** Monthly included SYNTHETIC check-run allowance per plan + type. Browser today; API
+ *  lands with that adapter. 0 for unknown/contracted. */
+const PLAN_SYNTHETIC_RUNS: Record<PlanId, { browser: number; api: number; overage: OverageMode; hardCap: boolean }> = {
+  hobby: { browser: 1_000, api: 10_000, overage: "cap", hardCap: true },
+  pro: { browser: 12_000, api: 100_000, overage: "bill", hardCap: false },
+  enterprise: { browser: 0, api: 0, overage: "contract", hardCap: false },
+};
+
+export function planIncludedSyntheticRuns(id: string, kind: "browser" | "api"): number {
+  const p = PLAN_SYNTHETIC_RUNS[id as PlanId];
+  return p ? p[kind] : 0;
+}
+export function planSyntheticOverage(id: string): OverageMode {
+  return PLAN_SYNTHETIC_RUNS[id as PlanId]?.overage ?? "cap";
+}
+
+/**
+ * Whether a plan may use CHECK incident automation — a failing check auto-opening
+ * an Incident on a linked service. Pro-gated, mirroring how Checkly gates incident
+ * automation to Team+. Unknown/Hobby plans cannot.
+ */
+export function planAllowsIncidentAutomation(id: string): boolean {
+  return id === "pro" || id === "enterprise";
+}

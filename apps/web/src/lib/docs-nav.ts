@@ -129,6 +129,20 @@ export const nav: NavSection[] = [
         ],
       },
       {
+        title: "Checks",
+        items: [
+          { title: "Overview", href: "/docs/checks" },
+          { title: "Uptime monitors", href: "/docs/checks/uptime" },
+          { title: "API checks", href: "/docs/checks/api-checks" },
+          { title: "Browser checks", href: "/docs/checks/browser-checks" },
+          { title: "Assertions", href: "/docs/checks/assertions" },
+          { title: "Alerting", href: "/docs/checks/alerting" },
+          { title: "Maintenance windows", href: "/docs/checks/maintenance-windows" },
+          { title: "Incident automation", soon: true },
+          { title: "Status pages", soon: true },
+        ],
+      },
+      {
         title: "Incidents",
         items: [
           { title: "Incidents", href: "/docs/incidents" },

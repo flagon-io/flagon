@@ -25,6 +25,9 @@ import { rcca_ } from "./rcca.route.js";
 import { severityLevels_ } from "./severity-levels.route.js";
 import { objectives_ } from "./objectives.route.js";
 import { integrations_ } from "./integrations.route.js";
+import { checks_ } from "./checks.route.js";
+import { alertChannels_ } from "./alert-channels.route.js";
+import { maintenanceWindows_ } from "./maintenance-windows.route.js";
 import { managementWriteLimit } from "../../lib/management-rate-limit.js";
 
 export const v1 = new Hono();
@@ -70,6 +73,13 @@ orgs.route("/:org/security", security_);
 // Bring-your-own-provider integrations (Twilio, …): customer-supplied
 // credentials Flagon uses on their behalf. Slack/Discord app-installs are separate.
 orgs.route("/:org/integrations", integrations_);
+// Checks: uptime + synthetic monitoring. The monitor-types discovery endpoint lives
+// at /checks/monitor-types (a static segment, so it resolves before /checks/:key).
+orgs.route("/:org/checks", checks_);
+// Alert channels: reusable destinations check alerts deliver to (email today).
+orgs.route("/:org/alert-channels", alertChannels_);
+// Maintenance windows: planned spans that suppress scheduled check runs.
+orgs.route("/:org/maintenance-windows", maintenanceWindows_);
 // The org resource itself (PATCH /:org rename). Registered last so the more
 // specific sub-resource routes above take precedence.
 orgs.route("/:org", org_);

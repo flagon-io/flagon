@@ -1544,6 +1544,195 @@ export const reliabilityObjectives = pgTable(
   ],
 );
 
+/**
+ * =============================================================================
+ * CHECKS (uptime + synthetic monitoring)
+ * =============================================================================
+ * The Checks product: active monitoring (a Checkly clone). A `check` is a
+ * scheduled probe of one monitor TYPE (URL, browser, and — later — TCP/DNS/ICMP/
+ * gRPC/SSL/heartbeat/API/multistep). The type-specific config lives in `config`
+ * jsonb, validated by that type's adapter (checks/monitors). Every table is
+ * `check_*` prefixed and TENANT-scoped (organization_id + the same RLS policy as
+ * everything else). Billing is NOT here: a run meters through the shared durable
+ * spine (usage_events) under the type's `billingSource` ("checks.uptime" /
+ * "checks.browser"), so uptime and synthetic runs bill at their own rates.
+ */
+
+/** A check's alerting trigger: alert after N consecutive failed runs, or after the
+ *  check has been failing for M minutes (Checkly's RUN_BASED / TIME_BASED). An
+ *  optional reminder cadence re-notifies while still alerting. */
+export type CheckAlertTrigger =
+  | { type: "run_count"; runs: number; reminderMinutes?: number }
+  | { type: "time_based"; minutes: number; reminderMinutes?: number };
+
+export const checks = pgTable(
+  "checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    // The monitor-type key (checks/monitors registry): "url", "browser", …
+    type: text("type").notNull(),
+    // The billing/IA family, denormalized from the type so the due scan + metering
+    // never have to resolve the adapter: "uptime" | "synthetic".
+    family: text("family").notNull(),
+    // Type-specific config, validated on write by getMonitorType(type).configSchema.
+    config: jsonb("config")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    // --- schedule ---
+    frequencySeconds: integer("frequency_seconds").notNull().default(300),
+    locations: text("locations").array().notNull().default(sql`ARRAY['default']::text[]`),
+    // Round-robin (false) vs run-from-all-locations (true). MVP is single-location.
+    runParallel: boolean("run_parallel").notNull().default(false),
+    // Retry strategy (Checkly: none/single/fixed/linear/exponential). Null = none.
+    // Wired in a later phase; the column exists so the schedule shape is stable.
+    retryStrategy: jsonb("retry_strategy").$type<Record<string, unknown>>(),
+    activated: boolean("activated").notNull().default(true),
+    muted: boolean("muted").notNull().default(false),
+    tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
+    // --- live state (the state machine, checks/state.ts) ---
+    currentStatus: text("current_status").notNull().default("unknown"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    consecutivePasses: integer("consecutive_passes").notNull().default(0),
+    // Set on the first failing run; null when not failing (drives time_based alerts).
+    failingSince: timestamp("failing_since", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    // The due-scan key: the sweep picks up checks whose next_run_at has passed.
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
+    lastStatusChangeAt: timestamp("last_status_change_at", { withTimezone: true }),
+    // --- alerting config (embedded; one settings owner per check) ---
+    alertTrigger: jsonb("alert_trigger")
+      .$type<CheckAlertTrigger>()
+      .notNull()
+      .default(sql`'{"type":"run_count","runs":1}'::jsonb`),
+    alertOnDegraded: boolean("alert_on_degraded").notNull().default(false),
+    // The alert CHANNELS this check notifies (ids into alert_channels) — the Checkly
+    // model: a check subscribes to reusable channels rather than carrying raw addresses.
+    alertChannelIds: uuid("alert_channel_ids").array().notNull().default(sql`ARRAY[]::uuid[]`),
+    // Legacy quick-emails kept for back-compat; new checks select channels instead.
+    alertEmails: text("alert_emails").array().notNull().default(sql`ARRAY[]::text[]`),
+    // --- alerting runtime state ---
+    alertState: text("alert_state").notNull().default("ok"),
+    lastAlertedAt: timestamp("last_alerted_at", { withTimezone: true }),
+    lastReminderAt: timestamp("last_reminder_at", { withTimezone: true }),
+    // --- incident automation (Pro-gated; wired in a later phase) ---
+    incidentAutomation: boolean("incident_automation").notNull().default(false),
+    linkedProjectId: uuid("linked_project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
+    openIncidentId: uuid("open_incident_id").references(() => incidents.id, {
+      onDelete: "set null",
+    }),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("checks_org_key_key").on(t.organizationId, t.key),
+    // The per-minute due scan reads only runnable checks; a partial index keeps it
+    // tight even when most checks are muted/deactivated.
+    index("checks_due_idx")
+      .on(t.organizationId, t.nextRunAt)
+      .where(sql`${t.activated} and not ${t.muted}`),
+    index("checks_org_status_idx").on(t.organizationId, t.currentStatus),
+    index("checks_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * The append-only run log: one row per probe execution. The fast history read for
+ * the check detail view; a later phase folds these into daily rollups for
+ * analytics + retention. Tenant data (org-scoped, RLS).
+ */
+export const checkResults = pgTable(
+  "check_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    checkId: uuid("check_id")
+      .notNull()
+      .references(() => checks.id, { onDelete: "cascade" }),
+    runStartedAt: timestamp("run_started_at", { withTimezone: true }).notNull(),
+    status: text("status").notNull(),
+    latencyMs: integer("latency_ms"),
+    httpStatus: integer("http_status"),
+    location: text("location").notNull().default("default"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    assertions: jsonb("assertions"),
+    detail: jsonb("detail"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("check_results_check_time_idx").on(t.checkId, t.runStartedAt),
+    index("check_results_org_idx").on(t.organizationId),
+  ],
+);
+
+/**
+ * An alert channel — a reusable destination that check alerts deliver to (email today;
+ * SMS/Slack/webhook/etc. as the alert-channel registry fills out). Channels are ORG-GLOBAL
+ * by default (they receive every check's alerts), matching Checkly's "global alert channels
+ * for the checks in your account"; per-check subscriptions come later. `config` holds the
+ * type-specific destination (email: `{ address }`). The send_on_* flags gate which state
+ * transitions notify. Tenant data (org-scoped, RLS).
+ */
+export const alertChannels = pgTable(
+  "alert_channels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    // Channel type key ("email" today). Many types are backed by an org Integration
+    // (SMS -> Twilio, Slack -> the Slack app); email is native.
+    type: text("type").notNull(),
+    name: text("name").notNull(),
+    // Type-specific destination, e.g. { address } for email.
+    config: jsonb("config").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    sendOnFailure: boolean("send_on_failure").notNull().default(true),
+    sendOnRecovery: boolean("send_on_recovery").notNull().default(true),
+    sendOnDegraded: boolean("send_on_degraded").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    index("alert_channels_org_idx").on(t.organizationId),
+    index("alert_channels_org_type_idx").on(t.organizationId, t.type),
+  ],
+);
+
+/**
+ * A maintenance window: a planned span during which matched checks are NOT run (and so
+ * never alert), the Checkly model. A window targets checks by TAG — its `tags` intersect a
+ * check's tags (ANY-of); an EMPTY `tags` matches every check. Windows can repeat
+ * (daily/weekly/monthly) until an optional `repeatEndsAt`. Purely a scheduling suppression:
+ * the sweep skips execution for matched checks while a window is active (see
+ * checks/maintenance.ts). Tenant data (org-scoped, RLS).
+ */
+export const maintenanceWindows = pgTable(
+  "maintenance_windows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    name: text("name").notNull(),
+    // Checks whose tags intersect these are in the window; empty = ALL checks.
+    tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    // "none" | "daily" | "weekly" | "monthly" — how the window recurs from startsAt.
+    repeat: text("repeat").notNull().default("none"),
+    // When a repeating window stops recurring; null = forever.
+    repeatEndsAt: timestamp("repeat_ends_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id"),
+    ...timestamps,
+  },
+  (t) => [
+    index("maintenance_windows_org_idx").on(t.organizationId),
+  ],
+);
+
 export type Flag = typeof flags.$inferSelect;
 export type NewFlag = typeof flags.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
@@ -1587,6 +1776,14 @@ export type ReliabilityObjective = typeof reliabilityObjectives.$inferSelect;
 export type RccaTemplate = typeof rccaTemplates.$inferSelect;
 export type IncidentRcca = typeof incidentRccas.$inferSelect;
 export type IncidentActionItem = typeof incidentActionItems.$inferSelect;
+export type Check = typeof checks.$inferSelect;
+export type NewCheck = typeof checks.$inferInsert;
+export type CheckResult = typeof checkResults.$inferSelect;
+export type NewCheckResult = typeof checkResults.$inferInsert;
+export type AlertChannel = typeof alertChannels.$inferSelect;
+export type NewAlertChannel = typeof alertChannels.$inferInsert;
+export type MaintenanceWindow = typeof maintenanceWindows.$inferSelect;
+export type NewMaintenanceWindow = typeof maintenanceWindows.$inferInsert;
 
 /** Everything the migrator and query layer should know about. */
 export const schema = {
@@ -1631,6 +1828,10 @@ export const schema = {
   rccaTemplates,
   incidentRccas,
   incidentActionItems,
+  checks,
+  checkResults,
+  alertChannels,
+  maintenanceWindows,
 };
 
 // Re-exported so callers can build raw fragments without importing drizzle-orm

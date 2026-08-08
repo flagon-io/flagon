@@ -1,0 +1,42 @@
+export const metadata = {
+  title: "Assertions",
+  description:
+    "Validate a check's response with source / comparison / target assertions — status code, response time, body, JSON paths, and headers.",
+};
+
+# Assertions
+
+HTTP-based checks (the [URL monitor](/docs/checks/uptime) and the
+[API check](/docs/checks/api-checks)) validate the response with **assertions**. When one
+or more assertions fail, the check fails. Each assertion is a **source**, an optional
+**property**, a **comparison**, and a **target** — the same shape you build in the console.
+
+## Sources
+
+- **status** — the HTTP status code.
+- **responseTime** — the response time in milliseconds.
+- **body** — the raw response body.
+- **jsonBody** — a value inside a JSON body, addressed by a dot path in `property` (e.g.
+  `data.id`).
+- **header** — a response header, named in `property` (e.g. `content-type`).
+
+## Comparisons
+
+`equals`, `not_equals`, `greater_than`, `less_than`, `contains`, `not_contains`,
+`is_empty`, `not_empty`. The `target` is ignored for `is_empty` / `not_empty`.
+
+## Examples
+
+```json
+{
+  "assertions": [
+    { "source": "status", "comparison": "equals", "target": "200" },
+    { "source": "responseTime", "comparison": "less_than", "target": "800" },
+    { "source": "jsonBody", "property": "data.id", "comparison": "equals", "target": "42" },
+    { "source": "header", "property": "content-type", "comparison": "contains", "target": "json" }
+  ]
+}
+```
+
+The default assertion for an HTTP check, if you specify none, is `status < 400` — any
+non-error response passes.

@@ -36,6 +36,7 @@ export type ProjectRepo = {
   visibility: string | null;
 };
 export type Project = {
+  id: string;
   key: string;
   name: string;
   description: string | null;

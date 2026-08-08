@@ -1,9 +1,17 @@
 import type Stripe from "stripe";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations } from "../db/auth-tables.js";
-import { getStripe, getProPriceId, getMeteredPriceId } from "./stripe.js";
-import { statusEntitlesPro } from "./entitlement.js";
+import { checks } from "../db/schema.js";
+import { withOrg } from "../db/tenant.js";
+import {
+  getStripe,
+  getProPriceId,
+  getMeteredPriceIds,
+  UPTIME_MONITORS_METER_EVENT_NAME,
+} from "./stripe.js";
+import { statusEntitlesPro, isMeteredReportable } from "./entitlement.js";
+import { captureError } from "./monitoring.js";
 import type { BillingCycle } from "../usage/allowance.js";
 
 /**
@@ -100,16 +108,23 @@ export async function createCheckoutUrl(
 ): Promise<string> {
   const stripe = getStripe();
   const priceId = await getProPriceId();
-  const meteredPriceId = await getMeteredPriceId();
+  const meteredPriceIds = await getMeteredPriceIds();
   const customerId = await ensureCustomer(org, actor);
   const base = `${appUrl()}/${org.slug}/settings/billing`;
+
+  // The flat $50 base + one metered item per meter — events, browser check runs, AND the
+  // uptime-monitors gauge (getMeteredPriceIds includes all of them). Metered items carry
+  // NO quantity (usage flows via each meter; the shared $50 credit offsets every one),
+  // so every billing line is present from day one and reads plainly by its product name.
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+    { price: priceId, quantity: 1 },
+    ...meteredPriceIds.map((price) => ({ price })),
+  ];
 
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    // The flat $50 base + the metered events price. A metered item carries NO
-    // quantity (usage is reported to its meter); the $50 credit grant offsets it.
-    line_items: [{ price: priceId, quantity: 1 }, { price: meteredPriceId }],
+    line_items: lineItems,
     client_reference_id: org.id,
     subscription_data: {
       metadata: { flagon_org_id: org.id, flagon_org_slug: org.slug },
@@ -124,25 +139,54 @@ export async function createCheckoutUrl(
   return session.url;
 }
 
-/**
- * Ensure a subscription carries the metered events item, adding it if absent
- * (idempotent). New checkouts include it already; this self-heals subscriptions that
- * predate metered billing (the flat-price + comped subs backfilled at launch, or any
- * that somehow lost it). Metered items carry no quantity — usage flows via the meter.
- */
-export async function ensureMeteredItem(
-  subscription: Stripe.Subscription,
-): Promise<void> {
-  const meteredPriceId = await getMeteredPriceId();
-  const alreadyHas = subscription.items.data.some(
-    (it) => it.price?.id === meteredPriceId,
+/** The org's count of ACTIVE uptime monitors — the metered gauge value. Muted monitors
+ *  still run (and bill); deactivated ones don't. The one product-table read billing does,
+ *  for the count-billed uptime unit. */
+export async function activeUptimeMonitorCount(orgId: string): Promise<number> {
+  const rows = await withOrg(orgId, (tx) =>
+    tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(checks)
+      .where(and(eq(checks.family, "uptime"), eq(checks.activated, true))),
   );
-  if (alreadyHas) return;
+  return rows[0]?.n ?? 0;
+}
+
+/**
+ * Ensure a subscription carries every metered billing item the code declares — one per
+ * meter (events, browser check runs, uptime monitors). Idempotent — new checkouts include
+ * these already; this self-heals subscriptions that predate a meter (the flat-price +
+ * comped subs, or any that lost one). Metered items carry no quantity; usage flows via
+ * each meter and the shared $50 credit offsets it.
+ */
+export async function ensureBillingItems(subscription: Stripe.Subscription): Promise<void> {
   const stripe = getStripe();
-  await stripe.subscriptionItems.create({
-    subscription: subscription.id,
-    price: meteredPriceId,
-  });
+  const meteredIds = await getMeteredPriceIds();
+  for (const priceId of meteredIds) {
+    if (subscription.items.data.some((it) => it.price?.id === priceId)) continue;
+    await stripe.subscriptionItems.create({ subscription: subscription.id, price: priceId });
+  }
+}
+
+/**
+ * Report the org's current active-uptime-monitor COUNT to the uptime meter — a GAUGE:
+ * Stripe's `last` aggregation bills the last value reported in the period, so reporting
+ * the count each usage sweep keeps the billed count current (and prices monitors from #1,
+ * drawing down the shared $50 credit). Only a billable (entitled) Pro org is reported.
+ * Best-effort: never throws — a Stripe hiccup just leaves the previous value until the
+ * next sweep.
+ */
+export async function reportUptimeUsage(org: BillingOrg): Promise<void> {
+  if (!isMeteredReportable(org)) return;
+  try {
+    const count = await activeUptimeMonitorCount(org.id);
+    await getStripe().billing.meterEvents.create({
+      event_name: UPTIME_MONITORS_METER_EVENT_NAME,
+      payload: { stripe_customer_id: org.stripeCustomerId!, value: String(count) },
+    });
+  } catch (err) {
+    captureError(`[billing] reportUptimeUsage org ${org.slug} failed`, err, { org: org.slug });
+  }
 }
 
 /** Create a Billing Portal session and return its URL. */

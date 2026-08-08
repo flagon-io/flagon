@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations } from "../db/auth-tables.js";
 import { reportOrgUsage } from "./report.js";
+import { reportUptimeUsage } from "../lib/billing.js";
 import { compactUsageEvents } from "./events.js";
 import { captureError } from "../lib/monitoring.js";
 
@@ -59,6 +60,9 @@ export async function sweepUsageReports(): Promise<{
       await compactUsageEvents(org.id);
       const result = await reportOrgUsage(org);
       sent += result.sent;
+      // Report the current active uptime-monitor count as a gauge (Stripe `last`
+      // aggregation bills the last value). Best-effort inside — never fails the org.
+      await reportUptimeUsage(org);
     } catch (err) {
       // Swallow per-org so one org's Stripe/DB failure leaves its receipts for the
       // next sweep without blocking the others — but alert, because a persistent

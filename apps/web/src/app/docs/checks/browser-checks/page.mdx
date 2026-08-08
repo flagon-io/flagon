@@ -1,0 +1,39 @@
+export const metadata = {
+  title: "Browser checks",
+  description:
+    "Script a real user flow with Playwright and run it on a schedule in a headless browser.",
+};
+
+# Browser checks
+
+A **browser check** runs a [Playwright](https://playwright.dev) script in a real
+headless browser, on a schedule. Use it to verify the flows that matter: a login, a
+search, a checkout, anything a synthetic HTTP request can't prove on its own.
+
+Browser checks are a **synthetic** check. They cost more per run than a URL monitor,
+because each run drives a full browser, so reach for them on your critical paths and
+lean on URL monitors for broad coverage.
+
+## The script
+
+Your script runs with the Playwright `page` in scope. Navigate, interact, and assert.
+Any thrown error (including a failed assertion) fails the run.
+
+```js
+await page.goto("https://acme.com/login");
+await page.fill("#email", "robin@acme.com");
+await page.fill("#password", process.env.LOGIN_PASSWORD);
+await page.click("button[type=submit]");
+await page.waitForURL("**/dashboard");
+```
+
+## Passing and failing
+
+Browser checks have no degraded state. A run either completes its script (**passing**)
+or throws / times out (**failing**). The default time budget is 30 seconds.
+
+## Where they run
+
+Browser checks execute in a dedicated, isolated runtime, separate from the lightweight
+uptime path, so a heavy browser run never slows your other checks. Running from
+additional and private locations is coming.

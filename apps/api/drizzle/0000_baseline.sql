@@ -19,38 +19,7 @@ BEGIN
 END;
 $$;
 
-CREATE TABLE public.access_tokens (
-    id uuid NOT NULL,
-    type text NOT NULL,
-    name text NOT NULL,
-    token_hash text NOT NULL,
-    prefix text NOT NULL,
-    last_four text NOT NULL,
-    user_id uuid,
-    organization_id uuid,
-    created_by_user_id uuid,
-    scopes text,
-    last_used_at timestamp with time zone,
-    expires_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT access_tokens_owner_check CHECK ((((type = 'personal'::text) AND (user_id IS NOT NULL) AND (organization_id IS NULL)) OR ((type = 'organization'::text) AND (organization_id IS NOT NULL) AND (user_id IS NULL))))
-);
 
-CREATE TABLE public.accounts (
-    id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    account_id text NOT NULL,
-    provider_id text NOT NULL,
-    access_token text,
-    refresh_token text,
-    id_token text,
-    access_token_expires_at timestamp with time zone,
-    refresh_token_expires_at timestamp with time zone,
-    scope text,
-    password text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
 CREATE TABLE public.assets (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -467,24 +436,7 @@ CREATE TABLE public.incidents (
 
 ALTER TABLE ONLY public.incidents FORCE ROW LEVEL SECURITY;
 
-CREATE TABLE public.invitations (
-    id uuid NOT NULL,
-    organization_id uuid NOT NULL,
-    email text NOT NULL,
-    role text,
-    status text DEFAULT 'pending'::text NOT NULL,
-    expires_at timestamp with time zone NOT NULL,
-    inviter_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
-CREATE TABLE public.members (
-    id uuid NOT NULL,
-    organization_id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    role text DEFAULT 'member'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
 CREATE TABLE public.notification_channels (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -572,13 +524,6 @@ CREATE TABLE public.oncall_schedules (
 
 ALTER TABLE ONLY public.oncall_schedules FORCE ROW LEVEL SECURITY;
 
-CREATE TABLE public.org_sso_sessions (
-    id uuid NOT NULL,
-    organization_id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    authenticated_at timestamp with time zone DEFAULT now() NOT NULL,
-    expires_at timestamp with time zone NOT NULL
-);
 
 CREATE TABLE public.org_usage_counters (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -592,26 +537,6 @@ CREATE TABLE public.org_usage_counters (
 
 ALTER TABLE ONLY public.org_usage_counters FORCE ROW LEVEL SECURITY;
 
-CREATE TABLE public.organizations (
-    id uuid NOT NULL,
-    name text NOT NULL,
-    slug text NOT NULL,
-    logo text,
-    plan text DEFAULT 'hobby'::text NOT NULL,
-    metadata text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    stripe_customer_id text,
-    stripe_subscription_id text,
-    subscription_status text,
-    project_creation_policy text DEFAULT 'managers'::text NOT NULL,
-    sso_enforced boolean DEFAULT false NOT NULL,
-    require_2fa boolean DEFAULT false NOT NULL,
-    sso_default_role text DEFAULT 'member'::text NOT NULL,
-    scim_enabled boolean DEFAULT false NOT NULL,
-    deleted_at timestamp with time zone,
-    deleted_by_user_id uuid,
-    deleted_members jsonb
-);
 
 CREATE TABLE public.project_access (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -739,37 +664,8 @@ CREATE TABLE public.runbooks (
 
 ALTER TABLE ONLY public.runbooks FORCE ROW LEVEL SECURITY;
 
-CREATE TABLE public.scim_groups (
-    id uuid NOT NULL,
-    organization_id uuid NOT NULL,
-    external_id text,
-    display_name text NOT NULL,
-    role text DEFAULT 'member'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
-CREATE TABLE public.scim_tokens (
-    id uuid NOT NULL,
-    organization_id uuid NOT NULL,
-    name text NOT NULL,
-    token_hash text NOT NULL,
-    last_four text NOT NULL,
-    created_by_user_id uuid,
-    last_used_at timestamp with time zone,
-    expires_at timestamp with time zone,
-    revoked_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
-CREATE TABLE public.scim_users (
-    id uuid NOT NULL,
-    organization_id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    external_id text,
-    active boolean DEFAULT true NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
 CREATE TABLE public.segments (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -784,29 +680,7 @@ CREATE TABLE public.segments (
 
 ALTER TABLE ONLY public.segments FORCE ROW LEVEL SECURITY;
 
-CREATE TABLE public.sessions (
-    id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    token text NOT NULL,
-    expires_at timestamp with time zone NOT NULL,
-    ip_address text,
-    user_agent text,
-    active_organization_id uuid,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
-CREATE TABLE public.sso_providers (
-    id uuid NOT NULL,
-    issuer text NOT NULL,
-    domain text NOT NULL,
-    oidc_config text,
-    saml_config text,
-    user_id uuid,
-    provider_id text NOT NULL,
-    organization_id uuid,
-    domain_verified boolean DEFAULT false NOT NULL
-);
 
 CREATE TABLE public.team_members (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -832,15 +706,6 @@ CREATE TABLE public.teams (
 
 ALTER TABLE ONLY public.teams FORCE ROW LEVEL SECURITY;
 
-CREATE TABLE public.two_factors (
-    id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    secret text NOT NULL,
-    backup_codes text NOT NULL,
-    verified boolean DEFAULT true NOT NULL,
-    failed_verification_count integer DEFAULT 0,
-    locked_until timestamp with time zone
-);
 
 CREATE TABLE public.usage_event_rollups (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -884,45 +749,11 @@ CREATE TABLE public.usage_meter_reports (
 
 ALTER TABLE ONLY public.usage_meter_reports FORCE ROW LEVEL SECURITY;
 
-CREATE TABLE public.user_emails (
-    id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    email text NOT NULL,
-    verified boolean DEFAULT false NOT NULL,
-    is_primary boolean DEFAULT false NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
-CREATE TABLE public.users (
-    id uuid NOT NULL,
-    name text NOT NULL,
-    email text NOT NULL,
-    email_verified boolean DEFAULT false NOT NULL,
-    image text,
-    username text,
-    display_username text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    two_factor_enabled boolean DEFAULT false NOT NULL
-);
 
-CREATE TABLE public.verifications (
-    id uuid NOT NULL,
-    identifier text NOT NULL,
-    value text NOT NULL,
-    expires_at timestamp with time zone NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
 
-ALTER TABLE ONLY public.access_tokens
-    ADD CONSTRAINT access_tokens_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.access_tokens
-    ADD CONSTRAINT access_tokens_token_hash_unique UNIQUE (token_hash);
 
-ALTER TABLE ONLY public.accounts
-    ADD CONSTRAINT accounts_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.assets
     ADD CONSTRAINT assets_pkey PRIMARY KEY (id);
@@ -1008,11 +839,7 @@ ALTER TABLE ONLY public.incident_webhook_deliveries
 ALTER TABLE ONLY public.incidents
     ADD CONSTRAINT incidents_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.invitations
-    ADD CONSTRAINT invitations_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.members
-    ADD CONSTRAINT members_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.notification_channels
     ADD CONSTRAINT notification_channels_pkey PRIMARY KEY (id);
@@ -1035,17 +862,11 @@ ALTER TABLE ONLY public.oncall_schedule_teams
 ALTER TABLE ONLY public.oncall_schedules
     ADD CONSTRAINT oncall_schedules_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.org_sso_sessions
-    ADD CONSTRAINT org_sso_sessions_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.org_usage_counters
     ADD CONSTRAINT org_usage_counters_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.organizations
-    ADD CONSTRAINT organizations_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.organizations
-    ADD CONSTRAINT organizations_slug_unique UNIQUE (slug);
 
 ALTER TABLE ONLY public.project_access
     ADD CONSTRAINT project_access_pkey PRIMARY KEY (id);
@@ -1074,32 +895,16 @@ ALTER TABLE ONLY public.runbook_steps
 ALTER TABLE ONLY public.runbooks
     ADD CONSTRAINT runbooks_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.scim_groups
-    ADD CONSTRAINT scim_groups_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.scim_tokens
-    ADD CONSTRAINT scim_tokens_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.scim_tokens
-    ADD CONSTRAINT scim_tokens_token_hash_key UNIQUE (token_hash);
 
-ALTER TABLE ONLY public.scim_users
-    ADD CONSTRAINT scim_users_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.segments
     ADD CONSTRAINT segments_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.sessions
-    ADD CONSTRAINT sessions_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.sessions
-    ADD CONSTRAINT sessions_token_unique UNIQUE (token);
 
-ALTER TABLE ONLY public.sso_providers
-    ADD CONSTRAINT sso_providers_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.sso_providers
-    ADD CONSTRAINT sso_providers_provider_id_key UNIQUE (provider_id);
 
 ALTER TABLE ONLY public.team_members
     ADD CONSTRAINT team_members_pkey PRIMARY KEY (id);
@@ -1107,8 +912,6 @@ ALTER TABLE ONLY public.team_members
 ALTER TABLE ONLY public.teams
     ADD CONSTRAINT teams_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.two_factors
-    ADD CONSTRAINT two_factors_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.usage_event_rollups
     ADD CONSTRAINT usage_event_rollups_pkey PRIMARY KEY (id);
@@ -1119,26 +922,13 @@ ALTER TABLE ONLY public.usage_events
 ALTER TABLE ONLY public.usage_meter_reports
     ADD CONSTRAINT usage_meter_reports_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.user_emails
-    ADD CONSTRAINT user_emails_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.users
-    ADD CONSTRAINT users_email_unique UNIQUE (email);
 
-ALTER TABLE ONLY public.users
-    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY public.users
-    ADD CONSTRAINT users_username_unique UNIQUE (username);
 
-ALTER TABLE ONLY public.verifications
-    ADD CONSTRAINT verifications_pkey PRIMARY KEY (id);
 
-CREATE INDEX access_tokens_org_id_idx ON public.access_tokens USING btree (organization_id);
 
-CREATE INDEX access_tokens_user_id_idx ON public.access_tokens USING btree (user_id);
 
-CREATE INDEX accounts_user_id_idx ON public.accounts USING btree (user_id);
 
 CREATE UNIQUE INDEX assets_bucket_key_key ON public.assets USING btree (bucket, key);
 
@@ -1282,13 +1072,9 @@ CREATE INDEX incidents_org_status_idx ON public.incidents USING btree (organizat
 
 CREATE INDEX incidents_owner_team_idx ON public.incidents USING btree (owner_team_id);
 
-CREATE INDEX invitations_email_idx ON public.invitations USING btree (email);
 
-CREATE INDEX invitations_org_id_idx ON public.invitations USING btree (organization_id);
 
-CREATE UNIQUE INDEX members_org_user_key ON public.members USING btree (organization_id, user_id);
 
-CREATE INDEX members_user_id_idx ON public.members USING btree (user_id);
 
 CREATE INDEX notification_channels_user_idx ON public.notification_channels USING btree (user_id);
 
@@ -1322,11 +1108,9 @@ CREATE UNIQUE INDEX oncall_schedules_org_key_key ON public.oncall_schedules USIN
 
 CREATE INDEX oncall_schedules_team_idx ON public.oncall_schedules USING btree (team_id);
 
-CREATE UNIQUE INDEX org_sso_sessions_org_user_key ON public.org_sso_sessions USING btree (organization_id, user_id);
 
 CREATE UNIQUE INDEX org_usage_counters_bucket_key ON public.org_usage_counters USING btree (organization_id, period);
 
-CREATE UNIQUE INDEX organizations_stripe_customer_id_key ON public.organizations USING btree (stripe_customer_id);
 
 CREATE INDEX project_access_org_idx ON public.project_access USING btree (organization_id);
 
@@ -1368,21 +1152,15 @@ CREATE INDEX runbooks_org_idx ON public.runbooks USING btree (organization_id);
 
 CREATE UNIQUE INDEX runbooks_org_key_key ON public.runbooks USING btree (organization_id, key);
 
-CREATE UNIQUE INDEX scim_groups_org_external_key ON public.scim_groups USING btree (organization_id, external_id);
 
-CREATE INDEX scim_tokens_org_id_idx ON public.scim_tokens USING btree (organization_id);
 
-CREATE UNIQUE INDEX scim_users_org_external_key ON public.scim_users USING btree (organization_id, external_id);
 
-CREATE UNIQUE INDEX scim_users_org_user_key ON public.scim_users USING btree (organization_id, user_id);
 
 CREATE INDEX segments_org_idx ON public.segments USING btree (organization_id);
 
 CREATE UNIQUE INDEX segments_org_key_key ON public.segments USING btree (organization_id, key);
 
-CREATE INDEX sessions_user_id_idx ON public.sessions USING btree (user_id);
 
-CREATE INDEX sso_providers_org_id_idx ON public.sso_providers USING btree (organization_id);
 
 CREATE INDEX team_members_org_idx ON public.team_members USING btree (organization_id);
 
@@ -1394,7 +1172,6 @@ CREATE INDEX teams_org_idx ON public.teams USING btree (organization_id);
 
 CREATE UNIQUE INDEX teams_org_key_key ON public.teams USING btree (organization_id, key);
 
-CREATE INDEX two_factors_user_id_idx ON public.two_factors USING btree (user_id);
 
 CREATE UNIQUE INDEX usage_event_rollups_bucket_key ON public.usage_event_rollups USING btree (organization_id, day, source);
 
@@ -1408,25 +1185,13 @@ CREATE INDEX usage_events_unreported_idx ON public.usage_events USING btree (org
 
 CREATE INDEX usage_meter_reports_pending_idx ON public.usage_meter_reports USING btree (organization_id) WHERE (status = 'pending'::text);
 
-CREATE UNIQUE INDEX user_emails_email_key ON public.user_emails USING btree (email);
 
-CREATE UNIQUE INDEX user_emails_one_primary ON public.user_emails USING btree (user_id) WHERE is_primary;
 
-CREATE INDEX user_emails_user_id_idx ON public.user_emails USING btree (user_id);
 
-CREATE INDEX verifications_identifier_idx ON public.verifications USING btree (identifier);
 
-ALTER TABLE ONLY public.access_tokens
-    ADD CONSTRAINT access_tokens_created_by_user_id_users_id_fk FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
 
-ALTER TABLE ONLY public.access_tokens
-    ADD CONSTRAINT access_tokens_organization_id_organizations_id_fk FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.access_tokens
-    ADD CONSTRAINT access_tokens_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.accounts
-    ADD CONSTRAINT accounts_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY public.client_keys
     ADD CONSTRAINT client_keys_environment_id_environments_id_fk FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON DELETE CASCADE;
@@ -1530,17 +1295,9 @@ ALTER TABLE ONLY public.incidents
 ALTER TABLE ONLY public.incidents
     ADD CONSTRAINT incidents_owner_team_id_teams_id_fk FOREIGN KEY (owner_team_id) REFERENCES public.teams(id) ON DELETE SET NULL;
 
-ALTER TABLE ONLY public.invitations
-    ADD CONSTRAINT invitations_inviter_id_users_id_fk FOREIGN KEY (inviter_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.invitations
-    ADD CONSTRAINT invitations_organization_id_organizations_id_fk FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.members
-    ADD CONSTRAINT members_organization_id_organizations_id_fk FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.members
-    ADD CONSTRAINT members_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY public.oncall_escalation_levels
     ADD CONSTRAINT oncall_escalation_levels_policy_id_oncall_escalation_policies_i FOREIGN KEY (policy_id) REFERENCES public.oncall_escalation_policies(id) ON DELETE CASCADE;
@@ -1560,11 +1317,7 @@ ALTER TABLE ONLY public.oncall_schedule_teams
 ALTER TABLE ONLY public.oncall_schedules
     ADD CONSTRAINT oncall_schedules_team_id_teams_id_fk FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.org_sso_sessions
-    ADD CONSTRAINT org_sso_sessions_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.org_sso_sessions
-    ADD CONSTRAINT org_sso_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY public.project_access
     ADD CONSTRAINT project_access_project_id_projects_id_fk FOREIGN KEY (project_id) REFERENCES public.projects(id) ON DELETE CASCADE;
@@ -1593,38 +1346,18 @@ ALTER TABLE ONLY public.runbook_services
 ALTER TABLE ONLY public.runbook_steps
     ADD CONSTRAINT runbook_steps_runbook_id_runbooks_id_fk FOREIGN KEY (runbook_id) REFERENCES public.runbooks(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.scim_groups
-    ADD CONSTRAINT scim_groups_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.scim_tokens
-    ADD CONSTRAINT scim_tokens_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
 
-ALTER TABLE ONLY public.scim_tokens
-    ADD CONSTRAINT scim_tokens_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.scim_users
-    ADD CONSTRAINT scim_users_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.scim_users
-    ADD CONSTRAINT scim_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.sessions
-    ADD CONSTRAINT sessions_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.sso_providers
-    ADD CONSTRAINT sso_providers_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.sso_providers
-    ADD CONSTRAINT sso_providers_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY public.team_members
     ADD CONSTRAINT team_members_team_id_teams_id_fk FOREIGN KEY (team_id) REFERENCES public.teams(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.two_factors
-    ADD CONSTRAINT two_factors_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY public.user_emails
-    ADD CONSTRAINT user_emails_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 ALTER TABLE public.assets ENABLE ROW LEVEL SECURITY;
 
@@ -1821,8 +1554,6 @@ DO $rls$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'flagon_app') THEN
     EXECUTE $g$GRANT USAGE ON SCHEMA public TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.access_tokens TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.accounts TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.assets TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.billing_credit_grants TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.client_keys TO flagon_app$g$;
@@ -1850,8 +1581,6 @@ BEGIN
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.incident_updates TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.incident_webhook_deliveries TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.incidents TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.invitations TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.members TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notification_channels TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.oncall_escalation_levels TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.oncall_escalation_policies TO flagon_app$g$;
@@ -1859,9 +1588,7 @@ BEGIN
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.oncall_schedule_members TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.oncall_schedule_teams TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.oncall_schedules TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.org_sso_sessions TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.org_usage_counters TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.organizations TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.project_access TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.project_relations TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.projects TO flagon_app$g$;
@@ -1871,20 +1598,11 @@ BEGIN
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.runbook_services TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.runbook_steps TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.runbooks TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.scim_groups TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.scim_tokens TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.scim_users TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.segments TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sessions TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sso_providers TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.team_members TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.teams TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.two_factors TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.usage_event_rollups TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.usage_events TO flagon_app$g$;
     EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.usage_meter_reports TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.user_emails TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.users TO flagon_app$g$;
-    EXECUTE $g$GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.verifications TO flagon_app$g$;
   END IF;
 END $rls$;
