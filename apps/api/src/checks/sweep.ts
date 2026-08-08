@@ -6,6 +6,7 @@ import { checks, type Check } from "../db/schema.js";
 import { captureError } from "../lib/monitoring.js";
 import { getMonitorType } from "./monitors/index.js";
 import { executeInline } from "./execute.js";
+import { runBrowserRemote } from "./remote-browser.js";
 import { activeWindows, anyWindowSuppresses } from "./maintenance.js";
 
 /**
@@ -35,6 +36,10 @@ export async function sweepDueChecks(): Promise<SweepResult> {
   let dispatched = 0;
   let failed = 0;
   let suppressed = 0;
+  // Browser runs go to the dedicated browser function over HTTP; collect them and await
+  // ALL at the end (in parallel) so the sweep stays alive until they finish — an aborted /
+  // returned caller drops the request and can kill the run mid-flight on serverless.
+  const browserRuns: Promise<unknown>[] = [];
 
   for (const org of orgs) {
     try {
@@ -73,7 +78,7 @@ export async function sweepDueChecks(): Promise<SweepResult> {
 
         const type = getMonitorType(check.type);
         if (type?.runner === "browser") {
-          dispatchBrowserRun(org.id, org.slug, check);
+          browserRuns.push(runBrowserRemote(org.id, org.slug, check));
           dispatched += 1;
         } else {
           await executeInline(org.id, org.slug, check);
@@ -86,43 +91,9 @@ export async function sweepDueChecks(): Promise<SweepResult> {
     }
   }
 
+  // Wait for the browser runs to complete (recording their own results); allSettled so one
+  // failure never rejects the sweep.
+  if (browserRuns.length) await Promise.allSettled(browserRuns);
+
   return { orgs: orgs.length, ran, dispatched, failed, suppressed };
-}
-
-/** The base URL of THIS deployment, for dispatching to the sibling browser function. */
-function selfBaseUrl(): string {
-  if (process.env.CHECKS_BROWSER_URL) return process.env.CHECKS_BROWSER_URL;
-  if (process.env.API_URL) return process.env.API_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3002";
-}
-
-/**
- * Fire-and-forget POST to the dedicated browser function (api/checks-browser). It
- * runs the Playwright probe and records the result itself. Authed with CRON_SECRET,
- * the same shared secret the cron endpoints use. Never throws — a dispatch failure
- * is captured and the check retries next tick.
- */
-function dispatchBrowserRun(orgId: string, orgSlug: string, check: Check): void {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    captureError(`[checks-sweep] cannot dispatch browser check ${check.key}: no CRON_SECRET`, new Error("no CRON_SECRET"), {
-      check: check.key,
-      org: orgSlug,
-    });
-    return;
-  }
-  const url = `${selfBaseUrl().replace(/\/$/, "")}/checks-browser`;
-  void fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
-    body: JSON.stringify({ orgId, checkId: check.id }),
-    // Bounded so a hung dispatch can't wedge the sweep; the function does the real work.
-    signal: AbortSignal.timeout(5000),
-  }).catch((err) => {
-    captureError(`[checks-sweep] browser dispatch failed for ${check.key}`, err, {
-      check: check.key,
-      org: orgSlug,
-    });
-  });
 }

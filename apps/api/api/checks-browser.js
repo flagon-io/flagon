@@ -11,6 +11,7 @@
 import "@sparticuz/chromium";
 import "playwright-core";
 import { runCheckById } from "../dist/checks/execute.js";
+import { serializeResult } from "../dist/checks/serialize.js";
 
 function unauthorized(res) {
   res.statusCode = 401;
@@ -44,7 +45,13 @@ export default async function handler(req, res) {
     const recorded = await runCheckById(orgId, checkId);
     res.statusCode = recorded ? 200 : 404;
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ ok: Boolean(recorded) }));
+    // Return the recorded result so a synchronous "Run now" can relay it to the console.
+    res.end(
+      JSON.stringify({
+        ok: Boolean(recorded),
+        result: recorded ? serializeResult(recorded.result) : null,
+      }),
+    );
   } catch (err) {
     res.statusCode = 500;
     res.setHeader("content-type", "application/json");

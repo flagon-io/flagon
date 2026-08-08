@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { captureError } from "../../lib/monitoring.js";
 import type { MonitorType, RunResult } from "./types.js";
 import { thresholdMs } from "./types.js";
 import { runInSandbox } from "./sandbox.js";
@@ -55,7 +56,10 @@ async function launchServer(): Promise<{ wsEndpoint: string; close: () => Promis
       headless: true,
     });
     return { wsEndpoint: server.wsEndpoint(), close: () => server.close() };
-  } catch {
+  } catch (err) {
+    // Surface WHY it couldn't launch (missing deps in this function, a Chromium failure,
+    // launchServer unsupported here, …) instead of a silent "runtime unavailable".
+    captureError("[checks] browser launchServer failed", err, {});
     return null;
   }
 }

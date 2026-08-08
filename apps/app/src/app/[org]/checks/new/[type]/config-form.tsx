@@ -389,9 +389,20 @@ export function ConfigForm({
         </div>
       </div>
 
-      <Field label="Tags">
-        <TagsInput value={tags} onChange={setTags} placeholder="Add a tag and press Enter" />
-      </Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Tags">
+          <TagsInput value={tags} onChange={setTags} placeholder="Add a tag and press Enter" />
+        </Field>
+        <Field label="Project" hint="Relate this check to a project; it shows on that project's Checks tab.">
+          <Select
+            value={linkedProjectKey}
+            onValueChange={setLinkedProjectKey}
+            placeholder="No project"
+            options={[{ value: "", label: "No project" }, ...projects.map((p) => ({ value: p.key, label: p.name }))]}
+            disabled={projects.length === 0}
+          />
+        </Field>
+      </div>
 
       {/* Primary config, per type */}
       {isHttp ? (
@@ -670,27 +681,6 @@ export function ConfigForm({
             <Switch checked={alertOnDegraded} onCheckedChange={setAlertOnDegraded} ariaLabel="Alert on degraded runs" />
           </label>
         ) : null}
-      </Section>
-
-      {/* Project relation */}
-      <Section
-        title="Project"
-        description="Relate this check to a project. It then appears on that project's Checks tab alongside its incidents."
-      >
-        {projects.length ? (
-          <Field label="Project">
-            <Select
-              value={linkedProjectKey}
-              onValueChange={setLinkedProjectKey}
-              placeholder="No project"
-              options={[{ value: "", label: "No project" }, ...projects.map((p) => ({ value: p.key, label: p.name }))]}
-            />
-          </Field>
-        ) : (
-          <p className="text-sm text-zinc-500">
-            No projects yet. Create a project to relate checks to it.
-          </p>
-        )}
       </Section>
 
       {/* Incident automation */}

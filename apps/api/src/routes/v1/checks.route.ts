@@ -16,6 +16,8 @@ import { checks, checkResults, projects, type Check, type CheckResult } from "..
 import { getMonitorType, listMonitorTypes } from "../../checks/monitors/index.js";
 import { FREQUENCY_SECONDS } from "../../checks/monitors/types.js";
 import { executeInline } from "../../checks/execute.js";
+import { runBrowserRemote } from "../../checks/remote-browser.js";
+import { serializeResult } from "../../checks/serialize.js";
 
 /**
  * The Checks product API. Mounted under /v1/orgs/:org/checks. A check is a scheduled
@@ -57,20 +59,6 @@ function serializeCheck(row: Check) {
   };
 }
 
-function serializeResult(row: CheckResult) {
-  return {
-    id: row.id,
-    runStartedAt: row.runStartedAt.toISOString(),
-    status: row.status,
-    latencyMs: row.latencyMs,
-    httpStatus: row.httpStatus,
-    location: row.location,
-    errorCode: row.errorCode,
-    errorMessage: row.errorMessage,
-    assertions: row.assertions,
-    detail: row.detail,
-  };
-}
 
 /** name -> a url-safe key, when the caller doesn't supply one. */
 function slugify(name: string): string {
@@ -562,6 +550,15 @@ checks_.post("/:key/run", async (c) => {
   if (ctx instanceof Response) return ctx;
   const check = await loadCheck(ctx.orgId, c.req.param("key"));
   if (!check) return jsonError(c, 404, "No such check.");
+
+  // Browser checks can only run where Chromium lives — hand off to the dedicated browser
+  // function and relay the result it records. Everything else runs inline here.
+  if (getMonitorType(check.type)?.runner === "browser") {
+    const { result } = await runBrowserRemote(ctx.orgId, ctx.orgSlug, check);
+    if (!result) return jsonError(c, 502, "The browser run could not be completed. Check the browser function logs.");
+    return c.json(result);
+  }
+
   const recorded = await executeInline(ctx.orgId, ctx.orgSlug, check);
   if (!recorded) return jsonError(c, 422, "This check's monitor type is unavailable.");
   return c.json(serializeResult(recorded.result));
