@@ -92,6 +92,13 @@
       "when": 1786173922102,
       "tag": "0012_maintenance_check_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786175743031,
+      "tag": "0013_drop_gated_synthetic_checks",
+      "breakpoints": true
     }
   ]
 }
