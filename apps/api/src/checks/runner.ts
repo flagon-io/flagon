@@ -28,6 +28,11 @@ export type RecordedRun = {
   transition: CheckTransition;
 };
 
+// Failure codes that mean the probe never actually ran (no compute consumed) — so the run
+// is recorded for the timeline but NOT metered. `runtime_unavailable` = the browser runtime
+// couldn't launch; `adapter_error` = the adapter threw before executing.
+const NON_BILLABLE_ERROR_CODES = new Set(["runtime_unavailable", "adapter_error"]);
+
 export async function recordRun(
   orgId: string,
   orgSlug: string,
@@ -97,8 +102,13 @@ export async function recordRun(
   // start) so a re-recorded run — a browser-function retry — never double-counts; a
   // durable receipt is written but the events counter is untouched (check runs bill
   // on their own meter, not the exposures allowance).
+  //
+  // Never bill a run that DIDN'T EXECUTE the probe — our runtime was unavailable, or the
+  // adapter threw before running. The customer consumed no compute, so it's not a billable
+  // run (a run that started and then failed — script error, timeout, assertion — DOES bill).
   const type = getMonitorType(check.type);
-  if (type?.billingSource) {
+  const executed = !(result.error && NON_BILLABLE_ERROR_CODES.has(result.error.code));
+  if (type?.billingSource && executed) {
     try {
       await ingestEvents(orgId, runBillingQuantity(type, result), {
         source: type.billingSource,
