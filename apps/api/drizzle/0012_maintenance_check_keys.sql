@@ -1,0 +1,1 @@
+ALTER TABLE "maintenance_windows" ADD COLUMN "check_keys" text[] DEFAULT ARRAY[]::text[] NOT NULL;

@@ -27,10 +27,9 @@ export async function executeInline(
 ): Promise<RecordedRun | null> {
   const type = getMonitorType(check.type);
   if (!type) {
-    captureError(`[checks] unknown monitor type for ${check.key}`, new Error(check.type), {
-      check: check.key,
-      org: orgSlug,
-    });
+    // The type isn't registered — normally because it's been GATED to "Soon" (e.g. api,
+    // browser) while checks of that type still exist. Skip quietly; the check is inert until
+    // the type is re-registered or the check is deleted. Not an error to report each tick.
     return null;
   }
 

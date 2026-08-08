@@ -16,8 +16,6 @@ import { checks, checkResults, projects, type Check, type CheckResult } from "..
 import { getMonitorType, listMonitorTypes } from "../../checks/monitors/index.js";
 import { FREQUENCY_SECONDS } from "../../checks/monitors/types.js";
 import { executeInline } from "../../checks/execute.js";
-import { runBrowserRemote } from "../../checks/remote-browser.js";
-import { serializeResult } from "../../checks/serialize.js";
 
 /**
  * The Checks product API. Mounted under /v1/orgs/:org/checks. A check is a scheduled
@@ -42,7 +40,6 @@ function serializeCheck(row: Check) {
     locations: row.locations,
     activated: row.activated,
     muted: row.muted,
-    tags: row.tags,
     currentStatus: row.currentStatus,
     consecutiveFailures: row.consecutiveFailures,
     lastRunAt: row.lastRunAt ? row.lastRunAt.toISOString() : null,
@@ -59,6 +56,20 @@ function serializeCheck(row: Check) {
   };
 }
 
+function serializeResult(row: CheckResult) {
+  return {
+    id: row.id,
+    runStartedAt: row.runStartedAt.toISOString(),
+    status: row.status,
+    latencyMs: row.latencyMs,
+    httpStatus: row.httpStatus,
+    location: row.location,
+    errorCode: row.errorCode,
+    errorMessage: row.errorMessage,
+    assertions: row.assertions,
+    detail: row.detail,
+  };
+}
 
 /** name -> a url-safe key, when the caller doesn't supply one. */
 function slugify(name: string): string {
@@ -96,7 +107,6 @@ const baseFields = {
   locations: z.array(z.string()).min(1).optional(),
   activated: z.boolean().optional(),
   muted: z.boolean().optional(),
-  tags: z.array(z.string()).optional(),
   alertEmails: z.array(z.string().email()).optional(),
   alertChannelIds: z.array(z.string().uuid()).optional(),
   alertTrigger: alertTriggerSchema.optional(),
@@ -134,7 +144,6 @@ const checkSchema = z.object({
   locations: z.array(z.string()),
   activated: z.boolean(),
   muted: z.boolean(),
-  tags: z.array(z.string()),
   currentStatus: z.enum(["unknown", "passing", "degraded", "failing"]),
   consecutiveFailures: z.number().int(),
   lastRunAt: z.string().nullable(),
@@ -449,7 +458,6 @@ checks_.post("/", async (c) => {
           locations: body.locations ?? ["default"],
           activated: body.activated ?? true,
           muted: body.muted ?? false,
-          tags: body.tags ?? [],
           alertEmails: body.alertEmails ?? [],
           alertChannelIds: body.alertChannelIds ?? [],
           alertTrigger: body.alertTrigger ?? { type: "run_count", runs: 1 },
@@ -504,7 +512,6 @@ checks_.patch("/:key", async (c) => {
   if (body.locations !== undefined) set.locations = body.locations;
   if (body.activated !== undefined) set.activated = body.activated;
   if (body.muted !== undefined) set.muted = body.muted;
-  if (body.tags !== undefined) set.tags = body.tags;
   if (body.alertEmails !== undefined) set.alertEmails = body.alertEmails;
   if (body.alertChannelIds !== undefined) set.alertChannelIds = body.alertChannelIds;
   if (body.alertTrigger !== undefined) set.alertTrigger = body.alertTrigger;
@@ -550,22 +557,6 @@ checks_.post("/:key/run", async (c) => {
   if (ctx instanceof Response) return ctx;
   const check = await loadCheck(ctx.orgId, c.req.param("key"));
   if (!check) return jsonError(c, 404, "No such check.");
-
-  // Browser checks can only run where Chromium lives — hand off to the dedicated browser
-  // function and relay the result it records. Reuse the PUBLIC host this request arrived on
-  // (e.g. api.flagon.io) so the internal call isn't blocked by Deployment Protection on the
-  // deployment-specific *.vercel.app URL. Everything else runs inline here.
-  if (getMonitorType(check.type)?.runner === "browser") {
-    // On Vercel the PUBLIC host is in x-forwarded-host; `host` is the internal (protected)
-    // one. Use the forwarded host so the internal call isn't blocked by Deployment Protection.
-    const host = c.req.header("x-forwarded-host") ?? c.req.header("host");
-    const proto = c.req.header("x-forwarded-proto") ?? "https";
-    const base = host ? `${proto}://${host}` : undefined;
-    const { result } = await runBrowserRemote(ctx.orgId, ctx.orgSlug, check, base);
-    if (!result) return jsonError(c, 502, "The browser run could not be completed. Check the browser function logs.");
-    return c.json(result);
-  }
-
   const recorded = await executeInline(ctx.orgId, ctx.orgSlug, check);
   if (!recorded) return jsonError(c, 422, "This check's monitor type is unavailable.");
   return c.json(serializeResult(recorded.result));

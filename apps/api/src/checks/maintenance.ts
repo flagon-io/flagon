@@ -2,9 +2,9 @@ import type { MaintenanceWindow } from "../db/schema.js";
 
 /**
  * Maintenance-window evaluation. A window suppresses SCHEDULED monitoring for the checks
- * it targets (by tag) while it is active; the sweep skips those checks so they never run
- * and never alert during planned maintenance. Two pure predicates + a small loader:
- *   - windowMatchesTags: does this window target a check with these tags?
+ * it targets while it is active; the sweep skips those checks so they never run and never
+ * alert during planned maintenance. Two pure predicates + a small loader:
+ *   - windowMatchesCheck: does this window target this check?
  *   - isWindowActive: is the window occurring at `now` (honoring repeat)?
  * Both are pure (take `now`) so they unit-test without a clock or DB.
  */
@@ -13,11 +13,9 @@ export type Repeat = "none" | "daily" | "weekly" | "monthly";
 
 const DAY_MS = 86_400_000;
 
-/** A window targets a check when their tags intersect; EMPTY window tags = every check. */
-export function windowMatchesTags(windowTags: string[], checkTags: string[]): boolean {
-  if (windowTags.length === 0) return true;
-  const set = new Set(checkTags);
-  return windowTags.some((t) => set.has(t));
+/** A window targets a check when it's in the window's selection; EMPTY selection = ALL checks. */
+export function windowMatchesCheck(windowCheckKeys: string[], checkKey: string): boolean {
+  return windowCheckKeys.length === 0 || windowCheckKeys.includes(checkKey);
 }
 
 /** Same calendar day-of-month/time shifted by `k` whole months (day may clamp forward). */
@@ -73,7 +71,7 @@ export async function activeWindows(orgId: string, now: Date): Promise<Maintenan
   return rows.filter((w) => isWindowActive(w, now));
 }
 
-/** Whether any active window currently targets a check with these tags. */
-export function anyWindowSuppresses(windows: MaintenanceWindow[], checkTags: string[]): boolean {
-  return windows.some((w) => windowMatchesTags(w.tags, checkTags));
+/** Whether any active window currently targets this check. */
+export function anyWindowSuppresses(windows: MaintenanceWindow[], checkKey: string): boolean {
+  return windows.some((w) => windowMatchesCheck(w.checkKeys, checkKey));
 }

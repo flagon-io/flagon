@@ -134,10 +134,7 @@ export function ChannelPicker({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href={`/${slug}/checks/alert-channels`} className="text-sm text-teal-400 hover:text-teal-300">
-          &larr; Alert channels
-        </Link>
-        <h1 className="mt-2 text-xl font-semibold tracking-tight text-zinc-100">New alert channel</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">New alert channel</h1>
         <p className="mt-1 text-sm text-zinc-500">
           Choose a channel type. Channels are powered by your{" "}
           <Link href={`/${slug}/settings/integrations`} className="text-teal-400 hover:text-teal-300">

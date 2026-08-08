@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 /**
  * Incident automation end-to-end against a real DB: a Pro check with automation on and a
  * linked service OPENS an incident on the first failing run, and RESOLVES it on recovery.
- * Drives the shared recordRun path (the same one the sweep + browser fn + agent use).
+ * Drives the shared recordRun path (the same one the sweep uses).
  */
 const DATABASE_URL = process.env.DATABASE_URL ?? process.env.APP_DATABASE_URL;
 

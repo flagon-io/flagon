@@ -2,13 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run db:migrate && npm run db:verify-rls && (npm run stripe:sync || echo 'WARNING stripe:sync FAILED - Stripe prices were NOT reconciled - this tolerance is TEMPORARY, restore fail-closed') && npm run build",
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../../packages ../../package-lock.json",
-  "functions": {
-    "api/checks-browser.js": { "maxDuration": 60, "memory": 1024 },
-    "api/index.js": { "maxDuration": 60 }
-  },
   "rewrites": [
-    { "source": "/checks-browser", "destination": "/api/checks-browser" },
-    { "source": "/((?!checks-browser).*)", "destination": "/api" }
+    { "source": "/(.*)", "destination": "/api" }
   ],
   "crons": [
     { "path": "/internal/cron/report", "schedule": "*/5 * * * *" },

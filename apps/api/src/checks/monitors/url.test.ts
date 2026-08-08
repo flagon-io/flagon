@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { urlMonitor } from "./url.js";
-import { browserMonitor } from "./browser.js";
+import { apiMonitor } from "./api.js";
 import type { RunContext } from "./types.js";
 
 /**
@@ -116,7 +116,7 @@ describe("monitor billing model (Checkly-faithful)", () => {
     // monitors omit it (billed by monitor count); synthetic checks carry one.
     expect(urlMonitor.family).toBe("uptime");
     expect(urlMonitor.billingSource).toBeFalsy();
-    expect(browserMonitor.family).toBe("synthetic");
-    expect(browserMonitor.billingSource).toBe("checks.browser");
+    expect(apiMonitor.family).toBe("synthetic");
+    expect(apiMonitor.billingSource).toBe("checks.api");
   });
 });

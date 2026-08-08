@@ -78,6 +78,20 @@
       "when": 1786161801488,
       "tag": "0010_maintenance_windows",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786173902078,
+      "tag": "0011_checks_maintenance_drop_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786173922102,
+      "tag": "0012_maintenance_check_keys",
+      "breakpoints": true
     }
   ]
 }

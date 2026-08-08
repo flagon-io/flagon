@@ -4,10 +4,6 @@ import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { listChecks } from "@/lib/checks-api";
 import { ChecksView } from "./checks-view";
 
-// "Run" on a browser check waits on the browser function (Chromium ~30-40s); give the
-// server action room beyond the default function limit.
-export const maxDuration = 60;
-
 /**
  * Checks — the uptime + synthetic monitoring home. Lists the org's checks grouped
  * by family (uptime monitors, synthetic checks), each routing to its detail page.

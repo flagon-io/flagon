@@ -91,13 +91,15 @@ describe.skipIf(!DATABASE_URL)("checks http", () => {
     await Promise.all([okServer, errServer].map((s) => new Promise<void>((r) => s.close(() => r()))));
   });
 
-  it("lists monitor types including url and browser", async () => {
+  it("lists the live uptime monitor types (url/tcp/dns/ssl)", async () => {
     const res = await get("/checks/monitor-types");
     expect(res.status).toBe(200);
     const { monitorTypes } = await res.json();
     const keys = monitorTypes.map((t: { key: string }) => t.key);
-    expect(keys).toContain("url");
-    expect(keys).toContain("browser");
+    expect(keys).toEqual(expect.arrayContaining(["url", "tcp", "dns", "ssl"]));
+    // Synthetic checks (api, browser) are deferred to "Soon" — not registered.
+    expect(keys).not.toContain("api");
+    expect(keys).not.toContain("browser");
     const url = monitorTypes.find((t: { key: string }) => t.key === "url");
     expect(url.family).toBe("uptime");
     expect(url.configSchema).toBeTruthy();

@@ -175,10 +175,7 @@ export function CheckDetail({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href={`/${slug}/checks`} className="text-sm text-teal-400 hover:text-teal-300">
-          &larr; Checks
-        </Link>
-        <div className="mt-2 flex items-start justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
             <StatusPill status={check.currentStatus} />
             <div>
@@ -187,7 +184,6 @@ export function CheckDetail({
                 {check.type} · every {frequencyLabel(check.frequencySeconds)}
                 {check.muted ? " · muted" : ""}
                 {!check.activated ? " · paused" : ""}
-                {check.tags.length ? ` · ${check.tags.join(", ")}` : ""}
               </p>
             </div>
           </div>

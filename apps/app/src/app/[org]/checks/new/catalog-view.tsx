@@ -105,10 +105,7 @@ export function NewCheckCatalog({ slug, implemented, projectKey }: { slug: strin
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href={`/${slug}/checks`} className="text-sm text-teal-400 hover:text-teal-300">
-          &larr; Checks
-        </Link>
-        <h1 className="mt-2 text-xl font-semibold tracking-tight text-zinc-100">New check</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-100">New check</h1>
         <p className="mt-1 text-sm text-zinc-500">
           Pick what you want to monitor. Live types are ready now; the rest are on the way.
         </p>

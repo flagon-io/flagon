@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Mail, MessageCircle, Phone, Send, Webhook, type LucideIcon } from "lucide-react";
 import { Button, Field, Input, Switch } from "@flagon/design";
@@ -151,10 +150,7 @@ export function AlertChannelForm({
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
       <div>
-        <Link href={`/${slug}/checks/alert-channels`} className="text-sm text-teal-400 hover:text-teal-300">
-          &larr; Alert channels
-        </Link>
-        <div className="mt-2 flex items-start justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <Icon className="size-5 text-zinc-300" />
             <div>

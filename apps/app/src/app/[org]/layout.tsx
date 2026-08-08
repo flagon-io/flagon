@@ -9,6 +9,7 @@ import {
   SIDEBAR_COOKIE,
 } from "@/components/workspace/workspace-sidebar";
 import { WorkspaceTopbar } from "@/components/workspace/workspace-topbar";
+import { BreadcrumbProvider } from "@/components/workspace/breadcrumb";
 import { VerifyEmailBanner } from "@/components/workspace/verify-email-banner";
 import { OrgLocked } from "@/components/workspace/org-locked";
 import { SsoRequired } from "@/components/workspace/sso-required";
@@ -87,28 +88,30 @@ export default async function OrgLayout({
         current={membership}
         initialCollapsed={initialCollapsed}
       />
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <WorkspaceTopbar user={user} slug={slug} />
-        {!session.user.emailVerified ? (
-          <VerifyEmailBanner email={session.user.email} />
-        ) : null}
-        <div className="flex-1 overflow-y-auto">
-          <main className="px-6 py-8">
-            <div className="mx-auto w-full max-w-7xl">
-              {gate ??
-                (isOrgLocked(membership) ? (
-                  <OrgLocked
-                    slug={slug}
-                    canManage={canManageOrg(membership.role)}
-                    status={membership.subscriptionStatus}
-                  />
-                ) : (
-                  children
-                ))}
-            </div>
-          </main>
+      <BreadcrumbProvider>
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <WorkspaceTopbar user={user} slug={slug} />
+          {!session.user.emailVerified ? (
+            <VerifyEmailBanner email={session.user.email} />
+          ) : null}
+          <div className="flex-1 overflow-y-auto">
+            <main className="px-6 py-8">
+              <div className="mx-auto w-full max-w-7xl">
+                {gate ??
+                  (isOrgLocked(membership) ? (
+                    <OrgLocked
+                      slug={slug}
+                      canManage={canManageOrg(membership.role)}
+                      status={membership.subscriptionStatus}
+                    />
+                  ) : (
+                    children
+                  ))}
+              </div>
+            </main>
+          </div>
         </div>
-      </div>
+      </BreadcrumbProvider>
     </div>
   );
 }

@@ -1,10 +1,9 @@
 import type { MonitorType } from "./types.js";
 import { urlMonitor } from "./url.js";
-import { browserMonitor } from "./browser.js";
-import { apiMonitor } from "./api.js";
 import { tcpMonitor } from "./tcp.js";
 import { dnsMonitor } from "./dns.js";
 import { sslMonitor } from "./ssl.js";
+// apiMonitor + browserMonitor are intentionally NOT registered (Soon) — see below.
 
 /**
  * The monitor-type registry — the ONE place a monitor kind is registered.
@@ -16,14 +15,18 @@ import { sslMonitor } from "./ssl.js";
  * picker, and the docs — reads this list generically, so no core change is needed.
  */
 const MONITOR_TYPES: MonitorType<any>[] = [
-  // Uptime monitors (inline probes, billed by monitor count).
+  // Uptime monitors (inline probes, billed by monitor count). These are what's LIVE.
   urlMonitor,
   tcpMonitor,
   dnsMonitor,
   sslMonitor,
-  // Synthetic checks (billed per run under their own meter).
-  apiMonitor,
-  browserMonitor,
+  // SYNTHETIC checks are deferred to "Soon", so neither is registered here:
+  //  - apiMonitor: the adapter (api.ts) is intact and works; held back to flush out the UX.
+  //  - browserMonitor: removed entirely — @sparticuz/chromium can't launch on Vercel
+  //    serverless (missing system libs, `libnss3.so`); belongs on a container runner.
+  // Their billing meters (`check.runs.api`, `check.runs.browser`) are deliberately KEPT in
+  // usage/meters.ts so the Stripe scaffold persists. Re-register here to bring either back;
+  // registry-driven, so the type picker / config / validation / docs update automatically.
 ];
 
 const BY_KEY = new Map(MONITOR_TYPES.map((m) => [m.key, m]));

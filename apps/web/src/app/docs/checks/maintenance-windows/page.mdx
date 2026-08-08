@@ -12,11 +12,11 @@ scheduled work that would otherwise trip your monitors and page someone.
 
 ## How targeting works
 
-A window targets checks by **tag**. When a window is active, any check whose tags
-**intersect** the window's tags is paused for the duration.
+A window applies to the **checks you select**. When a window is active, each selected check
+is paused for the duration.
 
-- Give a window the tag `deploy` and every check tagged `deploy` is covered.
-- Leave a window's tags **empty** to pause **every** check in the org.
+- Select specific checks to scope the window to them.
+- Select **nothing** (the default) to pause **every** check in the org.
 
 Checks resume automatically the moment the window ends — nothing to turn back on.
 
@@ -47,7 +47,7 @@ curl -X POST https://api.flagon.io/v1/orgs/$ORG/maintenance-windows \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Nightly deploy",
-    "tags": ["deploy"],
+    "checkKeys": ["home", "api-health"],
     "startsAt": "2026-09-01T02:00:00Z",
     "endsAt": "2026-09-01T04:00:00Z",
     "repeat": "daily"

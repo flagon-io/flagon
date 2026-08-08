@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { canManageOrg, getMembershipBySlug } from "@/lib/org";
-import { getMaintenanceWindow } from "@/lib/checks-api";
+import { getMaintenanceWindow, listChecks } from "@/lib/checks-api";
 import { MaintenanceForm } from "../maintenance-form";
 
 /** Edit an existing maintenance window. */
@@ -17,8 +17,15 @@ export default async function EditMaintenancePage({
   if (!membership) redirect("/");
   if (!canManageOrg(membership.role)) redirect(`/${slug}/checks/maintenance`);
 
-  const window = await getMaintenanceWindow(slug, id);
+  const [window, checks] = await Promise.all([getMaintenanceWindow(slug, id), listChecks(slug)]);
   if (!window) notFound();
 
-  return <MaintenanceForm slug={slug} mode="edit" window={window} />;
+  return (
+    <MaintenanceForm
+      slug={slug}
+      mode="edit"
+      window={window}
+      checks={checks.map((c) => ({ key: c.key, name: c.name }))}
+    />
+  );
 }

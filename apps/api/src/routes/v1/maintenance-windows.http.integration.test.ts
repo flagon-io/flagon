@@ -62,7 +62,7 @@ describe.skipIf(!DATABASE_URL)("maintenance windows http", () => {
   it("creates a window", async () => {
     const res = await post("/maintenance-windows", {
       name: "Nightly deploy",
-      tags: ["api"],
+      checkKeys: ["home"],
       startsAt: "2026-09-01T02:00:00.000Z",
       endsAt: "2026-09-01T04:00:00.000Z",
       repeat: "daily",
@@ -71,7 +71,7 @@ describe.skipIf(!DATABASE_URL)("maintenance windows http", () => {
     const { window } = await res.json();
     id = window.id;
     expect(window.name).toBe("Nightly deploy");
-    expect(window.tags).toEqual(["api"]);
+    expect(window.checkKeys).toEqual(["home"]);
     expect(window.repeat).toBe("daily");
     expect(window.repeatEndsAt).toBeNull();
   });
@@ -93,11 +93,11 @@ describe.skipIf(!DATABASE_URL)("maintenance windows http", () => {
   });
 
   it("edits the window", async () => {
-    const res = await patch(`/maintenance-windows/${id}`, { repeat: "weekly", tags: ["api", "web"] });
+    const res = await patch(`/maintenance-windows/${id}`, { repeat: "weekly", checkKeys: ["home", "api-health"] });
     expect(res.status).toBe(200);
     const { window } = await res.json();
     expect(window.repeat).toBe("weekly");
-    expect(window.tags).toEqual(["api", "web"]);
+    expect(window.checkKeys).toEqual(["home", "api-health"]);
   });
 
   it("deletes the window", async () => {

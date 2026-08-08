@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button, Field, Input, Select, TagsInput, type SelectOption } from "@flagon/design";
+import { Button, Field, Input, Select, type SelectOption } from "@flagon/design";
 import type { MaintenanceRepeat, MaintenanceWindow } from "@/lib/checks-api";
 import {
   createMaintenanceWindowAction,
@@ -12,7 +11,7 @@ import {
 } from "../actions";
 
 /**
- * Create + edit a maintenance window (Checkly-style): name, target tags (empty = all
+ * Create + edit a maintenance window: name, which checks it applies to (none selected = ALL
  * checks), a start/end, and an optional repeat (daily/weekly/monthly) with an end date.
  * `datetime-local` inputs are local time; converted to ISO on save. Action buttons are
  * right-aligned per house convention.
@@ -37,17 +36,19 @@ export function MaintenanceForm({
   slug,
   mode,
   window: existing,
+  checks,
 }: {
   slug: string;
   mode: "create" | "edit";
   window?: MaintenanceWindow;
+  checks: { key: string; name: string }[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState(existing?.name ?? "");
-  const [tags, setTags] = useState<string[]>(existing?.tags ?? []);
+  const [checkKeys, setCheckKeys] = useState<string[]>(existing?.checkKeys ?? []);
   const [startsAt, setStartsAt] = useState(toLocalInput(existing?.startsAt ?? null));
   const [endsAt, setEndsAt] = useState(toLocalInput(existing?.endsAt ?? null));
   const [repeat, setRepeat] = useState<MaintenanceRepeat>(existing?.repeat ?? "none");
@@ -61,7 +62,7 @@ export function MaintenanceForm({
     setError(null);
     const payload = {
       name: name.trim(),
-      tags,
+      checkKeys,
       startsAt: toIso(startsAt)!,
       endsAt: toIso(endsAt)!,
       repeat,
@@ -85,16 +86,13 @@ export function MaintenanceForm({
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
       <div>
-        <Link href={`/${slug}/checks/maintenance`} className="text-sm text-teal-400 hover:text-teal-300">
-          &larr; Maintenance windows
-        </Link>
-        <div className="mt-2 flex items-start justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
               {editing ? "Edit maintenance window" : "New maintenance window"}
             </h1>
             <p className="mt-0.5 text-sm text-zinc-500">
-              Checks matching the tags below won&apos;t run or alert during this window.
+              The selected checks won&apos;t run or alert during this window.
             </p>
           </div>
           <Button variant="primary" onClick={save} disabled={disabled}>
@@ -108,8 +106,38 @@ export function MaintenanceForm({
           <Field label="Name">
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nightly deploy" />
           </Field>
-          <Field label="Target tags" hint="Checks with any of these tags are paused. Leave empty to pause every check.">
-            <TagsInput value={tags} onChange={setTags} placeholder="Add a tag and press Enter" />
+          <Field label="Applies to" hint="Leave everything unchecked to pause every check.">
+            {checks.length === 0 ? (
+              <p className="text-sm text-zinc-500">No checks yet.</p>
+            ) : (
+              <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto rounded-md border border-white/10 bg-white/2 p-3">
+                <label className="flex items-center gap-2 text-sm text-zinc-200">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-teal-500"
+                    checked={checkKeys.length === 0}
+                    onChange={() => setCheckKeys([])}
+                  />
+                  All checks
+                </label>
+                <div className="my-1 h-px bg-white/10" />
+                {checks.map((c) => (
+                  <label key={c.key} className="flex items-center gap-2 text-sm text-zinc-300">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-teal-500"
+                      checked={checkKeys.includes(c.key)}
+                      onChange={(e) =>
+                        setCheckKeys((prev) =>
+                          e.target.checked ? [...prev, c.key] : prev.filter((k) => k !== c.key),
+                        )
+                      }
+                    />
+                    {c.name}
+                  </label>
+                ))}
+              </div>
+            )}
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Starts">

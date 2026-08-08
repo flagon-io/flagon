@@ -29,9 +29,9 @@ export type RecordedRun = {
 };
 
 // Failure codes that mean the probe never actually ran (no compute consumed) — so the run
-// is recorded for the timeline but NOT metered. `runtime_unavailable` = the browser runtime
-// couldn't launch; `adapter_error` = the adapter threw before executing.
-const NON_BILLABLE_ERROR_CODES = new Set(["runtime_unavailable", "adapter_error"]);
+// is recorded for the timeline but NOT metered. `adapter_error` = the adapter threw before
+// executing the probe.
+const NON_BILLABLE_ERROR_CODES = new Set(["adapter_error"]);
 
 export async function recordRun(
   orgId: string,

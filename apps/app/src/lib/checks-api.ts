@@ -33,7 +33,6 @@ export type Check = {
   locations: string[];
   activated: boolean;
   muted: boolean;
-  tags: string[];
   currentStatus: CheckStatus;
   consecutiveFailures: number;
   lastRunAt: string | null;
@@ -122,7 +121,6 @@ export type CheckInput = {
   frequencySeconds?: number;
   activated?: boolean;
   muted?: boolean;
-  tags?: string[];
   alertEmails?: string[];
   alertChannelIds?: string[];
   alertTrigger?: Record<string, unknown>;
@@ -232,7 +230,7 @@ export type MaintenanceRepeat = "none" | "daily" | "weekly" | "monthly";
 export type MaintenanceWindow = {
   id: string;
   name: string;
-  tags: string[];
+  checkKeys: string[];
   startsAt: string;
   endsAt: string;
   repeat: MaintenanceRepeat;
@@ -243,7 +241,7 @@ export type MaintenanceWindow = {
 
 export type MaintenanceWindowInput = {
   name: string;
-  tags?: string[];
+  checkKeys?: string[];
   startsAt: string;
   endsAt: string;
   repeat?: MaintenanceRepeat;

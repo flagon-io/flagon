@@ -10,7 +10,7 @@ import { maintenanceWindows, type MaintenanceWindow } from "../../db/schema.js";
 
 /**
  * Maintenance windows API — planned spans during which matched checks are not run and so
- * never alert (the Checkly model). A window targets checks by TAG (empty tags = all), and
+ * never alert (the Checkly model). A window targets checks by KEY (empty = all checks), and
  * can repeat daily/weekly/monthly until an optional end. The sweep reads active windows
  * and skips matched checks (checks/maintenance.ts). Mounted under
  * /v1/orgs/:org/maintenance-windows.
@@ -27,7 +27,7 @@ function serialize(row: MaintenanceWindow) {
   return {
     id: row.id,
     name: row.name,
-    tags: row.tags,
+    checkKeys: row.checkKeys,
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     repeat: row.repeat,
@@ -40,7 +40,7 @@ function serialize(row: MaintenanceWindow) {
 const windowSchema = z.object({
   id: z.string(),
   name: z.string(),
-  tags: z.array(z.string()),
+  checkKeys: z.array(z.string()),
   startsAt: z.string(),
   endsAt: z.string(),
   repeat: z.enum(REPEATS),
@@ -55,7 +55,7 @@ registerComponentSchema("MaintenanceWindowResponse", z.object({ window: windowSc
 const createSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
-    tags: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+    checkKeys: z.array(z.string().trim().min(1).max(200)).max(1000).optional(),
     startsAt: z.string().datetime(),
     endsAt: z.string().datetime(),
     repeat: z.enum(REPEATS).optional(),
@@ -68,7 +68,7 @@ const createSchema = z
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
-  tags: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  checkKeys: z.array(z.string().trim().min(1).max(200)).max(1000).optional(),
   startsAt: z.string().datetime().optional(),
   endsAt: z.string().datetime().optional(),
   repeat: z.enum(REPEATS).optional(),
@@ -89,7 +89,7 @@ registerRoute({
   path: "/v1/orgs/{org}/maintenance-windows",
   summary: "Create a maintenance window",
   description:
-    "Create a window that suppresses scheduled runs for checks matching its tags (empty tags = all). Owner/admin only.",
+    "Create a window that suppresses scheduled runs for the selected checks (empty = all). Owner/admin only.",
   tags: [TAG],
   auth: true,
   paramDescriptions: { org: params.org },
@@ -167,7 +167,7 @@ maintenanceWindows_.post("/", async (c) => {
       .values({
         organizationId: ctx.orgId,
         name: body.name,
-        tags: body.tags ?? [],
+        checkKeys: body.checkKeys ?? [],
         startsAt: new Date(body.startsAt),
         endsAt: new Date(body.endsAt),
         repeat: body.repeat ?? "none",
@@ -202,7 +202,7 @@ maintenanceWindows_.patch("/:id", async (c) => {
 
   const set: Partial<MaintenanceWindow> = {};
   if (body.name !== undefined) set.name = body.name;
-  if (body.tags !== undefined) set.tags = body.tags;
+  if (body.checkKeys !== undefined) set.checkKeys = body.checkKeys;
   if (body.startsAt !== undefined) set.startsAt = new Date(body.startsAt);
   if (body.endsAt !== undefined) set.endsAt = new Date(body.endsAt);
   if (body.repeat !== undefined) set.repeat = body.repeat;

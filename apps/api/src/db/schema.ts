@@ -1592,7 +1592,6 @@ export const checks = pgTable(
     retryStrategy: jsonb("retry_strategy").$type<Record<string, unknown>>(),
     activated: boolean("activated").notNull().default(true),
     muted: boolean("muted").notNull().default(false),
-    tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
     // --- live state (the state machine, checks/state.ts) ---
     currentStatus: text("current_status").notNull().default("unknown"),
     consecutiveFailures: integer("consecutive_failures").notNull().default(0),
@@ -1717,8 +1716,8 @@ export const maintenanceWindows = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     organizationId: uuid("organization_id").notNull(),
     name: text("name").notNull(),
-    // Checks whose tags intersect these are in the window; empty = ALL checks.
-    tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
+    // The checks this window pauses, by key. EMPTY = ALL checks (the default).
+    checkKeys: text("check_keys").array().notNull().default(sql`ARRAY[]::text[]`),
     startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
     endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
     // "none" | "daily" | "weekly" | "monthly" — how the window recurs from startsAt.

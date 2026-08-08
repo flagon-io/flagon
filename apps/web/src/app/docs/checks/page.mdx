@@ -22,18 +22,13 @@ Lightweight protocol probes, billed by the number of active monitors:
 - **DNS monitor** resolves a record and checks the answer.
 - **SSL monitor** verifies the TLS certificate and warns before it expires.
 
-## Synthetic checks
+## Coming soon
 
-Exercise a real flow, billed per run:
-
-- **[API check](/docs/checks/api-checks)** sends a request with headers and a body and
-  runs full [assertions](/docs/checks/assertions) against the response.
-- **[Browser check](/docs/checks/browser-checks)** runs a Playwright script in a headless
-  browser, so you can test a login, a checkout, or any click path a user takes.
-
-More monitor types (ICMP, gRPC, heartbeat, multistep, Playwright suites) are on the way.
-Every type is an adapter behind the same scheduling, alerting, and billing, so they light
-up without changing anything about how you use Checks.
+**Synthetic checks** (billed per run) are on the way: **API checks** (a request with headers
+and a body, run through full assertions) and **Browser checks** (a real browser flow), along
+with ICMP, gRPC, heartbeat, multistep, and Playwright suites. Every type is an adapter behind
+the same scheduling, alerting, and billing, so they light up without changing how you use
+Checks.
 
 ## How a run is evaluated
 
@@ -42,12 +37,11 @@ Every run resolves to one of three states:
 - **Passing**: the check succeeded within its response-time threshold and every assertion
   held.
 - **Degraded**: it succeeded but was slower than the degraded threshold (or, for SSL, the
-  certificate is nearing expiry). Browser checks have no degraded state.
+  certificate is nearing expiry).
 - **Failing**: it errored, timed out, or an assertion did not hold.
 
 ## What's next
 
-- Set up [uptime monitors](/docs/checks/uptime), [API checks](/docs/checks/api-checks), and
-  [browser checks](/docs/checks/browser-checks).
+- Set up [uptime monitors](/docs/checks/uptime).
 - Learn the [assertion model](/docs/checks/assertions) that validates responses.
 - Learn how [alerting](/docs/checks/alerting) reaches you through your channels.

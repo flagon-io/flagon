@@ -12,7 +12,6 @@ import {
   Select,
   Slider,
   Switch,
-  TagsInput,
   Textarea,
   type SelectOption,
   type SliderStep,
@@ -87,44 +86,15 @@ const TRIGGER_OPTS = [
   { value: "time_based", label: "After N minutes" },
 ];
 
-const REGION_GROUPS: { group: string; regions: { name: string; code: string; current?: boolean }[] }[] = [
-  {
-    group: "Americas",
-    regions: [
-      { name: "US East", code: "us-east-1", current: true },
-      { name: "US East (Ohio)", code: "us-east-2" },
-      { name: "US West (N. California)", code: "us-west-1" },
-      { name: "US West (Oregon)", code: "us-west-2" },
-      { name: "Canada (Montreal)", code: "ca-central-1" },
-      { name: "South America (São Paulo)", code: "sa-east-1" },
-    ],
-  },
-  {
-    group: "Europe / Middle East / Africa",
-    regions: [
-      { name: "Ireland", code: "eu-west-1" },
-      { name: "Frankfurt", code: "eu-central-1" },
-      { name: "London", code: "eu-west-2" },
-      { name: "Paris", code: "eu-west-3" },
-      { name: "Stockholm", code: "eu-north-1" },
-      { name: "Milan", code: "eu-south-1" },
-      { name: "Bahrain", code: "me-south-1" },
-      { name: "Cape Town", code: "af-south-1" },
-    ],
-  },
-  {
-    group: "Asia Pacific",
-    regions: [
-      { name: "Singapore", code: "ap-southeast-1" },
-      { name: "Tokyo", code: "ap-northeast-1" },
-      { name: "Osaka", code: "ap-northeast-3" },
-      { name: "Hong Kong", code: "ap-east-1" },
-      { name: "Sydney", code: "ap-southeast-2" },
-      { name: "Jakarta", code: "ap-southeast-3" },
-      { name: "Seoul", code: "ap-northeast-2" },
-      { name: "Mumbai", code: "ap-south-1" },
-    ],
-  },
+// Generic global-edge locations (not tied to any cloud's region codes). Today checks run
+// from the nearest edge automatically; pinning to a specific region is on the way.
+const LOCATIONS: { name: string; current?: boolean }[] = [
+  { name: "Global edge (automatic)", current: true },
+  { name: "North America" },
+  { name: "Europe" },
+  { name: "Asia Pacific" },
+  { name: "South America" },
+  { name: "Oceania" },
 ];
 
 function SoonTag() {
@@ -195,7 +165,6 @@ export function ConfigForm({
   const isTcp = t === "tcp";
   const isDns = t === "dns";
   const isSsl = t === "ssl";
-  const isBrowser = t === "browser";
   const isHttp = isUrl || isApi;
 
   // Prefill from an existing check when editing.
@@ -204,7 +173,6 @@ export function ConfigForm({
   const cn = (k: string, d: string) => (cfg[k] != null ? String(cfg[k]) : d);
 
   const [name, setName] = useState(initial?.name ?? "");
-  const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
   const [activated, setActivated] = useState(initial?.activated ?? true);
   const [muted, setMuted] = useState(initial?.muted ?? false);
 
@@ -256,10 +224,6 @@ export function ConfigForm({
   const [degradedMs, setDegradedMs] = useState(cn("degradedThresholdMs", "3000"));
   const [failedMs, setFailedMs] = useState(cn("timeoutMs", isSsl ? "5000" : "5000"));
 
-  const [script, setScript] = useState(
-    cs("script") || "// Playwright script. `page` is in scope.\nawait page.goto('https://example.com');\n",
-  );
-
   const latencyDegraded = monitor.supportsDegraded && !isSsl;
 
   function timing(cfg: Record<string, unknown>): Record<string, unknown> {
@@ -294,16 +258,11 @@ export function ConfigForm({
       if (failedMs.trim()) cfg.timeoutMs = Number(failedMs);
       return cfg;
     }
-    if (isBrowser) {
-      const cfg: Record<string, unknown> = { script };
-      if (failedMs.trim()) cfg.timeoutMs = Number(failedMs);
-      return cfg;
-    }
     return {};
   }
 
   const missingPrimary =
-    (isHttp && !url) || (isTcp && (!host || !port)) || (isDns && !hostname) || (isSsl && !host) || (isBrowser && !script.trim());
+    (isHttp && !url) || (isTcp && (!host || !port)) || (isDns && !hostname) || (isSsl && !host);
   const disabled = pending || !name || missingPrimary;
 
   // The Project relation (optional). Sent on both create and edit.
@@ -319,7 +278,6 @@ export function ConfigForm({
           frequencySeconds: Number(frequency),
           activated,
           muted,
-          tags,
           alertChannelIds: [...selectedChannels],
           alertTrigger: buildTrigger(),
           alertOnDegraded: monitor.supportsDegraded ? alertOnDegraded : undefined,
@@ -340,7 +298,6 @@ export function ConfigForm({
         frequencySeconds: Number(frequency),
         activated,
         muted,
-        tags,
         alertChannelIds: [...selectedChannels],
         alertTrigger: buildTrigger(),
         alertOnDegraded: monitor.supportsDegraded ? alertOnDegraded : undefined,
@@ -361,60 +318,50 @@ export function ConfigForm({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-      {/* Header */}
-      <div>
-        <Link
-          href={mode === "edit" && initial ? `/${slug}/checks/${initial.key}` : `/${slug}/checks/new`}
-          className="text-sm text-teal-400 hover:text-teal-300"
-        >
-          &larr; {mode === "edit" ? "Back to check" : "New check"}
-        </Link>
-        <div className="mt-2 flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={`${monitor.label} #1`} className="text-base font-semibold" />
-          </div>
-          <div className="flex shrink-0 items-center gap-4">
-            <label className="flex items-center gap-2 text-sm text-zinc-300">
-              Activated
-              <Switch checked={activated} onCheckedChange={setActivated} ariaLabel="Activated" />
-            </label>
-            <label className="flex items-center gap-2 text-sm text-zinc-300">
-              Muted
-              <Switch checked={muted} onCheckedChange={setMuted} ariaLabel="Muted" />
-            </label>
-            <Button variant="primary" onClick={submit} disabled={disabled}>
-              {mode === "edit" ? "Save changes" : "Create check"}
-            </Button>
-          </div>
-        </div>
-      </div>
+      {/* Identity */}
+      <Field label="Name">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={`${monitor.label} #1`} />
+      </Field>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Tags">
-          <TagsInput value={tags} onChange={setTags} placeholder="Add a tag and press Enter" />
-        </Field>
-        <Field label="Project" hint="Relate this check to a project; it shows on that project's Checks tab.">
-          <Select
-            value={linkedProjectKey}
-            onValueChange={setLinkedProjectKey}
-            placeholder="No project"
-            options={[{ value: "", label: "No project" }, ...projects.map((p) => ({ value: p.key, label: p.name }))]}
-            disabled={projects.length === 0}
-          />
-        </Field>
+      <Field label="Project" hint="Relate this check to a project; it shows on that project's Checks tab.">
+        <Select
+          value={linkedProjectKey}
+          onValueChange={setLinkedProjectKey}
+          placeholder="No project"
+          options={[{ value: "", label: "No project" }, ...projects.map((p) => ({ value: p.key, label: p.name }))]}
+          disabled={projects.length === 0}
+        />
+      </Field>
+
+      <div className="flex flex-wrap items-center gap-6">
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <Switch checked={activated} onCheckedChange={setActivated} ariaLabel="Activated" /> Activated
+        </label>
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <Switch checked={muted} onCheckedChange={setMuted} ariaLabel="Muted" /> Muted
+        </label>
       </div>
 
       {/* Primary config, per type */}
       {isHttp ? (
         <Section title={isApi ? "API request" : "Monitor a URL"} description={monitor.summary}>
           <Field label="URL">
-            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" />
+            <div className="flex">
+              <Select
+                value={method}
+                onValueChange={setMethod}
+                options={METHODS}
+                fullWidth={false}
+                className="w-28 shrink-0 rounded-r-none"
+              />
+              <Input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://example.com"
+                className="-ml-px flex-1 rounded-l-none"
+              />
+            </div>
           </Field>
-          <div className="mt-4">
-            <Field label="Method">
-              <Select value={method} onValueChange={setMethod} options={METHODS} />
-            </Field>
-          </div>
           {isApi && method !== "GET" && method !== "HEAD" ? (
             <div className="mt-4">
               <Field label="Request body" hint="Sent as-is.">
@@ -476,12 +423,6 @@ export function ConfigForm({
           <Field label="Warn before expiry" hint="Days. The check degrades when the cert expires within this window.">
             <Input value={expiryDays} onChange={(e) => setExpiryDays(e.target.value)} inputMode="numeric" />
           </Field>
-        </Section>
-      ) : null}
-
-      {isBrowser ? (
-        <Section title="Browser script" description="A Playwright script; `page` is in scope. Any thrown error fails the run.">
-          <Textarea value={script} onChange={(e) => setScript(e.target.value)} rows={10} className="font-mono text-xs" />
         </Section>
       ) : null}
 
@@ -566,33 +507,23 @@ export function ConfigForm({
       </Section>
 
       {/* Locations */}
-      <Section title="Locations" description="Where we run this check from. Today every check runs from US East; more regions and private locations (a Flagon agent in your own network) are on the way.">
-        <div className="grid gap-5 sm:grid-cols-3">
-          {REGION_GROUPS.map((g) => (
-            <div key={g.group}>
-              <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-zinc-400 uppercase">{g.group}</h3>
-              <div className="flex flex-col gap-1.5">
-                {g.regions.map((r) => (
-                  <div
-                    key={r.code}
-                    className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${
-                      r.current ? "border-teal-400/30 bg-teal-400/5" : "border-white/8 bg-white/1 opacity-70"
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className={`truncate text-xs font-medium ${r.current ? "text-zinc-100" : "text-zinc-400"}`}>{r.name}</div>
-                      <div className="truncate text-[10px] text-zinc-500">{r.code}</div>
-                    </div>
-                    {r.current ? (
-                      <span className="shrink-0 rounded-full border border-teal-400/20 bg-teal-400/10 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-teal-300 uppercase">
-                        Current
-                      </span>
-                    ) : (
-                      <SoonTag />
-                    )}
-                  </div>
-                ))}
-              </div>
+      <Section title="Locations" description="Where we run this check from. Today checks run from the nearest edge automatically; pinning to a specific region and private locations (a Flagon agent in your own network) are on the way.">
+        <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+          {LOCATIONS.map((r) => (
+            <div
+              key={r.name}
+              className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${
+                r.current ? "border-teal-400/30 bg-teal-400/5" : "border-white/8 bg-white/1 opacity-70"
+              }`}
+            >
+              <div className={`truncate text-xs font-medium ${r.current ? "text-zinc-100" : "text-zinc-400"}`}>{r.name}</div>
+              {r.current ? (
+                <span className="shrink-0 rounded-full border border-teal-400/20 bg-teal-400/10 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-teal-300 uppercase">
+                  Current
+                </span>
+              ) : (
+                <SoonTag />
+              )}
             </div>
           ))}
         </div>

@@ -135,7 +135,7 @@ export function ChecksView({ slug, checks, canManage }: { slug: string; checks: 
           </span>
           <p className="text-base font-medium text-zinc-100">No checks yet</p>
           <p className="max-w-sm text-sm text-zinc-500">
-            Add a URL monitor to watch an endpoint, or a browser check to script a real user flow. We run
+            Add a URL monitor to watch an endpoint, or an API check to validate a JSON response. We run
             it from our infrastructure and page you when it breaks.
           </p>
         </div>

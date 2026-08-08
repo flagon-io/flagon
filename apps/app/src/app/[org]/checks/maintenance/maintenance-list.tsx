@@ -49,7 +49,7 @@ function Row({ slug, window: w }: { slug: string; window: MaintenanceWindow }) {
         <div className="min-w-0">
           <div className="truncate text-sm font-medium text-zinc-100">{w.name}</div>
           <div className="mt-0.5 truncate text-xs text-zinc-500">
-            {scheduleLabel(w)} · {w.tags.length ? `tags: ${w.tags.join(", ")}` : "all checks"}
+            {scheduleLabel(w)} · {w.checkKeys.length ? `${w.checkKeys.length} check${w.checkKeys.length === 1 ? "" : "s"}` : "all checks"}
           </div>
         </div>
       </div>
@@ -77,8 +77,8 @@ export function MaintenanceList({
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-zinc-100">Maintenance windows</h1>
         <p className="mt-1 max-w-2xl text-sm text-zinc-500">
-          Planned downtime. During a window, checks matching its tags are not run and never alert, so scheduled
-          maintenance doesn&apos;t page anyone. Windows can repeat daily, weekly, or monthly.
+          Planned downtime. During a window, the checks you select (or all of them) are not run and never
+          alert, so scheduled maintenance doesn&apos;t page anyone. Windows can repeat daily, weekly, or monthly.
         </p>
       </div>
 

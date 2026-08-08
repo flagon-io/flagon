@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isWindowActive, windowMatchesTags } from "./maintenance.js";
+import { isWindowActive, windowMatchesCheck } from "./maintenance.js";
 
 const at = (iso: string) => new Date(iso);
 
@@ -12,15 +12,14 @@ function win(startsAt: string, endsAt: string, repeat = "none", repeatEndsAt: st
   };
 }
 
-describe("windowMatchesTags", () => {
-  it("empty window tags match every check", () => {
-    expect(windowMatchesTags([], [])).toBe(true);
-    expect(windowMatchesTags([], ["api"])).toBe(true);
+describe("windowMatchesCheck", () => {
+  it("empty selection matches every check", () => {
+    expect(windowMatchesCheck([], "home")).toBe(true);
+    expect(windowMatchesCheck([], "api-health")).toBe(true);
   });
-  it("matches on tag intersection (any-of)", () => {
-    expect(windowMatchesTags(["api", "web"], ["web"])).toBe(true);
-    expect(windowMatchesTags(["api"], ["web"])).toBe(false);
-    expect(windowMatchesTags(["api"], [])).toBe(false);
+  it("matches only the selected checks", () => {
+    expect(windowMatchesCheck(["home", "api-health"], "home")).toBe(true);
+    expect(windowMatchesCheck(["home"], "api-health")).toBe(false);
   });
 });
 
