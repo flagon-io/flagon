@@ -17,18 +17,40 @@ import { serializeResult, type SerializedResult } from "./serialize.js";
  * maxDuration is raised to cover it).
  */
 
-/** Base URL of THIS deployment, for reaching the sibling browser function. */
+/**
+ * Base URL for reaching the sibling browser function. Prefer a PUBLIC, stable host: the
+ * deployment-specific `VERCEL_URL` is behind Deployment Protection (a 401 on internal calls),
+ * whereas the production alias / custom domain is public. Order: explicit override →
+ * API_URL → the production alias → (last resort) the protected deployment URL.
+ */
 export function selfBaseUrl(): string {
   if (process.env.CHECKS_BROWSER_URL) return process.env.CHECKS_BROWSER_URL;
   if (process.env.API_URL) return process.env.API_URL;
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "http://localhost:3002";
+}
+
+/** Auth + (when present) the Vercel automation-bypass header, so an internal call still gets
+ *  through Deployment Protection if it must hit a protected host. */
+function browserFnHeaders(secret: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    authorization: `Bearer ${secret}`,
+  };
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (bypass) headers["x-vercel-protection-bypass"] = bypass;
+  return headers;
 }
 
 export async function runBrowserRemote(
   orgId: string,
   orgSlug: string,
   check: Check,
+  // The PUBLIC base URL to reach the browser function on. "Run now" passes the host the
+  // request arrived on (a public custom domain), which sidesteps Deployment Protection on
+  // the `*.vercel.app` deployment URL; the sweep omits it and uses selfBaseUrl().
+  baseUrl?: string,
 ): Promise<{ ok: boolean; result: SerializedResult | null }> {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
@@ -39,11 +61,14 @@ export async function runBrowserRemote(
     return { ok: false, result: null };
   }
 
-  const url = `${selfBaseUrl().replace(/\/$/, "")}/checks-browser`;
+  // An explicit CHECKS_BROWSER_URL always wins (points at a known-public host); then the
+  // caller-provided public host (run-now); then the derived self URL.
+  const base = process.env.CHECKS_BROWSER_URL || baseUrl || selfBaseUrl();
+  const url = `${base.replace(/\/$/, "")}/checks-browser`;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
+      headers: browserFnHeaders(secret),
       body: JSON.stringify({ orgId, checkId: check.id }),
       // Below the browser function's 60s maxDuration; it responds when the run is recorded.
       signal: AbortSignal.timeout(50_000),

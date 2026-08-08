@@ -4,6 +4,10 @@ import { canManageOrg, getMembershipBySlug } from "@/lib/org";
 import { getCheck, listAlertChannels, listCheckResults } from "@/lib/checks-api";
 import { CheckDetail } from "./check-detail";
 
+// "Run now" on a browser check waits on the browser function (Chromium ~30-40s); give the
+// server action room beyond the default function limit.
+export const maxDuration = 60;
+
 /**
  * A check's detail: its live status + config, the recent run history, and (for
  * managers) run-now / pause / mute / delete.

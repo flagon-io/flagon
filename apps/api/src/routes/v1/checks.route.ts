@@ -552,9 +552,16 @@ checks_.post("/:key/run", async (c) => {
   if (!check) return jsonError(c, 404, "No such check.");
 
   // Browser checks can only run where Chromium lives — hand off to the dedicated browser
-  // function and relay the result it records. Everything else runs inline here.
+  // function and relay the result it records. Reuse the PUBLIC host this request arrived on
+  // (e.g. api.flagon.io) so the internal call isn't blocked by Deployment Protection on the
+  // deployment-specific *.vercel.app URL. Everything else runs inline here.
   if (getMonitorType(check.type)?.runner === "browser") {
-    const { result } = await runBrowserRemote(ctx.orgId, ctx.orgSlug, check);
+    // On Vercel the PUBLIC host is in x-forwarded-host; `host` is the internal (protected)
+    // one. Use the forwarded host so the internal call isn't blocked by Deployment Protection.
+    const host = c.req.header("x-forwarded-host") ?? c.req.header("host");
+    const proto = c.req.header("x-forwarded-proto") ?? "https";
+    const base = host ? `${proto}://${host}` : undefined;
+    const { result } = await runBrowserRemote(ctx.orgId, ctx.orgSlug, check, base);
     if (!result) return jsonError(c, 502, "The browser run could not be completed. Check the browser function logs.");
     return c.json(result);
   }
