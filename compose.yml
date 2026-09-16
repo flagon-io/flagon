@@ -1,0 +1,73 @@
+services:
+  # Separate databases per service, mirroring production (api and app each
+  # own their own Postgres - they are never the same database).
+  postgres-api:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: flagon
+      POSTGRES_PASSWORD: flagon
+      POSTGRES_DB: flagon_api
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-api-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flagon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-app:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: flagon
+      POSTGRES_PASSWORD: flagon
+      POSTGRES_DB: flagon_app
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-app-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flagon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./api
+      target: dev
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://flagon:flagon@postgres-api:5432/flagon_api?sslmode=disable
+    volumes:
+      - ./api:/src
+    depends_on:
+      postgres-api:
+        condition: service_healthy
+
+  app:
+    build:
+      context: ./app
+      target: dev
+    ports:
+      - "4000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://api:8080
+      DATABASE_URL: postgres://flagon:flagon@postgres-app:5432/flagon_app?sslmode=disable
+      BETTER_AUTH_SECRET: dev-only-secret-change-me-32-characters-min
+      BETTER_AUTH_URL: http://localhost:4000
+    volumes:
+      - ./app:/src
+      - /src/node_modules
+      - /src/.next
+    depends_on:
+      postgres-app:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+volumes:
+  postgres-api-data:
+  postgres-app-data:

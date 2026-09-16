@@ -1,0 +1,61 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/api"
+    schedule:
+      interval: "weekly"
+    groups:
+      huma:
+        patterns:
+          - "github.com/danielgtaylor/huma/*"
+      chi:
+        patterns:
+          - "github.com/go-chi/*"
+      go-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "npm"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      next:
+        patterns:
+          - "next"
+          - "eslint-config-next"
+      eslint:
+        patterns:
+          - "eslint*"
+          - "@eslint/*"
+      tailwind:
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/api"
+      - "/app"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
