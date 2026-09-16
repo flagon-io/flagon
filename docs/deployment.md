@@ -48,18 +48,20 @@ have somewhere to go.
 
 ## Deploying `app` to Vercel
 
-The repo root `vercel.json` tells Vercel how to build the Next.js app from a
-subdirectory, so the Vercel project's Root Directory should stay as the repo
-root (do not set it to `app` in the dashboard, or the two will conflict).
+Set the Vercel project's **Root Directory to `app`** (Project Settings ->
+General -> Root Directory). With that set, Vercel auto-detects Next.js and
+needs no `vercel.json` or custom build/install commands - don't add one back;
+a root-level `vercel.json` with its own `cd app && ...` commands conflicts
+with Root Directory (Vercel already `cd`s into `app/` for you, so the
+commands try to `cd app` a second time and fail with "No such file or
+directory").
 
 1. Import the repo in the Vercel dashboard, or via CLI from the repo root:
    ```sh
    npx vercel link
    ```
-2. Vercel will pick up `vercel.json` automatically:
-   - install: `cd app && npm install`
-   - build: `cd app && npm run build`
-   - output: `app/.next`
+2. In Project Settings, set Root Directory to `app`. Leave Build/Install/
+   Output commands on their framework defaults (Next.js auto-detected).
 3. Set the production domain to `app.flagon.io` in the project's Domains
    settings, and add the DNS record Vercel gives you (usually a CNAME to
    `cname.vercel-dns.com`).
