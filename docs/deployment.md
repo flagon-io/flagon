@@ -59,20 +59,30 @@ power (see also `api/internal/db`):
   row-level security, tenant isolation holds even if a query forgets to scope
   itself.
 
-Point `FLAGON_APP_DATABASE_URL` at the same cluster/database as `DATABASE_URL`,
-but with the app role's own credentials. The API **provisions the role for
-you** at boot (creates it if missing, pins its password to this URL, and
-strips superuser/createdb/createrole/bypassrls), so the credential lives in
-exactly one place - this secret:
+You do **not** create the app role by hand - the API provisions it on boot
+(creates it if missing, syncs its password to this secret, and pins it to
+`NOSUPERUSER NOBYPASSRLS`), so the credential lives in exactly one place: this
+secret. To set it up:
 
-```sh
-# Same host/db as DATABASE_URL, different user + password.
-fly secrets set FLAGON_APP_DATABASE_URL='postgres://flagon_app:<generated-pw>@<same-host>:5432/<same-db>'
-```
+1. Get the cluster's host/port/database from the Managed Postgres "Connect"
+   info (Fly dashboard or the `fly mpg` CLI). `DATABASE_URL` itself can't be
+   read back from `fly secrets` - it is write-only.
+2. Set the secret pointing at that **same** host/port/database (and matching
+   `sslmode`), with user `flagon_app` and a fresh password:
+   ```sh
+   fly secrets set -a flagon-api \
+     FLAGON_APP_DATABASE_URL='postgres://flagon_app:<password>@<host>:<port>/<db>?sslmode=<same-as-DATABASE_URL>'
+   ```
+   Generate the password with `openssl rand -hex 24`. `fly secrets set`
+   redeploys, and the role is provisioned on that boot.
+3. Verify: `fly logs -a flagon-api` shows no `FLAGON_APP_DATABASE_URL is not
+   set` warning, and `GET /readyz` returns `{"status":"ok","database":"ok"}`.
 
-Generate a strong password for `<generated-pw>` (e.g. `openssl rand -hex 24`).
-Use the same host/port/database as the migrator URL; only the user and password
-differ.
+Provisioning needs the `DATABASE_URL` role to be allowed to create roles
+(`CREATEROLE` or superuser); Fly Managed Postgres' admin user has this. If it
+does not, the API does not crash - it logs `WARNING: could not provision app
+role` and runs degraded (`/readyz` shows the error). The fix is to create
+`flagon_app` once by hand and re-set the secret; the API syncs it from then on.
 
 **Migrations run automatically on every boot** (embedded SQL in
 `api/internal/db/migrations`, applied in filename order, each in its own
