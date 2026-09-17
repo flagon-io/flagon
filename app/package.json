@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "node scripts/deploy-migrate.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "db:migrate": "npx @better-auth/cli@latest migrate --yes && node --env-file-if-exists=.env.local scripts/migrate-user-emails.mjs"

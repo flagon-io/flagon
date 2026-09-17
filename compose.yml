@@ -40,7 +40,12 @@ services:
     ports:
       - "8080:8080"
     environment:
+      # Migrator/owner role: runs migrations + provisions the app role at boot.
       DATABASE_URL: postgres://flagon:flagon@postgres-api:5432/flagon_api?sslmode=disable
+      # App role: RLS-enforced (NOBYPASSRLS) runtime login. The api provisions
+      # this role (creates it, sets this password) on boot from the migrator
+      # connection, so nothing else needs to create it.
+      FLAGON_APP_DATABASE_URL: postgres://flagon_app:flagon_app@postgres-api:5432/flagon_api?sslmode=disable
     volumes:
       - ./api:/src
     depends_on:

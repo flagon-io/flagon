@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { OtpInput } from "@/components/auth/otp-input";
 
 interface UserEmail {
@@ -18,18 +18,20 @@ export default function EmailSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const res = await fetch("/api/emails");
     if (res.ok) {
       const { emails } = await res.json();
       setEmails(emails);
     }
     setLoading(false);
-  }
+  }, []);
 
   useEffect(() => {
-    refresh();
-  }, []);
+    (async () => {
+      await refresh();
+    })();
+  }, [refresh]);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();

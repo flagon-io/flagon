@@ -39,12 +39,58 @@ have somewhere to go.
    curl https://api.flagon.io/healthz
    curl https://api.flagon.io/openapi.json
    ```
-5. Secrets (once real config exists, e.g. `DATABASE_URL`, `STRIPE_SECRET_KEY`)
-   are set with:
+5. Secrets (e.g. `STRIPE_SECRET_KEY`) are set with:
    ```sh
-   fly secrets set DATABASE_URL=... STRIPE_SECRET_KEY=...
+   fly secrets set STRIPE_SECRET_KEY=...
    ```
    Never put these in `fly.toml` - it's committed to git.
+
+### Database, roles, and migrations
+
+The API uses two Postgres roles so the running server can never hold schema
+power (see also `api/internal/db`):
+
+- **Migrator** (`DATABASE_URL`) - the schema owner. Attaching a Fly Managed
+  Postgres cluster sets this automatically. It is used ONLY at boot, to run
+  migrations and to provision the app role. The HTTP server never queries with
+  it.
+- **App / RLS role** (`FLAGON_APP_DATABASE_URL`) - a least-privilege,
+  `NOBYPASSRLS` login used for every runtime query. Because it cannot bypass
+  row-level security, tenant isolation holds even if a query forgets to scope
+  itself.
+
+Point `FLAGON_APP_DATABASE_URL` at the same cluster/database as `DATABASE_URL`,
+but with the app role's own credentials. The API **provisions the role for
+you** at boot (creates it if missing, pins its password to this URL, and
+strips superuser/createdb/createrole/bypassrls), so the credential lives in
+exactly one place - this secret:
+
+```sh
+# Same host/db as DATABASE_URL, different user + password.
+fly secrets set FLAGON_APP_DATABASE_URL='postgres://flagon_app:<generated-pw>@<same-host>:5432/<same-db>'
+```
+
+Generate a strong password for `<generated-pw>` (e.g. `openssl rand -hex 24`).
+Use the same host/port/database as the migrator URL; only the user and password
+differ.
+
+**Migrations run automatically on every boot** (embedded SQL in
+`api/internal/db/migrations`, applied in filename order, each in its own
+transaction). Because `push to main` redeploys the API, migrations ship with
+the code - there is no separate migrate step. The boot contract:
+
+- A reachable database with a **failing or modified** migration is **fatal**:
+  the process exits non-zero, so Fly fails the deploy and keeps the old
+  machine. A schema mismatch never ships.
+- An **unreachable** database is **not** fatal: the API starts anyway (locally
+  and in production) so a database blip can't take the deploy down. It logs a
+  loud `WARNING` and `/readyz` returns `503` with the reason until the database
+  comes back. `/healthz` (Fly's health check) stays green because it is
+  liveness-only. If the database was down at boot, redeploy/restart once it is
+  back so the app role gets provisioned.
+
+Migrations are immutable once applied: editing a shipped migration file trips a
+checksum check and fails the next boot. Add a new migration instead.
 
 ## Deploying `app` to Vercel
 

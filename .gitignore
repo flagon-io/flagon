@@ -2,6 +2,8 @@
 /api/*.exe
 /api/*.test
 /api/dist/
+# air (dev live-reload) build dir
+/api/tmp/
 
 # Generated OpenAPI spec - built by api/cmd/genspec, never hand-edited or committed.
 # The running api server also serves it live at /openapi.json, /openapi.yaml, /docs.

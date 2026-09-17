@@ -1,10 +1,14 @@
-FROM golang:1.27.1 AS base
+# syntax=docker/dockerfile:1
+
+FROM golang:1.27-alpine AS base
+RUN apk add --no-cache ca-certificates tzdata git && update-ca-certificates
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+  --mount=type=cache,target=/root/.cache/go-build \
+  go mod download
 
-# Local development target: live-reloads on source changes via air, run with
-# `docker compose up` (bind-mounts ./api over /src). Not used for deploys.
+# Live-reload target for `docker compose up` (bind-mounts ./api over /src).
 FROM base AS dev
 RUN go install github.com/air-verse/air@latest
 COPY . .
@@ -13,14 +17,22 @@ CMD ["air", "-c", ".air.toml"]
 
 FROM base AS build
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/api ./cmd/api
-# Static spec is a build artifact only (e.g. for client codegen); the running
-# server also serves the live spec at /openapi.json, /openapi.yaml, /docs.
-RUN go run ./cmd/genspec -out /out/openapi.json
+RUN --mount=type=cache,target=/go/pkg/mod \
+  --mount=type=cache,target=/root/.cache/go-build \
+  CGO_ENABLED=0 go build -o /out/api ./cmd/api \
+  && CGO_ENABLED=0 go run ./cmd/genspec -out /out/openapi.json
 
-# Default (final) target: the deployable artifact used by Fly.
-FROM gcr.io/distroless/static-debian12 AS final
-COPY --from=build /out/api /api
-COPY --from=build /out/openapi.json /openapi.json
+FROM alpine AS final
+RUN apk add --no-cache ca-certificates tzdata wget postgresql-client \
+  && adduser -S -D -H -h /app appuser
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=build /out/api /usr/local/bin/api
+COPY --from=build /out/openapi.json /app/openapi.json
+WORKDIR /app
+USER appuser
+ENV PORT=8080
 EXPOSE 8080
-ENTRYPOINT ["/api"]
+# GET, not --spider (HEAD): the health route only answers GET.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 -O /dev/null "http://localhost:${PORT}/healthz" || exit 1
+ENTRYPOINT ["/usr/local/bin/api"]

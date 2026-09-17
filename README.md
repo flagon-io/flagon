@@ -38,10 +38,16 @@ server serves it live:
 
 ```sh
 cd api && go run ./cmd/api
+# GET  http://localhost:8080/           (JSON index of the API, api.github.com style)
 # GET  http://localhost:8080/openapi.json
 # GET  http://localhost:8080/openapi.yaml
 # GET  http://localhost:8080/docs      (interactive UI)
 ```
+
+The root `/` returns a flat JSON map of `<name>_url` discovery links, in the
+style of <https://api.github.com/>. It is built from the live OpenAPI
+definition, so every endpoint registered with `huma.Register` appears there
+automatically as the API grows - nothing to keep in sync by hand.
 
 `openapi/openapi.json` is only produced as a build artifact (see
 `api/Dockerfile`) for cases outside a running process, such as generating a
