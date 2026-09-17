@@ -1,4 +1,4 @@
-FROM node:24-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -9,7 +9,7 @@ FROM deps AS dev
 EXPOSE 3000
 CMD ["npm", "run", "dev"]
 
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /src
 COPY --from=deps /src/node_modules ./node_modules
 COPY . .
@@ -17,7 +17,7 @@ RUN npm run build
 
 # Default (final) target: the deployable artifact (Vercel builds from source
 # directly and doesn't use this, but it's what `docker build` produces).
-FROM node:24-alpine AS final
+FROM node:26-alpine AS final
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /src/public ./public
