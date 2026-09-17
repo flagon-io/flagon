@@ -25,7 +25,7 @@ export function AuthCard({ title, subtitle, footer, children }: AuthCardProps) {
         <Link
           href={MARKETING_SITE_URL}
           aria-label="Flagon home"
-          className="text-foreground transition-colors hover:text-brand"
+          className="opacity-90 transition-opacity hover:opacity-100"
         >
           <Logo className="h-9 w-9" />
         </Link>
