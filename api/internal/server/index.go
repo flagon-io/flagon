@@ -22,10 +22,9 @@ func registerIndex(router chi.Router, api huma.API) {
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		base := baseURL(r)
 
-		// Discovery links that always exist (huma serves these regardless of
+		// Discovery links that always exist (huma serves the spec regardless of
 		// which operations are registered).
 		index := map[string]string{
-			"docs_url":         base + "/docs",
 			"openapi_url":      base + "/openapi.json",
 			"openapi_yaml_url": base + "/openapi.yaml",
 		}

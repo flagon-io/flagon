@@ -28,13 +28,31 @@ func TestIndexServesDiscoveryLinks(t *testing.T) {
 
 	index := decodeIndex(t, rec)
 	want := map[string]string{
-		"docs_url":         "https://api.flagon.io/docs",
 		"openapi_url":      "https://api.flagon.io/openapi.json",
 		"openapi_yaml_url": "https://api.flagon.io/openapi.yaml",
 	}
 	for key, url := range want {
 		if index[key] != url {
 			t.Errorf("index[%q] = %q, want %q", key, index[key], url)
+		}
+	}
+	if _, ok := index["docs_url"]; ok {
+		t.Errorf("index should not advertise a docs_url (no built-in docs UI)")
+	}
+}
+
+func TestDocsRouteIsDisabled(t *testing.T) {
+	router, _ := New()
+
+	for path, wantAbsent := range map[string]bool{"/docs": true, "/openapi.json": false, "/openapi.yaml": false} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if wantAbsent && rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404 (docs UI removed)", path, rec.Code)
+		}
+		if !wantAbsent && rec.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200 (spec must stay served)", path, rec.Code)
 		}
 	}
 }

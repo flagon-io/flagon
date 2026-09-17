@@ -41,18 +41,20 @@ cd api && go run ./cmd/api
 # GET  http://localhost:8080/           (JSON index of the API, api.github.com style)
 # GET  http://localhost:8080/openapi.json
 # GET  http://localhost:8080/openapi.yaml
-# GET  http://localhost:8080/docs      (interactive UI)
 ```
+
+There is no built-in docs UI - the website renders its own docs viewer from the
+spec above. The API only serves the raw OpenAPI (`/openapi.json`,
+`/openapi.yaml`).
 
 The root `/` returns a flat JSON map of `<name>_url` discovery links, in the
 style of <https://api.github.com/>. It is built from the live OpenAPI
 definition, so every endpoint registered with `huma.Register` appears there
 automatically as the API grows - nothing to keep in sync by hand.
 
-`openapi/openapi.json` is only produced as a build artifact (see
-`api/Dockerfile`) for cases outside a running process, such as generating a
-typed client for `app`. Regenerate it manually with `make openapi` if you need
-a local copy.
+`openapi/openapi.json` is only needed outside a running process, such as
+generating a typed client for `app`. Produce it with `make openapi` (the
+deployed binary doesn't ship it - it serves the spec live instead).
 
 ## Local development
 

@@ -22,6 +22,11 @@ type Options struct {
 	// readiness is always OK. It backs /readyz, never /healthz: the process
 	// stays live (and the deploy stays up) even while a dependency is down.
 	ReadyCheck func(ctx context.Context) error
+
+	// RLSCheck runs the tenant-isolation self-test as the app (RLS) role and
+	// returns a JSON-serializable report plus whether isolation held. It backs
+	// /internal/rls-check. Nil disables that endpoint.
+	RLSCheck func(ctx context.Context) (report any, ok bool)
 }
 
 // Option mutates Options.
@@ -30,6 +35,12 @@ type Option func(*Options)
 // WithReadyCheck wires a dependency probe (e.g. db.Ping) into /readyz.
 func WithReadyCheck(check func(ctx context.Context) error) Option {
 	return func(o *Options) { o.ReadyCheck = check }
+}
+
+// WithRLSCheck wires the RLS self-test (e.g. db.CheckRLS) into
+// /internal/rls-check.
+func WithRLSCheck(check func(ctx context.Context) (any, bool)) Option {
+	return func(o *Options) { o.RLSCheck = check }
 }
 
 // New builds the chi router and Huma API. Every operation registered via
@@ -43,7 +54,12 @@ func New(opts ...Option) (chi.Router, huma.API) {
 	}
 
 	router := chi.NewMux()
-	api := humachi.New(router, huma.DefaultConfig("Flagon API", "0.0.0"))
+
+	// No built-in docs UI - the website renders its own from the OpenAPI spec.
+	// The spec itself stays served (huma keeps /openapi.json, /openapi.yaml).
+	config := huma.DefaultConfig("Flagon API", "0.0.0")
+	config.DocsPath = ""
+	api := humachi.New(router, config)
 
 	registerHealthChecks(router, options)
 	registerIndex(router, api)
@@ -74,8 +90,28 @@ func registerHealthChecks(router chi.Router, options Options) {
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(code)
-		_ = json.NewEncoder(w).Encode(body)
+		writeJSON(w, code, body)
 	})
+
+	// RLS self-test: proves tenant isolation is actually enforced for the app
+	// role, end to end, against a live fixture table (see db.CheckRLS). 200 when
+	// isolation holds, 503 otherwise. Registered off the documented spec.
+	if options.RLSCheck != nil {
+		router.Get("/internal/rls-check", func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			report, ok := options.RLSCheck(ctx)
+			code := http.StatusOK
+			if !ok {
+				code = http.StatusServiceUnavailable
+			}
+			writeJSON(w, code, report)
+		})
+	}
+}
+
+func writeJSON(w http.ResponseWriter, code int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(body)
 }

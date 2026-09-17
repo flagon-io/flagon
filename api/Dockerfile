@@ -19,15 +19,13 @@ FROM base AS build
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
   --mount=type=cache,target=/root/.cache/go-build \
-  CGO_ENABLED=0 go build -o /out/api ./cmd/api \
-  && CGO_ENABLED=0 go run ./cmd/genspec -out /out/openapi.json
+  CGO_ENABLED=0 go build -o /out/api ./cmd/api
 
 FROM alpine AS final
 RUN apk add --no-cache ca-certificates tzdata wget postgresql-client \
   && adduser -S -D -H -h /app appuser
 COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /out/api /usr/local/bin/api
-COPY --from=build /out/openapi.json /app/openapi.json
 WORKDIR /app
 USER appuser
 ENV PORT=8080

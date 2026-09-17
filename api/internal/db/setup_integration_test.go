@@ -46,6 +46,13 @@ func TestSetupProvisionsMigratesAndEnforcesRLS(t *testing.T) {
 		t.Fatalf("app-role Ping: %v", err)
 	}
 
+	// The built-in RLS self-check (also served at /internal/rls-check) must pass
+	// against the seeded fixture: each org sees only its own row, none sees any.
+	report, ok := d.CheckRLS(ctx)
+	if !ok {
+		t.Fatalf("CheckRLS reports RLS not enforced: %+v", report)
+	}
+
 	// The app role must be least-privilege: no superuser, no RLS bypass.
 	migrator, err := pgx.Connect(ctx, cfg.MigratorURL)
 	if err != nil {

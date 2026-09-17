@@ -33,7 +33,10 @@ func main() {
 	database := db.Open(ctx, cfg)
 	defer database.Close()
 
-	router, _ := server.New(server.WithReadyCheck(database.Ping))
+	router, _ := server.New(
+		server.WithReadyCheck(database.Ping),
+		server.WithRLSCheck(database.CheckRLS),
+	)
 
 	port := os.Getenv("PORT")
 	if port == "" {

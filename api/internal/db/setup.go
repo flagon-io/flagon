@@ -54,7 +54,11 @@ func Setup(ctx context.Context, cfg Config) error {
 	} else if roleErr != nil {
 		log.Printf("WARNING: cannot provision app role from FLAGON_APP_DATABASE_URL: %v", roleErr)
 	} else if err := provisionAppRole(ctx, conn, role, password); err != nil {
-		log.Printf("WARNING: could not provision app role %q; runtime database access may fail: %v", role, err)
+		if isDBManagedRole(err) {
+			log.Printf("INFO: app role %q is managed by the database (e.g. Fly Managed Postgres); leaving its password/attributes to the platform.", role)
+		} else {
+			log.Printf("WARNING: could not provision app role %q; runtime database access may fail: %v", role, err)
+		}
 	}
 
 	// Migrations are the deploy gate: any failure here is fatal to the caller.
@@ -64,10 +68,23 @@ func Setup(ctx context.Context, cfg Config) error {
 
 	if roleErr == nil && cfg.AppURL != "" {
 		if err := grantAppRole(ctx, conn, role); err != nil {
-			log.Printf("WARNING: could not grant runtime privileges to app role %q: %v", role, err)
+			if isDBManagedRole(err) {
+				log.Printf("INFO: grants for app role %q are managed by the database (e.g. Fly Managed Postgres); the platform's role model already covers it.", role)
+			} else {
+				log.Printf("WARNING: could not grant runtime privileges to app role %q: %v", role, err)
+			}
 		}
 	}
 	return nil
+}
+
+// isDBManagedRole reports whether err is the database refusing a role or grant
+// change because it manages roles itself (Fly Managed Postgres and similar) -
+// an expected, non-fatal condition, not a misconfiguration. Such platforms
+// return insufficient_privilege (42501) for ALTER ROLE / GRANT on their roles.
+func isDBManagedRole(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42501"
 }
 
 func connectWithRetry(ctx context.Context, url string) (*pgx.Conn, error) {
