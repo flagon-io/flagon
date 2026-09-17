@@ -17,7 +17,7 @@ package db
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -66,23 +66,23 @@ func Open(ctx context.Context, cfg Config) *DB {
 		// No RLS role configured. Fall back to the migrator URL so local dev
 		// still works, but make the loss of isolation impossible to miss.
 		if cfg.MigratorURL != "" {
-			log.Printf("WARNING: FLAGON_APP_DATABASE_URL is not set; runtime queries will use the migrator role, which BYPASSES tenant isolation. Set it before production.")
+			slog.Warn("FLAGON_APP_DATABASE_URL not set; runtime queries will use the migrator role, which BYPASSES tenant isolation - set it before production")
 		}
 		url = cfg.MigratorURL
 	}
 	if url == "" {
-		log.Printf("WARNING: no database configured (DATABASE_URL / FLAGON_APP_DATABASE_URL); starting in degraded mode.")
+		slog.Warn("no database configured (DATABASE_URL / FLAGON_APP_DATABASE_URL); starting in degraded mode")
 		return &DB{}
 	}
 
 	poolCfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
-		log.Printf("WARNING: invalid database URL, starting in degraded mode: %v", err)
+		slog.Warn("invalid database URL, starting in degraded mode", "err", err)
 		return &DB{}
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
-		log.Printf("WARNING: could not build database pool, starting in degraded mode: %v", err)
+		slog.Warn("could not build database pool, starting in degraded mode", "err", err)
 		return &DB{}
 	}
 	return &DB{pool: pool}

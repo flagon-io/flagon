@@ -8,12 +8,6 @@ primary_region = 'iad'
 
 [build]
 
-# Runs once per deploy, in a throwaway machine, BEFORE any serving machine rolls
-# out. This is the migration gate: if it fails the deploy aborts and the old
-# version keeps serving, so serving machines never race to migrate.
-[deploy]
-  release_command = '/usr/local/bin/api migrate'
-
 [http_service]
   internal_port = 8080
   force_https = true

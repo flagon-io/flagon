@@ -2,20 +2,22 @@
 //
 // Usage:
 //
-//	api            run the HTTP server (does NOT touch the schema)
+//	api            run the HTTP server (migrates on boot, then serves)
 //	api migrate    provision the app role + run migrations, then exit
 //
-// Migrations are a deploy-time step, not a per-boot one: Fly runs `api migrate`
-// as the release_command (once, before any serving machine rolls out), so many
-// serving machines can never race to migrate. Serving machines just open the
-// pool and serve.
+// Migrations run on boot: serving machines apply them, serialized by an advisory
+// lock so concurrent boots never race (see internal/db). Fly Managed Postgres is
+// not reachable from a release_command machine, so we cannot use that for
+// migrations; a regular serving machine reaches it fine.
 package main
 
 import (
 	"context"
-	"log"
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/flagon-io/flagon/api/internal/db"
 	"github.com/flagon-io/flagon/api/internal/metrics"
@@ -23,6 +25,8 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		runMigrate()
 		return
@@ -30,24 +34,40 @@ func main() {
 	runServe()
 }
 
-// runMigrate provisions the app role and applies migrations, then exits. It is
-// the deploy gate (Fly release_command): ANY failure - including an unreachable
-// database - is fatal, so a broken or unverifiable schema never rolls out. Fly
-// aborts the deploy and the previous version keeps serving.
+// runMigrate provisions the app role and applies migrations, then exits. Handy
+// for running migrations by hand (`fly machine run <image> migrate`); ANY
+// failure is fatal so a broken schema is loud.
 func runMigrate() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
 	cfg := db.ConfigFromEnv()
-	if err := db.Setup(context.Background(), cfg); err != nil {
-		log.Fatalf("FATAL: database setup failed; aborting deploy: %v", err)
+	if err := db.Setup(ctx, cfg); err != nil {
+		slog.Error("database setup failed", "err", err)
+		os.Exit(1)
 	}
-	log.Printf("database setup complete")
+	slog.Info("database setup complete")
 }
 
-// runServe opens the runtime pool and serves. It never migrates, so it is safe
-// to start any number of machines concurrently, and it starts even if the
-// database is momentarily unreachable (readiness reports the outage).
+// runServe migrates (via an advisory lock, so concurrent boots are safe), then
+// opens the runtime pool and serves. The migration step is degraded-tolerant:
+// a reachable database with a failing migration is fatal (never serve a broken
+// schema), but an unreachable one starts degraded (readiness reports it) rather
+// than blocking the boot.
 func runServe() {
 	ctx := context.Background()
 	cfg := db.ConfigFromEnv()
+
+	setupCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	if err := db.Setup(setupCtx, cfg); err != nil {
+		if errors.Is(err, db.ErrUnavailable) {
+			slog.Warn("database unavailable; starting DEGRADED without migrations, /readyz will report it", "err", err)
+		} else {
+			slog.Error("database migration failed; refusing to start against a broken schema", "err", err)
+			os.Exit(1)
+		}
+	}
+	cancel()
 
 	database := db.Open(ctx, cfg)
 	defer database.Close()
@@ -69,9 +89,10 @@ func runServe() {
 		port = "8080"
 	}
 	addr := ":" + port
-	log.Printf("flagon api listening on %s", addr)
+	slog.Info("api listening", "addr", addr)
 	if err := http.ListenAndServe(addr, m.InstrumentHTTP(router)); err != nil {
-		log.Fatal(err)
+		slog.Error("http server stopped", "err", err)
+		os.Exit(1)
 	}
 }
 
@@ -84,9 +105,9 @@ func serveMetrics(m *metrics.Metrics) {
 	mux.Handle("/metrics", m.Handler())
 
 	addr := ":" + port
-	log.Printf("flagon metrics listening on %s", addr)
+	slog.Info("metrics listening", "addr", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		// Metrics are non-essential; log but keep the API running.
-		log.Printf("WARNING: metrics server stopped: %v", err)
+		slog.Warn("metrics server stopped", "err", err)
 	}
 }

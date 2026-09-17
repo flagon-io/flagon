@@ -13,35 +13,53 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// migrationsFS holds the forward-only SQL migrations, applied in filename
-// order. Each file is one migration; do NOT put transaction control (BEGIN /
-// COMMIT) inside them - the runner wraps every migration in its own
-// transaction together with its bookkeeping row, so a migration either fully
-// applies or not at all.
+// migrationsFS holds the forward-only SQL migrations, applied in filename order.
+// Each file is one migration; do NOT put transaction control (BEGIN / COMMIT)
+// inside them - the whole run happens in a single transaction, so either every
+// pending migration applies or none does.
 //
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
 const migrationsDir = "migrations"
 
-// runMigrations applies every not-yet-applied migration in order. A migration
-// error, or a checksum mismatch on an already-applied migration (i.e. a
-// shipped file was edited after the fact), is returned as a hard error so the
-// caller can refuse to start - we never serve against a half-known schema.
+// migrationAdvisoryLock is a fixed key every migrator locks on, so concurrent
+// migrators (e.g. several machines booting at once) serialize instead of racing
+// to create the same objects.
+const migrationAdvisoryLock int64 = 4_972_011
+
+// runMigrations applies every not-yet-applied migration in order, in one
+// transaction guarded by a transaction-scoped advisory lock. The lock makes
+// concurrent boots safe: the first migrator applies while the rest wait, then
+// find nothing to do. A transaction-scoped lock (not session) is what works
+// through a transaction-pooling connection (pgbouncer) and frees on commit.
+//
+// A migration error, or a checksum mismatch on an already-applied migration
+// (i.e. a shipped file was edited after the fact), rolls the whole run back and
+// returns a hard error, so we never serve against a half-known schema.
 func runMigrations(ctx context.Context, conn *pgx.Conn) error {
 	// Pin the search path so unqualified DDL in migration bodies lands in
-	// public regardless of the migrator role's name (see Setup for the full
-	// rationale). The bookkeeping table below is qualified explicitly, so it is
-	// unaffected either way.
+	// public regardless of the migrator role's name. Bookkeeping is qualified
+	// explicitly, so it is unaffected either way.
 	if _, err := conn.Exec(ctx, "SET search_path TO public"); err != nil {
 		return fmt.Errorf("set search_path: %w", err)
 	}
 
-	if err := ensureMigrationsTable(ctx, conn); err != nil {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationAdvisoryLock); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+
+	if err := ensureMigrationsTable(ctx, tx); err != nil {
 		return fmt.Errorf("create public.schema_migrations: %w", err)
 	}
 
-	applied, err := appliedChecksums(ctx, conn)
+	applied, err := appliedChecksums(ctx, tx)
 	if err != nil {
 		return fmt.Errorf("read applied migrations: %w", err)
 	}
@@ -66,15 +84,16 @@ func runMigrations(ctx context.Context, conn *pgx.Conn) error {
 			continue
 		}
 
-		if err := applyMigration(ctx, conn, version, sum, string(body)); err != nil {
+		if err := applyMigration(ctx, tx, version, sum, string(body)); err != nil {
 			return fmt.Errorf("apply migration %s: %w", version, err)
 		}
 	}
-	return nil
+
+	return tx.Commit(ctx)
 }
 
-func ensureMigrationsTable(ctx context.Context, conn *pgx.Conn) error {
-	_, err := conn.Exec(ctx, `
+func ensureMigrationsTable(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS public.schema_migrations (
 			version    text PRIMARY KEY,
 			checksum   text NOT NULL,
@@ -83,8 +102,8 @@ func ensureMigrationsTable(ctx context.Context, conn *pgx.Conn) error {
 	return err
 }
 
-func appliedChecksums(ctx context.Context, conn *pgx.Conn) (map[string]string, error) {
-	rows, err := conn.Query(ctx, `SELECT version, checksum FROM public.schema_migrations`)
+func appliedChecksums(ctx context.Context, tx pgx.Tx) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `SELECT version, checksum FROM public.schema_migrations`)
 	if err != nil {
 		return nil, err
 	}
@@ -101,27 +120,18 @@ func appliedChecksums(ctx context.Context, conn *pgx.Conn) (map[string]string, e
 	return out, rows.Err()
 }
 
-// applyMigration runs one migration and records it in a single transaction. The
-// migration body may contain many statements (function bodies, multiple DDL),
-// so it is executed via the simple query protocol; the bookkeeping insert runs
-// on the same transaction so the two commit or roll back together.
-func applyMigration(ctx context.Context, conn *pgx.Conn, version, sum, body string) error {
-	tx, err := conn.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
+// applyMigration runs one migration's body and records it, within the caller's
+// transaction. The body may contain many statements (function bodies, multiple
+// DDL), so it is executed via the simple query protocol.
+func applyMigration(ctx context.Context, tx pgx.Tx, version, sum, body string) error {
 	if _, err := tx.Conn().PgConn().Exec(ctx, body).ReadAll(); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx,
+	_, err := tx.Exec(ctx,
 		`INSERT INTO public.schema_migrations (version, checksum) VALUES ($1, $2)`,
 		version, sum,
-	); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	)
+	return err
 }
 
 func migrationFiles() ([]string, error) {

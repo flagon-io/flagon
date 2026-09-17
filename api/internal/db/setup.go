@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -21,6 +21,7 @@ import (
 const (
 	connectAttempts = 6
 	connectBackoff  = 2 * time.Second
+	connectTimeout  = 10 * time.Second
 )
 
 // Setup provisions the app role, runs migrations, and grants the app role its
@@ -50,14 +51,14 @@ func Setup(ctx context.Context, cfg Config) error {
 
 	role, password, roleErr := appRoleCredentials(cfg.AppURL)
 	if cfg.AppURL == "" {
-		log.Printf("WARNING: FLAGON_APP_DATABASE_URL is not set; skipping app-role provisioning. Runtime will fall back to the migrator role with NO tenant isolation.")
+		slog.Warn("FLAGON_APP_DATABASE_URL not set; skipping app-role provisioning, runtime falls back to the migrator role with NO tenant isolation")
 	} else if roleErr != nil {
-		log.Printf("WARNING: cannot provision app role from FLAGON_APP_DATABASE_URL: %v", roleErr)
+		slog.Warn("cannot provision app role from FLAGON_APP_DATABASE_URL", "err", roleErr)
 	} else if err := provisionAppRole(ctx, conn, role, password); err != nil {
 		if isDBManagedRole(err) {
-			log.Printf("INFO: app role %q is managed by the database (e.g. Fly Managed Postgres); leaving its password/attributes to the platform.", role)
+			slog.Info("app role is managed by the database; leaving its password/attributes to the platform", "role", role)
 		} else {
-			log.Printf("WARNING: could not provision app role %q; runtime database access may fail: %v", role, err)
+			slog.Warn("could not provision app role; runtime database access may fail", "role", role, "err", err)
 		}
 	}
 
@@ -69,9 +70,9 @@ func Setup(ctx context.Context, cfg Config) error {
 	if roleErr == nil && cfg.AppURL != "" {
 		if err := grantAppRole(ctx, conn, role); err != nil {
 			if isDBManagedRole(err) {
-				log.Printf("INFO: grants for app role %q are managed by the database (e.g. Fly Managed Postgres); the platform's role model already covers it.", role)
+				slog.Info("grants for app role are managed by the database; the platform's role model already covers it", "role", role)
 			} else {
-				log.Printf("WARNING: could not grant runtime privileges to app role %q: %v", role, err)
+				slog.Warn("could not grant runtime privileges to app role", "role", role, "err", err)
 			}
 		}
 	}
@@ -88,15 +89,30 @@ func isDBManagedRole(err error) bool {
 }
 
 func connectWithRetry(ctx context.Context, url string) (*pgx.Conn, error) {
+	cfg, err := pgx.ParseConfig(url)
+	if err != nil {
+		return nil, err
+	}
+	// Migrations run through Managed Postgres' transaction-pooling pgbouncer,
+	// which does not tolerate pgx's default extended-protocol / prepared-
+	// statement path for DDL - it can hang mid-migration. The simple protocol
+	// avoids prepared statements entirely, so DDL behaves the same as psql.
+	cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+
 	var lastErr error
 	for attempt := 1; attempt <= connectAttempts; attempt++ {
-		conn, err := pgx.Connect(ctx, url)
+		// Bound each connect so a network black-hole fails fast rather than
+		// hanging the release command (and thus the whole deploy) indefinitely.
+		attemptCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+		conn, err := pgx.ConnectConfig(attemptCtx, cfg)
 		if err == nil {
-			if err = conn.Ping(ctx); err == nil {
+			if err = conn.Ping(attemptCtx); err == nil {
+				cancel()
 				return conn, nil
 			}
-			_ = conn.Close(ctx)
+			_ = conn.Close(attemptCtx)
 		}
+		cancel()
 		lastErr = err
 		if attempt < connectAttempts {
 			select {

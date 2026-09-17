@@ -50,9 +50,6 @@ services:
       FLAGON_APP_DATABASE_URL: postgres://flagon_app:flagon_app@postgres-api:5432/flagon_api?sslmode=disable
       # Shared secret the app authenticates to the API with (app<->API trust).
       FLAGON_INTERNAL_TOKEN: dev-internal-token
-    # Migrate once, then start the live-reload server (mirrors prod: migrate is a
-    # pre-serve step, the server itself never touches the schema).
-    command: sh -c "go run ./cmd/api migrate && air -c .air.toml"
     volumes:
       - ./api:/src
     depends_on:
