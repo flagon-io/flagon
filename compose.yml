@@ -40,12 +40,19 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Migrator/owner role: runs migrations + provisions the app role at boot.
+      # Migrator/owner role: used by `api migrate` to run migrations + provision
+      # the app role. In production this runs as Fly's release_command; locally
+      # the command below runs it once before the live-reload server starts.
       DATABASE_URL: postgres://flagon:flagon@postgres-api:5432/flagon_api?sslmode=disable
-      # App role: RLS-enforced (NOBYPASSRLS) runtime login. The api provisions
-      # this role (creates it, sets this password) on boot from the migrator
+      # App role: RLS-enforced (NOBYPASSRLS) runtime login. `api migrate`
+      # provisions this role (creates it, sets this password) from the migrator
       # connection, so nothing else needs to create it.
       FLAGON_APP_DATABASE_URL: postgres://flagon_app:flagon_app@postgres-api:5432/flagon_api?sslmode=disable
+      # Shared secret the app authenticates to the API with (app<->API trust).
+      FLAGON_INTERNAL_TOKEN: dev-internal-token
+    # Migrate once, then start the live-reload server (mirrors prod: migrate is a
+    # pre-serve step, the server itself never touches the schema).
+    command: sh -c "go run ./cmd/api migrate && air -c .air.toml"
     volumes:
       - ./api:/src
     depends_on:
@@ -60,6 +67,10 @@ services:
       - "4000:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://api:8080
+      # Server-side gateway to the Go API + the shared secret (must match the
+      # api service's FLAGON_INTERNAL_TOKEN).
+      FLAGON_API_URL: http://api:8080
+      FLAGON_INTERNAL_TOKEN: dev-internal-token
       DATABASE_URL: postgres://flagon:flagon@postgres-app:5432/flagon_app?sslmode=disable
       BETTER_AUTH_SECRET: dev-only-secret-change-me-32-characters-min
       BETTER_AUTH_URL: http://localhost:4000

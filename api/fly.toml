@@ -8,6 +8,12 @@ primary_region = 'iad'
 
 [build]
 
+# Runs once per deploy, in a throwaway machine, BEFORE any serving machine rolls
+# out. This is the migration gate: if it fails the deploy aborts and the old
+# version keeps serving, so serving machines never race to migrate.
+[deploy]
+  release_command = '/usr/local/bin/api migrate'
+
 [http_service]
   internal_port = 8080
   force_https = true
@@ -17,6 +23,16 @@ primary_region = 'iad'
   # extra machines stop when idle so we only pay for capacity under load.
   min_machines_running = 1
 
+  # Autoscaling signal for the built-in proxy: when a machine passes soft_limit
+  # concurrent requests, Fly routes to other running machines and starts a
+  # stopped one; hard_limit is the ceiling before it sheds load. Starting
+  # values - tune from Grafana (concurrency vs p95 latency) once real traffic
+  # exists. Provision more machines with `fly scale count N` to raise the pool.
+  [http_service.concurrency]
+    type = 'requests'
+    soft_limit = 100
+    hard_limit = 200
+
   [[http_service.checks]]
     interval = '15s'
     timeout = '5s'
@@ -24,8 +40,13 @@ primary_region = 'iad'
     method = 'GET'
     path = '/healthz'
 
+# Fly's managed Prometheus scrapes app metrics from this private port (the API
+# serves /metrics on :9091, off the public service - see internal/metrics).
+[metrics]
+  port = 9091
+  path = '/metrics'
+
 [[vm]]
-  memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
   memory_mb = 256

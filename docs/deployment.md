@@ -84,23 +84,27 @@ does not, the API does not crash - it logs `WARNING: could not provision app
 role` and runs degraded (`/readyz` shows the error). The fix is to create
 `flagon_app` once by hand and re-set the secret; the API syncs it from then on.
 
-**Migrations run automatically on every boot** (embedded SQL in
-`api/internal/db/migrations`, applied in filename order, each in its own
-transaction). Because `push to main` redeploys the API, migrations ship with
-the code - there is no separate migrate step. The boot contract:
+**Migrations run once per deploy, before any serving machine rolls out.** Fly
+runs `api migrate` as the `release_command` (see `[deploy]` in `fly.toml`),
+which provisions the app role and applies the embedded SQL in
+`api/internal/db/migrations` (filename order, each in its own transaction).
+Because `push to main` redeploys the API, migrations ship with the code - there
+is no manual migrate step. The contract:
 
-- A reachable database with a **failing or modified** migration is **fatal**:
-  the process exits non-zero, so Fly fails the deploy and keeps the old
-  machine. A schema mismatch never ships.
-- An **unreachable** database is **not** fatal: the API starts anyway (locally
-  and in production) so a database blip can't take the deploy down. It logs a
-  loud `WARNING` and `/readyz` returns `503` with the reason until the database
-  comes back. `/healthz` (Fly's health check) stays green because it is
-  liveness-only. If the database was down at boot, redeploy/restart once it is
-  back so the app role gets provisioned.
+- If `api migrate` fails - a **failing/modified** migration, or the database is
+  **unreachable** - the release step exits non-zero, Fly **aborts the deploy**,
+  and the previous version keeps serving. A broken or unverifiable schema never
+  rolls out, and a database blip during a deploy can't take the running app down.
+- Serving machines (`api`, no subcommand) **never touch the schema**, so any
+  number can start concurrently with no migration race. They open the pool
+  lazily and start even if the database is momentarily down; `/readyz` reports
+  the outage (503) while `/healthz` stays green (liveness-only).
 
 Migrations are immutable once applied: editing a shipped migration file trips a
-checksum check and fails the next boot. Add a new migration instead.
+checksum check and fails the next `api migrate`. Add a new migration instead.
+
+Locally, `docker compose` runs `api migrate` once before the live-reload server,
+mirroring the same pre-serve ordering.
 
 ## Deploying `app` to Vercel
 

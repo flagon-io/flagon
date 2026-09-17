@@ -27,6 +27,12 @@ type Options struct {
 	// returns a JSON-serializable report plus whether isolation held. It backs
 	// /internal/rls-check. Nil disables that endpoint.
 	RLSCheck func(ctx context.Context) (report any, ok bool)
+
+	// Identity backs the /me and /orgs endpoints; InternalToken is the shared
+	// secret the app authenticates with. Identity may be nil during spec
+	// generation (handlers never run then).
+	Identity      IdentityStore
+	InternalToken string
 }
 
 // Option mutates Options.
@@ -41,6 +47,15 @@ func WithReadyCheck(check func(ctx context.Context) error) Option {
 // /internal/rls-check.
 func WithRLSCheck(check func(ctx context.Context) (any, bool)) Option {
 	return func(o *Options) { o.RLSCheck = check }
+}
+
+// WithIdentity wires the /me and /orgs endpoints to a store, authenticated with
+// the given internal token (the shared app<->API secret).
+func WithIdentity(store IdentityStore, internalToken string) Option {
+	return func(o *Options) {
+		o.Identity = store
+		o.InternalToken = internalToken
+	}
 }
 
 // New builds the chi router and Huma API. Every operation registered via
@@ -63,6 +78,7 @@ func New(opts ...Option) (chi.Router, huma.API) {
 
 	registerHealthChecks(router, options)
 	registerIndex(router, api)
+	registerIdentityAPI(api, options.Identity, options.InternalToken)
 
 	return router, api
 }
