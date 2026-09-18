@@ -8,12 +8,26 @@ path" for adding capabilities. Read it before making structural changes.
 
 ## What Flagon is
 
-Flagon is a self-hostable **developer platform**. The core unit is a **Project**
-(a deployable app, in the Vercel model - no separate "app" layer). Everything
-operates inside an **organization**: URLs are `app.flagon.io/<org>/...`, with
-personal account settings at `/settings` as the one exception. The product suite
-is intentionally broad and growing: projects & deployments today; observability,
-a package registry, reporting/DORA metrics, and repo insights over time.
+Flagon is a self-hostable **developer platform for operating your whole system**:
+your projects, the tools around them, and the people who work on them, in one
+place you drive from the dashboard, the API, or an AI assistant. It is **powerful
+with AI and great without it** - AI is a first-class surface, never a requirement.
+A team can run Flagon as a straight DX platform and get full value; the AI is an
+accelerant on top, not a toll gate.
+
+The core unit today is a **Project** (a deployable app, in the Vercel model - no
+separate "app" layer). Everything operates inside an **organization**: URLs are
+`app.flagon.io/<org>/...`, with personal account settings at `/settings` as the
+one exception.
+
+The direction is broad: Flagon is growing into the hub for an engineering system,
+with AI woven through it and run safely over real data. Beyond projects &
+deployments today, the pillars are connected **context** across your tools,
+**agents** and orchestration with humans in the loop, an **MCP hub**, **metrics**
+and insight (a real "what changed across everything this week"), reusable
+**skills**, and the **governance** to run all of it safely. These land over time;
+each is already stubbed in `docs/` marked `status: planned`, which is the
+canonical map of where the product is headed - build against it.
 
 ## Architecture
 
@@ -48,8 +62,10 @@ Anything a user can do in the UI, they can do by asking the AI - and vice versa.
 The AI is not a bolt-on; it is wired in at the root so that **every new
 capability becomes available to the agent as it's built**. A user can create a
 project by clicking or by asking; drop a CSV to bulk-update projects and the
-agent detects intent and helps. As the suite grows (deployments, observability,
-DORA, commits on linked repos), the agent grows with it.
+agent detects intent and helps. As the suite grows (deployments, connected
+context, agents, metrics, and the rest of the pillars), the agent grows with it.
+This is capability parity, not a mandate: the platform is fully usable without
+ever talking to the AI.
 
 ### 3. AI + MCP + API stay in lockstep
 The AI agent and the **MCP server (`mcp.flagon.io`)** expose the *same*
