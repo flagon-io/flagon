@@ -1,14 +1,4 @@
-import type { LabelHTMLAttributes } from "react";
-import { cn } from "@/lib/cn";
-
-export function Label({
-  className,
-  ...props
-}: LabelHTMLAttributes<HTMLLabelElement>) {
-  return (
-    <label
-      className={cn("text-sm font-medium text-foreground", className)}
-      {...props}
-    />
-  );
-}
+// Moved into the design system. Kept as a re-export so existing
+// `@/components/ui/label` imports keep working; prefer importing from
+// "@flagon-io/ui" in new code.
+export * from "@flagon-io/ui/label";

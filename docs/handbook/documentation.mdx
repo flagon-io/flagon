@@ -1,0 +1,37 @@
+---
+title: Writing docs as an engineer
+description: Docs are part of the product, not a chore that comes after it. Stripe is our north star.
+section: Engineering
+order: 20
+---
+
+Good documentation is a feature, and we treat it like one. The docs are where a lot of people meet what we make: they arrive stuck on something specific, and the docs either get them unstuck or send them somewhere else. Stripe is our north star here, not because their prose is fancy but because their docs respect the reader's time and clearly took real work. That's the bar.
+
+## Docs are part of the product
+
+The docs are not the thing you write once the "real" work is done. They're part of the real work. A feature that nobody can figure out how to use isn't finished, no matter how clean the code is. So we plan for the docs alongside the thing they describe, and we don't call something shipped until a person could actually pick it up from the page.
+
+That framing changes how it feels to write them. Docs aren't a tax on building; they're the last mile of building. The person who couldn't have shipped without understanding the thing is exactly the person who can explain it.
+
+## Write for someone trying to get something done
+
+Nobody reads docs for fun. They're in the middle of a task, slightly annoyed, and they want the answer. So we write for that person: what are you trying to do, here's the shortest honest path to doing it, here's the thing that'll trip you up. We lead with the task, not with a tour of every option nobody asked about yet.
+
+Show, don't tell. A working example a person can copy, run, and adapt beats three paragraphs describing it. Real code, real values, the actual shape of the thing. Explanation is for the parts an example can't carry on its own.
+
+<Callout type="note" title="Write for the stuck reader">
+  Picture someone with your docs open in one tab and a half-built thing in the
+  other, close to giving up. Write for them. Everything else is decoration.
+</Callout>
+
+## Keep docs close to the code so they stay true
+
+The fastest way to lose trust is a doc that's confidently wrong. Docs drift from reality the moment the code moves and the page doesn't, and stale docs are worse than none: they cost someone an afternoon before they realize the page is lying. So we keep docs close to the code they describe, treat them as part of the same change, and update the page in the same breath as the behavior.
+
+When a doc lives next to what it documents, keeping it true is part of shipping instead of a separate cleanup nobody signs up for. This is one more reason we build [in the open](/handbook/open-source): docs in the open are docs people will notice when they go wrong, and that pressure keeps them honest.
+
+## Great docs are a real advantage
+
+Docs are one of the few places where doing the boring work well is genuinely rare, which makes it worth doing. When your docs are clear, people get further on their own, trust what they read, and remember that you didn't waste their afternoon. That compounds. It's cheaper than any amount of marketing and it's hard to fake, because you can feel the difference between docs someone cared about and docs someone resented.
+
+So we hold docs to the same standard as everything else we make: plain, specific, opinionated, and finished. Writing them is [how we build](/handbook/how-we-build), not a chore that happens after. When the docs are worth reading, so is the thing they describe.

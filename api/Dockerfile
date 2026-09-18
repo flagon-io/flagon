@@ -19,13 +19,13 @@ FROM base AS build
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
   --mount=type=cache,target=/root/.cache/go-build \
-  CGO_ENABLED=0 go build -o /out/api ./cmd/api
+  CGO_ENABLED=0 go build -o /out/flagon ./cmd/flagon
 
 FROM alpine AS final
 RUN apk add --no-cache ca-certificates tzdata wget postgresql-client \
   && adduser -S -D -H -h /app appuser
 COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=build /out/api /usr/local/bin/api
+COPY --from=build /out/flagon /usr/local/bin/flagon
 WORKDIR /app
 USER appuser
 ENV PORT=8080
@@ -33,4 +33,6 @@ EXPOSE 8080
 # GET, not --spider (HEAD): the health route only answers GET.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 -O /dev/null "http://localhost:${PORT}/healthz" || exit 1
-ENTRYPOINT ["/usr/local/bin/api"]
+# `serve` is the default; override with `migrate` (or any subcommand) as needed.
+ENTRYPOINT ["/usr/local/bin/flagon"]
+CMD ["serve"]

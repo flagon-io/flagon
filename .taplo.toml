@@ -1,0 +1,9 @@
+# Project-wide TOML formatting, honored by the Even Better TOML editor extension
+# (taplo) and the taplo CLI. Committed so everyone gets the same result and files
+# like api/fly.toml keep their indentation on save instead of being flattened.
+[formatting]
+# Indent key/value entries under their table header (2 spaces). Without this,
+# taplo's default flushes every entry to column 0.
+indent_entries = true
+# Never reorder keys; preserve the order they were written in.
+reorder_keys = false

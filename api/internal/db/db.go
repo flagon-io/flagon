@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,16 +36,8 @@ type Config struct {
 
 	// AppURL (FLAGON_APP_DATABASE_URL) is the RLS-enforced runtime role. Its
 	// user + password also drive app-role provisioning at boot, so the
-	// credential lives in exactly one place: this environment variable.
+	// credential lives in exactly one place: this connection string.
 	AppURL string
-}
-
-// ConfigFromEnv reads the connection strings from the environment.
-func ConfigFromEnv() Config {
-	return Config{
-		MigratorURL: os.Getenv("DATABASE_URL"),
-		AppURL:      os.Getenv("FLAGON_APP_DATABASE_URL"),
-	}
 }
 
 // DB is the runtime database handle used by the HTTP server. A nil pool is a

@@ -1,0 +1,45 @@
+---
+title: Customer comms as an engineer
+description: "When you ship something that changes what customers experience, they should hear it from us first, clearly, and before it bites them. How to do that well."
+section: Engineering
+order: 18
+---
+
+This is about the messages you send outward, on purpose, when your work changes something a customer relies on. It's the proactive twin of [support and customer care](/handbook/support-and-care), which is about answering when people come to you. A deprecation, a breaking API change, a migration, a pricing or quota change, an incident with lasting effects: in all of these, the worst way for a customer to find out is by hitting it. Telling them first is part of shipping the change, not a nicety that happens later.
+
+## When a change needs a heads-up
+
+Not everything you ship needs an announcement. Most small improvements just land. Reach for proactive comms when a change could surprise someone who's depending on current behavior:
+
+- A breaking change to the public API, the typed client, or the CLI.
+- Deprecating or removing something people use.
+- A migration that changes data, defaults, or how something works.
+- A limit or quota that will start being enforced.
+- The lasting aftermath of an [incident](/handbook/incidents), once the fire is out.
+
+If you're unsure whether something clears the bar, it probably does. Erring toward telling people is cheap; a customer blindsided by a change they could have prepared for is expensive.
+
+## Who owns the message
+
+You, the person who made the change, own getting it communicated. That doesn't always mean you personally write the final copy: if someone owns customer comms, loop them in and hand them what they need. But the responsibility for making sure it happens is yours, not something you assume a mailing list will take care of on its own. This is [feature ownership](/handbook/feature-ownership) reaching all the way to the customer.
+
+## What a good notice contains
+
+Whoever writes it, a useful notice is specific and honest, in the [voice we use everywhere](/handbook/brand-voice):
+
+- **What is changing**, concretely, not "improvements to your experience."
+- **When**, with a real date, and how much notice they're getting.
+- **Why**, briefly, because people extend more patience when the reason is clear.
+- **What they need to do**, if anything, with the exact steps or a link to them.
+
+<Callout type="brand">
+  Write it for the customer who will be woken up by this change, not for the person who shipped it. If the notice wouldn't have saved you from an unpleasant surprise, it isn't done.
+</Callout>
+
+## Aim it precisely
+
+Send it to the people it affects, and ideally only them. Blasting everyone about a change that touches one cohort trains people to ignore you, so that the one message that really matters gets skimmed and deleted. Work out who's actually impacted, the specific accounts or the users of the specific feature, and target that. Precise comms stay trusted; noisy comms get filtered.
+
+## Log it where people look
+
+Beyond the direct message, durable changes belong in the [changelog](/changelog), so there's a public, permanent record someone can find later when they're trying to work out when something changed. Because we [build in the open](/handbook/open-source), a lot of this is visible in the commit history and the roadmap already, but the changelog is where we say it in plain language aimed at the people using the product, rather than the people building it. A good rule: if you sent customers a notice about it, it should be in the changelog too.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -41,19 +42,28 @@ func TestIndexServesDiscoveryLinks(t *testing.T) {
 	}
 }
 
-func TestDocsRouteIsDisabled(t *testing.T) {
+// The built-in interactive API explorer stays disabled (config.DocsPath = "").
+// The /docs path is now the documentation API, which serves JSON, never the
+// Swagger/Stoplight HTML UI. The website renders its own docs from that API.
+func TestNoInteractiveDocsUI(t *testing.T) {
 	router, _ := New()
 
-	for path, wantAbsent := range map[string]bool{"/docs": true, "/openapi.json": false, "/openapi.yaml": false} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+	// The OpenAPI spec must always be served.
+	for _, path := range []string{"/openapi.json", "/openapi.yaml"} {
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if wantAbsent && rec.Code != http.StatusNotFound {
-			t.Errorf("GET %s = %d, want 404 (docs UI removed)", path, rec.Code)
-		}
-		if !wantAbsent && rec.Code != http.StatusOK {
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200 (spec must stay served)", path, rec.Code)
 		}
+	}
+
+	// /docs must not be an HTML docs UI. With no corpus wired it reports 503,
+	// but either way the body is JSON, never a Swagger/Stoplight HTML page.
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/docs", nil))
+	body := rec.Body.String()
+	if strings.Contains(strings.ToLower(body), "<!doctype") || strings.Contains(strings.ToLower(body), "swagger") {
+		t.Errorf("GET /docs looks like an HTML docs UI, want JSON API: %s", body)
 	}
 }
 
@@ -61,9 +71,9 @@ func TestIndexReflectsRegisteredOperations(t *testing.T) {
 	router, api := New()
 
 	huma.Register(api, huma.Operation{
-		OperationID: "list-projects",
+		OperationID: "list-widgets",
 		Method:      http.MethodGet,
-		Path:        "/projects",
+		Path:        "/widgets",
 	}, func(context.Context, *struct{}) (*struct{}, error) {
 		return &struct{}{}, nil
 	})
@@ -75,8 +85,8 @@ func TestIndexReflectsRegisteredOperations(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	index := decodeIndex(t, rec)
-	if got, want := index["list_projects_url"], "https://api.flagon.io/projects"; got != want {
-		t.Errorf("index[list_projects_url] = %q, want %q", got, want)
+	if got, want := index["list_widgets_url"], "https://api.flagon.io/widgets"; got != want {
+		t.Errorf("index[list_widgets_url] = %q, want %q", got, want)
 	}
 }
 

@@ -1,0 +1,28 @@
+# Local development port bindings. Copy to compose.override.yml (gitignored, so
+# yours is per-machine):
+#
+#   cp compose.override.example.yml compose.override.yml
+#
+# `docker compose` applies compose.override.yml automatically. The base
+# compose.yml binds no host ports, so it mirrors production and never collides
+# with servers you run natively; this file publishes the ports you want locally.
+#
+# Postgres is always published so a natively-run API/app can reach it on
+# localhost:5432 (databases flagon_api and flagon_app live in that one
+# instance). Comment out the api and/or app ports below when you run those
+# natively (e.g. leave `next dev` up and restart Go with a plain `go run`) -
+# that frees 8080 / 4000 for them.
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  # Comment this out to run the API natively (`cd api && go run ./cmd/flagon serve`).
+  api:
+    ports:
+      - "8080:8080"
+
+  # Comment this out to run the app natively (`cd app && npm run dev`).
+  app:
+    ports:
+      - "4000:3000"

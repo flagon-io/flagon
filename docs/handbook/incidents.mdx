@@ -1,0 +1,42 @@
+---
+title: When things break
+description: Blameless, stabilize first, tell the truth, and turn a bad day into a better system. No heroes required.
+section: Engineering
+order: 13
+---
+
+Things break. Not because someone was careless, usually, but because software is complicated and reality is creative. So the question isn't whether you'll be in an incident, it's whether you'll handle it well when you are. This is about the breakage that's actively hurting users right now; an ordinary bug that isn't gets triaged rather than paged, which is [bug prioritization](/handbook/bug-prioritization). This is how we do that, and most of it is about staying calm and honest rather than being clever. It's part of what makes this [a world-class place to build](/handbook/engineering-environment): you can push, because breaking something isn't a catastrophe for your reputation.
+
+## Blameless by default
+
+When something breaks, we care about the system that let it break, not about finding a person to pin it on. This isn't kindness for its own sake, it's the only way to actually learn anything. The moment people expect blame, they hide, they hedge, they stop volunteering the detail that would have explained everything, and your incidents get more mysterious and more frequent.
+
+So the default is blameless. If a single deploy from a single person could take down production, the deploy pipeline is the problem, not the person who happened to be holding it. "Who did this" is almost never the useful question. "How did the system make this easy to do and hard to catch" is.
+
+## Stabilize first, understand later
+
+When it's on fire, put out the fire. The goal in the moment is to stop the bleeding for the people affected: roll back, flip the flag, fail over, degrade gracefully. Do not stand in the burning building debating root cause. Curiosity is for after service is restored.
+
+This order matters because the instinct to understand is strong and it's a trap mid-incident. The elegant fix that addresses the true cause can wait twenty minutes. The revert that makes it stop hurting people cannot.
+
+<Callout type="note" title="Revert is not defeat">
+  Rolling back a change you were proud of isn't admitting failure, it's good instincts. You can always re-land it properly once nobody's on fire. Fast recovery beats a heroic in-place fix nearly every time.
+</Callout>
+
+## Communicate honestly
+
+If it affects people, tell them, in plain language, before they have to ask. During an incident, someone owns communication: a short, honest status, updated on a rhythm, that says what's broken, what we know, and when we'll say more. "We're investigating" on a schedule beats an eloquent explanation two hours late.
+
+When it's the kind of thing our users felt, we say so publicly. We're [built in public](/handbook/values), and that includes the bad days. A straight account of what broke and what we're doing about it earns more trust than pretending it didn't happen. People are remarkably forgiving of honesty and remarkably unforgiving of spin.
+
+## The write-up that turns a bad day into a better system
+
+After the fire is out, we write it up. Not to relive it, and not as punishment, but because an incident is expensive information and it would be a waste to pay for it and learn nothing. A good write-up is short and blameless: what happened, a timeline, why the system allowed it, and the specific changes that make this class of failure less likely or less painful next time.
+
+The output is a small number of real changes with owners, not a pile of aspirational action items nobody does. One concrete fix that actually ships beats ten that decorate a document. The test of a write-up is whether the next person hits this same wall, and whether the wall is now shorter.
+
+## No hero culture
+
+We don't celebrate the person who stayed up until 4am firefighting alone. We fix the thing that required it. Heroics feel great and they're a warning sign: they mean the system depends on individual sacrifice instead of being sound, and that dependency doesn't scale and burns people out.
+
+If an incident needs a hero, that's the finding. Ask for help early, wake someone up if you need to, and share the pager. The point is a system that's resilient because it's built well, not because a few exhausted people keep saving it.

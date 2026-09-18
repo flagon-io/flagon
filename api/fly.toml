@@ -6,41 +6,49 @@
 app = 'flagon-api'
 primary_region = 'iad'
 
+# Non-secret AI config. ANTHROPIC_API_KEY is a Fly secret (never committed);
+# the workspace id is not sensitive, so it lives here. Pinning the provider means
+# a missing/rotated key fails loud (a clear "no API key" error) instead of the
+# agent silently falling back to the offline mock.
+[env]
+FLAGON_AI_PROVIDER = 'anthropic'
+ANTHROPIC_WORKSPACE_ID = 'wrkspc_01VHr6wAJDdVDeB2bjdU1Zhg'
+
 [build]
 
 [http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = 'stop'
-  auto_start_machines = true
-  # Keep one machine always warm (no cold start on the common path); let any
-  # extra machines stop when idle so we only pay for capacity under load.
-  min_machines_running = 1
+internal_port = 8080
+force_https = true
+auto_stop_machines = 'stop'
+auto_start_machines = true
+# Keep one machine always warm (no cold start on the common path); let any
+# extra machines stop when idle so we only pay for capacity under load.
+min_machines_running = 1
 
-  # Autoscaling signal for the built-in proxy: when a machine passes soft_limit
-  # concurrent requests, Fly routes to other running machines and starts a
-  # stopped one; hard_limit is the ceiling before it sheds load. Starting
-  # values - tune from Grafana (concurrency vs p95 latency) once real traffic
-  # exists. Provision more machines with `fly scale count N` to raise the pool.
-  [http_service.concurrency]
-    type = 'requests'
-    soft_limit = 100
-    hard_limit = 200
+# Autoscaling signal for the built-in proxy: when a machine passes soft_limit
+# concurrent requests, Fly routes to other running machines and starts a
+# stopped one; hard_limit is the ceiling before it sheds load. Starting
+# values - tune from Grafana (concurrency vs p95 latency) once real traffic
+# exists. Provision more machines with `fly scale count N` to raise the pool.
+[http_service.concurrency]
+type = 'requests'
+soft_limit = 100
+hard_limit = 200
 
-  [[http_service.checks]]
-    interval = '15s'
-    timeout = '5s'
-    grace_period = '5s'
-    method = 'GET'
-    path = '/healthz'
+[[http_service.checks]]
+interval = '15s'
+timeout = '5s'
+grace_period = '5s'
+method = 'GET'
+path = '/healthz'
 
 # Fly's managed Prometheus scrapes app metrics from this private port (the API
 # serves /metrics on :9091, off the public service - see internal/metrics).
 [metrics]
-  port = 9091
-  path = '/metrics'
+port = 9091
+path = '/metrics'
 
 [[vm]]
-  cpu_kind = 'shared'
-  cpus = 1
-  memory_mb = 256
+cpu_kind = 'shared'
+cpus = 1
+memory_mb = 256

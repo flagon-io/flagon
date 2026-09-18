@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Alert, Button, Input, Label } from "@flagon-io/ui";
 import { authClient } from "@/lib/auth-client";
-import { SocialButtons } from "@/components/auth/social-buttons";
+import { SocialButtons, SOCIAL_ENABLED } from "@/components/auth/social-buttons";
 import { AuthCard } from "@/components/auth/auth-card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
+
+const USERNAME_RE = /^[a-zA-Z0-9_-]{3,30}$/;
 
 export default function SignupPage() {
   const router = useRouter();
@@ -16,31 +16,45 @@ export default function SignupPage() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const usernameValid = username === "" || USERNAME_RE.test(username);
+  const passwordsMatch = confirm === "" || password === confirm;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setSubmitting(true);
 
-    const { error: signUpError } = await authClient.signUp.email({
-      name,
-      username,
-      email,
-      password,
-    });
-
-    setSubmitting(false);
-
-    if (signUpError) {
-      setError(
-        signUpError.message ?? "Something went wrong. Please try again.",
-      );
+    if (!USERNAME_RE.test(username)) {
+      setError("Username must be 3-30 characters: letters, numbers, hyphens, or underscores.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords don't match.");
       return;
     }
 
-    router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+    setSubmitting(true);
+    const { error: signUpError } = await authClient.signUp.email({
+      name: name.trim(),
+      username: username.trim(),
+      email: email.trim(),
+      password,
+    });
+    setSubmitting(false);
+
+    if (signUpError) {
+      setError(signUpError.message ?? "Something went wrong. Please try again.");
+      return;
+    }
+
+    router.push(`/verify-email?email=${encodeURIComponent(email.trim())}`);
   }
 
   return (
@@ -75,9 +89,13 @@ export default function SignupPage() {
             type="text"
             autoComplete="username"
             required
+            aria-invalid={!usernameValid || undefined}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
+          <p className={`text-xs ${usernameValid ? "text-muted-foreground" : "text-destructive"}`}>
+            Letters, numbers, hyphens, or underscores. 3-30 characters.
+          </p>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="email">Email</Label>
@@ -101,22 +119,40 @@ export default function SignupPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+          <p className="text-xs text-muted-foreground">At least 8 characters.</p>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="confirm">Confirm password</Label>
+          <Input
+            id="confirm"
+            type="password"
+            autoComplete="new-password"
+            required
+            minLength={8}
+            aria-invalid={!passwordsMatch || undefined}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+          {!passwordsMatch && <p className="text-xs text-destructive">Passwords don&rsquo;t match.</p>}
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <Alert variant="destructive">{error}</Alert>}
 
         <Button type="submit" disabled={submitting} className="mt-1 w-full">
           {submitting ? "Creating account..." : "Sign up"}
         </Button>
       </form>
 
-      <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="h-px flex-1 bg-hairline" />
-        or
-        <span className="h-px flex-1 bg-hairline" />
-      </div>
-
-      <SocialButtons />
+      {SOCIAL_ENABLED && (
+        <>
+          <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="h-px flex-1 bg-hairline" />
+            or
+            <span className="h-px flex-1 bg-hairline" />
+          </div>
+          <SocialButtons />
+        </>
+      )}
     </AuthCard>
   );
 }

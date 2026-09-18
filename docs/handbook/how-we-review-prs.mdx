@@ -1,0 +1,47 @@
+---
+title: How we review PRs
+description: "The mechanical checklist for getting a pull request reviewed and merged here. The why behind it lives in how we review code; this is the how."
+section: Engineering
+order: 8
+---
+
+[How we review code](/handbook/code-review) is about the spirit of review: kind, rigorous, aimed at the reader a year out. This page is the mechanical companion, the actual checklist for opening a pull request, reviewing one, and merging it. If the two ever seem to disagree, the spirit wins; this is just the routine that serves it.
+
+## Before you ask for review
+
+The author controls most of what makes a review fast. Before you request one:
+
+- **Keep it small and focused.** One change per PR. If it does three things, it's three PRs. A change someone can review in ten minutes gets reviewed in ten minutes.
+- **Review your own diff first.** Read every line as if it were someone else's. You'll catch the debug print and the stray file before a human spends attention on them.
+- **Write the description for the reviewer.** What it does, and more usefully why. Link the issue. Call out the risky part and anything you're unsure about; pointing at your own soft spot gets you a better review, not a worse grade.
+- **Separate the noise.** Put a rename or a formatting pass in its own commit, or its own PR, so the reviewer isn't hunting for the real change in a wall of diff.
+- **Get CI green.** Don't ask a person to review what the machine hasn't checked. Open a draft PR if you want early eyes before it's finished.
+
+## Who reviews, and how fast
+
+Anyone competent in the area can review; you don't need a specific senior name on it. One thoughtful approval is enough for most changes. Pull in a second reviewer yourself when the change is risky, touches a security or data boundary, or you just want another set of eyes.
+
+Reviewing is real work, not an interruption to get to later. Small PRs deserve a fast turnaround, ideally same day. If you can't give a change the attention it needs right now, say so instead of rubber-stamping it; a fast approval on code nobody read is how the 2am page gets written.
+
+## The reviewer's checklist
+
+Read it like you'll maintain it, because you might. Concretely:
+
+- Does it actually do what the description says?
+- What about the edge the author probably didn't hit: the empty list, the second org, the retry, the timeout?
+- What's the call site you can't see in this diff? Does this break a caller?
+- Is it clear? Naming, a comment that explains the why, an abstraction no cleverer than the problem.
+- Are there [tests where they earn their keep](/handbook/testing), and do they test behavior rather than restate the code?
+- Did the things that travel with the change travel: the docs, the OpenAPI-facing bits, the [customer heads-up](/handbook/customer-comms) if it's breaking?
+
+<Callout type="brand">
+  Mark what's blocking and what isn't. Prefix the optional stuff ("nit:", "idea:") so the author knows what must change before merge and what's just a thought. A review where everything reads as mandatory is exhausting and slow.
+</Callout>
+
+## Merging
+
+The author merges, once there's an approval and CI is green. Squash the noisy commits so the history reads as one coherent change. The moment it lands on `main` it's on its way to production, so if you wouldn't want it deployed right now, it isn't ready; the rest of that story is in [shipping and releasing](/handbook/shipping-and-releasing).
+
+## Disagreement
+
+You'll disagree sometimes, and that's the point of review, not a failure of it. Argue it in the open, briefly, on the merits. Most disagreements dissolve once both people say what they actually mean. When one doesn't, the author usually gets the call on reversible things since they [own what they ship](/handbook/feature-ownership), and you pull in a third person for the genuinely hard, expensive ones. What you don't do is relitigate a settled decision on every future PR.

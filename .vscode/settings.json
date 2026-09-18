@@ -1,0 +1,10 @@
+{
+  // Keep TOML table entries indented on save. The "Even Better TOML" (taplo)
+  // formatter otherwise flattens key/value pairs to column 0, which reflows
+  // files like api/fly.toml away from their written 2-space style. TOML ignores
+  // this whitespace, so this is purely a house-style choice, kept consistent for
+  // everyone here. Table headers stay flush-left (indentTables left at default).
+  "evenBetterToml.formatter.indentEntries": true,
+  // Preserve authored key order; never alphabetize on save.
+  "evenBetterToml.formatter.reorderKeys": false
+}

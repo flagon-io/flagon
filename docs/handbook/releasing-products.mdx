@@ -1,0 +1,30 @@
+---
+title: Releasing products and features
+description: "How something new reaches users here: gradually, watched closely, and treated as the start of the work rather than the finish line."
+section: Product
+order: 6
+---
+
+A release is not a launch event, and it's not the moment the work is done. It's the moment you start finding out whether the work was any good. This page is the product-side view of getting something in front of users; the engineering mechanics of how a change ships live in [shipping and releasing](/handbook/shipping-and-releasing).
+
+## Get it in front of users early, in a small circle
+
+We don't build a whole feature in the dark and unveil it. We get a rough, real version to a few users as soon as it does one useful thing, then widen the circle as our confidence grows: ourselves first, then a handful of friendly users, then everyone. This is the same instinct as [shipping the smallest useful change](/handbook/iteration), applied to how a feature reaches the world.
+
+Releasing gradually means the feedback you get is real, from people actually using the thing, and it means a problem shows up while the blast radius is still small.
+
+<Callout type="brand">
+  The goal isn't a flawless launch. It's the shortest path to real users so you learn whether you built the right thing while it's still cheap to change your mind.
+</Callout>
+
+## Watch what happens
+
+A release is the point where [the metrics](/handbook/product-metrics) and [listening to users](/handbook/listening-to-users) earn their keep. Once something's out, the questions are immediate and concrete: is it being adopted, is it doing what we hoped, did it move the number we thought it would, what are the first users saying. The team that shipped it is the team watching, because they [own it](/handbook/feature-ownership) and they're the ones who understand what "working" was supposed to mean.
+
+## Follow up, don't move on
+
+The strongest signal of whether a release worked is what happens in the days after it, which is exactly when it's tempting to move on to the next thing. Resist that. Following up, tuning, fixing the rough edge that only shows up under real use, is part of shipping it, not a separate nice-to-have. A feature dropped and abandoned the moment it merged is a feature half-built.
+
+## Be willing to pull it back
+
+Sometimes you release, you watch, and the honest read is that it isn't landing. That's a normal outcome, not a failure to hide. Because we release behind flags and in small circles, walking something back is cheap, a config change, not a crisis. And if a feature turns out to be one nobody wants, removing it is progress: less to maintain, less to explain, less complexity everyone else pays for. The willingness to un-ship is what makes shipping fast safe in the first place.

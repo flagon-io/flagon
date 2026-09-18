@@ -1,0 +1,45 @@
+---
+title: Ship the smallest useful change
+description: Why we split big work into small useful pieces, ship them, and iterate in the open.
+section: Engineering
+order: 6
+---
+
+The instinct with any real piece of work is to go away, build the whole thing, and come back when it's done. We try hard not to do that. Instead we ship the smallest change that moves things forward, put it in front of real use, and iterate from there. Small and out the door beats big and imaginary, almost every time. This is one of our [operating principles](/handbook/operating-principles), and it's close to the center of how we build.
+
+## Smaller is safer and faster
+
+A small change is easier to reason about, easier to review, and easier to undo when it's wrong. When a one-line diff breaks something, you know exactly what broke it. When a three-week branch breaks something, you get to go spelunking.
+
+Small changes also ship, which is the part that matters. A big change sits in a branch collecting conflicts and losing relevance while the world moves on. Ten small changes that each landed this week have already taught you ten things about whether you're right. The whole point is a fast feedback loop, and small changes are how you run it.
+
+There's a compounding effect too. Every merged change is a checkpoint you can build on and can't lose. Every unmerged one is risk you're still carrying. We'd rather bank progress in small deposits than hold one big bet open.
+
+## Everything is in draft
+
+We ship things that are useful before they're finished, and we keep low shame about it. A rough version that people can actually use teaches you more in a day than a perfect version does in a month of you imagining how they'll use it.
+
+That's not an excuse to ship junk. "Unfinished but useful" is a real bar: it has to genuinely help, the sharp edges have to be honest ones, and it still has to be a [good thing](/handbook/values), just an early honest one. What we're refusing is the other failure, the one where you polish in private for so long that you ship late, ship wrong, and never got to learn.
+
+<Callout type="warn" title="Useful, not just small">
+  Smallest useful change, not smallest change. A slice that does nothing on its
+  own isn't iteration, it's a to-do list you shipped by accident. Each piece has
+  to stand up and do something real for a user.
+</Callout>
+
+## An example: splitting a big change
+
+Say the job is "let people invite teammates." That's a big change with a lot hiding in it. The temptation is to build the whole flow, roles and email invites and pending-state UI and all, then ship it in one go three weeks later.
+
+Here's the same work as a stack of small useful ones:
+
+- **Ship the manual version first.** An admin can add a teammate by email, no invite email, no roles yet. It's useful the day it lands, and it tells you whether anyone even wants this.
+- **Then the invite email.** Now the teammate gets a link instead of being added silently. Small change on top of a thing that already works.
+- **Then pending state.** Show who's been invited but hasn't joined. Another small, self-contained slice.
+- **Then roles,** once you've watched real teams use the flat version and know what permissions they actually reach for.
+
+Each step ships, gets used, and shapes the next one. If invites turn out to matter less than you thought, you stop after step one and you've lost days, not weeks.
+
+## How this connects to building in the open
+
+Shipping small is what makes building in public honest. If you only surface finished work, "in the open" is just a delayed reveal with better manners. Small, frequent changes mean the people using Flagon see the work as it actually moves and get to shape where it goes next, which is the whole point of [how we build](/handbook/how-we-build). The draft is the product, right up until the next draft.

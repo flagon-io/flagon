@@ -1,0 +1,163 @@
+package docs
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// BuildFromDir compiles the docs/ tree rooted at dir into a Corpus. It is the
+// single source of truth for how source files become the corpus, shared by
+// cmd/gendocs and the tests, so generation and verification can never disagree.
+//
+// A Markdown/MDX file is included only if its frontmatter has a title; files
+// without frontmatter (READMEs, notes) are skipped. Docs are sorted by slug so
+// the output is deterministic and diff-friendly.
+func BuildFromDir(dir string) (Corpus, error) {
+	root := os.DirFS(dir)
+	var docsOut []Doc
+
+	err := fs.WalkDir(root, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(p))
+		if ext != ".md" && ext != ".mdx" {
+			return nil
+		}
+		raw, err := fs.ReadFile(root, p)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", p, err)
+		}
+		fm, body, ok := splitFrontmatter(raw)
+		if !ok || strings.TrimSpace(fm["title"]) == "" {
+			return nil // no frontmatter/title: not a doc (e.g. README)
+		}
+		docsOut = append(docsOut, docFrom(p, fm, body))
+		return nil
+	})
+	if err != nil {
+		return Corpus{}, err
+	}
+
+	sort.SliceStable(docsOut, func(i, j int) bool { return docsOut[i].Slug < docsOut[j].Slug })
+	return Corpus{Docs: docsOut}, nil
+}
+
+// docFrom assembles a Doc from a file's path, frontmatter, and body.
+func docFrom(p string, fm map[string]string, body string) Doc {
+	slug := strings.TrimSuffix(filepath.ToSlash(p), filepath.Ext(p))
+
+	section := fm["section"]
+	if section == "" {
+		// Default the section to the top-level folder under docs/.
+		if i := strings.Index(slug, "/"); i > 0 {
+			section = slug[:i]
+		}
+	}
+
+	visibility := Visibility(strings.ToLower(strings.TrimSpace(fm["visibility"])))
+	if visibility != Internal {
+		visibility = Public
+	}
+
+	order := 0
+	if v := strings.TrimSpace(fm["order"]); v != "" {
+		order, _ = strconv.Atoi(v)
+	}
+
+	return Doc{
+		Slug:        slug,
+		Title:       strings.TrimSpace(fm["title"]),
+		Description: strings.TrimSpace(fm["description"]),
+		Section:     section,
+		Visibility:  visibility,
+		Order:       order,
+		Headings:    headings(body),
+		Body:        strings.TrimSpace(body),
+	}
+}
+
+// splitFrontmatter separates a leading YAML frontmatter block (fenced by ---)
+// from the body. It parses only the flat "key: value" subset the doc convention
+// uses, which keeps the toolchain dependency-free. Returns ok=false when there is
+// no frontmatter block.
+func splitFrontmatter(raw []byte) (map[string]string, string, bool) {
+	s := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	if !strings.HasPrefix(s, "---\n") {
+		return nil, s, false
+	}
+	rest := s[len("---\n"):]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return nil, s, false
+	}
+	block := rest[:end]
+	body := rest[end+len("\n---"):]
+	body = strings.TrimPrefix(body, "\n")
+
+	fm := map[string]string{}
+	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		fm[strings.TrimSpace(key)] = unquote(strings.TrimSpace(val))
+	}
+	return fm, body, true
+}
+
+func unquote(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
+}
+
+// headings pulls the ATX headings (## ...) out of the body for search weighting.
+func headings(body string) []string {
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			out = append(out, strings.TrimSpace(strings.TrimLeft(line, "#")))
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// Marshal renders a Corpus to the exact bytes written to corpus.gen.json:
+// indented, trailing newline, deterministic. gendocs uses this for both writing
+// and the -check drift comparison.
+func Marshal(c Corpus) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(c); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// CorpusPath is where the generated corpus lives, relative to the api module root.
+var CorpusPath = path.Join("internal", "docs", "corpus.gen.json")

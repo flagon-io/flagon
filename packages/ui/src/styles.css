@@ -1,0 +1,167 @@
+/*
+ * @flagon-io/ui theme contract (Tailwind v4). Import this once in a consuming
+ * app that doesn't already define the tokens:
+ *
+ *   @import "tailwindcss";
+ *   @import "@flagon-io/ui/styles.css";
+ *   @source "../node_modules/@flagon-io/ui/src";
+ *
+ * Token names follow shadcn's vocabulary (--background, --primary, --border,
+ * --ring, --radius, ...) so it's portable; brand-only extras (--brand, --link,
+ * ...) are additive. Dark mode is the `.dark` class on a root ancestor - set it
+ * yourself or via the Flagon ThemeProvider.
+ */
+@custom-variant dark (&:is(.dark *));
+
+/* Reusable subtle enter animation. Apply `animate-fade-in` to content that swaps
+ * in (view transitions, contextual nav, revealed panels) so changes read as
+ * intentional rather than jarring. Part of the house polish standard. */
+@theme {
+  --animate-fade-in: fade-in 180ms ease-out;
+  --animate-caret-blink: caret-blink 1s ease-out infinite;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes caret-blink {
+  0%,
+  70%,
+  100% {
+    opacity: 1;
+  }
+  20%,
+  50% {
+    opacity: 0;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-brand: var(--brand);
+  --color-brand-bright: var(--brand-bright);
+  --color-link: var(--link);
+  --color-subtle: var(--subtle);
+  --color-hairline: var(--hairline);
+  --color-panel: var(--panel);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.375rem;
+
+  --background: #fbfbfc;
+  --foreground: #0b0b0d;
+  --card: #ffffff;
+  --card-foreground: #0b0b0d;
+  --popover: #ffffff;
+  --popover-foreground: #0b0b0d;
+  --primary: #0d9488;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f5f6;
+  --secondary-foreground: #0b0b0d;
+  --muted: #f1f2f3;
+  --muted-foreground: #52525a;
+  --accent: #f1f2f3;
+  --accent-foreground: #0b0b0d;
+  --destructive: #e5484d;
+  --border: rgba(9, 9, 11, 0.12);
+  --input: rgba(9, 9, 11, 0.14);
+  --ring: #0d9488;
+
+  --brand: #0d9488;
+  --brand-bright: #0f766e;
+  --link: #0f766e;
+  --subtle: #62626b;
+  --hairline: rgba(9, 9, 11, 0.12);
+  --panel: rgba(9, 9, 11, 0.028);
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0b0b0d;
+  --sidebar-primary: #0d9488;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f2f3;
+  --sidebar-accent-foreground: #0b0b0d;
+  --sidebar-border: rgba(9, 9, 11, 0.1);
+  --sidebar-ring: #0d9488;
+
+  --brew-top: #14b8a6;
+  --brew-bot: #0f766e;
+  --brew-flat: #0d9488;
+  --foam: #99f6e4;
+  --sheen: rgba(255, 255, 255, 0.6);
+}
+
+.dark {
+  --background: #000000;
+  --foreground: #ededed;
+  --card: #0b0b0d;
+  --card-foreground: #ededed;
+  --popover: #0c0c0e;
+  --popover-foreground: #ededed;
+  --primary: #14b8a6;
+  --primary-foreground: #04140f;
+  --secondary: #18181b;
+  --secondary-foreground: #ededed;
+  --muted: #16161a;
+  --muted-foreground: #a7a7b0;
+  --accent: #1c1c20;
+  --accent-foreground: #ededed;
+  --destructive: #ef5350;
+  --border: rgba(255, 255, 255, 0.11);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: #2dd4bf;
+
+  --brand: #14b8a6;
+  --brand-bright: #2dd4bf;
+  --link: #2dd4bf;
+  --subtle: #8b8b94;
+  --hairline: rgba(255, 255, 255, 0.11);
+  --panel: rgba(255, 255, 255, 0.03);
+
+  --sidebar: #000000;
+  --sidebar-foreground: #ededed;
+  --sidebar-primary: #14b8a6;
+  --sidebar-primary-foreground: #04140f;
+  --sidebar-accent: #1f1f1f;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #2dd4bf;
+}

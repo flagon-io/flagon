@@ -1,5 +1,5 @@
 // Package server wires up the chi router and Huma API used by both the
-// running service (cmd/api) and the OpenAPI spec generator (cmd/genspec).
+// running service (cmd/flagon) and the OpenAPI spec generator (cmd/genspec).
 //
 //go:generate go run ../../cmd/genspec
 package server
@@ -13,6 +13,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/flagon-io/flagon/api/internal/ai"
+	"github.com/flagon-io/flagon/api/internal/docs"
 )
 
 // Options configures optional server dependencies.
@@ -33,6 +36,17 @@ type Options struct {
 	// generation (handlers never run then).
 	Identity      IdentityStore
 	InternalToken string
+
+	// AI backs the /ai endpoints (the in-product agent). Nil disables them; it is
+	// also nil during spec generation (handlers never run then).
+	AI *ai.Agent
+
+	// Docs backs the public documentation endpoints (/docs*). Nil disables them.
+	Docs *docs.Index
+
+	// Registry backs the public MCP server (/mcp), exposing the read-only,
+	// public-safe tools. Nil disables the MCP front door.
+	Registry *ai.Registry
 }
 
 // Option mutates Options.
@@ -58,6 +72,21 @@ func WithIdentity(store IdentityStore, internalToken string) Option {
 	}
 }
 
+// WithAI wires the in-product agent endpoints (/ai/*).
+func WithAI(agent *ai.Agent) Option {
+	return func(o *Options) { o.AI = agent }
+}
+
+// WithDocs wires the public documentation endpoints (/docs*) to the corpus index.
+func WithDocs(index *docs.Index) Option {
+	return func(o *Options) { o.Docs = index }
+}
+
+// WithMCP wires the public MCP front door (/mcp) to the shared tool registry.
+func WithMCP(registry *ai.Registry) Option {
+	return func(o *Options) { o.Registry = registry }
+}
+
 // New builds the chi router and Huma API. Every operation registered via
 // huma.Register is automatically documented in the generated OpenAPI spec.
 // To opt an endpoint OUT of documentation, register it directly on the chi
@@ -79,6 +108,18 @@ func New(opts ...Option) (chi.Router, huma.API) {
 	registerHealthChecks(router, options)
 	registerIndex(router, api)
 	registerIdentityAPI(api, options.Identity, options.InternalToken)
+	registerMembersAPI(api, options.Identity, options.InternalToken)
+	registerInvitationsAPI(api, options.Identity, options.InternalToken)
+	registerProjectsAPI(api, options.Identity, options.InternalToken)
+	registerTokensAPI(api, options.Identity, options.InternalToken)
+	registerNotificationsAPI(api, options.Identity, options.InternalToken)
+	registerAIAPI(api, options.AI, options.InternalToken)
+
+	// Docs content and MCP are served off the documented spec, on the chi router
+	// directly - like the health checks and the index. The OpenAPI spec stays the
+	// product's operational contract; documentation delivery is a separate concern.
+	registerDocsAPI(router, options.Docs)
+	registerMCP(router, options.Registry)
 
 	return router, api
 }

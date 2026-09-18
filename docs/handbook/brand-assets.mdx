@@ -1,0 +1,36 @@
+---
+title: Assets
+description: Where the logo lives, the treatments to reach for, and the clear-space and sizing rules for using the mark cleanly anywhere.
+section: Brand
+order: 5
+---
+
+Everything Flagon makes is in the open, and the brand is no exception. The mark, the palette tokens, and the type choices all live in the source for this site, so the canonical version of the identity is never a stale file in a shared drive: it is whatever is in the repo right now. See [open source](/handbook/open-source) for where that is.
+
+## The mark, canonically
+
+The source of truth for the mark is the `FlagonMark` component, which renders crisp at any size and follows the current theme. For anywhere that can't import the component, another app like the product at app.flagon.io, an email, a slide, there are self-contained SVG files hosted at stable URLs. The teal brew is baked in, and the glass outline uses `currentColor` with a light and dark default built in, so they read on any background even when dropped in with a plain `<img>` tag. Do not recreate the mark by hand; use these.
+
+- **Static:** [`/brand/flagon-mark.svg`](/brand/flagon-mark.svg)
+- **Animated** (pours in, then a slow living wave; halts under reduced motion): [`/brand/flagon-mark-animated.svg`](/brand/flagon-mark-animated.svg)
+- **Mono** (single ink, for tinting to one colour): [`/brand/flagon-mark-mono.svg`](/brand/flagon-mark-mono.svg)
+
+Inline the SVG and set a `color` on it to recolour the outline yourself. See the [visual identity](/handbook/brand-visual-identity) page for the treatments side by side.
+
+## Formats
+
+- **SVG** is the default for anything digital. It stays sharp and stays small.
+- **PNG** at 2x or 3x when a raster is unavoidable, on a transparent ground.
+- **Monochrome SVG** for single-colour contexts, using the mono treatment.
+
+If you are producing something physical or high-stakes (an event backdrop, printed swag, a partner placement) and want a second pair of eyes, ask in the Discord before it goes to print. It is cheaper than a reprint.
+
+## Clear space and minimum size
+
+- **Clear space:** keep space around the mark equal to at least the height of the lid on every side. Do not crowd it with text or other logos.
+- **Minimum size:** 16px tall on screen, a little larger in print. Below that the sheen drops away by design and the silhouette still reads.
+- **Backgrounds:** the mark wants contrast. Put the full or flat treatment on a plain ground; use the mono treatment when the background is busy or a fixed colour.
+
+## Don't
+
+The four rules on [visual identity](/handbook/brand-visual-identity#using-the-mark) are the short version. The ones people trip on most: never ship the hollow outline (the brew is the mark), and never stretch, rotate, recolour half of it, or add effects. If you find yourself modifying the vessel, stop and use one of the three treatments instead.

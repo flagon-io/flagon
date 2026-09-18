@@ -2,8 +2,10 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -o ./tmp/api ./cmd/api"
-bin = "tmp/api"
+cmd = "go build -o ./tmp/flagon ./cmd/flagon"
+bin = "tmp/flagon"
+# Run the HTTP API on live-reload; `flagon` needs an explicit subcommand.
+args_bin = ["serve"]
 include_ext = ["go"]
 exclude_dir = ["tmp"]
 delay = 200

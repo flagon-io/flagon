@@ -1,0 +1,30 @@
+---
+title: Projects
+description: A project is the core deployable unit in Flagon, scoped to an organization.
+section: Platform
+visibility: public
+order: 1
+---
+
+A **project** is the core unit in Flagon: a deployable app. There is no separate
+"app" layer above it, following the Vercel model. Every project belongs to an
+**organization**, and its URLs are org-scoped: `app.flagon.io/<org>/<project>`.
+
+## Creating a project
+
+You can create a project three ways, and they all go through the same API
+operation:
+
+- In the UI, from the organization's dashboard.
+- By asking the in-product assistant ("create a project called billing-api").
+- Directly against the API, or through an external agent over MCP.
+
+Because every path calls the same permission-checked API operation, a project
+created by the agent is identical to one created by hand.
+
+## Ownership and access
+
+Projects inherit their organization's membership and roles. Access is
+permission-scoped from day one: a token or agent can only act on a project if its
+scope allows it, and tenant isolation is enforced in the database with row-level
+security, so one organization can never see another's projects.

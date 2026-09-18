@@ -1,0 +1,171 @@
+import {
+  LayoutDashboard,
+  Boxes,
+  Settings2,
+  SlidersHorizontal,
+  Users,
+  KeyRound,
+  Gauge,
+  CreditCard,
+  CircleUserRound,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
+
+export type NavLink = {
+  label: string;
+  href: string;
+  icon?: LucideIcon;
+  badge?: string;
+  /** Match the pathname exactly (for an index route) instead of by prefix. */
+  exact?: boolean;
+  /** Has a contextual sub-nav; the item shows a chevron and drills in. */
+  section?: boolean;
+};
+
+/**
+ * The org-scoped main nav: flat groups separated by dividers (no section
+ * labels). Items marked `section` open a contextual sub-nav (see orgSection).
+ */
+export function orgNav(slug: string): NavLink[][] {
+  const base = `/${slug}`;
+  return [
+    [
+      { label: "Dashboard", href: base, icon: LayoutDashboard, exact: true },
+      { label: "Projects", href: `${base}/projects`, icon: Boxes },
+    ],
+    [
+      { label: "Usage", href: `${base}/usage`, icon: Gauge },
+      { label: "Settings", href: `${base}/settings`, icon: Settings2, section: true },
+    ],
+  ];
+}
+
+export type OrgSection = { title: string; backHref: string; items: NavLink[] };
+
+/** The org Settings sub-nav items. Shared by the sub-nav and the command menu so
+ * the two never drift. */
+export function settingsItems(slug: string): NavLink[] {
+  const base = `/${slug}`;
+  return [
+    { label: "General", href: `${base}/settings`, icon: SlidersHorizontal, exact: true },
+    { label: "Members", href: `${base}/settings/members`, icon: Users },
+    { label: "Billing", href: `${base}/settings/billing`, icon: CreditCard },
+    { label: "API tokens", href: `${base}/settings/tokens`, icon: KeyRound },
+    // OAuth clients: hidden until the feature ships (route still resolves).
+  ];
+}
+
+/** The contextual sub-nav shown when inside a section (currently Settings). */
+export function orgSection(slug: string, pathname: string): OrgSection | null {
+  const base = `/${slug}`;
+  const inSettings =
+    pathname === `${base}/settings` || pathname.startsWith(`${base}/settings/`);
+  if (!inSettings) return null;
+
+  return { title: "Settings", backHref: base, items: settingsItems(slug) };
+}
+
+const matches = (pathname: string, href: string, exact?: boolean) =>
+  exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+
+export { matches };
+
+/**
+ * The breadcrumb trail AFTER the org root, deepest last. E.g.
+ *   /<org>/settings/billing -> [{Settings, /settings}, {Billing, /settings/billing}]
+ *   /<org>/projects          -> [{Projects, /projects}]
+ *   /<org>                   -> []
+ * The org itself is rendered separately (the leading crumb).
+ */
+export function breadcrumbTrail(slug: string, pathname: string): { label: string; href: string }[] {
+  const base = `/${slug}`;
+  const section = orgSection(slug, pathname);
+
+  if (section) {
+    const crumbs = [{ label: section.title, href: `${base}/settings` }];
+    // Deepest section item that isn't the section root (General shares its href).
+    let leaf: NavLink | null = null;
+    for (const it of section.items) {
+      if (matches(pathname, it.href, it.exact) && it.href !== `${base}/settings`) {
+        if (!leaf || it.href.length > leaf.href.length) leaf = it;
+      }
+    }
+    if (leaf) crumbs.push({ label: leaf.label, href: leaf.href });
+    return crumbs;
+  }
+
+  const item = activeItem(slug, pathname);
+  return item && item.href !== base ? [item] : [];
+}
+
+/** The deepest matching link (main nav or the active section), for breadcrumbs. */
+export function activeItem(slug: string, pathname: string): { label: string; href: string } | null {
+  const links: NavLink[] = orgNav(slug).flat();
+  const section = orgSection(slug, pathname);
+  if (section) links.push(...section.items);
+
+  let match: { label: string; href: string } | null = null;
+  for (const l of links) {
+    if (matches(pathname, l.href, l.exact) && (!match || l.href.length > match.href.length)) {
+      match = { label: l.label, href: l.href };
+    }
+  }
+  return match;
+}
+
+export type CommandItem = {
+  group: string;
+  label: string;
+  href: string;
+  icon?: LucideIcon;
+  badge?: string;
+  /** Extra terms to match on beyond the label (synonyms, abbreviations). */
+  keywords?: string;
+};
+
+/**
+ * Every destination the quick-search can jump to, grouped for display. Built from
+ * the same nav sources so it stays in sync. Personal account routes live outside
+ * the org (the one non-org exception), so they're always reachable here too.
+ */
+export function commandItems(slug: string): CommandItem[] {
+  const base = `/${slug}`;
+  // Drop section parents (e.g. "Settings"): their children are listed directly
+  // below, so including the parent would duplicate its destination.
+  const nav = orgNav(slug)
+    .flat()
+    .filter((l) => !l.section);
+  const keywords: Record<string, string> = {
+    [base]: "home overview start",
+    [`${base}/projects`]: "apps services repos",
+    [`${base}/usage`]: "billing metering consumption credits plan",
+  };
+
+  return [
+    ...nav.map((l) => ({
+      group: "Navigation",
+      label: l.label,
+      href: l.href,
+      icon: l.icon,
+      keywords: keywords[l.href],
+    })),
+    ...settingsItems(slug).map((l) => ({
+      group: "Settings",
+      label: l.label,
+      href: l.href,
+      icon: l.icon,
+      badge: l.badge,
+      keywords:
+        l.label === "API tokens"
+          ? "pat personal access token"
+          : l.label === "Members"
+            ? "team people invite roles"
+            : l.label === "Billing"
+              ? "plan payment card credit invoice upgrade"
+              : "org organization preferences",
+    })),
+    { group: "Account", label: "Account settings", href: "/settings", icon: CircleUserRound, keywords: "personal profile me" },
+    { group: "Account", label: "Security", href: "/settings/security", icon: ShieldCheck, keywords: "2fa password passkeys sessions" },
+  ];
+}

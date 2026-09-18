@@ -1,0 +1,14 @@
+{
+  "name": "flagon",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "app",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace app",
+    "build": "npm run build --workspace app",
+    "lint": "npm run lint --workspace app"
+  }
+}

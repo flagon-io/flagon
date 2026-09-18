@@ -15,3 +15,6 @@ Thumbs.db
 
 .vercel
 .env*
+
+# Per-machine local dev port bindings; copy from compose.override.example.yml.
+/compose.override.yml

@@ -1,0 +1,49 @@
+---
+title: Project structure
+description: "A map of the Flagon monorepo, so you can find the thing you need to change without reading everything first."
+section: Engineering
+order: 4
+---
+
+This is a map, not a tour. The goal is that when you have a change to make, you know roughly which door to open, and when you're reading a pull request you can tell where each file lives without guessing. The repo is [flagon-io/flagon](https://github.com/flagon-io/flagon), a single monorepo holding both services, the shared UI, and the generated API spec, so a change that crosses those boundaries lands in one reviewable pull request instead of several that have to merge in a careful order.
+
+## The shape of it
+
+```text
+api/            the Go service: source of truth, all data and logic
+  cmd/flagon      the `flagon` CLI (serve, migrate, ...)
+  cmd/genspec     generates openapi/openapi.json as a build artifact
+  internal/server chi router + huma setup, shared by both commands
+  internal/...    the product domains
+app/            the Next.js service: UI, gateway, and auth
+  src/app         routes (dashboard, [org], login, signup, settings, ...)
+  src/components  UI, composed from the shared package
+  src/lib         the typed API client and helpers
+  db/  scripts/   migrations and seeding for the app's own auth store
+packages/ui     @flagon-io/ui, the shared component library
+openapi/        the generated OpenAPI spec (gitignored, not hand-edited)
+```
+
+It's an npm workspace: `app` and `packages/*` are workspaces, and `api` is its own Go module.
+
+## Where things actually live
+
+**All the product logic is in `api/`.** This is the half that matters most to get right, because it's the [source of truth](/handbook/tech-stack): it owns the data, the multi-tenancy, and the secrets. The HTTP layer is set up in `internal/server` (the chi router plus huma), and the domains live in `internal/` beside it. Endpoints are registered through huma, which is what makes them show up in the OpenAPI spec automatically, with no separate step where docs can drift from code.
+
+**`app/` is deliberately thin.** Its routes render the UI and handle auth, and for anything to do with product data they call the API through the typed client in `src/lib`. The app has its own small database for authentication (sessions, verified emails), migrated and seeded from `db/` and `scripts/`, but it does not reach into the product's data or touch Stripe. If you find business logic creeping into `app/`, that's the smell to catch in review.
+
+**`packages/ui` is the shared frontend vocabulary.** Components the app builds from live here as `@flagon-io/ui`, so the look and behavior stay consistent and there's one place to change a button.
+
+**`openapi/` is generated, never edited by hand.** It falls out of the huma registrations in `api/`. You regenerate the artifact with `make openapi` when you need it outside a running server (to build the typed client), but the running API serves the live spec, so day to day you don't touch this at all.
+
+## How to find your way in
+
+The fastest way to understand a change isn't to read the whole tree, it's to follow one request end to end. Pick something small and trace it: a page in `app/src/app` calls the typed client in `app/src/lib`, which hits the API, which routes through `internal/server` into a domain package, down to Postgres, and back. That single thread teaches you more about how the two services fit together than an afternoon of browsing, and it makes the [gateway-and-source-of-truth split](/handbook/tech-stack) concrete instead of abstract.
+
+<Callout type="note" title="When you can't find where something goes">
+  If a change doesn't have an obvious home, that's worth surfacing in review, not silently forcing. The usual question is which side of the line it belongs on: is this really product logic (it goes in `api/`) or genuinely presentation and auth (it stays in `app/`)? When that's unclear, the confusion is information.
+</Callout>
+
+## Keeping the map true
+
+Structure rots when nobody tends it. If you move things, update this page in the same pull request. A map that quietly stops matching the territory is worse than no map, because people trust it and get lost. Keeping it honest is part of [owning what you build](/handbook/feature-ownership).

@@ -1,7 +1,7 @@
 // Runs database migrations as part of a deploy build (Vercel `vercel-build`).
 //
 // `app` is Flagon's auth service, so its schema (BetterAuth core tables + our
-// user_email table) has to exist before the new deployment serves traffic.
+// user_emails table) has to exist before the new deployment serves traffic.
 // Wiring it into the build means a migration that would fail also fails the
 // deploy, so a broken schema never ships - the same contract the Go API uses.
 //
@@ -18,9 +18,12 @@ if (!process.env.DATABASE_URL) {
 }
 
 const steps = [
-  // BetterAuth's own core tables (user, session, account, verification).
+  // Rename BetterAuth's default singular tables to our plural convention, if
+  // they still exist under the old names. No-op once renamed. Must run first.
+  "node scripts/rename-auth-tables.mjs",
+  // BetterAuth's own core tables (users, sessions, accounts, verifications).
   "npx @better-auth/cli@latest migrate --yes",
-  // Our custom migrations (currently the user_email table). Idempotent.
+  // Our custom migrations (currently the user_emails table). Idempotent.
   "node scripts/migrate-user-emails.mjs",
 ];
 

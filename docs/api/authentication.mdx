@@ -1,0 +1,30 @@
+---
+title: Authentication and scopes
+description: How Flagon API tokens authenticate and how scopes gate every operation.
+section: API
+visibility: public
+order: 0
+---
+
+Every Flagon API operation is permission-scoped. A token authenticates the
+caller and carries a set of **scopes**; an operation runs only if the token's
+scopes cover it, and enforcement fails closed.
+
+## Tokens
+
+An access token is minted from the UI or the API and presented as a bearer
+token. Tokens act as a user within a single organization: they can never do
+anything the issuing user could not do themselves, and row-level security still
+applies to every query the token drives.
+
+## Scopes
+
+Scopes are hierarchical: a parent scope implies its children. When you mint a
+token you choose its scopes from a grouped checklist, each row labeled with the
+raw scope and a one-line description. The vocabulary is shared across the whole
+platform, so the same scope means the same thing whether a request comes over
+REST, from the in-product agent, or over MCP.
+
+Add a scope when you add an operation. Because scopes are generated from the same
+code that generates the OpenAPI spec, this reference stays in lockstep with what
+the API actually enforces.

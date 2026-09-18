@@ -1,10 +1,10 @@
-import { FLAGON_MARK_URL } from "@/lib/brand";
+import { FlagonMark } from "@flagon-io/ui";
+import { cn } from "@/lib/cn";
 
 /**
- * Flagon's full mark (teal brew baked in), hosted on flagon.io - not
- * duplicated here. Plain <img> is intentional: the file self-adapts its
- * outline color via an embedded prefers-color-scheme media query, which is
- * exactly what it's built for (see the asset's own doc comment).
+ * Flagon's mark, from @flagon-io/ui. The outline is `currentColor`, so
+ * `text-foreground` makes it follow the app theme (dark/light class) instead of
+ * the OS color scheme; the teal brew is baked in.
  */
 export function Logo({
   className,
@@ -13,6 +13,5 @@ export function Logo({
   className?: string;
   title?: string;
 }) {
-  // eslint-disable-next-line @next/next/no-img-element -- external SVG, no next/image optimization to gain
-  return <img src={FLAGON_MARK_URL} alt={title} className={className} />;
+  return <FlagonMark title={title} className={cn("text-foreground", className)} />;
 }

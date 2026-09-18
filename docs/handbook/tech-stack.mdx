@@ -1,0 +1,47 @@
+---
+title: Tech stack
+description: "What Flagon is built with, and why: two small, independently deployed services, boring proven tools, and a hard rule that the API is the only thing that owns data."
+section: Engineering
+order: 2
+---
+
+This is what Flagon runs on and the reasoning behind each choice. None of it is exotic. That's the point: we spend our interesting-technology budget on the product, not the plumbing, exactly as [how we build](/handbook/how-we-build) describes. It all lives in one monorepo, [flagon-io/flagon](https://github.com/flagon-io/flagon), but it deploys as two separate services that talk to each other over HTTP. They work together; neither is bundled inside the other.
+
+## The two halves
+
+| Piece | Stack | What it is | Hosted on |
+| --- | --- | --- | --- |
+| `app/` (`app.flagon.io`) | Next.js, TypeScript | the web UI, the gateway, and auth | Vercel |
+| `api/` (`api.flagon.io`) | Go (chi + huma) | the source of truth: all data and logic | Fly.io |
+
+Underneath both sits **Postgres**, and a shared **`@flagon-io/ui`** package holds the components the app is built from. The two services are wired together with a couple of environment variables (`FLAGON_API_URL`, `FLAGON_INTERNAL_TOKEN`), and that's the whole coupling.
+
+## The API owns everything real
+
+`api/` is a Go program built on chi and huma. It's the source of truth: it owns all the business data and logic, it's multi-tenant through Postgres Row-Level Security scoped by `org_id`, and it's the only place that holds real secrets like the database credentials and the Stripe keys. It ships as a single Go binary with its schema migrations embedded, so deploying it is running one file that migrates itself on boot.
+
+Go earns its place here for the same reasons it always does: it compiles to that one static binary with nothing to install around it, the standard library covers most of what we need, and it stays legible to people who didn't write it, which matters for a project we want strangers to [read and contribute to](/handbook/open-source).
+
+<Callout type="brand" title="One rule holds the architecture together">
+  The API is the only thing that touches business data or Stripe. If you're reaching around it, stop. That single boundary is what keeps the system honest as it grows.
+</Callout>
+
+## The app is a thin gateway
+
+`app/` is a Next.js app in TypeScript, and it's deliberately thin. It renders the UI, it handles authentication (sign-up, login, sessions, email verification), and it forwards everything else to the API. It does not reach into the product's data or talk to Stripe; when it needs something real, it asks the API. Keeping the app thin is what lets the API stay the single source of truth instead of one of two places the rules live.
+
+TypeScript because the types pay for themselves the first time you rename a field, and because we generate a typed client from the API's OpenAPI spec, so the app and the API can't quietly disagree about what an endpoint returns.
+
+## Postgres, and the OpenAPI contract
+
+Everything that persists lives in **Postgres**. In production the two services get their own instances; locally they share one instance with two databases to go easy on a laptop, but the boundary is the same. One store, well understood, that every host already knows how to back up. We reach for a Postgres feature long before we reach for a second piece of infrastructure.
+
+The API is **OpenAPI-first**: every endpoint registered with huma is documented automatically, so the spec can't drift from the code, and the running server serves it live. That spec is the contract the [live API reference](/docs/api) renders from and the typed client is generated against. Public SDKs and a client CLI are [on the roadmap](/roadmap); when they arrive they'll be generated from this same spec rather than hand-written.
+
+## Self-hostable by construction
+
+Because [leaving is always an option](/handbook/open-source), Flagon has to be something you can run yourself. That's two services and a Postgres: point the app at the API with two env vars, give the API a `DATABASE_URL`, and host them wherever you like. Our own instance happens to run on Vercel and Fly, but nothing in the code assumes that.
+
+## How to read this page later
+
+Specific versions and libraries drift, and this page drifts with them rather than listing every dependency; the lock files and `go.mod` are the real answer to "what exactly are we on." What shouldn't drift is the shape: two services, one monorepo, the API owns the data, Postgres underneath. If a proposed change breaks one of those, it needs a good story for why.

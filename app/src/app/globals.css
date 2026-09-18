@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Generate utilities for classes used by the @flagon-io/ui workspace package. */
+@source "../../../packages/ui/src";
+
 /*
  * Flagon brand + theme contract, ported from the flagon.io marketing site so
  * app.flagon.io starts from the same visual language. Canonical tokens follow
@@ -10,6 +13,34 @@
  */
 
 @custom-variant dark (&:is(.dark *));
+
+/* Reusable subtle enter animation. Use `animate-fade-in` on content that swaps
+ * in (view transitions, contextual nav, etc.) so changes feel intentional. */
+@theme {
+  --animate-fade-in: fade-in 180ms ease-out;
+  --animate-caret-blink: caret-blink 1s ease-out infinite;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes caret-blink {
+  0%,
+  70%,
+  100% {
+    opacity: 1;
+  }
+  20%,
+  50% {
+    opacity: 0;
+  }
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -31,6 +62,16 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  /* Sidebar surface (shadcn-compatible) */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
   /* Flagon brand extras (additive) */
   --color-brand: var(--brand);
   --color-brand-bright: var(--brand-bright);
@@ -45,7 +86,7 @@
   --radius-xl: calc(var(--radius) + 4px);
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
   --font-heading: var(--font-display), var(--font-geist-sans), ui-sans-serif,
     system-ui, sans-serif;
 }
@@ -79,6 +120,22 @@
   --subtle: #62626b;
   --hairline: rgba(9, 9, 11, 0.12);
   --panel: rgba(9, 9, 11, 0.028);
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0b0b0d;
+  --sidebar-primary: #0d9488;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f2f3;
+  --sidebar-accent-foreground: #0b0b0d;
+  --sidebar-border: rgba(9, 9, 11, 0.1);
+  --sidebar-ring: #0d9488;
+
+  /* Flagon mark (brew is teal in both modes; the outline follows currentColor) */
+  --brew-top: #14b8a6;
+  --brew-bot: #0f766e;
+  --brew-flat: #0d9488;
+  --foam: #99f6e4;
+  --sheen: rgba(255, 255, 255, 0.6);
 }
 
 /* ── Flagon theme · dark (true black, hyperscale-style) ──── */
@@ -108,6 +165,85 @@
   --subtle: #8b8b94;
   --hairline: rgba(255, 255, 255, 0.11);
   --panel: rgba(255, 255, 255, 0.03);
+
+  --sidebar: #000000;
+  --sidebar-foreground: #ededed;
+  --sidebar-primary: #14b8a6;
+  --sidebar-primary-foreground: #04140f;
+  --sidebar-accent: #1f1f1f;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #2dd4bf;
+}
+
+/*
+ * Alternate theme presets. Set data-theme="<name>" on any element to re-skin
+ * its subtree - the components are token-driven, so they follow. Light values
+ * apply directly; dark values apply when nested under the .dark class. Used by
+ * the theme selector on /ui to demo the system's flexibility.
+ */
+[data-theme="indigo"] {
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --ring: #6366f1;
+  --brand: #6366f1;
+  --brand-bright: #4f46e5;
+  --link: #4f46e5;
+  --radius: 0.625rem;
+}
+.dark [data-theme="indigo"] {
+  --primary: #818cf8;
+  --primary-foreground: #0b0b12;
+  --ring: #a5b4fc;
+  --brand: #818cf8;
+  --brand-bright: #a5b4fc;
+  --link: #a5b4fc;
+}
+
+[data-theme="rose"] {
+  --primary: #e11d48;
+  --primary-foreground: #ffffff;
+  --ring: #e11d48;
+  --brand: #e11d48;
+  --brand-bright: #be123c;
+  --link: #be123c;
+  --radius: 0.5rem;
+}
+.dark [data-theme="rose"] {
+  --primary: #fb7185;
+  --primary-foreground: #1a0509;
+  --ring: #fda4af;
+  --brand: #fb7185;
+  --brand-bright: #fda4af;
+  --link: #fda4af;
+}
+
+[data-theme="mono"] {
+  --primary: #18181b;
+  --primary-foreground: #ffffff;
+  --ring: #18181b;
+  --brand: #3f3f46;
+  --brand-bright: #18181b;
+  --link: #18181b;
+  --radius: 0.25rem;
+}
+.dark [data-theme="mono"] {
+  --primary: #fafafa;
+  --primary-foreground: #18181b;
+  --ring: #a1a1aa;
+  --brand: #d4d4d8;
+  --brand-bright: #fafafa;
+  --link: #e4e4e7;
+}
+
+/* Shiki dual-theme: colors come from CSS vars, switched by the .dark class. */
+.shiki,
+.shiki span {
+  color: var(--shiki-light);
+}
+:root:is(.dark) .shiki,
+:root:is(.dark) .shiki span {
+  color: var(--shiki-dark);
 }
 
 html {

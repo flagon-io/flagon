@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated shadcn registry (built from @flagon-io/ui by scripts/build-registry.mjs)
+/public/r/

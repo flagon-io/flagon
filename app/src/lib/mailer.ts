@@ -1,13 +1,24 @@
-// Transactional email. Uses Resend when RESEND_API_KEY is set; otherwise falls
-// back to logging the code to the console so local development needs no email
-// provider. Set RESEND_FROM to a verified sender in production (defaults to
-// Resend's shared onboarding sender, which only delivers to the account owner).
+// Transactional email. Uses Resend when RESEND_API_KEY is set; otherwise logs
+// to the console so local development needs no provider. Templates live in
+// src/emails - build one there and send it through sendEmail().
+import { otpEmail, type Email } from "@/emails/otp";
+import { resetPasswordEmail } from "@/emails/reset-password";
+import { inviteEmail } from "@/emails/invite";
+
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
-export async function sendOtpEmail(email: string, otp: string, context: string) {
+/** Send a rendered email. In dev (no RESEND_API_KEY) it logs the text version. */
+export async function sendEmail(to: string, email: Email) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
-    console.log(`[auth] ${context} OTP for ${email}: ${otp}`);
+    // In production a missing key means verification/reset mail silently never
+    // arrives, which strands every new signup. Fail loudly instead of no-oping.
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "RESEND_API_KEY is not set: refusing to drop a transactional email in production.",
+      );
+    }
+    console.log(`[email] to ${to} - ${email.subject}\n${email.text}`);
     return;
   }
 
@@ -20,9 +31,10 @@ export async function sendOtpEmail(email: string, otp: string, context: string) 
     },
     body: JSON.stringify({
       from,
-      to: [email],
-      subject: "Your Flagon verification code",
-      text: `Your Flagon ${context} code is ${otp}.\n\nIt expires shortly. If you didn't request this, you can ignore this email.`,
+      to: [to],
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
     }),
   });
 
@@ -31,4 +43,24 @@ export async function sendOtpEmail(email: string, otp: string, context: string) 
     // "succeeding" with an email that never arrived.
     throw new Error(`Resend send failed (${res.status}): ${await res.text()}`);
   }
+}
+
+export async function sendOtpEmail(
+  email: string,
+  otp: string,
+  context: string,
+  verifyUrl?: string,
+) {
+  await sendEmail(email, otpEmail({ code: otp, context, verifyUrl }));
+}
+
+export async function sendResetPasswordEmail(email: string, url: string) {
+  await sendEmail(email, resetPasswordEmail({ url }));
+}
+
+export async function sendInviteEmail(
+  email: string,
+  opts: { url: string; orgName: string; inviter?: string; role: string },
+) {
+  await sendEmail(email, inviteEmail(opts));
 }

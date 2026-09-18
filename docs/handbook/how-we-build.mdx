@@ -1,0 +1,60 @@
+---
+title: How we build
+description: "The engineering habits we actually keep: ship small, stay releasable, and prefer boring tech that works."
+section: Engineering
+order: 1
+---
+
+This is how we write and ship software. None of it is clever. Most of it is the stuff everyone agrees with in the abstract and then quietly abandons the first time a deadline gets close. We try not to abandon it. These are habits, not rules, and the point of writing them down is so we notice when we're drifting.
+
+## Ship small and often
+
+Big changes are where bugs hide and momentum dies, so we keep them small. A change that takes a day to review is a change nobody reviews well.
+
+Small also means shippable. We'd rather merge a rough first version that does one thing and improve it in the open than sit on a perfect branch for three weeks. The feedback you get from something real beats the feedback you imagine from something planned.
+
+## Main stays releasable
+
+`main` should be deployable at any moment. Not "after we fix that one thing," but now. If it's not, that's the most important problem in the building until it is.
+
+This is what makes shipping small actually work. When the trunk is always green, releasing is uneventful, which is exactly what a release should be. If you're about to merge something you wouldn't want deployed by accident, it's not ready.
+
+## Review for real
+
+Code review is two people making a change better. Read it like you'll have to maintain it, because you might.
+
+Say the real thing. "This is confusing" is a useful review comment. "LGTM" on 600 lines you didn't read is not. When you're the one being reviewed, remember the review is about the code, not about you. There's more on this in [how we review code](/handbook/code-review).
+
+## Tests where they earn their keep
+
+We test the things that would hurt if they broke: the logic that's easy to get subtly wrong, the paths money and data flow through, the bugs we've already been bitten by once. We don't chase a coverage number for its own sake.
+
+A test that never fails is telling you nothing. A test suite so slow nobody runs it might as well not exist. Write the tests that catch real regressions and delete the ones that just make the suite heavier.
+
+## Boring tech, on purpose
+
+Prefer the proven thing. The database everyone understands, the framework with ten years of answered questions behind it, the pattern that's dull because it works. You get a small number of interesting-technology bets in a company, and you should spend them where they actually matter, not on the plumbing.
+
+<Callout type="note" title="Before you adopt something new">
+  Ask what it buys you that the boring option wouldn't, and who's on call at 2am when it breaks in a way nobody has seen before.
+</Callout>
+
+## Delete code happily
+
+The best pull request is often the one that removes more than it adds. Dead code still gets read, maintained, and worked around by every person who comes after you. If a feature is gone, delete the code. If a branch is never taken, delete it. Git remembers so you don't have to.
+
+Less code means less surface area for bugs and less to load into your head before you can change anything. Treat deletion as progress, because it is.
+
+## Own what you ship
+
+You build it, you keep an eye on it. We don't throw work over a wall to some other team who catches the pager when it breaks. The person who wrote the thing is the person who understands it, and that understanding is worth the most exactly when something's on fire.
+
+Owning it doesn't mean suffering alone. Ask for help early and often. It means the buck stops somewhere real instead of dissolving into "the process."
+
+## Simplicity is a feature
+
+Every layer, option, and abstraction is a tax someone pays later, usually you, six months from now, having forgotten why it's there. Reach for the simplest thing that could work, and add complexity only when reality forces your hand, not because you're anticipating a future that may never arrive.
+
+If you can't explain how it works in a couple of plain sentences, that's a signal. Simple isn't the easy version. It's the version you had to think harder to get to.
+
+This all connects to [how we work](/handbook/how-we-work) and our [values](/handbook/values). Because we're [building in the open](/handbook/open-source), you can watch us succeed and fail at every one of these in the commit log.

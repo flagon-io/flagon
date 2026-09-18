@@ -23,7 +23,7 @@ export async function createPrimaryUserEmail(
   verified: boolean,
 ) {
   await pool.query(
-    `insert into user_email (id, user_id, email, verified, is_primary)
+    `insert into user_emails (id, user_id, email, verified, is_primary)
      values ($1, $2, $3, $4, true)
      on conflict (email) do nothing`,
     [randomUUID(), userId, email, verified],
@@ -39,7 +39,7 @@ export async function syncPrimaryUserEmail(
   verified: boolean,
 ) {
   await pool.query(
-    `insert into user_email (id, user_id, email, verified, is_primary)
+    `insert into user_emails (id, user_id, email, verified, is_primary)
      values ($1, $2, $3, $4, true)
      on conflict (email) do update set verified = $4, updated_at = now()`,
     [randomUUID(), userId, email, verified],
@@ -49,7 +49,7 @@ export async function syncPrimaryUserEmail(
 export async function listUserEmails(userId: string): Promise<UserEmail[]> {
   const { rows } = await pool.query(
     `select id, email, verified, is_primary as "isPrimary", created_at as "createdAt"
-     from user_email where user_id = $1 order by is_primary desc, created_at asc`,
+     from user_emails where user_id = $1 order by is_primary desc, created_at asc`,
     [userId],
   );
   return rows;
@@ -62,7 +62,7 @@ export async function requestAddUserEmail(userId: string, email: string) {
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
   const { rowCount } = await pool.query(
-    `insert into user_email (id, user_id, email, verified, is_primary, otp, otp_expires_at)
+    `insert into user_emails (id, user_id, email, verified, is_primary, otp, otp_expires_at)
      values ($1, $2, $3, false, false, $4, $5)
      on conflict (email) do nothing`,
     [randomUUID(), userId, email, otp, expiresAt],
@@ -75,9 +75,30 @@ export async function requestAddUserEmail(userId: string, email: string) {
   return otp;
 }
 
+// Regenerates and returns a fresh OTP for a pending (unverified) secondary email,
+// so the caller can re-send it. Errors if there's no such pending email.
+export async function resendUserEmailOtp(userId: string, email: string) {
+  const otp = generateOtp();
+  const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+  const { rows } = await pool.query(
+    `update user_emails
+     set otp = $3, otp_expires_at = $4, updated_at = now()
+     where user_id = $1 and email = $2 and verified = false
+     returning id`,
+    [userId, email, otp, expiresAt],
+  );
+
+  if (rows.length === 0) {
+    throw new Error("No pending verification for that email.");
+  }
+
+  return otp;
+}
+
 export async function verifyUserEmailOtp(userId: string, email: string, otp: string) {
   const { rows } = await pool.query(
-    `update user_email
+    `update user_emails
      set verified = true, otp = null, otp_expires_at = null, updated_at = now()
      where user_id = $1 and email = $2 and otp = $3 and otp_expires_at > now()
      returning id`,
@@ -97,7 +118,7 @@ export async function setPrimaryUserEmail(userId: string, emailId: string) {
     await client.query("begin");
 
     const { rows } = await client.query(
-      `select email, verified from user_email where id = $1 and user_id = $2`,
+      `select email, verified from user_emails where id = $1 and user_id = $2`,
       [emailId, userId],
     );
     const target = rows[0];
@@ -105,15 +126,15 @@ export async function setPrimaryUserEmail(userId: string, emailId: string) {
     if (!target.verified) throw new Error("Verify this email before making it primary.");
 
     await client.query(
-      `update user_email set is_primary = false, updated_at = now() where user_id = $1`,
+      `update user_emails set is_primary = false, updated_at = now() where user_id = $1`,
       [userId],
     );
     await client.query(
-      `update user_email set is_primary = true, updated_at = now() where id = $1`,
+      `update user_emails set is_primary = true, updated_at = now() where id = $1`,
       [emailId],
     );
     await client.query(
-      `update "user" set email = $1, "updatedAt" = now() where id = $2`,
+      `update users set email = $1, "updatedAt" = now() where id = $2`,
       [target.email, userId],
     );
 
@@ -128,7 +149,7 @@ export async function setPrimaryUserEmail(userId: string, emailId: string) {
 
 export async function deleteUserEmail(userId: string, emailId: string) {
   const { rows } = await pool.query(
-    `delete from user_email where id = $1 and user_id = $2 and is_primary = false returning id`,
+    `delete from user_emails where id = $1 and user_id = $2 and is_primary = false returning id`,
     [emailId, userId],
   );
   if (rows.length === 0) {

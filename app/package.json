@@ -3,14 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/build-registry.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/build-registry.mjs",
     "build": "next build",
-    "vercel-build": "node scripts/deploy-migrate.mjs && next build",
+    "vercel-build": "node scripts/build-registry.mjs && node scripts/deploy-migrate.mjs && next build",
     "start": "next start",
     "lint": "eslint",
-    "db:migrate": "npx @better-auth/cli@latest migrate --yes && node --env-file-if-exists=.env.local scripts/migrate-user-emails.mjs"
+    "registry": "node scripts/build-registry.mjs",
+    "db:migrate": "node --env-file-if-exists=.env.local scripts/rename-auth-tables.mjs && npx @better-auth/cli@latest migrate --yes && node --env-file-if-exists=.env.local scripts/migrate-user-emails.mjs",
+    "db:seed": "node --env-file-if-exists=.env.local scripts/seed.mjs",
+    "restore-user": "node --env-file-if-exists=.env.local scripts/restore-user.mjs"
   },
   "dependencies": {
+    "@flagon-io/ui": "*",
     "@icons-pack/react-simple-icons": "^13.15.1",
     "@radix-ui/react-dropdown-menu": "^2.1.24",
     "better-auth": "^1.7.5",
@@ -18,14 +24,19 @@
     "lucide-react": "^1.46.0",
     "next": "16.3.5",
     "pg": "^8.23.0",
+    "qrcode": "^1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "react-markdown": "^9.1.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^4.4.3",
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^26",
     "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

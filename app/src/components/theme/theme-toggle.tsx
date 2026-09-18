@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Check, Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
+import { buttonClasses } from "@flagon-io/ui";
 import { cn } from "@/lib/cn";
 
 type Theme = "light" | "dark" | "system";
@@ -75,9 +76,9 @@ export function ThemeToggle() {
         <button
           type="button"
           aria-label={`Theme: ${pref}`}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand data-[state=open]:text-foreground"
+          className={buttonClasses({ variant: "ghost", size: "icon" })}
         >
-          <Current className="h-[18px] w-[18px]" strokeWidth={2} />
+          <Current className="size-4.5" strokeWidth={2} />
         </button>
       </DropdownMenu.Trigger>
 

@@ -6,14 +6,14 @@ import { MARKETING_SITE_URL } from "@/lib/site";
 
 interface AuthCardProps {
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   footer?: ReactNode;
   children: ReactNode;
 }
 
 // Shared shell for /login, /signup, /verify-email: logo + heading, then the
-// form directly on the page background - no bordered card, matching Vercel
-// and GitHub's login layout - with a footer link below it.
+// form directly on the page background - no bordered card - with a footer link
+// below it.
 export function AuthCard({ title, subtitle, footer, children }: AuthCardProps) {
   return (
     <main className="relative flex min-h-full flex-1 flex-col items-center justify-center gap-6 bg-background p-4">

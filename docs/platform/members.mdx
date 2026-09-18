@@ -1,0 +1,50 @@
+---
+title: Members and invitations
+description: Add teammates to an organization, by existing account or by email invitation.
+section: platform
+visibility: public
+order: 2
+---
+
+Everything in Flagon happens inside an **organization**, and an organization has
+**members**. Each member has a role that sets what they can do:
+
+- **Owner** - full control, including billing and deleting the organization.
+- **Admin** - manage members, tokens, and settings.
+- **Member** - create and manage projects.
+- **Viewer** - read-only access.
+
+Owners and admins manage the roster from **Settings -> Members**.
+
+## Adding people
+
+You add people by email or username, and Flagon does the right thing for each:
+
+- If the person **already has a Flagon account**, they are added to the
+  organization straight away and see it the next time they load the app.
+- If the email **has no account yet**, Flagon sends them an **invitation**: an
+  email with a link to register and join in one step.
+
+You can enter several people at once and give each their own role.
+
+## How invitations work
+
+A pending invitation is addressed to an email and carries the role you chose. It
+shows up under the **Pending invitations** tab until it is accepted, and an owner
+or admin can revoke it at any time. Invitations expire after seven days.
+
+When the invited person opens the link, they land on a page that already knows
+which organization invited them. If they do not have an account, they set a name,
+username, and password and are dropped straight into the organization. If they
+are already signed in with the invited email, they just confirm.
+
+The invitation link is proof that the person controls that mailbox, so accepting
+it **doubles as email verification** - there is no separate code to enter. The
+email on the new account is fixed to the address that was invited.
+
+## Permissions
+
+Inviting and revoking require the `write:org` scope (owners and admins). Listing
+members and pending invitations requires `read:org`. As everywhere in Flagon, the
+agent and API act with your identity, so they can only invite people if you
+could, and tenant isolation is enforced in the database.

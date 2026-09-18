@@ -1,32 +1,22 @@
+# The base stack binds no host ports, so it mirrors production and never
+# collides with a Go/Next server you run natively on the same machine.
+# compose.override.yml (applied automatically by `docker compose`) publishes
+# the ports for local development - most importantly Postgres, so a natively
+# run `go run` / `npm run dev` can reach it on localhost.
 services:
-  # Separate databases per service, mirroring production (api and app each
-  # own their own Postgres - they are never the same database).
-  postgres-api:
+  # One Postgres instance holding both databases (flagon_api + flagon_app) to
+  # keep laptop resource use low. They stay separate databases, so the app/api
+  # data boundary matches production - which runs them as two independent
+  # instances (see .docker/postgres/01-create-app-db.sql to split them back).
+  postgres:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: flagon
       POSTGRES_PASSWORD: flagon
       POSTGRES_DB: flagon_api
-    ports:
-      - "5432:5432"
     volumes:
-      - postgres-api-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flagon"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  postgres-app:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: flagon
-      POSTGRES_PASSWORD: flagon
-      POSTGRES_DB: flagon_app
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres-app-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
+      - ./.docker/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U flagon"]
       interval: 5s
@@ -37,38 +27,34 @@ services:
     build:
       context: ./api
       target: dev
-    ports:
-      - "8080:8080"
     environment:
       # Migrator/owner role: used by `api migrate` to run migrations + provision
       # the app role. In production this runs as Fly's release_command; locally
       # the command below runs it once before the live-reload server starts.
-      DATABASE_URL: postgres://flagon:flagon@postgres-api:5432/flagon_api?sslmode=disable
+      DATABASE_URL: postgres://flagon:flagon@postgres:5432/flagon_api?sslmode=disable
       # App role: RLS-enforced (NOBYPASSRLS) runtime login. `api migrate`
       # provisions this role (creates it, sets this password) from the migrator
       # connection, so nothing else needs to create it.
-      FLAGON_APP_DATABASE_URL: postgres://flagon_app:flagon_app@postgres-api:5432/flagon_api?sslmode=disable
+      FLAGON_APP_DATABASE_URL: postgres://flagon_app:flagon_app@postgres:5432/flagon_api?sslmode=disable
       # Shared secret the app authenticates to the API with (app<->API trust).
       FLAGON_INTERNAL_TOKEN: dev-internal-token
     volumes:
       - ./api:/src
     depends_on:
-      postgres-api:
+      postgres:
         condition: service_healthy
 
   app:
     build:
       context: ./app
       target: dev
-    ports:
-      - "4000:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://api:8080
       # Server-side gateway to the Go API + the shared secret (must match the
       # api service's FLAGON_INTERNAL_TOKEN).
       FLAGON_API_URL: http://api:8080
       FLAGON_INTERNAL_TOKEN: dev-internal-token
-      DATABASE_URL: postgres://flagon:flagon@postgres-app:5432/flagon_app?sslmode=disable
+      DATABASE_URL: postgres://flagon:flagon@postgres:5432/flagon_app?sslmode=disable
       BETTER_AUTH_SECRET: dev-only-secret-change-me-32-characters-min
       BETTER_AUTH_URL: http://localhost:4000
     volumes:
@@ -76,11 +62,10 @@ services:
       - /src/node_modules
       - /src/.next
     depends_on:
-      postgres-app:
+      postgres:
         condition: service_healthy
       api:
         condition: service_started
 
 volumes:
-  postgres-api-data:
-  postgres-app-data:
+  postgres-data:
