@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -16,6 +17,10 @@ import (
 // tools are read-only and touch no tenant data, so this endpoint needs no auth;
 // it runs every tool with an anonymous context, so internal docs never leak here.
 //
+// The /mcp path is served on every host so local dev and api.flagon.io/mcp keep
+// working; the dedicated public hostname (mcp.flagon.io) serves the same handler
+// at the root via mcpHostGate, installed in New before any routes.
+//
 // Operational tools that act as a user (whoami, create_organization, ...) are not
 // public and are intentionally absent until an authenticated MCP surface exists.
 // Registered on the chi router directly (like the health checks), off the
@@ -24,7 +29,20 @@ func registerMCP(router chi.Router, registry *ai.Registry) {
 	if registry == nil {
 		return
 	}
-	router.Post("/mcp", func(w http.ResponseWriter, r *http.Request) {
+	router.Post("/mcp", mcpHandler(registry))
+}
+
+// mcpHandler serves one MCP JSON-RPC request. It is POST-only (this server
+// implements the Streamable HTTP transport's POST channel, not the GET/SSE one);
+// any other method is a 405 so the endpoint behaves the same whether it is
+// reached via the /mcp path or at the root of the MCP host.
+func mcpHandler(registry *ai.Registry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		defer r.Body.Close()
 		req, err := decodeRPC(r)
 		if err != nil {
@@ -37,7 +55,44 @@ func registerMCP(router chi.Router, registry *ai.Registry) {
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)
-	})
+	}
+}
+
+// mcpHostGate turns the dedicated MCP hostname into a single-purpose front door.
+// On that host the MCP endpoint IS the site: it is served at the root (and at
+// /mcp, so clients configured either way work), and every other path is a 404 so
+// the public hostname never exposes the rest of the API surface (index,
+// openapi.json, docs, ...). On any other host the gate is a no-op, so
+// api.flagon.io and local dev keep every route, /mcp included.
+//
+// Installed as chi middleware, which must be registered before any routes - see
+// New. Host comparison ignores the port and case (r.Host can carry :443 locally).
+func mcpHostGate(host string, handler http.HandlerFunc) func(http.Handler) http.Handler {
+	want := strings.ToLower(host)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !hostMatches(r.Host, want) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			switch r.URL.Path {
+			case "/", "/mcp":
+				handler(w, r)
+			default:
+				http.NotFound(w, r)
+			}
+		})
+	}
+}
+
+// hostMatches reports whether the request's Host header (which may include a
+// port) equals the configured MCP host, case-insensitively.
+func hostMatches(reqHost, want string) bool {
+	h := strings.ToLower(reqHost)
+	if i := strings.LastIndexByte(h, ':'); i >= 0 {
+		h = h[:i]
+	}
+	return h == want
 }
 
 type rpcRequest struct {

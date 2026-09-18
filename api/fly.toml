@@ -13,6 +13,11 @@ primary_region = 'iad'
 [env]
 FLAGON_AI_PROVIDER = 'anthropic'
 ANTHROPIC_WORKSPACE_ID = 'wrkspc_01VHr6wAJDdVDeB2bjdU1Zhg'
+# The API and the public MCP server are one app on one set of Fly IPs. This host
+# makes mcp.flagon.io a dedicated MCP front door (endpoint at the root, every
+# other path 404s) so it never exposes the rest of the API surface. api.flagon.io
+# keeps every route, /mcp included.
+FLAGON_MCP_HOST = 'mcp.flagon.io'
 
 [build]
 

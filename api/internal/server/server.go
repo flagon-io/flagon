@@ -1,5 +1,5 @@
 // Package server wires up the chi router and Huma API used by both the
-// running service (cmd/flagon) and the OpenAPI spec generator (cmd/genspec).
+// running service (cmd/flagon-server) and the OpenAPI spec generator (cmd/genspec).
 //
 //go:generate go run ../../cmd/genspec
 package server
@@ -47,6 +47,12 @@ type Options struct {
 	// Registry backs the public MCP server (/mcp), exposing the read-only,
 	// public-safe tools. Nil disables the MCP front door.
 	Registry *ai.Registry
+
+	// MCPHost, when set (e.g. "mcp.flagon.io"), turns that hostname into a
+	// dedicated MCP front door: the endpoint is served at the root and every
+	// other path 404s, so the public MCP host never exposes the rest of the API.
+	// Empty (local dev, spec generation) leaves the /mcp path as the only mount.
+	MCPHost string
 }
 
 // Option mutates Options.
@@ -87,6 +93,13 @@ func WithMCP(registry *ai.Registry) Option {
 	return func(o *Options) { o.Registry = registry }
 }
 
+// WithMCPHost dedicates a hostname (e.g. "mcp.flagon.io") to the MCP endpoint:
+// on that host the endpoint is served at the root and all other paths 404. Empty
+// is a no-op (only the /mcp path is mounted). Requires WithMCP.
+func WithMCPHost(host string) Option {
+	return func(o *Options) { o.MCPHost = host }
+}
+
 // New builds the chi router and Huma API. Every operation registered via
 // huma.Register is automatically documented in the generated OpenAPI spec.
 // To opt an endpoint OUT of documentation, register it directly on the chi
@@ -98,6 +111,14 @@ func New(opts ...Option) (chi.Router, huma.API) {
 	}
 
 	router := chi.NewMux()
+
+	// The MCP host gate is middleware, so it must be installed before any routes
+	// (chi requires this). On mcp.flagon.io it serves the MCP endpoint at the root
+	// and 404s everything else; on every other host it is a pass-through. Only
+	// active when both a registry and a host are configured.
+	if options.Registry != nil && options.MCPHost != "" {
+		router.Use(mcpHostGate(options.MCPHost, mcpHandler(options.Registry)))
+	}
 
 	// No built-in docs UI - the website renders its own from the OpenAPI spec.
 	// The spec itself stays served (huma keeps /openapi.json, /openapi.yaml).

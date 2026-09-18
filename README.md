@@ -17,10 +17,11 @@ tenant, scoped by `org_id`), and is the only thing that holds real secrets
 
 ```
 api/        Go module (github.com/flagon-io/flagon/api)
-  cmd/flagon      the `flagon` CLI - `serve` runs the HTTP API, `migrate`, ...
-  cmd/genspec     generates openapi/openapi.json as a build artifact
-  cmd/gendocs     compiles docs/ into internal/docs/corpus.gen.json (embedded)
-  internal/server chi router + huma API setup shared by both commands
+  cmd/flagon-server the API server - `serve` runs the HTTP API, `migrate` migrates
+  cmd/flagon        the user-facing `flagon` CLI - a thin HTTP client (baseline skeleton)
+  cmd/genspec       generates openapi/openapi.json as a build artifact
+  cmd/gendocs       compiles docs/ into internal/docs/corpus.gen.json (embedded)
+  internal/server   chi router + huma API setup used by the server + genspec
 app/        Next.js app - the web UI + gateway
 packages/   shared npm workspaces (e.g. packages/ui, the @flagon-io/ui design system)
 docs/       Markdown/MDX documentation - the single source of truth (see docs/README.md)
@@ -45,7 +46,7 @@ You do not need to regenerate anything to see the spec locally - the running
 server serves it live:
 
 ```sh
-cd api && go run ./cmd/flagon serve
+cd api && go run ./cmd/flagon-server serve
 # GET  http://localhost:8080/           (JSON index of the API, api.github.com style)
 # GET  http://localhost:8080/openapi.json
 # GET  http://localhost:8080/openapi.yaml
@@ -129,7 +130,7 @@ docker compose up -d postgres
 
 # API - defaults point at the compose Postgres, so no env is needed locally.
 # Migrates on boot, then serves on :8080.
-cd api && go run ./cmd/flagon serve
+cd api && go run ./cmd/flagon-server serve
 
 # App - reads app/.env.local automatically.
 cd app && npm install && npm run dev   # http://localhost:3000
@@ -158,9 +159,9 @@ Override any of them with `SEED_EMAIL`, `SEED_USERNAME`, `SEED_PASSWORD`, or
 
 ### API configuration
 
-The Go binary is the `flagon` CLI, built with [urfave/cli](https://cli.urfave.org):
-`serve` runs the HTTP API, `migrate` provisions the app role and applies
-migrations, and more commands will follow. Every setting is a flag with an
+The server binary is `cmd/flagon-server`, built with
+[urfave/cli](https://cli.urfave.org): `serve` runs the HTTP API, `migrate`
+provisions the app role and applies migrations. Every setting is a flag with an
 environment-variable source and a sane local-dev default. Precedence is **flag >
 real env var > `.env.local` > `.env` > default**; the two dotfiles (next to where
 you run the binary, i.e. `api/`) are gitignored and loaded on startup, so you can
@@ -169,10 +170,21 @@ Postgres, so the common case needs no configuration at all.
 
 ```sh
 cd api
-go run ./cmd/flagon --help            # list commands
-go run ./cmd/flagon serve --help      # every serve flag, env var, and default
-go run ./cmd/flagon migrate           # provision the app role + migrate, then exit
-PORT=9000 go run ./cmd/flagon serve   # env var overrides the default (POSIX shells)
+go run ./cmd/flagon-server --help          # list commands
+go run ./cmd/flagon-server serve --help    # every serve flag, env var, and default
+go run ./cmd/flagon-server migrate         # provision the app role + migrate, then exit
+PORT=9000 go run ./cmd/flagon-server serve # env var overrides the default (POSIX shells)
+```
+
+The user-facing `flagon` CLI is a separate binary (`cmd/flagon`): a thin HTTP
+client that operates Flagon as the authenticated user (`flagon login`,
+`flagon projects`, `flagon deploy`, ...). It is a baseline skeleton today - the
+command surface and flags are real, but the actions return "not implemented"
+until they are wired up against the generated API client.
+
+```sh
+cd api
+go run ./cmd/flagon --help                 # list the (stubbed) CLI commands
 ```
 
 ## Deploying

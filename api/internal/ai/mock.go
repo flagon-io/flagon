@@ -15,8 +15,8 @@ const MockModel = "mock"
 // it does lightweight keyword intent detection to drive whatever tools are
 // registered (the same "model is the brain, tools are the hands" split a small
 // real model would use), and otherwise returns a generic, helpful reply. It
-// never makes a network call, so `go run ./cmd/flagon serve` gives you a usable
-// assistant even with no API keys.
+// never makes a network call, so `go run ./cmd/flagon-server serve` gives you a
+// usable assistant even with no API keys.
 type Mock struct{ model string }
 
 // NewMock builds the offline provider. model may be empty (reports "mock").

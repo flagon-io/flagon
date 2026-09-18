@@ -141,13 +141,18 @@ One Postgres instance in Docker (two databases), servers run natively:
 cp compose.override.example.yml compose.override.yml   # once: publish local ports
 docker compose up -d postgres                          # flagon_api + flagon_app on :5432
 
-cd api && go run ./cmd/flagon serve   # API on :8080 (godotenv loads api/.env)
-cd app && npm install && npm run dev  # app on :3000; npm run db:migrate; npm run db:seed
+cd api && go run ./cmd/flagon-server serve   # API on :8080 (godotenv loads api/.env)
+cd app && npm install && npm run dev         # app on :3000; npm run db:migrate; npm run db:seed
 ```
+
+The API server is `cmd/flagon-server` (serve + migrate; the only binary that
+touches Postgres). `cmd/flagon` is the separate user-facing CLI - a thin HTTP
+client that talks to the API as the authenticated user; it is a baseline skeleton
+today (commands return "not implemented"), not yet shipped.
 
 - `api/.env` (gitignored) is loaded by godotenv at startup - put local secrets
   (Anthropic key, etc.) there. Config is urfave/cli flags with env sources +
-  sane local defaults, so `go run ./cmd/flagon serve` needs no setup for the DB.
+  sane local defaults, so `go run ./cmd/flagon-server serve` needs no setup for the DB.
 - `npm run db:seed` makes a static-password demo user (`demo@flagon.dev` /
   `demo` / `password12345`) and a baseline org (`/demo`) the user owns
   (created via the API's `POST /orgs`, so it needs the API running); the login

@@ -2,9 +2,9 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -o ./tmp/flagon ./cmd/flagon"
-bin = "tmp/flagon"
-# Run the HTTP API on live-reload; `flagon` needs an explicit subcommand.
+cmd = "go build -o ./tmp/flagon-server ./cmd/flagon-server"
+bin = "tmp/flagon-server"
+# Run the HTTP API on live-reload; `flagon-server` needs an explicit subcommand.
 args_bin = ["serve"]
 include_ext = ["go"]
 exclude_dir = ["tmp"]

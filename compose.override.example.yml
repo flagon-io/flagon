@@ -17,7 +17,7 @@ services:
     ports:
       - "5432:5432"
 
-  # Comment this out to run the API natively (`cd api && go run ./cmd/flagon serve`).
+  # Comment this out to run the API natively (`cd api && go run ./cmd/flagon-server serve`).
   api:
     ports:
       - "8080:8080"
