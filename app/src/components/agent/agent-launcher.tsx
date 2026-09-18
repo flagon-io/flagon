@@ -1,19 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sparkles, Compass, Building2, BookOpen, ArrowUp, type LucideIcon } from "lucide-react";
+import { Sparkles, ArrowUp } from "lucide-react";
 import { useAgent } from "./agent-provider";
-
-type Prompt = { icon: LucideIcon; title: string; subtitle: string; prompt: string };
-
-// Lean on what the agent is genuinely good at today: answering questions from
-// the docs and reading your account state, rather than one-off mutation flows.
-const PROMPTS: Prompt[] = [
-  { icon: Sparkles, title: "What can you do?", subtitle: "See how Flagon can help", prompt: "What can you help me with?" },
-  { icon: Compass, title: "Show me around", subtitle: "How Flagon is organized", prompt: "Give me a quick tour of how Flagon is organized." },
-  { icon: Building2, title: "My organizations", subtitle: "Where I belong and my role", prompt: "Which organizations am I in, and what is my role in each?" },
-  { icon: BookOpen, title: "How projects work", subtitle: "Read it from the docs", prompt: "How do projects work in Flagon?" },
-];
 
 function greetingFor(hour: number): string {
   if (hour < 5) return "Good evening";
@@ -23,9 +12,9 @@ function greetingFor(hour: number): string {
 }
 
 /**
- * The dashboard hero: a time-aware greeting and a gateway into the Ask AI panel.
- * Submitting or picking a suggestion opens the persistent panel and sends the
- * message there.
+ * The dashboard hero: a time-aware greeting and a roomy gateway into the Ask AI
+ * panel. Submitting opens the persistent panel and sends the message there.
+ * Suggested prompts live in the Ask AI panel, not here, so the hero stays calm.
  */
 export function AgentLauncher({ name }: { name?: string | null }) {
   const { send } = useAgent();
@@ -49,15 +38,15 @@ export function AgentLauncher({ name }: { name?: string | null }) {
   }
 
   return (
-    <div className="py-10 md:py-16">
+    <div className="w-full max-w-3xl">
       <div className="text-center">
         <h1 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
           {greeting ? `${greeting}${firstName ? `, ${firstName}` : ""}.` : "Let’s get to work."}
         </h1>
-        <p className="mt-2.5 text-base text-muted-foreground">What are we building today?</p>
+        <p className="mt-3 text-base text-muted-foreground">What are we building today?</p>
       </div>
 
-      <form onSubmit={submit} className="relative mx-auto mt-8 max-w-2xl">
+      <form onSubmit={submit} className="relative mx-auto mt-10 w-full max-w-3xl">
         <Sparkles className="pointer-events-none absolute top-1/2 left-4 size-4.5 -translate-y-1/2 text-brand-bright" />
         <input
           value={input}
@@ -75,28 +64,6 @@ export function AgentLauncher({ name }: { name?: string | null }) {
           <ArrowUp className="size-4.5" />
         </button>
       </form>
-
-      <div className="mx-auto mt-4 grid max-w-2xl gap-2.5 sm:grid-cols-2">
-        {PROMPTS.map((p) => {
-          const Icon = p.icon;
-          return (
-            <button
-              key={p.title}
-              type="button"
-              onClick={() => void send(p.prompt)}
-              className="group flex items-center gap-3 rounded-xl border border-hairline bg-card px-3.5 py-3 text-left outline-none transition-colors hover:border-brand/30 hover:bg-panel focus-visible:ring-2 focus-visible:ring-brand"
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/12 text-brand-bright">
-                <Icon className="size-4" />
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium text-foreground">{p.title}</span>
-                <span className="block truncate text-xs text-muted-foreground">{p.subtitle}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }

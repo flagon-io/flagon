@@ -23,4 +23,19 @@ permission-checked API.
 - **Operational tools.** Acting on your organization's data over MCP requires
   authentication, so the agent operates as you, with your scopes.
 
-Point your MCP-capable client at `https://mcp.flagon.io` to get started.
+## Connecting
+
+Point your MCP-capable client at `https://mcp.flagon.io` to get started. With no
+credentials, the server exposes only the read-only documentation tools.
+
+To reach the operational tools, present a Flagon access token as a bearer token:
+
+```
+Authorization: Bearer flagon_xxx
+```
+
+The token acts as you: the server resolves it to your identity and the tools you
+can use are exactly the ones your token's scopes allow (a token with no scopes
+has full access, still bounded by your role). A tool your token cannot reach is
+simply not listed. This is the same permission model as the REST API - the token
+is the ceiling, and tenant isolation always applies.

@@ -15,6 +15,11 @@ import {
   Maximize2,
   Minimize2,
   Square,
+  Boxes,
+  FileText,
+  Rocket,
+  Gauge,
+  type LucideIcon,
 } from "lucide-react";
 import {
   Alert,
@@ -54,10 +59,52 @@ export function AgentPanel() {
   );
 }
 
-const STARTERS = [
-  "What can you do?",
-  "List my organizations",
-  "Create an organization",
+type Starter = {
+  icon: LucideIcon;
+  title: string;
+  subtitle: string;
+  prompt: string;
+  soon?: boolean;
+};
+
+// What people actually reach for: their projects and what's changed. The recap
+// prompt leans on the audit log. Capabilities the platform hasn't shipped yet
+// (deployments, DORA metrics) show disabled with a "Soon" tag so the surface
+// advertises the direction without pretending it works.
+const STARTERS: Starter[] = [
+  {
+    icon: Boxes,
+    title: "Show me our projects",
+    subtitle: "What we're building here",
+    prompt: "What projects do we have in this organization?",
+  },
+  {
+    icon: FileText,
+    title: "Recap what shipped",
+    subtitle: "An executive summary of recent changes",
+    prompt:
+      "Give me an executive summary of everything that changed in this organization recently, grouped by what happened.",
+  },
+  {
+    icon: Sparkles,
+    title: "What can you do?",
+    subtitle: "See how Flagon can help",
+    prompt: "What can you help me with?",
+  },
+  {
+    icon: Rocket,
+    title: "How are deploys going?",
+    subtitle: "Coming soon",
+    prompt: "",
+    soon: true,
+  },
+  {
+    icon: Gauge,
+    title: "Show delivery metrics",
+    subtitle: "Coming soon",
+    prompt: "",
+    soon: true,
+  },
 ];
 
 function PanelBody({
@@ -158,7 +205,7 @@ function PanelBody({
         </div>
       </header>
 
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
+      <div ref={scrollRef} className="dot-grid flex-1 space-y-4 overflow-y-auto p-4">
         {empty && (
           <div className="flex h-full flex-col items-center justify-center px-4 text-center">
             <span className="mb-3 flex size-11 items-center justify-center rounded-xl bg-brand/12 text-brand-bright">
@@ -168,17 +215,39 @@ function PanelBody({
             <p className="mt-1 text-sm text-muted-foreground">
               I can act on Flagon for you - managing orgs, projects, and more.
             </p>
-            <div className="mt-5 flex w-full max-w-xs flex-col gap-2">
-              {STARTERS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => void send(s)}
-                  className="rounded-lg border border-hairline bg-card px-3 py-2 text-left text-sm text-foreground outline-none transition-colors hover:border-brand/40 hover:bg-panel focus-visible:ring-2 focus-visible:ring-brand"
-                >
-                  {s}
-                </button>
-              ))}
+            <div className="mt-6 flex w-full max-w-sm flex-col gap-2">
+              {STARTERS.map((s) => {
+                const Icon = s.icon;
+                return (
+                  <button
+                    key={s.title}
+                    type="button"
+                    disabled={s.soon}
+                    onClick={() => {
+                      if (!s.soon) void send(s.prompt);
+                    }}
+                    className={cn(
+                      "group flex items-center gap-3 rounded-xl border border-hairline bg-card/70 px-3 py-2.5 text-left outline-none transition-colors",
+                      s.soon
+                        ? "cursor-not-allowed opacity-55"
+                        : "hover:border-brand/40 hover:bg-panel focus-visible:ring-2 focus-visible:ring-brand",
+                    )}
+                  >
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/12 text-brand-bright">
+                      <Icon className="size-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">{s.title}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{s.subtitle}</span>
+                    </span>
+                    {s.soon && (
+                      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        Soon
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

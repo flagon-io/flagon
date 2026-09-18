@@ -21,6 +21,34 @@ operation:
 Because every path calls the same permission-checked API operation, a project
 created by the agent is identical to one created by hand.
 
+## The project page
+
+A project reads like a repository. Its **Overview** tab renders the README as a
+document, with an inline editor (Edit and Preview) for members. The **Settings**
+tab holds the project's name, slug, description, and repository URL, plus the
+delete action. Later, linking a real repository will sync the README automatically
+instead of editing it in place.
+
+## Editing a project
+
+You can change a project's name, slug, description, and repository URL from the
+Settings tab, and its README from the Overview tab, by asking the assistant, or
+over the API. Edits are partial: only the fields you change are touched. Renaming
+the slug changes the project's URL. Editing requires write access (members and
+above; viewers are read-only).
+
+## Deleting and restoring
+
+Deleting a project is a **soft delete**: the project is hidden and stops counting,
+but it can be restored. Deleting **frees the slug immediately**, so you can create
+a new project with the same name right away.
+
+Restoring brings the project back, but only if its slug is still free. If a new
+project has since taken that name, restore is refused until you free the slug (for
+example by renaming the new project). Delete and restore both require write
+access. Like everything else, all three actions go through the same
+permission-checked API operation whether you use the UI, the assistant, or MCP.
+
 ## Ownership and access
 
 Projects inherit their organization's membership and roles. Access is

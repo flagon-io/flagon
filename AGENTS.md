@@ -119,16 +119,25 @@ To add, say, "delete a project":
 1. **API operation** - register a huma operation in `api/internal/server` that
    calls the domain/service layer (which enforces RLS + membership). It now
    appears in the OpenAPI spec automatically.
-2. **Tool** - add it to the shared tool registry so it's exposed as (a) an MCP
-   tool and (b) an agent tool. Mark mutations as requiring HITL confirmation.
+2. **Tool** - add it to the shared tool registry (`api/internal/ai/tools.go`,
+   backed by the `ai.Store` surface) so the one registry exposes it as both an MCP
+   tool and an agent tool. Give it the same scope as its operation and mark
+   mutations `Mutating`. **This step is not optional and is not a follow-up.** A
+   user-facing capability that exists in the API and UI but has no tool is a bug,
+   not a smaller version of done: the agent and MCP go blind to it (e.g. "I don't
+   have a tool to list projects" while the projects page works). If it isn't in
+   the registry, the AI can't do it - and AI-first (principle #2) is violated.
 3. **UI** - build the UI in `app/` that calls the API through the gateway.
 4. **Docs** - add or update the page under `docs/` in the *same* change, then
    `make docs` to regenerate the embedded corpus. Documentation is part of the
    work, not a follow-up: CI runs `gendocs -check` and fails if the corpus is
    stale, so a capability and its docs land together.
 
-Do them in that order. Never let the UI reach around the API, and never add an
-agent/MCP tool that isn't backed by a real, permission-checked API operation.
+Do them in that order, and **do not consider a capability done until all four
+exist**. Steps 1, 2, and 4 land in the *same* change - API, tool, and docs are
+one unit of work; only the UI may trail. Never let the UI reach around the API,
+and never add an agent/MCP tool that isn't backed by a real, permission-checked
+API operation.
 
 ## Documentation
 
@@ -189,6 +198,29 @@ today (commands return "not implemented"), not yet shipped.
   orgs); use a modal only when a full page is overkill. Never an inline
   "type here + Add" form stuck on a list page. The list page gets a primary
   "New ..." action that routes to the creation surface.
+- **Every user capability ships a tool.** Because the AI agent, the MCP server,
+  and the REST API are one tool registry with three front doors (principle #3),
+  a new user-facing operation must be added to `api/internal/ai/tools.go` in the
+  same change as the operation - same scope, `Mutating` where it writes. A
+  capability without a tool is invisible to the agent and MCP and counts as
+  unfinished. (Pure infra/internal endpoints that no user would ask the AI to run
+  are the only exception.)
+- **We audit org changes.** Auditing is a first-class subsystem in
+  `api/internal/audit` (typed `Action` keys, `Entry`/`Event`/`Filter`/`Page`, a
+  write seam `audit.Record`, and a read `audit.Store`). Every mutation of an
+  organization's state records an entry, so "who did what, where, when" is always
+  answerable. Inside the mutation's own transaction call
+  `recordAudit(ctx, tx, orgID, actorID, audit.ActionX, targetType, targetID, summary)`
+  (the thin `db/audit.go` wrapper over `audit.Record`) - the entry commits
+  atomically with the change, so a missing audit line is a bug, not a follow-up.
+  Add the `Action` constant in `internal/audit` when you add a mutation; the
+  summary is a human predicate; the "where" (IP/country/UA) is read from context,
+  never threaded through the domain layer. The log is append-only (no
+  update/delete) and readable by org owners/admins only (the `flagon.org_audit`
+  window + the RLS policy enforce the role). It is a SEPARATE system from user
+  notifications. The write and read go through the `audit` package's seams
+  precisely so it can move to a separate service / columnar store (ClickHouse)
+  later - a swap behind `Record`/`Store`, not a rewrite of call sites.
 - **Permission-scoped by default.** Every capability carries a scope from day
   one, even while org RBAC stays simple. Anything that mints a credential
   presents its permissions the way classic tokens do: a grouped, hierarchical

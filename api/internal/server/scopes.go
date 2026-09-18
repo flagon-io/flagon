@@ -69,6 +69,9 @@ var operationScopes = map[string]Scope{
 	"set-member-role":            ScopeWriteOrg,
 	"remove-member":              ScopeWriteOrg,
 	"list-invitations":           ScopeReadOrg,
+	"list-audit-log":             ScopeReadOrg,
+	"get-audit-config":           ScopeReadOrg,
+	"set-audit-config":           ScopeWriteOrg,
 	"invite-member":              ScopeWriteOrg,
 	"revoke-invitation":          ScopeWriteOrg,
 	// get-invitation is public (no auth) and accept-invitation is internal-only
@@ -78,6 +81,9 @@ var operationScopes = map[string]Scope{
 	"list-projects":              ScopeReadProject,
 	"get-project":                ScopeReadProject,
 	"create-project":             ScopeWriteProject,
+	"update-project":             ScopeWriteProject,
+	"delete-project":             ScopeWriteProject,
+	"restore-project":            ScopeWriteProject,
 	"list-notifications":         ScopeNotifications,
 	"notifications-unread-count": ScopeNotifications,
 	"read-notification":          ScopeNotifications,
@@ -92,6 +98,13 @@ func scopeAllows(held []string, opID string) bool {
 	if !mapped {
 		return false
 	}
+	return scopeSatisfies(held, required)
+}
+
+// scopeSatisfies reports whether a set of held scopes covers a required scope,
+// honoring the implication table (a held parent grants its children). It is the
+// core check behind both operation scoping (scopeAllows) and MCP tool scoping.
+func scopeSatisfies(held []string, required Scope) bool {
 	for _, h := range held {
 		hs := Scope(h)
 		if hs == required {

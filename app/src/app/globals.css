@@ -296,3 +296,19 @@ label[for] {
   background-color: var(--muted-foreground);
   background-clip: padding-box;
 }
+
+/* Subtle dot-grid backdrop (Cloudflare-style) for the AI conversation panel.
+   The dot color derives from a foreground token via color-mix, so it reads as a
+   faint texture on both the light and dark panel backgrounds. */
+.dot-grid {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--muted-foreground) 12%, transparent) 1px,
+    transparent 1.4px
+  );
+  background-size: 15px 15px;
+  /* Paint the dots only inside the element's padding box, so the grid is inset
+     from the panel edges instead of running up to the borders. */
+  background-origin: content-box;
+  background-clip: content-box;
+  background-position: center;
+}

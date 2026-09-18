@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/flagon-io/flagon/api/internal/ai"
+	"github.com/flagon-io/flagon/api/internal/audit"
 	"github.com/flagon-io/flagon/api/internal/docs"
 )
 
@@ -47,6 +48,10 @@ type Options struct {
 	// Registry backs the public MCP server (/mcp), exposing the read-only,
 	// public-safe tools. Nil disables the MCP front door.
 	Registry *ai.Registry
+
+	// Audit backs the org audit log endpoint (search + filters + pagination).
+	// Nil disables the endpoint.
+	Audit *audit.Store
 
 	// MCPHost, when set (e.g. "mcp.flagon.io"), turns that hostname into a
 	// dedicated MCP front door: the endpoint is served at the root and every
@@ -93,6 +98,11 @@ func WithMCP(registry *ai.Registry) Option {
 	return func(o *Options) { o.Registry = registry }
 }
 
+// WithAudit wires the org audit log endpoint to the audit read store.
+func WithAudit(store *audit.Store) Option {
+	return func(o *Options) { o.Audit = store }
+}
+
 // WithMCPHost dedicates a hostname (e.g. "mcp.flagon.io") to the MCP endpoint:
 // on that host the endpoint is served at the root and all other paths 404. Empty
 // is a no-op (only the /mcp path is mounted). Requires WithMCP.
@@ -117,7 +127,7 @@ func New(opts ...Option) (chi.Router, huma.API) {
 	// and 404s everything else; on every other host it is a pass-through. Only
 	// active when both a registry and a host are configured.
 	if options.Registry != nil && options.MCPHost != "" {
-		router.Use(mcpHostGate(options.MCPHost, mcpHandler(options.Registry)))
+		router.Use(mcpHostGate(options.MCPHost, mcpHandler(options.Registry, options.Identity)))
 	}
 
 	// No built-in docs UI - the website renders its own from the OpenAPI spec.
@@ -132,6 +142,7 @@ func New(opts ...Option) (chi.Router, huma.API) {
 	registerMembersAPI(api, options.Identity, options.InternalToken)
 	registerInvitationsAPI(api, options.Identity, options.InternalToken)
 	registerProjectsAPI(api, options.Identity, options.InternalToken)
+	registerAuditAPI(api, options.Identity, options.Audit, options.InternalToken)
 	registerTokensAPI(api, options.Identity, options.InternalToken)
 	registerNotificationsAPI(api, options.Identity, options.InternalToken)
 	registerAIAPI(api, options.AI, options.InternalToken)
@@ -140,7 +151,7 @@ func New(opts ...Option) (chi.Router, huma.API) {
 	// directly - like the health checks and the index. The OpenAPI spec stays the
 	// product's operational contract; documentation delivery is a separate concern.
 	registerDocsAPI(router, options.Docs)
-	registerMCP(router, options.Registry)
+	registerMCP(router, options.Registry, options.Identity)
 
 	return router, api
 }

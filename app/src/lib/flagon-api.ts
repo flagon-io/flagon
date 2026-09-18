@@ -31,6 +31,14 @@ async function call(
   init: RequestInit,
   user: { id: string; email: string },
 ) {
+  // Forward the END USER's request context so the API can stamp the audit log's
+  // "where" (the API only sees the gateway otherwise). Vercel populates the geo
+  // headers at the edge; x-forwarded-for's first hop is the client.
+  const h = await headers();
+  const clientIp = (h.get("x-forwarded-for") ?? "").split(",")[0].trim();
+  const clientCountry = h.get("x-vercel-ip-country") ?? "";
+  const clientUA = h.get("user-agent") ?? "";
+
   return fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
@@ -38,6 +46,9 @@ async function call(
       Authorization: `Bearer ${INTERNAL_TOKEN}`,
       "X-Flagon-User-Id": user.id,
       "X-Flagon-User-Email": user.email,
+      "X-Flagon-Client-Ip": clientIp,
+      "X-Flagon-Client-Country": clientCountry,
+      "X-Flagon-Client-Ua": clientUA,
       ...init.headers,
     },
     cache: "no-store",
@@ -162,6 +173,9 @@ export interface CreateProjectBody {
   repository_url?: string;
 }
 
+// UpdateProjectBody is a partial edit: omitted fields are left unchanged.
+export type UpdateProjectBody = Partial<CreateProjectBody>;
+
 export async function listProjects(slug: string): Promise<Project[]> {
   const user = await currentUser();
   if (!user) return [];
@@ -197,6 +211,160 @@ export async function createProject(slug: string, body: CreateProjectBody): Prom
   if (res.status === 422) throw new Error("Please enter a valid project name.");
   if (!res.ok) throw new Error(`api create project failed (${res.status})`);
   return res.json();
+}
+
+export async function updateProject(
+  slug: string,
+  project: string,
+  body: UpdateProjectBody,
+): Promise<Project> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}`,
+    { method: "PATCH", body: JSON.stringify(body) },
+    user,
+  );
+  if (res.status === 403) throw new Error("You don't have permission to edit this project.");
+  if (res.status === 404) throw new Error("Project not found.");
+  if (res.status === 409) throw new Error("A project with that slug already exists.");
+  if (res.status === 422) throw new Error("Please enter valid project details.");
+  if (!res.ok) throw new Error(`api update project failed (${res.status})`);
+  return res.json();
+}
+
+export async function deleteProject(slug: string, project: string): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}`,
+    { method: "DELETE" },
+    user,
+  );
+  if (res.status === 403) throw new Error("You don't have permission to delete this project.");
+  if (res.status === 404) throw new Error("Project not found.");
+  if (!res.ok) throw new Error(`api delete project failed (${res.status})`);
+}
+
+export async function restoreProject(slug: string, project: string): Promise<Project> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/restore`,
+    { method: "POST" },
+    user,
+  );
+  if (res.status === 403) throw new Error("You don't have permission to restore this project.");
+  if (res.status === 404) throw new Error("No deleted project with that slug to restore.");
+  if (res.status === 409)
+    throw new Error("That slug is taken by another project now. Rename it first, then restore.");
+  if (!res.ok) throw new Error(`api restore project failed (${res.status})`);
+  return res.json();
+}
+
+// --- Org audit log --------------------------------------------------------
+
+export interface AuditEvent {
+  id: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  actor_email: string | null;
+  actor_username: string | null;
+  actor_avatar_url: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  summary: string;
+  actor_ip: string | null;
+  actor_country: string | null;
+  actor_user_agent: string | null;
+  created_at: string;
+}
+
+export async function listAuditEvents(slug: string, limit = 8): Promise<AuditEvent[]> {
+  const user = await currentUser();
+  if (!user) return [];
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/audit?per_page=${limit}`,
+    { method: "GET" },
+    user,
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.events ?? [];
+}
+
+export interface AuditQuery {
+  q?: string;
+  actions?: string[];
+  actor?: string;
+  perPage?: number;
+  before?: string;
+}
+
+export interface AuditPage {
+  events: AuditEvent[];
+  next: string | null;
+}
+
+// pull the `before` cursor out of the API's RFC 5988 Link header (rel="next").
+function nextCursor(link: string | null): string | null {
+  if (!link) return null;
+  for (const part of link.split(",")) {
+    if (!/rel="?next"?/.test(part)) continue;
+    const m = part.match(/<([^>]+)>/);
+    if (!m) continue;
+    try {
+      return new URL(m[1], "http://x").searchParams.get("before");
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export interface AuditConfig {
+  ip_disclosure: boolean;
+}
+
+export async function getAuditConfig(slug: string): Promise<AuditConfig> {
+  const user = await currentUser();
+  if (!user) return { ip_disclosure: false };
+  const res = await call(`/orgs/${encodeURIComponent(slug)}/audit/config`, { method: "GET" }, user);
+  if (!res.ok) return { ip_disclosure: false };
+  return res.json();
+}
+
+export async function setAuditConfig(slug: string, ipDisclosure: boolean): Promise<AuditConfig> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/audit/config`,
+    { method: "PUT", body: JSON.stringify({ ip_disclosure: ipDisclosure }) },
+    user,
+  );
+  if (res.status === 403) throw new Error("You don't have permission to change this.");
+  if (!res.ok) throw new Error("Couldn't save the setting.");
+  return res.json();
+}
+
+export async function listAuditPage(slug: string, query: AuditQuery = {}): Promise<AuditPage> {
+  const user = await currentUser();
+  if (!user) return { events: [], next: null };
+  const qs = new URLSearchParams();
+  if (query.q) qs.set("q", query.q);
+  for (const a of query.actions ?? []) qs.append("action", a);
+  if (query.actor) qs.set("actor", query.actor);
+  if (query.perPage) qs.set("per_page", String(query.perPage));
+  if (query.before) qs.set("before", query.before);
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/audit?${qs.toString()}`,
+    { method: "GET" },
+    user,
+  );
+  if (!res.ok) return { events: [], next: null };
+  const data = await res.json();
+  return { events: data.events ?? [], next: nextCursor(res.headers.get("link")) };
 }
 
 // --- Org members (RBAC) ---------------------------------------------------

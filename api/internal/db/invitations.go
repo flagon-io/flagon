@@ -3,11 +3,14 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/flagon-io/flagon/api/internal/audit"
 )
 
 // invitePrefix namespaces invite tokens (mirrors the access-token prefixes). A
@@ -138,7 +141,8 @@ func (d *DB) InviteMember(ctx context.Context, actorID, slug, login, role string
 			}
 			res.Status = "added"
 			res.UserID = targetID
-			return nil
+			return recordAudit(ctx, tx, orgID, actorID, audit.ActionMemberAdded, "member", targetID,
+				fmt.Sprintf("added %s as %s", login, role))
 		}
 
 		// Not a Flagon user: we can only invite an email address.
@@ -164,7 +168,8 @@ func (d *DB) InviteMember(ctx context.Context, actorID, slug, login, role string
 		res.Email = login
 		res.Token = secret
 		res.Invite = inv
-		return nil
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionInvitationSent, "invitation", inv.ID,
+			fmt.Sprintf("invited %s as %s", login, role))
 	})
 	if err != nil {
 		return InviteResult{}, err
@@ -224,7 +229,8 @@ func (d *DB) RevokeInvitation(ctx context.Context, actorID, slug, inviteID strin
 		if tag.RowsAffected() == 0 {
 			return ErrInviteNotFound
 		}
-		return nil
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionInvitationRevoke, "invitation", inviteID,
+			"revoked an invitation")
 	})
 }
 

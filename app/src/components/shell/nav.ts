@@ -9,6 +9,12 @@ import {
   CreditCard,
   CircleUserRound,
   ShieldCheck,
+  ScrollText,
+  UserCog,
+  UsersRound,
+  Webhook,
+  KeySquare,
+  Fingerprint,
   type LucideIcon,
 } from "lucide-react";
 
@@ -21,6 +27,9 @@ export type NavLink = {
   exact?: boolean;
   /** Has a contextual sub-nav; the item shows a chevron and drills in. */
   section?: boolean;
+  /** Placeholder for a not-yet-shipped area: rendered greyed with a "Soon" tag,
+   * not a link, and excluded from breadcrumbs and the command menu. */
+  disabled?: boolean;
 };
 
 /**
@@ -41,19 +50,65 @@ export function orgNav(slug: string): NavLink[][] {
   ];
 }
 
-export type OrgSection = { title: string; backHref: string; items: NavLink[] };
+/** A labelled cluster of sub-nav links (GitHub-style grouped settings). A group
+ * with no label renders its items with no header (the top "General" cluster). */
+export type NavGroup = { label?: string; items: NavLink[] };
 
-/** The org Settings sub-nav items. Shared by the sub-nav and the command menu so
- * the two never drift. */
-export function settingsItems(slug: string): NavLink[] {
+export type OrgSection = { title: string; backHref: string; groups: NavGroup[]; items: NavLink[] };
+
+/** The org Settings sub-nav, grouped like GitHub. `settingsItems` flattens it for
+ * the command menu and breadcrumbs so the sources never drift. */
+export function settingsGroups(slug: string): NavGroup[] {
   const base = `/${slug}`;
   return [
-    { label: "General", href: `${base}/settings`, icon: SlidersHorizontal, exact: true },
-    { label: "Members", href: `${base}/settings/members`, icon: Users },
-    { label: "Billing", href: `${base}/settings/billing`, icon: CreditCard },
-    { label: "API tokens", href: `${base}/settings/tokens`, icon: KeyRound },
-    // OAuth clients: hidden until the feature ships (route still resolves).
+    { items: [{ label: "General", href: `${base}/settings`, icon: SlidersHorizontal, exact: true }] },
+    {
+      label: "Access",
+      items: [
+        { label: "Members", href: `${base}/settings/members`, icon: Users },
+        { label: "Teams", href: `${base}/settings/teams`, icon: UsersRound, disabled: true },
+        { label: "Roles", href: `${base}/settings/roles`, icon: UserCog, disabled: true },
+        {
+          label: "Member privileges",
+          href: `${base}/settings/member-privileges`,
+          icon: ShieldCheck,
+          disabled: true,
+        },
+      ],
+    },
+    {
+      label: "Billing and plans",
+      items: [{ label: "Billing", href: `${base}/settings/billing`, icon: CreditCard }],
+    },
+    {
+      label: "Developer",
+      items: [
+        { label: "API tokens", href: `${base}/settings/tokens`, icon: KeyRound },
+        { label: "Webhooks", href: `${base}/settings/webhooks`, icon: Webhook, disabled: true },
+        { label: "Secrets", href: `${base}/settings/secrets`, icon: KeySquare, disabled: true },
+      ],
+    },
+    {
+      label: "Security",
+      items: [
+        {
+          label: "Authentication",
+          href: `${base}/settings/authentication`,
+          icon: Fingerprint,
+          disabled: true,
+        },
+      ],
+    },
+    {
+      label: "Logs",
+      items: [{ label: "Audit log", href: `${base}/settings/audit`, icon: ScrollText }],
+    },
   ];
+}
+
+/** Flat list of the settings links (command menu, breadcrumbs). */
+export function settingsItems(slug: string): NavLink[] {
+  return settingsGroups(slug).flatMap((g) => g.items);
 }
 
 /** The contextual sub-nav shown when inside a section (currently Settings). */
@@ -63,7 +118,12 @@ export function orgSection(slug: string, pathname: string): OrgSection | null {
     pathname === `${base}/settings` || pathname.startsWith(`${base}/settings/`);
   if (!inSettings) return null;
 
-  return { title: "Settings", backHref: base, items: settingsItems(slug) };
+  return {
+    title: "Settings",
+    backHref: base,
+    groups: settingsGroups(slug),
+    items: settingsItems(slug),
+  };
 }
 
 const matches = (pathname: string, href: string, exact?: boolean) =>
@@ -150,7 +210,9 @@ export function commandItems(slug: string): CommandItem[] {
       icon: l.icon,
       keywords: keywords[l.href],
     })),
-    ...settingsItems(slug).map((l) => ({
+    ...settingsItems(slug)
+      .filter((l) => !l.disabled)
+      .map((l) => ({
       group: "Settings",
       label: l.label,
       href: l.href,
@@ -163,7 +225,9 @@ export function commandItems(slug: string): CommandItem[] {
             ? "team people invite roles"
             : l.label === "Billing"
               ? "plan payment card credit invoice upgrade"
-              : "org organization preferences",
+              : l.label === "Audit log"
+                ? "audit history events changes who did what security"
+                : "org organization preferences",
     })),
     { group: "Account", label: "Account settings", href: "/settings", icon: CircleUserRound, keywords: "personal profile me" },
     { group: "Account", label: "Security", href: "/settings/security", icon: ShieldCheck, keywords: "2fa password passkeys sessions" },

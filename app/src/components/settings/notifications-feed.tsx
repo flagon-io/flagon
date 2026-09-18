@@ -1,23 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Alert, Button, Card, Skeleton, cn } from "@flagon-io/ui";
+import { Bell, Check, CheckCheck } from "lucide-react";
+import {
+  Alert,
+  Button,
+  Card,
+  Skeleton,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  cn,
+} from "@flagon-io/ui";
+import { type Notification, notificationMeta, timeAgo } from "@/lib/notifications";
 
-type Notification = {
-  id: string;
-  title: string;
-  body: string | null;
-  link: string | null;
-  read_at: string | null;
-  created_at: string;
-};
+type Filter = "all" | "unread";
 
 export function NotificationsFeed() {
   const router = useRouter();
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,30 +43,39 @@ export function NotificationsFeed() {
     })();
   }, [load]);
 
-  async function openItem(n: Notification) {
-    if (!n.read_at) {
-      await fetch(`/api/notifications/${n.id}/read`, { method: "POST" });
-      setItems((prev) =>
-        prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)),
-      );
-    }
+  const markRead = useCallback(async (id: string) => {
+    setItems((prev) =>
+      prev.map((x) => (x.id === id && !x.read_at ? { ...x, read_at: new Date().toISOString() } : x)),
+    );
+    await fetch(`/api/notifications/${id}/read`, { method: "POST" });
+  }, []);
+
+  function openItem(n: Notification) {
+    if (!n.read_at) void markRead(n.id);
     if (n.link) router.push(n.link);
   }
 
   async function markAll() {
-    await fetch("/api/notifications/read-all", { method: "POST" });
     setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
+    await fetch("/api/notifications/read-all", { method: "POST" });
   }
 
-  const hasUnread = items.some((x) => !x.read_at);
+  const unreadCount = useMemo(() => items.filter((x) => !x.read_at).length, [items]);
+  const visible = useMemo(
+    () => (filter === "unread" ? items.filter((x) => !x.read_at) : items),
+    [items, filter],
+  );
 
   if (loading) {
     return (
       <Card className="divide-y divide-hairline">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="space-y-2 px-4 py-3">
-            <Skeleton className="h-4 w-48" />
-            <Skeleton className="h-3 w-64" />
+          <div key={i} className="flex gap-3 px-4 py-3.5">
+            <Skeleton className="size-9 shrink-0 rounded-full" />
+            <div className="flex flex-1 flex-col gap-2">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-3 w-64" />
+            </div>
           </div>
         ))}
       </Card>
@@ -71,40 +85,34 @@ export function NotificationsFeed() {
   return (
     <div className="space-y-3">
       {error && <Alert variant="destructive">{error}</Alert>}
-      {hasUnread && (
-        <div className="flex justify-end">
-          <Button variant="outline" size="sm" onClick={markAll}>
-            Mark all as read
-          </Button>
-        </div>
-      )}
-      {items.length === 0 ? (
-        error ? null : (
-          <Card className="px-6 py-12 text-center">
-            <p className="text-sm text-muted-foreground">You&rsquo;re all caught up.</p>
-          </Card>
-        )
+
+      <div className="flex items-center justify-between gap-3">
+        <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+          <TabsList>
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="unread">
+              Unread
+              {unreadCount > 0 && (
+                <span className="ml-1.5 rounded-full bg-brand/15 px-1.5 text-[11px] font-semibold text-brand-bright">
+                  {unreadCount}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <Button variant="outline" size="sm" onClick={markAll} disabled={unreadCount === 0}>
+          <CheckCheck className="size-4" />
+          Mark all as read
+        </Button>
+      </div>
+
+      {visible.length === 0 ? (
+        <EmptyState filter={filter} />
       ) : (
-        <Card>
+        <Card className="overflow-hidden">
           <ul className="divide-y divide-hairline">
-            {items.map((n) => (
-              <li key={n.id}>
-                <button
-                  type="button"
-                  onClick={() => openItem(n)}
-                  className={cn(
-                    "flex w-full flex-col gap-0.5 px-4 py-3 text-left outline-none transition-colors hover:bg-panel focus-visible:bg-panel",
-                    !n.read_at && "bg-brand/5",
-                  )}
-                >
-                  <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    {!n.read_at && <span className="size-1.5 shrink-0 rounded-full bg-brand" />}
-                    {n.title}
-                  </span>
-                  {n.body && <span className="text-sm text-muted-foreground">{n.body}</span>}
-                  <span className="text-xs text-muted-foreground">{timeAgo(n.created_at)}</span>
-                </button>
-              </li>
+            {visible.map((n) => (
+              <FeedRow key={n.id} n={n} onOpen={openItem} onMarkRead={markRead} />
             ))}
           </ul>
         </Card>
@@ -113,15 +121,75 @@ export function NotificationsFeed() {
   );
 }
 
-function timeAgo(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const mins = Math.round((Date.now() - d.getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return d.toLocaleDateString();
+function FeedRow({
+  n,
+  onOpen,
+  onMarkRead,
+}: {
+  n: Notification;
+  onOpen: (n: Notification) => void;
+  onMarkRead: (id: string) => void;
+}) {
+  const { Icon, tone } = notificationMeta(n.type);
+  const unread = !n.read_at;
+  return (
+    <li className="group/row relative">
+      <button
+        type="button"
+        onClick={() => onOpen(n)}
+        className={cn(
+          "flex w-full items-start gap-3 px-4 py-3.5 text-left outline-none transition-colors hover:bg-panel focus-visible:bg-panel",
+          unread && "bg-brand/5",
+        )}
+      >
+        <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-full", tone)}>
+          <Icon className="size-4.5" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 pr-8">
+          <span
+            className={cn(
+              "text-sm",
+              unread ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
+            )}
+          >
+            {n.title}
+          </span>
+          {n.body && <span className="text-sm text-muted-foreground">{n.body}</span>}
+          <span className="mt-0.5 text-xs text-muted-foreground">{timeAgo(n.created_at)}</span>
+        </span>
+      </button>
+      {unread && (
+        <>
+          <span className="pointer-events-none absolute top-4 right-4 size-2 rounded-full bg-brand group-hover/row:opacity-0 group-focus-within/row:opacity-0" />
+          <button
+            type="button"
+            onClick={() => onMarkRead(n.id)}
+            aria-label="Mark as read"
+            title="Mark as read"
+            className="absolute top-3 right-3 flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-secondary hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+          >
+            <Check className="size-4" />
+          </button>
+        </>
+      )}
+    </li>
+  );
+}
+
+function EmptyState({ filter }: { filter: Filter }) {
+  return (
+    <Card className="flex flex-col items-center gap-2 px-6 py-14 text-center">
+      <span className="flex size-11 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+        <Bell className="size-5" />
+      </span>
+      <p className="text-sm font-medium text-foreground">
+        {filter === "unread" ? "No unread notifications" : "No notifications yet"}
+      </p>
+      <p className="text-sm text-muted-foreground">
+        {filter === "unread"
+          ? "You're all caught up."
+          : "Activity across your organizations will show up here."}
+      </p>
+    </Card>
+  );
 }

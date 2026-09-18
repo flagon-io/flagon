@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/flagon-io/flagon/api/internal/audit"
 	"github.com/flagon-io/flagon/api/internal/db"
 )
 
@@ -28,6 +29,13 @@ type IdentityStore interface {
 	ListProjects(ctx context.Context, actorID, orgSlug string) ([]db.Project, error)
 	CreateProject(ctx context.Context, actorID, orgSlug string, in db.ProjectInput) (db.Project, error)
 	GetProject(ctx context.Context, actorID, orgSlug, projectSlug string) (db.Project, error)
+	UpdateProject(ctx context.Context, actorID, orgSlug, projectSlug string, in db.ProjectUpdate) (db.Project, error)
+	SetProjectDeleted(ctx context.Context, actorID, orgSlug, projectSlug string, deleted bool) (db.Project, error)
+
+	GetOrg(ctx context.Context, actorID, orgSlug string) (db.Org, error)
+
+	GetAuditConfig(ctx context.Context, actorID, orgSlug string) (ipDisclosure bool, err error)
+	SetAuditConfig(ctx context.Context, actorID, orgSlug string, ipDisclosure bool) error
 
 	ListMembers(ctx context.Context, actorID, slug string) ([]db.Member, error)
 	AddMember(ctx context.Context, actorID, slug, login, role string) (targetID, orgName string, err error)
@@ -404,7 +412,7 @@ func combinedAuth(api huma.API, store IdentityStore, internalToken string) func(
 			}
 			ctx = huma.WithValue(ctx, userIDKey, principal.UserID)
 			ctx = huma.WithValue(ctx, userEmailKey, principal.Email)
-			next(ctx)
+			next(withAuditMeta(ctx))
 			return
 		}
 
@@ -423,8 +431,41 @@ func combinedAuth(api huma.API, store IdentityStore, internalToken string) func(
 		}
 		ctx = huma.WithValue(ctx, userIDKey, userID)
 		ctx = huma.WithValue(ctx, userEmailKey, strings.TrimSpace(ctx.Header("X-Flagon-User-Email")))
-		next(ctx)
+		next(withAuditMeta(ctx))
 	}
+}
+
+// withAuditMeta records the request's "where" (client IP, country, user-agent)
+// onto the context so recordAudit can stamp it onto any audit entry the request
+// writes. The app gateway forwards the end user's values as X-Flagon-Client-*;
+// a direct API/MCP call falls back to the connection's own proxy headers.
+func withAuditMeta(ctx huma.Context) huma.Context {
+	country := strings.TrimSpace(ctx.Header("X-Flagon-Client-Country"))
+	ua := strings.TrimSpace(ctx.Header("X-Flagon-Client-Ua"))
+	if ua == "" {
+		ua = strings.TrimSpace(ctx.Header("User-Agent"))
+	}
+	ctx = huma.WithValue(ctx, audit.CtxIP, clientIP(ctx))
+	ctx = huma.WithValue(ctx, audit.CtxCountry, country)
+	ctx = huma.WithValue(ctx, audit.CtxUA, ua)
+	return ctx
+}
+
+// clientIP resolves the caller's IP from the first present proxy header. The
+// gateway-forwarded end-user IP wins; then Fly's edge header; then the standard
+// forwarded-for chain (first hop is the client).
+func clientIP(ctx huma.Context) string {
+	for _, h := range []string{"X-Flagon-Client-Ip", "Fly-Client-Ip", "X-Forwarded-For", "X-Real-Ip"} {
+		v := strings.TrimSpace(ctx.Header(h))
+		if v == "" {
+			continue
+		}
+		if i := strings.IndexByte(v, ','); i >= 0 {
+			v = strings.TrimSpace(v[:i])
+		}
+		return v
+	}
+	return ""
 }
 
 func identity(ctx context.Context) (userID, email string) {

@@ -209,10 +209,39 @@ function SectionNav({ section, pathname }: { section: OrgSection; pathname: stri
         <span className={cn("text-sm font-semibold", collapseHidden)}>{section.title}</span>
       </Link>
 
-      <nav className="space-y-0.5">
-        {section.items.map((item) => {
+      <nav className="space-y-4">
+        {section.groups.map((group, gi) => (
+          <div key={group.label ?? gi} className="space-y-0.5">
+            {group.label && (
+              <p
+                className={cn(
+                  "px-2 pt-1 pb-0.5 text-[11px] font-semibold tracking-wider text-muted-foreground/70 uppercase",
+                  collapseHidden,
+                )}
+              >
+                {group.label}
+              </p>
+            )}
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              if (item.disabled) {
+            // Not-yet-shipped area: shown for wayfinding (GitHub-style) but inert.
+            return (
+              <div
+                key={item.href}
+                title={`${item.label} - coming soon`}
+                aria-disabled="true"
+                className={cn(navLinkClasses(false), "cursor-not-allowed opacity-45 hover:bg-transparent")}
+              >
+                {Icon && <Icon className="size-4.5 shrink-0" />}
+                <span className={cn("flex-1 truncate", collapseHidden)}>{item.label}</span>
+                <Badge variant="outline" className={collapseHidden}>
+                  Soon
+                </Badge>
+              </div>
+            );
+          }
           const active = matches(pathname, item.href, item.exact);
-          const Icon = item.icon;
           return (
             <Link
               key={item.href}
@@ -230,8 +259,10 @@ function SectionNav({ section, pathname }: { section: OrgSection; pathname: stri
                 </Badge>
               )}
             </Link>
-          );
-        })}
+              );
+            })}
+          </div>
+        ))}
       </nav>
     </div>
   );

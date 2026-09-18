@@ -35,6 +35,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/flagon-io/flagon/api/internal/ai"
+	"github.com/flagon-io/flagon/api/internal/audit"
 	"github.com/flagon-io/flagon/api/internal/db"
 	"github.com/flagon-io/flagon/api/internal/docs"
 	"github.com/flagon-io/flagon/api/internal/metrics"
@@ -80,6 +81,11 @@ func main() {
 						Usage:   "shared secret the app authenticates to the API with (must match the app's FLAGON_INTERNAL_TOKEN)",
 						Sources: cli.EnvVars("FLAGON_INTERNAL_TOKEN"),
 						Value:   "dev-internal-token",
+					},
+					&cli.StringFlag{
+						Name:    "host",
+						Usage:   "interface to bind (empty = all interfaces, needed in prod/containers; set 127.0.0.1 locally to bind loopback only and avoid the Windows Firewall prompt)",
+						Sources: cli.EnvVars("FLAGON_HOST"),
 					},
 					&cli.IntFlag{
 						Name:    "port",
@@ -240,13 +246,19 @@ func runServe(ctx context.Context, cmd *cli.Command) error {
 		server.WithDocs(docsIndex),
 		server.WithMCP(registry),
 		server.WithMCPHost(cmd.String("mcp-host")),
+		server.WithAudit(audit.NewStore(database.Pool())),
 	)
+
+	// host is empty in prod (bind all interfaces, so Fly/containers can route to
+	// us) and 127.0.0.1 in local dev (loopback only, which Windows Firewall never
+	// prompts for). It applies to both the API and the metrics listener.
+	host := cmd.String("host")
 
 	// Metrics live on a separate, private port that Fly's Prometheus scrapes
 	// (see [metrics] in fly.toml); they are never exposed on the public service.
-	go serveMetrics(cmd.Int("metrics-port"), m)
+	go serveMetrics(host, cmd.Int("metrics-port"), m)
 
-	addr := fmt.Sprintf(":%d", cmd.Int("port"))
+	addr := fmt.Sprintf("%s:%d", host, cmd.Int("port"))
 	slog.Info("api listening", "addr", addr)
 	if err := http.ListenAndServe(addr, m.InstrumentHTTP(router)); err != nil {
 		return fmt.Errorf("http server stopped: %w", err)
@@ -289,11 +301,11 @@ func buildProvider(cmd *cli.Command) (ai.Provider, string) {
 	}
 }
 
-func serveMetrics(port int, m *metrics.Metrics) {
+func serveMetrics(host string, port int, m *metrics.Metrics) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", m.Handler())
 
-	addr := fmt.Sprintf(":%d", port)
+	addr := fmt.Sprintf("%s:%d", host, port)
 	slog.Info("metrics listening", "addr", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		// Metrics are non-essential; log but keep the API running.

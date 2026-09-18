@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { headers, cookies } from "next/headers";
 import { getMe } from "@/lib/flagon-api";
 import { auth } from "@/lib/auth";
@@ -18,8 +18,11 @@ export default async function OrgLayout({
 
   const org = me.orgs.find((o) => o.slug === slug);
   if (!org) {
-    // Not a member of this slug (or it doesn't exist): send them somewhere real.
-    redirect(me.orgs.length > 0 ? `/${me.orgs[0].slug}` : "/new");
+    // Not a member of this slug - which is indistinguishable here from the org not
+    // existing at all. 404 (never redirect) so we leak nothing about whether the
+    // org is real. This bubbles to the root not-found (the generic 404), since the
+    // shell never renders for a non-member.
+    notFound();
   }
 
   const session = await auth.api.getSession({ headers: await headers() });

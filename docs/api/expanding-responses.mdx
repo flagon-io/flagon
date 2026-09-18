@@ -1,0 +1,56 @@
+---
+title: Expanding responses
+description: Inline related objects in a single request with Stripe-style expand[] parameters.
+order: 4
+---
+
+Flagon is a hub for your data, and its objects reference each other - a project
+belongs to an organization, an audit event has an actor, and so on. By default a
+response returns a **reference** to a related object (an id, like `org_id`), not
+the whole thing, so payloads stay small and predictable.
+
+When you need the related object too, ask for it with **`expand[]`** (the same
+convention Stripe uses) instead of making a second request.
+
+## How it works
+
+Add one `expand[]` parameter per relation you want inlined. The expanded object
+appears alongside the reference it came from.
+
+```sh
+# Just the project (org_id only):
+GET /orgs/acme/projects/billing-api
+
+# The project with its organization inlined:
+GET /orgs/acme/projects/billing-api?expand[]=organization
+```
+
+```jsonc
+{
+  "id": "…",
+  "slug": "billing-api",
+  "org_id": "org_…",
+  // present only because organization was expanded:
+  "organization": { "id": "org_…", "name": "Acme", "slug": "acme", "role": "owner" }
+}
+```
+
+You can expand several relations at once, and the parser is forgiving - repeated
+params and comma-separated lists both work:
+
+```
+?expand[]=organization&expand[]=created_by
+?expand=organization,created_by
+```
+
+## Rules
+
+- **Opt-in.** Nothing is expanded unless you ask; the reference id is always
+  present whether or not you expand it.
+- **Permission-scoped.** An expanded object is only ever returned if your token
+  and role could read it on its own - expand never widens access.
+- **Unknown expansions are ignored**, so adding an `expand[]` your client
+  understands but a given endpoint doesn't is harmless.
+
+Expansion is being rolled out across the API; each operation's OpenAPI entry
+lists the relations it supports.

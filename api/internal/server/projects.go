@@ -71,11 +71,92 @@ func registerProjectsAPI(api huma.API, store IdentityStore, internalToken string
 		Path:        "/orgs/{slug}/projects/{project}",
 		Summary:     "Get a project",
 		Middlewares: huma.Middlewares{auth},
-	}, func(ctx context.Context, in *GetProjectInput) (*ProjectOutput, error) {
+	}, func(ctx context.Context, in *GetProjectInput) (*ProjectDetailOutput, error) {
 		actorID, _ := identity(ctx)
 		project, err := store.GetProject(ctx, actorID, in.Slug, in.Project)
 		if err != nil {
 			return nil, projectErr(err, "could not load project")
+		}
+		out := &ProjectDetailOutput{}
+		out.Body.Project = project
+
+		// Stripe-style expand[]: inline related objects on request. By default the
+		// project carries only org_id; expand[]=organization embeds the org.
+		expand := parseExpand(in.Expand)
+		if expand.Has("organization") {
+			org, err := store.GetOrg(ctx, actorID, in.Slug)
+			if err != nil {
+				return nil, projectErr(err, "could not expand organization")
+			}
+			out.Body.Organization = &org
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "update-project",
+		Method:      http.MethodPatch,
+		Path:        "/orgs/{slug}/projects/{project}",
+		Summary:     "Update a project",
+		Middlewares: huma.Middlewares{auth},
+	}, func(ctx context.Context, in *UpdateProjectInput) (*ProjectOutput, error) {
+		actorID, _ := identity(ctx)
+		update := db.ProjectUpdate{
+			Description:   in.Body.Description,
+			Readme:        in.Body.Readme,
+			RepositoryURL: in.Body.RepositoryURL,
+		}
+		if in.Body.Name != nil {
+			name := strings.TrimSpace(*in.Body.Name)
+			if name == "" {
+				return nil, huma.Error422UnprocessableEntity("name cannot be empty")
+			}
+			update.Name = &name
+		}
+		if in.Body.Slug != nil {
+			slug := slugify(*in.Body.Slug)
+			if slug == "" {
+				return nil, huma.Error422UnprocessableEntity("slug must contain a letter or digit")
+			}
+			update.Slug = &slug
+		}
+		project, err := store.UpdateProject(ctx, actorID, in.Slug, in.Project, update)
+		if err != nil {
+			return nil, projectErr(err, "could not update project")
+		}
+		out := &ProjectOutput{}
+		out.Body = project
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-project",
+		Method:      http.MethodDelete,
+		Path:        "/orgs/{slug}/projects/{project}",
+		Summary:     "Delete a project (soft delete; restorable)",
+		Middlewares: huma.Middlewares{auth},
+	}, func(ctx context.Context, in *GetProjectInput) (*ProjectOutput, error) {
+		actorID, _ := identity(ctx)
+		project, err := store.SetProjectDeleted(ctx, actorID, in.Slug, in.Project, true)
+		if err != nil {
+			return nil, projectErr(err, "could not delete project")
+		}
+		out := &ProjectOutput{}
+		out.Body = project
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "restore-project",
+		Method:      http.MethodPost,
+		Path:        "/orgs/{slug}/projects/{project}/restore",
+		Summary:     "Restore a soft-deleted project",
+		Middlewares: huma.Middlewares{auth},
+	}, func(ctx context.Context, in *GetProjectInput) (*ProjectOutput, error) {
+		actorID, _ := identity(ctx)
+		project, err := store.SetProjectDeleted(ctx, actorID, in.Slug, in.Project, false)
+		if err != nil {
+			return nil, projectErr(err, "could not restore project")
 		}
 		out := &ProjectOutput{}
 		out.Body = project
@@ -116,10 +197,35 @@ type CreateProjectInput struct {
 	}
 }
 
-// GetProjectInput fetches one project by slug.
+// GetProjectInput fetches one project by slug (also used by delete + restore).
+// Expand accepts Stripe-style expand[] params (e.g. expand[]=organization).
 type GetProjectInput struct {
+	Slug    string   `path:"slug"`
+	Project string   `path:"project"`
+	Expand  []string `query:"expand[]" doc:"Related objects to inline, e.g. expand[]=organization"`
+}
+
+// ProjectDetailOutput is a single project plus any expanded relations. The
+// project's own fields are inlined (embedded); expanded objects are added
+// alongside only when requested via expand[].
+type ProjectDetailOutput struct {
+	Body struct {
+		db.Project
+		Organization *db.Org `json:"organization,omitempty"`
+	}
+}
+
+// UpdateProjectInput is a partial edit; omitted fields are left unchanged.
+type UpdateProjectInput struct {
 	Slug    string `path:"slug"`
 	Project string `path:"project"`
+	Body    struct {
+		Name          *string `json:"name,omitempty" doc:"Display name"`
+		Slug          *string `json:"slug,omitempty" doc:"URL slug (renames the project)"`
+		Description   *string `json:"description,omitempty" doc:"One-line summary"`
+		Readme        *string `json:"readme,omitempty" doc:"Markdown README"`
+		RepositoryURL *string `json:"repository_url,omitempty" doc:"Source repository URL"`
+	}
 }
 
 // ProjectsOutput is the project list.

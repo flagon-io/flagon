@@ -11,32 +11,62 @@ import (
 	"github.com/flagon-io/flagon/api/internal/ai"
 )
 
-// registerMCP mounts the public MCP front door at /mcp. It speaks the Model
-// Context Protocol over JSON-RPC 2.0 (Streamable HTTP transport) and exposes
-// ONLY the registry's public-safe tools - today, documentation retrieval. Those
-// tools are read-only and touch no tenant data, so this endpoint needs no auth;
-// it runs every tool with an anonymous context, so internal docs never leak here.
+// registerMCP mounts the MCP front door at /mcp. It speaks the Model Context
+// Protocol over JSON-RPC 2.0 (Streamable HTTP transport). Anonymous callers see
+// ONLY the registry's public-safe tools (documentation retrieval today), run with
+// an anonymous context so internal docs never leak. A caller presenting a Flagon
+// token (Authorization: Bearer flagon_...) is resolved to a user and can reach
+// the user-acting tools their token's scopes allow - the same registry the REST
+// API and in-product agent use, acting as that user (RLS + scopes still apply).
 //
 // The /mcp path is served on every host so local dev and api.flagon.io/mcp keep
 // working; the dedicated public hostname (mcp.flagon.io) serves the same handler
 // at the root via mcpHostGate, installed in New before any routes.
 //
-// Operational tools that act as a user (whoami, create_organization, ...) are not
-// public and are intentionally absent until an authenticated MCP surface exists.
 // Registered on the chi router directly (like the health checks), off the
 // documented REST spec.
-func registerMCP(router chi.Router, registry *ai.Registry) {
+func registerMCP(router chi.Router, registry *ai.Registry, store IdentityStore) {
 	if registry == nil {
 		return
 	}
-	router.Post("/mcp", mcpHandler(registry))
+	router.Post("/mcp", mcpHandler(registry, store))
+}
+
+// mcpCaller is the resolved identity of one MCP request. The zero value is an
+// anonymous caller (public tools only); authed is set once a valid token is
+// presented, carrying the user context and the token's held scopes (nil scopes
+// meaning a full-access token).
+type mcpCaller struct {
+	tc     ai.ToolContext
+	scopes []string
+	authed bool
+}
+
+// canUse reports whether this caller may see and run a tool. Public tools are
+// always allowed. Everything else requires authentication; a non-Public tool
+// with no declared Scope is fail-closed (unreachable), a full-access token (nil
+// scopes) may use any scoped tool, and a scoped token must hold the tool's scope.
+func (c mcpCaller) canUse(t ai.Tool) bool {
+	if t.Def.Name == "" {
+		return false
+	}
+	if t.Public {
+		return true
+	}
+	if !c.authed || t.Scope == "" {
+		return false
+	}
+	if c.scopes == nil {
+		return true
+	}
+	return scopeSatisfies(c.scopes, Scope(t.Scope))
 }
 
 // mcpHandler serves one MCP JSON-RPC request. It is POST-only (this server
 // implements the Streamable HTTP transport's POST channel, not the GET/SSE one);
 // any other method is a 405 so the endpoint behaves the same whether it is
 // reached via the /mcp path or at the root of the MCP host.
-func mcpHandler(registry *ai.Registry) http.HandlerFunc {
+func mcpHandler(registry *ai.Registry, store IdentityStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -44,18 +74,51 @@ func mcpHandler(registry *ai.Registry) http.HandlerFunc {
 			return
 		}
 		defer r.Body.Close()
+
+		caller, ok := authenticateMCP(r, store)
+		if !ok {
+			// A token was presented but did not resolve: fail loud rather than
+			// silently downgrading to anonymous, so a rotated/expired token is
+			// obvious instead of quietly losing access to the user's tools.
+			writeJSON(w, http.StatusOK, rpcErr(nil, -32001, "invalid or expired token"))
+			return
+		}
+
 		req, err := decodeRPC(r)
 		if err != nil {
 			writeJSON(w, http.StatusOK, rpcErr(nil, -32700, "parse error"))
 			return
 		}
-		resp, notification := handleRPC(r.Context(), registry, req)
+		resp, notification := handleRPC(r.Context(), registry, caller, req)
 		if notification {
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
+}
+
+// authenticateMCP resolves the request's Authorization header into a caller. No
+// Flagon token (missing header, or a non-flagon bearer) is an anonymous caller,
+// ok=true. A Flagon token that fails to resolve returns ok=false so the handler
+// can reject it. Tokens act as the user, mirroring the REST API's combinedAuth.
+func authenticateMCP(r *http.Request, store IdentityStore) (mcpCaller, bool) {
+	presented := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !strings.HasPrefix(presented, "flagon_") {
+		return mcpCaller{}, true // anonymous
+	}
+	if store == nil {
+		return mcpCaller{}, false
+	}
+	p, err := store.ResolveToken(r.Context(), presented)
+	if err != nil {
+		return mcpCaller{}, false
+	}
+	tc := ai.ToolContext{UserID: p.UserID, Email: p.Email, AllowInternalDocs: true}
+	if p.OrgID != nil {
+		tc.OrgID = *p.OrgID
+	}
+	return mcpCaller{tc: tc, scopes: p.Scopes, authed: true}, true
 }
 
 // mcpHostGate turns the dedicated MCP hostname into a single-purpose front door.
@@ -128,9 +191,9 @@ func rpcOK(id json.RawMessage, result any) rpcResponse {
 	return rpcResponse{JSONRPC: "2.0", ID: id, Result: result}
 }
 
-// handleRPC dispatches one MCP method. The bool return is true for a
-// notification (no id): the caller sends no response body.
-func handleRPC(ctx context.Context, registry *ai.Registry, req rpcRequest) (rpcResponse, bool) {
+// handleRPC dispatches one MCP method for a resolved caller. The bool return is
+// true for a notification (no id): the caller sends no response body.
+func handleRPC(ctx context.Context, registry *ai.Registry, caller mcpCaller, req rpcRequest) (rpcResponse, bool) {
 	// Notifications (e.g. notifications/initialized) carry no id and expect no
 	// reply.
 	if len(req.ID) == 0 {
@@ -149,7 +212,9 @@ func handleRPC(ctx context.Context, registry *ai.Registry, req rpcRequest) (rpcR
 		return rpcOK(req.ID, map[string]any{}), false
 
 	case "tools/list":
-		defs := registry.PublicDefs()
+		// List exactly the tools this caller may run: public tools for everyone,
+		// plus the scoped tools an authenticated token holds.
+		defs := registry.DefsFor(caller.canUse)
 		tools := make([]map[string]any, 0, len(defs))
 		for _, d := range defs {
 			tools = append(tools, map[string]any{
@@ -161,14 +226,14 @@ func handleRPC(ctx context.Context, registry *ai.Registry, req rpcRequest) (rpcR
 		return rpcOK(req.ID, map[string]any{"tools": tools}), false
 
 	case "tools/call":
-		return callTool(ctx, registry, req), false
+		return callTool(ctx, registry, caller, req), false
 
 	default:
 		return rpcErr(req.ID, -32601, "method not found: "+req.Method), false
 	}
 }
 
-func callTool(ctx context.Context, registry *ai.Registry, req rpcRequest) rpcResponse {
+func callTool(ctx context.Context, registry *ai.Registry, caller mcpCaller, req rpcRequest) rpcResponse {
 	var params struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -178,18 +243,23 @@ func callTool(ctx context.Context, registry *ai.Registry, req rpcRequest) rpcRes
 	}
 
 	tool, ok := registry.Get(params.Name)
-	// Only public-safe tools are callable here; anything else is treated as
-	// nonexistent so the public surface never hints at internal capabilities.
-	if !ok || !tool.Public {
+	// A tool the caller cannot even see is reported as nonexistent when they are
+	// anonymous, so the public surface never hints at authenticated capabilities.
+	// An authenticated caller who is merely missing a scope gets a clear reason.
+	if !ok || (!caller.authed && !tool.Public) {
 		return rpcErr(req.ID, -32602, "unknown tool: "+params.Name)
+	}
+	if !caller.canUse(tool) {
+		return rpcErr(req.ID, -32003, "this token is missing the scope required for "+params.Name)
 	}
 
 	args := params.Arguments
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	// Anonymous context: no user identity, no internal docs.
-	out, err := tool.Run(ctx, ai.ToolContext{}, args)
+	// Anonymous callers run with the zero ToolContext (no identity, no internal
+	// docs); authenticated callers act as their user.
+	out, err := tool.Run(ctx, caller.tc, args)
 	if err != nil {
 		return rpcOK(req.ID, toolResult(err.Error(), true))
 	}

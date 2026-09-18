@@ -30,9 +30,10 @@
       "order": 1,
       "headings": [
         "One registry, three front doors",
-        "What it exposes today"
+        "What it exposes today",
+        "Connecting"
       ],
-      "body": "Flagon exposes a **Model Context Protocol** server at\n[mcp.flagon.io](https://mcp.flagon.io), so an external agent (for example, an\nassistant in your editor) can work with Flagon directly.\n\n## One registry, three front doors\n\nThe MCP server, the in-product [assistant](/docs/ai/assistant), and the HTTP API\nall draw from the same set of operations. Add a capability once and it is\navailable everywhere. Nothing the agent can do reaches around the\npermission-checked API.\n\n## What it exposes today\n\n- **Documentation tools.** Any agent can search Flagon's docs and read pages, so\n  it can learn how Flagon works before acting. These are read-only and safe to\n  use without authentication.\n- **Operational tools.** Acting on your organization's data over MCP requires\n  authentication, so the agent operates as you, with your scopes.\n\nPoint your MCP-capable client at `https://mcp.flagon.io` to get started."
+      "body": "Flagon exposes a **Model Context Protocol** server at\n[mcp.flagon.io](https://mcp.flagon.io), so an external agent (for example, an\nassistant in your editor) can work with Flagon directly.\n\n## One registry, three front doors\n\nThe MCP server, the in-product [assistant](/docs/ai/assistant), and the HTTP API\nall draw from the same set of operations. Add a capability once and it is\navailable everywhere. Nothing the agent can do reaches around the\npermission-checked API.\n\n## What it exposes today\n\n- **Documentation tools.** Any agent can search Flagon's docs and read pages, so\n  it can learn how Flagon works before acting. These are read-only and safe to\n  use without authentication.\n- **Operational tools.** Acting on your organization's data over MCP requires\n  authentication, so the agent operates as you, with your scopes.\n\n## Connecting\n\nPoint your MCP-capable client at `https://mcp.flagon.io` to get started. With no\ncredentials, the server exposes only the read-only documentation tools.\n\nTo reach the operational tools, present a Flagon access token as a bearer token:\n\n```\nAuthorization: Bearer flagon_xxx\n```\n\nThe token acts as you: the server resolves it to your identity and the tools you\ncan use are exactly the ones your token's scopes allow (a token with no scopes\nhas full access, still bounded by your role). A tool your token cannot reach is\nsimply not listed. This is the same permission model as the REST API - the token\nis the ceiling, and tenant isolation always applies."
     },
     {
       "slug": "api/authentication",
@@ -55,6 +56,21 @@
       "status": "planned",
       "order": 2,
       "body": ""
+    },
+    {
+      "slug": "api/expanding-responses",
+      "title": "Expanding responses",
+      "description": "Inline related objects in a single request with Stripe-style expand[] parameters.",
+      "section": "API",
+      "visibility": "public",
+      "order": 4,
+      "headings": [
+        "How it works",
+        "Just the project (org_id only):",
+        "The project with its organization inlined:",
+        "Rules"
+      ],
+      "body": "Flagon is a hub for your data, and its objects reference each other - a project\nbelongs to an organization, an audit event has an actor, and so on. By default a\nresponse returns a **reference** to a related object (an id, like `org_id`), not\nthe whole thing, so payloads stay small and predictable.\n\nWhen you need the related object too, ask for it with **`expand[]`** (the same\nconvention Stripe uses) instead of making a second request.\n\n## How it works\n\nAdd one `expand[]` parameter per relation you want inlined. The expanded object\nappears alongside the reference it came from.\n\n```sh\n# Just the project (org_id only):\nGET /orgs/acme/projects/billing-api\n\n# The project with its organization inlined:\nGET /orgs/acme/projects/billing-api?expand[]=organization\n```\n\n```jsonc\n{\n  \"id\": \"…\",\n  \"slug\": \"billing-api\",\n  \"org_id\": \"org_…\",\n  // present only because organization was expanded:\n  \"organization\": { \"id\": \"org_…\", \"name\": \"Acme\", \"slug\": \"acme\", \"role\": \"owner\" }\n}\n```\n\nYou can expand several relations at once, and the parser is forgiving - repeated\nparams and comma-separated lists both work:\n\n```\n?expand[]=organization&expand[]=created_by\n?expand=organization,created_by\n```\n\n## Rules\n\n- **Opt-in.** Nothing is expanded unless you ask; the reference id is always\n  present whether or not you expand it.\n- **Permission-scoped.** An expanded object is only ever returned if your token\n  and role could read it on its own - expand never widens access.\n- **Unknown expansions are ignored**, so adding an `expand[]` your client\n  understands but a given endpoint doesn't is harmless.\n\nExpansion is being rolled out across the API; each operation's OpenAPI entry\nlists the relations it supports."
     },
     {
       "slug": "api/using-the-api",
@@ -1577,6 +1593,19 @@
       "body": "Flagon is open source, and built in the open. If you want to fix something, add a\ncapability, or just understand how it works, everything is right here.\n\n## The repositories\n\n- **[flagon-io/flagon](https://github.com/flagon-io/flagon)** the product: the\n  API, the app, and the design system.\n- **[flagon-io/flagon.io](https://github.com/flagon-io/flagon.io)** this site and\n  the company handbook.\n\n## How it is built\n\nTwo principles shape every change:\n\n- **API-first.** Every capability is an API operation first, and the OpenAPI spec\n  is generated from the code. If it is not in the API, it does not exist.\n- **AI-first.** Every capability becomes available to the assistant and the MCP\n  server as it ships, from one shared tool registry.\n\nDocumentation is part of that: docs live in the product repo next to the code\nthey describe, so a change and its docs ship together.\n\n## Run it locally\n\nSee [Self-hosting Flagon](/docs/self-hosting/overview) for bringing the platform\nup on your machine. The short version is one Postgres in Docker and the services\nrun directly.\n\n## Sending a change\n\nWork in small pieces, open a pull request, and keep the docs in the same change\nas the code. The [handbook](/handbook) covers how the team works, reviews, and\nships in more depth."
     },
     {
+      "slug": "platform/audit-log",
+      "title": "Audit log",
+      "description": "An immutable, org-scoped record of who changed what in your organization.",
+      "section": "Platform",
+      "visibility": "public",
+      "order": 4,
+      "headings": [
+        "What's recorded",
+        "Reading it"
+      ],
+      "body": "Every organization has an **audit log**: an append-only record of the changes\nmade to it. It answers \"who did what, and when\" for the things that matter -\nprojects created, updated, deleted, and restored; members added, removed, and\nre-roled; invitations sent and revoked; and organization settings changed.\n\nIt lives under the organization's **Settings** and is visible to **owners and\nadmins only** (following GitHub) - it is not shown to regular members. It is also\n**separate from notifications**: notifications are personal (they belong to a\nuser, who marks them read); the audit log belongs to the **organization**.\n\n## What's recorded\n\nEach entry captures **who** (the actor), **what** (an action like\n`project.created`, the target, and a short summary), **where** (the actor's\ncountry and client, and their IP when disclosure is enabled), and **when**.\nEntries are written in the same database transaction as the change they describe,\nso the log never drifts from reality, and it is **immutable** - no one, including\nadmins, can edit or delete history.\n\nActor **IP disclosure is opt-in and off by default** (following GitHub): IPs are\nalways recorded, but only revealed in the log once an owner or admin enables it\nunder **Settings -> Audit log -> Settings**. Enabling or disabling it is itself\nan audited event.\n\n## Reading it\n\nOwners and admins read the full log from **Settings -> Audit log**, with search,\naction filters, and pagination; recent activity also surfaces on the dashboard.\nYou can ask the assistant (\"what changed in this org this week?\") or read it over\nthe API - `GET /orgs/{slug}/audit` supports `q`, `action`, `actor`, and\ncursor-based pagination via the standard `Link` header (`rel=\"next\"`). Reading\nrequires the `read:org` scope **and** an owner/admin role; like everything in\nFlagon it is tenant-isolated, so one organization can never see another's history."
+    },
+    {
       "slug": "platform/environments",
       "title": "Environments",
       "description": "Promote a project across environments, from development to production.",
@@ -1618,9 +1647,12 @@
       "order": 1,
       "headings": [
         "Creating a project",
+        "The project page",
+        "Editing a project",
+        "Deleting and restoring",
         "Ownership and access"
       ],
-      "body": "A **project** is the core unit in Flagon: a deployable app. There is no separate\n\"app\" layer above it, following the Vercel model. Every project belongs to an\n**organization**, and its URLs are org-scoped: `app.flagon.io/<org>/<project>`.\n\n## Creating a project\n\nYou can create a project three ways, and they all go through the same API\noperation:\n\n- In the UI, from the organization's dashboard.\n- By asking the in-product assistant (\"create a project called billing-api\").\n- Directly against the API, or through an external agent over MCP.\n\nBecause every path calls the same permission-checked API operation, a project\ncreated by the agent is identical to one created by hand.\n\n## Ownership and access\n\nProjects inherit their organization's membership and roles. Access is\npermission-scoped from day one: a token or agent can only act on a project if its\nscope allows it, and tenant isolation is enforced in the database with row-level\nsecurity, so one organization can never see another's projects."
+      "body": "A **project** is the core unit in Flagon: a deployable app. There is no separate\n\"app\" layer above it, following the Vercel model. Every project belongs to an\n**organization**, and its URLs are org-scoped: `app.flagon.io/<org>/<project>`.\n\n## Creating a project\n\nYou can create a project three ways, and they all go through the same API\noperation:\n\n- In the UI, from the organization's dashboard.\n- By asking the in-product assistant (\"create a project called billing-api\").\n- Directly against the API, or through an external agent over MCP.\n\nBecause every path calls the same permission-checked API operation, a project\ncreated by the agent is identical to one created by hand.\n\n## The project page\n\nA project reads like a repository. Its **Overview** tab renders the README as a\ndocument, with an inline editor (Edit and Preview) for members. The **Settings**\ntab holds the project's name, slug, description, and repository URL, plus the\ndelete action. Later, linking a real repository will sync the README automatically\ninstead of editing it in place.\n\n## Editing a project\n\nYou can change a project's name, slug, description, and repository URL from the\nSettings tab, and its README from the Overview tab, by asking the assistant, or\nover the API. Edits are partial: only the fields you change are touched. Renaming\nthe slug changes the project's URL. Editing requires write access (members and\nabove; viewers are read-only).\n\n## Deleting and restoring\n\nDeleting a project is a **soft delete**: the project is hidden and stops counting,\nbut it can be restored. Deleting **frees the slug immediately**, so you can create\na new project with the same name right away.\n\nRestoring brings the project back, but only if its slug is still free. If a new\nproject has since taken that name, restore is refused until you free the slug (for\nexample by renaming the new project). Delete and restore both require write\naccess. Like everything else, all three actions go through the same\npermission-checked API operation whether you use the UI, the assistant, or MCP.\n\n## Ownership and access\n\nProjects inherit their organization's membership and roles. Access is\npermission-scoped from day one: a token or agent can only act on a project if its\nscope allows it, and tenant isolation is enforced in the database with row-level\nsecurity, so one organization can never see another's projects."
     },
     {
       "slug": "self-hosting/overview",

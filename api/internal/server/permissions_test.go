@@ -75,6 +75,16 @@ func TestEndpointScopeEnforcement(t *testing.T) {
 		{"read:project lists projects", []string{"read:project"}, http.MethodGet, "/orgs/acme/projects", http.StatusOK},
 		{"read:project cannot create project", []string{"read:project"}, http.MethodPost, "/orgs/acme/projects", http.StatusForbidden},
 		{"write:project creates project (implies read)", []string{"write:project"}, http.MethodPost, "/orgs/acme/projects", http.StatusOK},
+		{"read:project cannot update project", []string{"read:project"}, http.MethodPatch, "/orgs/acme/projects/web", http.StatusForbidden},
+		{"write:project updates project", []string{"write:project"}, http.MethodPatch, "/orgs/acme/projects/web", http.StatusOK},
+		{"read:project cannot delete project", []string{"read:project"}, http.MethodDelete, "/orgs/acme/projects/web", http.StatusForbidden},
+		{"write:project deletes project", []string{"write:project"}, http.MethodDelete, "/orgs/acme/projects/web", http.StatusOK},
+		{"write:project restores project", []string{"write:project"}, http.MethodPost, "/orgs/acme/projects/web/restore", http.StatusOK},
+		{"read:org lists audit log", []string{"read:org"}, http.MethodGet, "/orgs/acme/audit", http.StatusOK},
+		{"read:project cannot read audit log", []string{"read:project"}, http.MethodGet, "/orgs/acme/audit", http.StatusForbidden},
+		{"read:org reads audit config", []string{"read:org"}, http.MethodGet, "/orgs/acme/audit/config", http.StatusOK},
+		{"read:org cannot set audit config", []string{"read:org"}, http.MethodPut, "/orgs/acme/audit/config", http.StatusForbidden},
+		{"write:org sets audit config", []string{"write:org"}, http.MethodPut, "/orgs/acme/audit/config", http.StatusOK},
 		{"read:org lists invitations", []string{"read:org"}, http.MethodGet, "/orgs/acme/invitations", http.StatusOK},
 		{"read:org cannot invite", []string{"read:org"}, http.MethodPost, "/orgs/acme/invitations", http.StatusForbidden},
 		{"write:org invites (implies read)", []string{"write:org"}, http.MethodPost, "/orgs/acme/invitations", http.StatusOK},
@@ -125,7 +135,37 @@ func registerScopeProbe(api huma.API, store IdentityStore) {
 	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
 
 	huma.Register(api, huma.Operation{
+		OperationID: "update-project", Method: http.MethodPatch, Path: "/orgs/{slug}/projects/{project}",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-project", Method: http.MethodDelete, Path: "/orgs/{slug}/projects/{project}",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "restore-project", Method: http.MethodPost, Path: "/orgs/{slug}/projects/{project}/restore",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
 		OperationID: "list-invitations", Method: http.MethodGet, Path: "/orgs/{slug}/invitations",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-audit-log", Method: http.MethodGet, Path: "/orgs/{slug}/audit",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-audit-config", Method: http.MethodGet, Path: "/orgs/{slug}/audit/config",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "set-audit-config", Method: http.MethodPut, Path: "/orgs/{slug}/audit/config",
 		Middlewares: huma.Middlewares{auth},
 	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
 
@@ -137,6 +177,11 @@ func registerScopeProbe(api huma.API, store IdentityStore) {
 
 type probeSlugInput struct {
 	Slug string `path:"slug"`
+}
+
+type probeProjectInput struct {
+	Slug    string `path:"slug"`
+	Project string `path:"project"`
 }
 
 // probeOK gives the probe handlers a body so a permitted request is a plain 200
@@ -175,6 +220,19 @@ func (scopeFakeStore) CreateProject(context.Context, string, string, db.ProjectI
 func (scopeFakeStore) GetProject(context.Context, string, string, string) (db.Project, error) {
 	return db.Project{}, nil
 }
+func (scopeFakeStore) UpdateProject(context.Context, string, string, string, db.ProjectUpdate) (db.Project, error) {
+	return db.Project{}, nil
+}
+func (scopeFakeStore) SetProjectDeleted(context.Context, string, string, string, bool) (db.Project, error) {
+	return db.Project{}, nil
+}
+func (scopeFakeStore) GetOrg(context.Context, string, string) (db.Org, error) {
+	return db.Org{}, nil
+}
+func (scopeFakeStore) GetAuditConfig(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+func (scopeFakeStore) SetAuditConfig(context.Context, string, string, bool) error { return nil }
 func (scopeFakeStore) ListOrgs(context.Context, string) ([]db.Org, error) { return nil, nil }
 func (scopeFakeStore) UpsertUserProfile(context.Context, string, string, db.ProfileInput) error {
 	return nil

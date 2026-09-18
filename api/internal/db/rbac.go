@@ -3,9 +3,12 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/flagon-io/flagon/api/internal/audit"
 )
 
 // Roles, highest privilege first. owner > admin > member > viewer.
@@ -157,10 +160,13 @@ func (d *DB) AddMember(ctx context.Context, actorID, slug, login, role string) (
 			return ErrAlreadyMember
 		}
 
-		_, err = tx.Exec(ctx,
+		if _, err = tx.Exec(ctx,
 			`INSERT INTO public.memberships (org_id, user_id, role) VALUES ($1, $2, $3)`,
-			orgID, targetID, role)
-		return err
+			orgID, targetID, role); err != nil {
+			return err
+		}
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionMemberAdded, "member", targetID,
+			fmt.Sprintf("added %s as %s", login, role))
 	})
 	return targetID, orgName, err
 }
@@ -205,10 +211,13 @@ func (d *DB) SetMemberRole(ctx context.Context, actorID, slug, targetID, newRole
 			}
 		}
 
-		_, err = tx.Exec(ctx,
+		if _, err = tx.Exec(ctx,
 			`UPDATE public.memberships SET role = $3 WHERE org_id = $1 AND user_id = $2`,
-			orgID, targetID, newRole)
-		return err
+			orgID, targetID, newRole); err != nil {
+			return err
+		}
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionMemberRoleChange, "member", targetID,
+			fmt.Sprintf("changed a member's role to %s", newRole))
 	})
 }
 
@@ -248,9 +257,11 @@ func (d *DB) RemoveMember(ctx context.Context, actorID, slug, targetID string) e
 			}
 		}
 
-		_, err = tx.Exec(ctx,
-			`DELETE FROM public.memberships WHERE org_id = $1 AND user_id = $2`, orgID, targetID)
-		return err
+		if _, err = tx.Exec(ctx,
+			`DELETE FROM public.memberships WHERE org_id = $1 AND user_id = $2`, orgID, targetID); err != nil {
+			return err
+		}
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionMemberRemoved, "member", targetID, "removed a member")
 	})
 }
 
@@ -279,9 +290,86 @@ func (d *DB) UpdateOrg(ctx context.Context, actorID, slug, name string) (Org, er
 			return err
 		}
 		org.Role = actorRole
-		return nil
+		return recordAudit(ctx, tx, org.ID, actorID, audit.ActionOrgUpdated, "organization", org.ID,
+			"renamed the organization to "+name)
 	})
 	return org, err
+}
+
+// GetOrg returns a single organization the caller is a member of, with the
+// caller's role. Used by expand[]=organization and anywhere a full org object is
+// needed from a reference. RLS (resolveOrg) enforces membership.
+func (d *DB) GetOrg(ctx context.Context, actorID, slug string) (Org, error) {
+	var o Org
+	err := d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID, _, err := resolveOrg(ctx, tx, slug)
+		if err != nil {
+			return err
+		}
+		role, err := memberRole(ctx, tx, orgID, actorID)
+		if err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx,
+			`SELECT id, name, slug, created_at FROM public.orgs WHERE id = $1`, orgID).
+			Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt); err != nil {
+			return err
+		}
+		o.Role = role
+		return nil
+	})
+	return o, err
+}
+
+// GetAuditConfig returns an org's audit configuration (currently just whether
+// actor IP addresses are disclosed in the log). Owners/admins only.
+func (d *DB) GetAuditConfig(ctx context.Context, actorID, slug string) (ipDisclosure bool, err error) {
+	err = d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID, _, err := resolveOrg(ctx, tx, slug)
+		if err != nil {
+			return err
+		}
+		role, err := memberRole(ctx, tx, orgID, actorID)
+		if err != nil {
+			return err
+		}
+		if role != RoleOwner && role != RoleAdmin {
+			return ErrForbidden
+		}
+		return tx.QueryRow(ctx,
+			`SELECT audit_ip_disclosure FROM public.orgs WHERE id = $1`, orgID).Scan(&ipDisclosure)
+	})
+	return ipDisclosure, err
+}
+
+// SetAuditConfig toggles actor IP disclosure for an org's audit log. Owners/admins
+// only. The change is itself recorded to the audit log (a security setting change
+// is exactly the kind of thing you audit).
+func (d *DB) SetAuditConfig(ctx context.Context, actorID, slug string, ipDisclosure bool) error {
+	return d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID, _, err := resolveOrg(ctx, tx, slug)
+		if err != nil {
+			return err
+		}
+		role, err := memberRole(ctx, tx, orgID, actorID)
+		if err != nil {
+			return err
+		}
+		if role != RoleOwner && role != RoleAdmin {
+			return ErrForbidden
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE public.orgs SET audit_ip_disclosure = $1, updated_at = now() WHERE id = $2`,
+			ipDisclosure, orgID); err != nil {
+			return err
+		}
+		verb := "disabled"
+		if ipDisclosure {
+			verb = "enabled"
+		}
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionOrgAuditConfig, "organization", orgID,
+			verb+" actor IP disclosure in the audit log")
+	})
 }
 
 // canManage enforces the role hierarchy for a role change.

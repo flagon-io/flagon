@@ -125,7 +125,8 @@ func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken str
 		// Let the inviter know their invitation was accepted (best-effort).
 		if invitedBy != "" {
 			_ = store.CreateNotification(ctx, invitedBy, nil, "org.invite_accepted",
-				email+" joined "+name, email+" accepted your invitation to "+name+".", "/"+slug)
+				email+" joined "+name, email+" accepted your invitation to "+name+".",
+				"/"+slug+"/settings/members")
 		}
 		out := &AcceptInvitationOutput{}
 		out.Body.OrgSlug = slug

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Alert, Button, Input, Label, Textarea } from "@flagon-io/ui";
+import { Alert, Button, Input, Label } from "@flagon-io/ui";
 
 function slugify(s: string): string {
   return s
@@ -14,10 +14,6 @@ function slugify(s: string): string {
     .slice(0, 60);
 }
 
-const README_PLACEHOLDER = `# My project
-
-What it does, how to run it, anything a teammate should know.`;
-
 export function NewProjectForm({ orgSlug }: { orgSlug: string }) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -25,7 +21,6 @@ export function NewProjectForm({ orgSlug }: { orgSlug: string }) {
   const [slugEdited, setSlugEdited] = useState(false);
   const [description, setDescription] = useState("");
   const [repositoryUrl, setRepositoryUrl] = useState("");
-  const [readme, setReadme] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +38,6 @@ export function NewProjectForm({ orgSlug }: { orgSlug: string }) {
         slug: effectiveSlug,
         description: description.trim(),
         repository_url: repositoryUrl.trim(),
-        readme,
       }),
     });
     if (!res.ok) {
@@ -111,19 +105,9 @@ export function NewProjectForm({ orgSlug }: { orgSlug: string }) {
         </p>
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="p-readme">README</Label>
-        <Textarea
-          id="p-readme"
-          value={readme}
-          onChange={(e) => setReadme(e.target.value)}
-          placeholder={README_PLACEHOLDER}
-          className="min-h-48 font-mono text-sm"
-        />
-        <p className="text-xs text-muted-foreground">
-          Markdown. Normally this would sync from the linked repository.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        You can add a README from the project&rsquo;s Overview tab once it&rsquo;s created.
+      </p>
 
       {error && <Alert variant="destructive">{error}</Alert>}
 

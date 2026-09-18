@@ -2,22 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Bell } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Bell, Check, CheckCheck } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger, Skeleton, buttonClasses, cn } from "@flagon-io/ui";
-
-type Notification = {
-  id: string;
-  type: string;
-  title: string;
-  body: string | null;
-  link: string | null;
-  read_at: string | null;
-  created_at: string;
-};
+import { type Notification, notificationMeta, timeAgo } from "@/lib/notifications";
 
 export function Notifications() {
   const router = useRouter();
+  const pathname = usePathname();
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
@@ -46,9 +38,7 @@ export function Notifications() {
     (async () => {
       await loadCount();
     })();
-    const t = setInterval(() => {
-      void loadCount();
-    }, 60000);
+    const t = setInterval(() => void loadCount(), 60000);
     return () => clearInterval(t);
   }, [loadCount]);
 
@@ -57,22 +47,28 @@ export function Notifications() {
     if (o) void loadList();
   }
 
+  // markRead flips one notification to read (optimistically) without navigating.
+  const markRead = useCallback(async (id: string) => {
+    setItems((prev) =>
+      prev.map((x) => (x.id === id && !x.read_at ? { ...x, read_at: new Date().toISOString() } : x)),
+    );
+    setUnread((u) => Math.max(0, u - 1));
+    await fetch(`/api/notifications/${id}/read`, { method: "POST" });
+  }, []);
+
   async function openItem(n: Notification) {
-    if (!n.read_at) {
-      await fetch(`/api/notifications/${n.id}/read`, { method: "POST" });
-      setItems((prev) =>
-        prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)),
-      );
-      setUnread((u) => Math.max(0, u - 1));
-    }
+    if (!n.read_at) void markRead(n.id);
     setOpen(false);
-    if (n.link) router.push(n.link);
+    // Always go somewhere: the notification's target, or the full feed if it has
+    // no target (or already points at the page you're on), so a click never
+    // feels like a no-op.
+    router.push(n.link && n.link !== pathname ? n.link : "/settings/notifications");
   }
 
   async function markAll() {
-    await fetch("/api/notifications/read-all", { method: "POST" });
     setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
     setUnread(0);
+    await fetch("/api/notifications/read-all", { method: "POST" });
   }
 
   return (
@@ -88,54 +84,45 @@ export function Notifications() {
           </span>
         )}
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-0">
-        <div className="flex items-center justify-between border-b border-hairline px-3 py-2">
-          <span className="text-sm font-semibold text-foreground">Notifications</span>
+      <PopoverContent align="end" className="w-88 p-0">
+        <div className="flex items-center justify-between border-b border-hairline px-3 py-2.5">
+          <span className="text-sm font-semibold text-foreground">
+            Notifications
+            {unread > 0 && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{unread} unread</span>}
+          </span>
           {unread > 0 && (
             <button
               type="button"
               onClick={markAll}
-              className="text-xs font-medium text-link outline-none hover:underline focus-visible:underline"
+              className="flex items-center gap-1 text-xs font-medium text-link outline-none hover:underline focus-visible:underline"
             >
+              <CheckCheck className="size-3.5" />
               Mark all read
             </button>
           )}
         </div>
 
-        <div className="max-h-96 overflow-y-auto">
+        <div className="max-h-104 overflow-y-auto">
           {loading ? (
             <div className="divide-y divide-hairline">
               {[0, 1, 2].map((i) => (
-                <div key={i} className="flex flex-col gap-1.5 px-3 py-3">
-                  <Skeleton className="h-4 w-40" />
-                  <Skeleton className="h-3 w-52" />
-                  <Skeleton className="h-2.5 w-14" />
+                <div key={i} className="flex gap-3 px-3 py-3">
+                  <Skeleton className="size-8 shrink-0 rounded-full" />
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <Skeleton className="h-3.5 w-40" />
+                    <Skeleton className="h-3 w-52" />
+                  </div>
                 </div>
               ))}
             </div>
           ) : items.length === 0 ? (
-            <p className="px-3 py-8 text-center text-sm text-muted-foreground">
-              You&rsquo;re all caught up.
-            </p>
+            <EmptyState />
           ) : (
-            items.map((n) => (
-              <button
-                key={n.id}
-                type="button"
-                onClick={() => openItem(n)}
-                className={cn(
-                  "flex w-full flex-col gap-0.5 border-b border-hairline px-3 py-2.5 text-left outline-none transition-colors last:border-b-0 hover:bg-panel focus-visible:bg-panel",
-                  !n.read_at && "bg-brand/5",
-                )}
-              >
-                <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  {!n.read_at && <span className="size-1.5 shrink-0 rounded-full bg-brand" />}
-                  <span className="truncate">{n.title}</span>
-                </span>
-                {n.body && <span className="line-clamp-2 text-xs text-muted-foreground">{n.body}</span>}
-                <span className="text-[11px] text-muted-foreground">{timeAgo(n.created_at)}</span>
-              </button>
-            ))
+            <ul className="divide-y divide-hairline">
+              {items.map((n) => (
+                <NotificationRow key={n.id} n={n} onOpen={openItem} onMarkRead={markRead} />
+              ))}
+            </ul>
           )}
         </div>
 
@@ -151,15 +138,70 @@ export function Notifications() {
   );
 }
 
-function timeAgo(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const mins = Math.round((Date.now() - d.getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return d.toLocaleDateString();
+function NotificationRow({
+  n,
+  onOpen,
+  onMarkRead,
+}: {
+  n: Notification;
+  onOpen: (n: Notification) => void;
+  onMarkRead: (id: string) => void;
+}) {
+  const { Icon, tone } = notificationMeta(n.type);
+  const unread = !n.read_at;
+  return (
+    <li className="group/row relative">
+      <button
+        type="button"
+        onClick={() => onOpen(n)}
+        className={cn(
+          "flex w-full items-start gap-3 px-3 py-2.5 text-left outline-none transition-colors hover:bg-panel focus-visible:bg-panel",
+          unread && "bg-brand/5",
+        )}
+      >
+        <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-full", tone)}>
+          <Icon className="size-4" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span
+            className={cn(
+              "truncate text-sm",
+              unread ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
+            )}
+          >
+            {n.title}
+          </span>
+          {n.body && <span className="line-clamp-2 text-xs text-muted-foreground">{n.body}</span>}
+          <span className="text-[11px] text-muted-foreground">{timeAgo(n.created_at)}</span>
+        </span>
+      </button>
+      {/* Unread dot, swapped for a "mark read" button on hover/focus. */}
+      {unread && (
+        <>
+          <span className="pointer-events-none absolute top-1/2 right-3 size-2 -translate-y-1/2 rounded-full bg-brand group-hover/row:opacity-0 group-focus-within/row:opacity-0" />
+          <button
+            type="button"
+            onClick={() => onMarkRead(n.id)}
+            aria-label="Mark as read"
+            title="Mark as read"
+            className="absolute top-1/2 right-2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-secondary hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+          >
+            <Check className="size-3.5" />
+          </button>
+        </>
+      )}
+    </li>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="flex flex-col items-center gap-2 px-3 py-10 text-center">
+      <span className="flex size-10 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+        <Bell className="size-5" />
+      </span>
+      <p className="text-sm font-medium text-foreground">You&rsquo;re all caught up</p>
+      <p className="text-xs text-muted-foreground">New notifications will show up here.</p>
+    </div>
+  );
 }

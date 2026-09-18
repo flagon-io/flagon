@@ -1,0 +1,40 @@
+---
+title: Audit log
+description: An immutable, org-scoped record of who changed what in your organization.
+visibility: public
+order: 4
+---
+
+Every organization has an **audit log**: an append-only record of the changes
+made to it. It answers "who did what, and when" for the things that matter -
+projects created, updated, deleted, and restored; members added, removed, and
+re-roled; invitations sent and revoked; and organization settings changed.
+
+It lives under the organization's **Settings** and is visible to **owners and
+admins only** (following GitHub) - it is not shown to regular members. It is also
+**separate from notifications**: notifications are personal (they belong to a
+user, who marks them read); the audit log belongs to the **organization**.
+
+## What's recorded
+
+Each entry captures **who** (the actor), **what** (an action like
+`project.created`, the target, and a short summary), **where** (the actor's
+country and client, and their IP when disclosure is enabled), and **when**.
+Entries are written in the same database transaction as the change they describe,
+so the log never drifts from reality, and it is **immutable** - no one, including
+admins, can edit or delete history.
+
+Actor **IP disclosure is opt-in and off by default** (following GitHub): IPs are
+always recorded, but only revealed in the log once an owner or admin enables it
+under **Settings -> Audit log -> Settings**. Enabling or disabling it is itself
+an audited event.
+
+## Reading it
+
+Owners and admins read the full log from **Settings -> Audit log**, with search,
+action filters, and pagination; recent activity also surfaces on the dashboard.
+You can ask the assistant ("what changed in this org this week?") or read it over
+the API - `GET /orgs/{slug}/audit` supports `q`, `action`, `actor`, and
+cursor-based pagination via the standard `Link` header (`rel="next"`). Reading
+requires the `read:org` scope **and** an owner/admin role; like everything in
+Flagon it is tenant-isolated, so one organization can never see another's history.
