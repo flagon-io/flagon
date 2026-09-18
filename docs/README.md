@@ -7,7 +7,7 @@ capability and its docs ship together and can never quietly drift apart.
 Nothing here is rendered directly. The docs are compiled into a corpus the API
 owns, and everything else is a *client* of that corpus:
 
-```
+```text
 docs/**.mdx  ->  make docs  ->  api/internal/docs/corpus.gen.json  (embedded in the API)
                                         |
                                         +--> HTTP: GET /docs, /docs/{slug}, /docs/search   (the website renders these)
@@ -25,7 +25,7 @@ Every doc is a Markdown/MDX file with YAML frontmatter. The fields:
 | --- | --- | --- |
 | `title` | yes | Human title. A file with no `title` is ignored (so this README is skipped). |
 | `description` | no | One-line summary, weighted heavily in search and shown in listings. |
-| `section` | no | Grouping (e.g. `platform`, `api`, `handbook`). Defaults to the top-level folder. |
+| `section` | no | Grouping label, and the column a page appears under in the docs site's "All docs" grid. Use a Title-Case display label (e.g. `Platform`, `API`, `Get started`) and keep it identical across a section's pages. Grouping is case-insensitive, but the label is shown verbatim. Defaults to the top-level folder. |
 | `visibility` | no | `public` (default) or `internal`. `internal` docs never leave the org: they are excluded from the public HTTP endpoints and the public MCP, but the in-product agent can still read them. |
 | `order` | no | Sort order within a section (ascending). Defaults to `0`. |
 

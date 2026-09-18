@@ -10,5 +10,8 @@
     "dev": "npm run dev --workspace app",
     "build": "npm run build --workspace app",
     "lint": "npm run lint --workspace app"
+  },
+  "devDependencies": {
+    "next": "16.3.5"
   }
 }

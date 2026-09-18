@@ -35,6 +35,11 @@ jobs:
           cache-dependency-path: package-lock.json
       # npm workspaces: install and run from the repo root (the single lockfile
       # lives there; the root `lint`/`build` scripts delegate to the app workspace).
-      - run: npm ci
+      # Use `npm install`, not `npm ci`: a lockfile generated on one OS omits the
+      # `packages` entries for other platforms' native binaries (lightningcss,
+      # tailwind oxide, ...), and `npm ci` installs only what's in that map, so it
+      # fails on Linux. `npm install` resolves the current platform's optional
+      # deps at install time (this is also how the Vercel build installs).
+      - run: npm install --no-audit --no-fund
       - run: npm run lint
       - run: npm run build

@@ -19,11 +19,19 @@ tenant, scoped by `org_id`), and is the only thing that holds real secrets
 api/        Go module (github.com/flagon-io/flagon/api)
   cmd/flagon      the `flagon` CLI - `serve` runs the HTTP API, `migrate`, ...
   cmd/genspec     generates openapi/openapi.json as a build artifact
+  cmd/gendocs     compiles docs/ into internal/docs/corpus.gen.json (embedded)
   internal/server chi router + huma API setup shared by both commands
-app/        Next.js app (created with create-next-app)
+app/        Next.js app - the web UI + gateway
+packages/   shared npm workspaces (e.g. packages/ui, the @flagon-io/ui design system)
+docs/       Markdown/MDX documentation - the single source of truth (see docs/README.md)
 openapi/    generated OpenAPI spec (gitignored, not hand-edited)
 .github/    CI + dependabot configuration
 ```
+
+The JavaScript side is an npm workspaces monorepo: the single `package-lock.json`
+and `node_modules` live at the repo root, and `app` plus everything under
+`packages/` are workspaces. Run `npm` commands from the root (`npm run build`,
+`npm run lint`) - they delegate to the `app` workspace.
 
 ## OpenAPI
 
@@ -55,6 +63,32 @@ automatically as the API grows - nothing to keep in sync by hand.
 `openapi/openapi.json` is only needed outside a running process, such as
 generating a typed client for `app`. Produce it with `make openapi` (the
 deployed binary doesn't ship it - it serves the spec live instead).
+
+## Documentation
+
+Product documentation lives in [`docs/`](docs) as Markdown/MDX files and is the
+**single source of truth**: docs ship in the same PR as the code they describe,
+so a capability and its docs can't quietly drift apart. Each file carries YAML
+frontmatter (`title`, plus optional `description`, `section`, `visibility`,
+`order`), and its slug is the path under `docs/` without the extension
+(`docs/platform/projects.mdx` -> `platform/projects`).
+
+Nothing in `docs/` is rendered directly. `make docs` (or `go run ./cmd/gendocs`)
+compiles the whole tree into `api/internal/docs/corpus.gen.json`, which the API
+embeds. Everything else is a *client* of that one corpus:
+
+- the API serves public pages at `/docs`, `/docs/search`, and `/docs/page` - the
+  website renders its docs viewer entirely from these routes, holding no copy of
+  its own;
+- the in-product agent and the public MCP answer from the same corpus via the
+  `search_docs` / `get_doc` tools.
+
+Unlike `openapi/openapi.json` (gitignored, served live), the corpus is a
+**committed** artifact: it's pulled in with `//go:embed`, so it must be checked
+in for the API to build. Regenerate and commit it whenever you change anything
+under `docs/` - CI runs `go run ./cmd/gendocs -check` and fails if the committed
+corpus is stale. The full convention (frontmatter fields, `internal` visibility,
+the corpus flow) lives in [`docs/README.md`](docs/README.md).
 
 ## Local development
 
