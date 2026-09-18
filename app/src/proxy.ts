@@ -5,7 +5,9 @@ import type { NextRequest } from "next/server";
 // dev) by rewriting that host onto the /ui section. The registry under /r and
 // framework/asset paths are left untouched so shadcn can fetch
 // https://ui.flagon.io/r/<name>.json directly.
-export function middleware(req: NextRequest) {
+//
+// This is Next's Proxy convention (the renamed successor to middleware).
+export function proxy(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
   const isUiHost = host === "ui.flagon.io" || host.startsWith("ui.localhost");
   if (!isUiHost) return NextResponse.next();

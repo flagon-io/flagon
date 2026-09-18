@@ -55,6 +55,49 @@ func TestBuildFromDir(t *testing.T) {
 	}
 }
 
+func TestHumanize(t *testing.T) {
+	cases := map[string]string{
+		"get-started": "Get started",
+		"api":         "API",
+		"ai":          "AI",
+		"self-hosting": "Self hosting",
+		"open-source":  "Open source",
+		"platform":     "Platform",
+	}
+	for dir, want := range cases {
+		if got := humanize(dir); got != want {
+			t.Errorf("humanize(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}
+
+func TestBuildFromDir_DirectoryDefaultsAndStatus(t *testing.T) {
+	dir := t.TempDir()
+	// No section frontmatter: the directory name is the default category.
+	write(t, dir, "get-started/intro.mdx", "---\ntitle: Intro\n---\n\nhi\n")
+	write(t, dir, "api/tokens.mdx", "---\ntitle: Tokens\n---\n\nhi\n")
+	// A planned placeholder.
+	write(t, dir, "cli/overview.mdx", "---\ntitle: CLI\nstatus: planned\n---\n\n")
+
+	c, err := BuildFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bySlug := map[string]Doc{}
+	for _, d := range c.Docs {
+		bySlug[d.Slug] = d
+	}
+	if bySlug["get-started/intro"].Section != "Get started" {
+		t.Errorf("directory default = %q, want %q", bySlug["get-started/intro"].Section, "Get started")
+	}
+	if bySlug["api/tokens"].Section != "API" {
+		t.Errorf("acronym default = %q, want %q", bySlug["api/tokens"].Section, "API")
+	}
+	if !bySlug["cli/overview"].Planned() {
+		t.Errorf("expected cli/overview to be planned")
+	}
+}
+
 func testIndex() *Index {
 	return NewIndex(Corpus{Docs: []Doc{
 		{Slug: "platform/projects", Title: "Projects", Description: "The core deployable unit.", Section: "platform", Visibility: Public, Body: "A project is deployable."},

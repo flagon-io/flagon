@@ -1,0 +1,39 @@
+---
+title: Contributing
+description: Flagon is open source. How it is built, how to run it, and how to contribute.
+order: 0
+---
+
+Flagon is open source, and built in the open. If you want to fix something, add a
+capability, or just understand how it works, everything is right here.
+
+## The repositories
+
+- **[flagon-io/flagon](https://github.com/flagon-io/flagon)** the product: the
+  API, the app, and the design system.
+- **[flagon-io/flagon.io](https://github.com/flagon-io/flagon.io)** this site and
+  the company handbook.
+
+## How it is built
+
+Two principles shape every change:
+
+- **API-first.** Every capability is an API operation first, and the OpenAPI spec
+  is generated from the code. If it is not in the API, it does not exist.
+- **AI-first.** Every capability becomes available to the assistant and the MCP
+  server as it ships, from one shared tool registry.
+
+Documentation is part of that: docs live in the product repo next to the code
+they describe, so a change and its docs ship together.
+
+## Run it locally
+
+See [Self-hosting Flagon](/docs/self-hosting/overview) for bringing the platform
+up on your machine. The short version is one Postgres in Docker and the services
+run directly.
+
+## Sending a change
+
+Work in small pieces, open a pull request, and keep the docs in the same change
+as the code. The [handbook](/handbook) covers how the team works, reviews, and
+ships in more depth.

@@ -35,11 +35,11 @@ jobs:
           cache-dependency-path: package-lock.json
       # npm workspaces: install and run from the repo root (the single lockfile
       # lives there; the root `lint`/`build` scripts delegate to the app workspace).
-      # Use `npm install`, not `npm ci`: a lockfile generated on one OS omits the
-      # `packages` entries for other platforms' native binaries (lightningcss,
-      # tailwind oxide, ...), and `npm ci` installs only what's in that map, so it
-      # fails on Linux. `npm install` resolves the current platform's optional
-      # deps at install time (this is also how the Vercel build installs).
-      - run: npm install --no-audit --no-fund
+      # The committed lockfile carries every platform's native-binary nodes
+      # (lightningcss, tailwind oxide, ...), so `npm ci` installs the Linux ones
+      # here. If you ever see "Cannot find module '*.linux-x64-gnu.node'", the lock
+      # was regenerated on a single OS and lost the other platforms - regenerate
+      # it with a clean from-scratch resolve (run `scripts/relock.sh`).
+      - run: npm ci
       - run: npm run lint
       - run: npm run build

@@ -1,0 +1,26 @@
+---
+title: MCP server
+description: Point an external agent at mcp.flagon.io to operate Flagon and read its documentation.
+order: 1
+---
+
+Flagon exposes a **Model Context Protocol** server at
+[mcp.flagon.io](https://mcp.flagon.io), so an external agent (for example, an
+assistant in your editor) can work with Flagon directly.
+
+## One registry, three front doors
+
+The MCP server, the in-product [assistant](/docs/ai/assistant), and the HTTP API
+all draw from the same set of operations. Add a capability once and it is
+available everywhere. Nothing the agent can do reaches around the
+permission-checked API.
+
+## What it exposes today
+
+- **Documentation tools.** Any agent can search Flagon's docs and read pages, so
+  it can learn how Flagon works before acting. These are read-only and safe to
+  use without authentication.
+- **Operational tools.** Acting on your organization's data over MCP requires
+  authentication, so the agent operates as you, with your scopes.
+
+Point your MCP-capable client at `https://mcp.flagon.io` to get started.

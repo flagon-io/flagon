@@ -1,0 +1,49 @@
+---
+title: Quickstart
+description: Create your organization and first project, and meet the assistant, in a few minutes.
+order: 1
+---
+
+Get from nothing to a working project in a few minutes. Every step below can be
+done in the dashboard, by asking the assistant, or against the API. Pick whichever
+fits how you like to work.
+
+## 1. Get an account
+
+Use Flagon hosted at [app.flagon.io](https://app.flagon.io/signup), or run it
+yourself. If you would rather self-host, jump to
+[Self-hosting Flagon](/docs/self-hosting/overview) and come back here.
+
+## 2. Create an organization
+
+Everything in Flagon lives inside an **organization**: your projects, your
+members, and your settings. Create one and you land at `app.flagon.io/<org>`.
+
+## 3. Create your first project
+
+A **project** is a deployable app. Create one from your organization's
+dashboard, or just ask the assistant:
+
+> Create a project called `billing-api`.
+
+Read operations run immediately; anything that changes data (like creating a
+project) is proposed for you to confirm first, so you stay in control.
+
+## 4. Drive it from the API
+
+Everything you just did is an API operation. Mint a token with the scopes you
+need, then call the API:
+
+```bash
+curl https://api.flagon.io/orgs/<org>/projects \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+See [Authentication and scopes](/docs/api/authentication) for how tokens and
+scopes work, and [Using the API](/docs/api/using-the-api) for the full reference.
+
+## Next steps
+
+- **[Core concepts](/docs/get-started/core-concepts)** for the model behind it all.
+- **[Projects](/docs/platform/projects)** for the unit you build on.
+- **[The assistant](/docs/ai/assistant)** to do more of this by asking.

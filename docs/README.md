@@ -25,7 +25,8 @@ Every doc is a Markdown/MDX file with YAML frontmatter. The fields:
 | --- | --- | --- |
 | `title` | yes | Human title. A file with no `title` is ignored (so this README is skipped). |
 | `description` | no | One-line summary, weighted heavily in search and shown in listings. |
-| `section` | no | Grouping label, and the column a page appears under in the docs site's "All docs" grid. Use a Title-Case display label (e.g. `Platform`, `API`, `Get started`) and keep it identical across a section's pages. Grouping is case-insensitive, but the label is shown verbatim. Defaults to the top-level folder. |
+| `section` | no | Grouping label, and the column a page appears under in the docs site's "All docs" grid. **Defaults to a humanized version of the top-level directory** (`get-started/` → `Get started`, `api/` → `API`, `self-hosting/` → `Self hosting`), so the folder is the category unless you set this. Only override when the folder name isn't the label you want. Grouping is case-insensitive. |
+| `status` | no | `published` (default) or `planned`. A `planned` page is a placeholder: it shows in the nav and grid so the structure is visible, but renders a "not written yet" state instead of an empty article. Give it a `title` and `description` and leave the body empty until you write it. |
 | `visibility` | no | `public` (default) or `internal`. `internal` docs never leave the org: they are excluded from the public HTTP endpoints and the public MCP, but the in-product agent can still read them. |
 | `order` | no | Sort order within a section (ascending). Defaults to `0`. |
 

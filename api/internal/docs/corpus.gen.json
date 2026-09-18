@@ -1,6 +1,31 @@
 {
   "docs": [
     {
+      "slug": "ai/assistant",
+      "title": "The assistant",
+      "description": "Operate Flagon by asking. Reads run automatically; changes are proposed for you to confirm.",
+      "section": "AI",
+      "visibility": "public",
+      "headings": [
+        "How it behaves",
+        "Model choice and cost"
+      ],
+      "body": "Flagon is AI-first: anything you can do in the dashboard, you can do by asking\nthe assistant, and anything the assistant can do, you can also do yourself. It is\nbuilt into the platform, not bolted on, so it gains new abilities as the product\ngrows.\n\n## How it behaves\n\n- **It acts as you.** The assistant runs operations with your identity and your\n  organization's scope, so it can never do anything you could not do yourself.\n- **Reads run, changes are proposed.** Read-only actions happen immediately.\n  Anything that changes data is returned as a proposed action for you to confirm\n  first, so you stay in control.\n- **It is scoped to Flagon.** The assistant helps you operate Flagon. It is not a\n  general chatbot, and it will steer back to what it can actually do.\n- **It can read the docs.** Ask it how something works and it searches this\n  documentation to answer, rather than guessing.\n\n## Model choice and cost\n\nThe model is configuration, not code. Flagon ships with a hosted default and can\npoint at any OpenAI-compatible endpoint or a self-hosted model, so you can run\nyour own for a flat cost. Usage is metered per organization so plans can be\nenforced.\n\nSee [MCP server](/docs/ai/mcp) to give the same abilities to an external agent."
+    },
+    {
+      "slug": "ai/mcp",
+      "title": "MCP server",
+      "description": "Point an external agent at mcp.flagon.io to operate Flagon and read its documentation.",
+      "section": "AI",
+      "visibility": "public",
+      "order": 1,
+      "headings": [
+        "One registry, three front doors",
+        "What it exposes today"
+      ],
+      "body": "Flagon exposes a **Model Context Protocol** server at\n[mcp.flagon.io](https://mcp.flagon.io), so an external agent (for example, an\nassistant in your editor) can work with Flagon directly.\n\n## One registry, three front doors\n\nThe MCP server, the in-product [assistant](/docs/ai/assistant), and the HTTP API\nall draw from the same set of operations. Add a capability once and it is\navailable everywhere. Nothing the agent can do reaches around the\npermission-checked API.\n\n## What it exposes today\n\n- **Documentation tools.** Any agent can search Flagon's docs and read pages, so\n  it can learn how Flagon works before acting. These are read-only and safe to\n  use without authentication.\n- **Operational tools.** Acting on your organization's data over MCP requires\n  authentication, so the agent operates as you, with your scopes.\n\nPoint your MCP-capable client at `https://mcp.flagon.io` to get started."
+    },
+    {
       "slug": "api/authentication",
       "title": "Authentication and scopes",
       "description": "How Flagon API tokens authenticate and how scopes gate every operation.",
@@ -11,6 +36,92 @@
         "Scopes"
       ],
       "body": "Every Flagon API operation is permission-scoped. A token authenticates the\ncaller and carries a set of **scopes**; an operation runs only if the token's\nscopes cover it, and enforcement fails closed.\n\n## Tokens\n\nAn access token is minted from the UI or the API and presented as a bearer\ntoken. Tokens act as a user within a single organization: they can never do\nanything the issuing user could not do themselves, and row-level security still\napplies to every query the token drives.\n\n## Scopes\n\nScopes are hierarchical: a parent scope implies its children. When you mint a\ntoken you choose its scopes from a grouped checklist, each row labeled with the\nraw scope and a one-line description. The vocabulary is shared across the whole\nplatform, so the same scope means the same thing whether a request comes over\nREST, from the in-product agent, or over MCP.\n\nAdd a scope when you add an operation. Because scopes are generated from the same\ncode that generates the OpenAPI spec, this reference stays in lockstep with what\nthe API actually enforces."
+    },
+    {
+      "slug": "api/errors",
+      "title": "Errors",
+      "description": "How the API reports errors, and what each status means.",
+      "section": "API",
+      "visibility": "public",
+      "status": "planned",
+      "order": 2,
+      "body": ""
+    },
+    {
+      "slug": "api/using-the-api",
+      "title": "Using the API",
+      "description": "The base URL, how requests authenticate, and the live OpenAPI reference.",
+      "section": "API",
+      "visibility": "public",
+      "order": 1,
+      "headings": [
+        "Base URL",
+        "Authentication",
+        "The reference is generated from the code"
+      ],
+      "body": "Flagon is API-first: every capability in the product is an HTTP API operation\nfirst, so anything you can do in the dashboard you can do over the API.\n\n## Base URL\n\nAll requests go to `https://api.flagon.io`. Most resources are org-scoped, for\nexample `GET /orgs/<org>/projects`.\n\n## Authentication\n\nRequests authenticate with a bearer token that carries a set of scopes:\n\n```bash\ncurl https://api.flagon.io/orgs/<org>/projects \\\n  -H \"Authorization: Bearer $FLAGON_TOKEN\"\n```\n\nSee [Authentication and scopes](/docs/api/authentication) for how tokens are\nminted and how scopes gate each operation.\n\n## The reference is generated from the code\n\nThe OpenAPI document is generated from the API's source, never hand-written, so\nit always matches what the API actually does. It is served live at\n`https://api.flagon.io/openapi.json`, and the interactive reference lives at\n[/docs/api](/docs/api).\n\nBecause the spec is generated, new endpoints and fields appear in the reference\nthe moment they ship."
+    },
+    {
+      "slug": "cli/overview",
+      "title": "CLI",
+      "description": "Drive Flagon from your terminal.",
+      "section": "CLI",
+      "visibility": "public",
+      "status": "planned",
+      "body": ""
+    },
+    {
+      "slug": "deploying/deployments",
+      "title": "Deployments",
+      "description": "Ship your projects with deployments and release workflows.",
+      "section": "Deploying",
+      "visibility": "public",
+      "status": "planned",
+      "body": ""
+    },
+    {
+      "slug": "get-started/core-concepts",
+      "title": "Core concepts",
+      "description": "Organizations, projects, members, and how access works across Flagon.",
+      "section": "Get started",
+      "visibility": "public",
+      "order": 2,
+      "headings": [
+        "Organizations",
+        "Projects",
+        "Members and access",
+        "One set of capabilities, three front doors"
+      ],
+      "body": "A quick map of the pieces you will work with. Each has its own page under\n[Platform](/docs/platform/projects); this is the overview.\n\n## Organizations\n\nThe **organization** is the top-level container. Your projects, members, tokens,\nand settings all live inside one, and URLs are org-scoped\n(`app.flagon.io/<org>/...`). Your personal account settings at `/settings` are\nthe one exception.\n\n## Projects\n\nA **project** is a deployable app, the core unit you build on. There is no\nseparate \"app\" layer above it. See [Projects](/docs/platform/projects).\n\n## Members and access\n\nPeople join an organization as **members** with roles, and access is\n**permission-scoped** from day one. A token or an agent can only ever do what the\nperson behind it is allowed to do, and tenant isolation is enforced in the\ndatabase, so one organization can never see another's data.\n\n## One set of capabilities, three front doors\n\nThe dashboard, the [assistant](/docs/ai/assistant), and the\n[API](/docs/api/using-the-api) (and [MCP](/docs/ai/mcp)) all drive the same\npermission-checked operations. Whatever you learn one way carries over to the\nothers."
+    },
+    {
+      "slug": "get-started/introduction",
+      "title": "Introduction",
+      "description": "Flagon is a developer platform for shipping and operating projects, drivable from the UI, an assistant, or the API.",
+      "section": "Get started",
+      "visibility": "public",
+      "headings": [
+        "Three ways to do everything",
+        "What you can do today",
+        "Next steps"
+      ],
+      "body": "Flagon is a **developer platform** for building, shipping, and operating your\nprojects. Use it hosted at [app.flagon.io](https://app.flagon.io), or run the\nwhole thing yourself: it is open source and self-hostable end to end.\n\nThe core unit is a **project**: a deployable app. Every project lives inside an\n**organization**, so your work, your team, and your access all sit in one place.\n\n## Three ways to do everything\n\nAnything you can do in Flagon, you can do three ways, backed by the same\npermission-checked operations:\n\n- **The dashboard.** A fast UI for creating and managing your organization,\n  projects, members, and tokens.\n- **The assistant.** Ask for what you want (\"create a project called billing\")\n  and Flagon does it, or proposes it for you to confirm. The assistant is wired\n  into the platform, so it grows as the product does.\n- **The API and MCP.** Every capability is an HTTP API operation first, so you\n  can script it, build on it, or point an external agent at\n  [mcp.flagon.io](https://mcp.flagon.io).\n\n## What you can do today\n\n- Create and manage **organizations** and invite **members** with scoped roles.\n- Create **projects** and organize your work inside an org.\n- Mint **API tokens** with fine-grained **scopes** and drive the platform\n  programmatically.\n- Ask the **assistant** to do any of the above, and read these docs, on your\n  behalf.\n\nThe suite grows from here: deployments, observability, a package registry, and\nreporting are on the way, and each becomes available across the UI, the\nassistant, and the API as it ships.\n\n## Next steps\n\n- **[Quickstart](/docs/get-started/quickstart)** gets you from nothing to your\n  first project in a few minutes.\n- **[Projects](/docs/platform/projects)** explains the core unit you build on.\n- **[Authentication and scopes](/docs/api/authentication)** covers driving\n  Flagon from the API."
+    },
+    {
+      "slug": "get-started/quickstart",
+      "title": "Quickstart",
+      "description": "Create your organization and first project, and meet the assistant, in a few minutes.",
+      "section": "Get started",
+      "visibility": "public",
+      "order": 1,
+      "headings": [
+        "1. Get an account",
+        "2. Create an organization",
+        "3. Create your first project",
+        "4. Drive it from the API",
+        "Next steps"
+      ],
+      "body": "Get from nothing to a working project in a few minutes. Every step below can be\ndone in the dashboard, by asking the assistant, or against the API. Pick whichever\nfits how you like to work.\n\n## 1. Get an account\n\nUse Flagon hosted at [app.flagon.io](https://app.flagon.io/signup), or run it\nyourself. If you would rather self-host, jump to\n[Self-hosting Flagon](/docs/self-hosting/overview) and come back here.\n\n## 2. Create an organization\n\nEverything in Flagon lives inside an **organization**: your projects, your\nmembers, and your settings. Create one and you land at `app.flagon.io/<org>`.\n\n## 3. Create your first project\n\nA **project** is a deployable app. Create one from your organization's\ndashboard, or just ask the assistant:\n\n> Create a project called `billing-api`.\n\nRead operations run immediately; anything that changes data (like creating a\nproject) is proposed for you to confirm first, so you stay in control.\n\n## 4. Drive it from the API\n\nEverything you just did is an API operation. Mint a token with the scopes you\nneed, then call the API:\n\n```bash\ncurl https://api.flagon.io/orgs/<org>/projects \\\n  -H \"Authorization: Bearer $FLAGON_TOKEN\"\n```\n\nSee [Authentication and scopes](/docs/api/authentication) for how tokens and\nscopes work, and [Using the API](/docs/api/using-the-api) for the full reference.\n\n## Next steps\n\n- **[Core concepts](/docs/get-started/core-concepts)** for the model behind it all.\n- **[Projects](/docs/platform/projects)** for the unit you build on.\n- **[The assistant](/docs/ai/assistant)** to do more of this by asking."
     },
     {
       "slug": "handbook/adding-tools",
@@ -1397,6 +1508,39 @@
       "body": "Welcome aboard. The goal of your first week is simple: get you comfortable, get you set up, and get you shipping something small and real. We're not going to hand you a two-week reading list and disappear. You learn this place by doing things in it, so we'll get you doing things quickly. For how we run onboarding on our end, and what we owe you, see [onboarding](/handbook/onboarding).\n\n## Day one\n\nDay one is mostly about getting the machinery working and meeting the people. Expect it to be low-drama on purpose.\n\n- **Get your tools.** Accounts, access, hardware, the [GitHub org](https://github.com/flagon-io), and the [Discord](https://discord.gg/dtYQs6rPXN) where most of the day-to-day happens. If something's missing or broken, say so; sorting out access is normal first-day friction, not a you problem.\n- **Meet your people.** You'll get introduced to the crew and pointed at who owns what. We're small, so this is short, and there's no org chart to memorize.\n- **Start reading the handbook.** Not all of it, not today. Start with [working here](/handbook/working-here) and the values, then pull up specific pages when you have a specific question. The handbook is the source of truth; when you're unsure how something works, it's the first place to look.\n\nNobody expects you to be productive on day one. If you end the day with a working setup and a rough sense of who's who, that's a good day one.\n\n## Through the week\n\nThe rest of the week is about turning \"set up\" into \"moving.\" The thing we care about most is that you ship something small before the week is out.\n\nIt doesn't matter how small. A doc fix, a tiny bug, a rough edge you noticed and smoothed. The point isn't the size of the change, it's going through the whole loop once: find the thing, make the change, get it reviewed, ship it. That single trip through the pipeline teaches you more about how we work than any onboarding deck could.\n\n<Callout type=\"brand\" title=\"Ship something in week one\">\n  Your first-week win isn't a big feature. It's proof that you can move an idea\n  all the way to shipped here. Small and real beats large and hypothetical.\n</Callout>\n\n## Ask anything\n\nYou will not understand everything in week one. Nobody does, and pretending otherwise just slows you down, so ask. There are no dumb questions in your first month, and honestly not many after that either.\n\nIf you're stuck for more than a little while, reach out instead of grinding alone. Asking early is a sign you're paying attention. We'd much rather answer the \"obvious\" question now than untangle a wrong assumption later.\n\nWhen you spot something confusing, write it down. An unclear handbook or setup doc is a bug, and you're the person best placed to catch it, because you're seeing it fresh. Fix it or flag it. Improving the on-ramp for the next person is real, valued work.\n\n## What we're actually after\n\nMomentum. Not a perfect mental model of the whole system, not every corner of the codebase mapped, just the sense that you can find your footing and start contributing. Everything deeper fills in as you go.\n\nYou were hired because we think you can do the work and we want to do it with you. Week one is just where that starts. If you finish it feeling oriented, a little productive, and comfortable asking questions, you're exactly where you should be."
     },
     {
+      "slug": "observability/overview",
+      "title": "Observability",
+      "description": "Metrics, logs, and traces for the projects you run on Flagon.",
+      "section": "Observability",
+      "visibility": "public",
+      "status": "planned",
+      "body": ""
+    },
+    {
+      "slug": "open-source/contributing",
+      "title": "Contributing",
+      "description": "Flagon is open source. How it is built, how to run it, and how to contribute.",
+      "section": "Open source",
+      "visibility": "public",
+      "headings": [
+        "The repositories",
+        "How it is built",
+        "Run it locally",
+        "Sending a change"
+      ],
+      "body": "Flagon is open source, and built in the open. If you want to fix something, add a\ncapability, or just understand how it works, everything is right here.\n\n## The repositories\n\n- **[flagon-io/flagon](https://github.com/flagon-io/flagon)** the product: the\n  API, the app, and the design system.\n- **[flagon-io/flagon.io](https://github.com/flagon-io/flagon.io)** this site and\n  the company handbook.\n\n## How it is built\n\nTwo principles shape every change:\n\n- **API-first.** Every capability is an API operation first, and the OpenAPI spec\n  is generated from the code. If it is not in the API, it does not exist.\n- **AI-first.** Every capability becomes available to the assistant and the MCP\n  server as it ships, from one shared tool registry.\n\nDocumentation is part of that: docs live in the product repo next to the code\nthey describe, so a change and its docs ship together.\n\n## Run it locally\n\nSee [Self-hosting Flagon](/docs/self-hosting/overview) for bringing the platform\nup on your machine. The short version is one Postgres in Docker and the services\nrun directly.\n\n## Sending a change\n\nWork in small pieces, open a pull request, and keep the docs in the same change\nas the code. The [handbook](/handbook) covers how the team works, reviews, and\nships in more depth."
+    },
+    {
+      "slug": "platform/environments",
+      "title": "Environments",
+      "description": "Promote a project across environments, from development to production.",
+      "section": "Platform",
+      "visibility": "public",
+      "status": "planned",
+      "order": 2,
+      "body": ""
+    },
+    {
       "slug": "platform/members",
       "title": "Members and invitations",
       "description": "Add teammates to an organization, by existing account or by email invitation.",
@@ -1409,6 +1553,15 @@
         "Permissions"
       ],
       "body": "Everything in Flagon happens inside an **organization**, and an organization has\n**members**. Each member has a role that sets what they can do:\n\n- **Owner** - full control, including billing and deleting the organization.\n- **Admin** - manage members, tokens, and settings.\n- **Member** - create and manage projects.\n- **Viewer** - read-only access.\n\nOwners and admins manage the roster from **Settings -> Members**.\n\n## Adding people\n\nYou add people by email or username, and Flagon does the right thing for each:\n\n- If the person **already has a Flagon account**, they are added to the\n  organization straight away and see it the next time they load the app.\n- If the email **has no account yet**, Flagon sends them an **invitation**: an\n  email with a link to register and join in one step.\n\nYou can enter several people at once and give each their own role.\n\n## How invitations work\n\nA pending invitation is addressed to an email and carries the role you chose. It\nshows up under the **Pending invitations** tab until it is accepted, and an owner\nor admin can revoke it at any time. Invitations expire after seven days.\n\nWhen the invited person opens the link, they land on a page that already knows\nwhich organization invited them. If they do not have an account, they set a name,\nusername, and password and are dropped straight into the organization. If they\nare already signed in with the invited email, they just confirm.\n\nThe invitation link is proof that the person controls that mailbox, so accepting\nit **doubles as email verification** - there is no separate code to enter. The\nemail on the new account is fixed to the address that was invited.\n\n## Permissions\n\nInviting and revoking require the `write:org` scope (owners and admins). Listing\nmembers and pending invitations requires `read:org`. As everywhere in Flagon, the\nagent and API act with your identity, so they can only invite people if you\ncould, and tenant isolation is enforced in the database."
+    },
+    {
+      "slug": "platform/organizations",
+      "title": "Organizations",
+      "description": "Organizations own everything in Flagon: projects, members, tokens, and settings.",
+      "section": "Platform",
+      "visibility": "public",
+      "status": "planned",
+      "body": ""
     },
     {
       "slug": "platform/projects",
@@ -1424,16 +1577,17 @@
       "body": "A **project** is the core unit in Flagon: a deployable app. There is no separate\n\"app\" layer above it, following the Vercel model. Every project belongs to an\n**organization**, and its URLs are org-scoped: `app.flagon.io/<org>/<project>`.\n\n## Creating a project\n\nYou can create a project three ways, and they all go through the same API\noperation:\n\n- In the UI, from the organization's dashboard.\n- By asking the in-product assistant (\"create a project called billing-api\").\n- Directly against the API, or through an external agent over MCP.\n\nBecause every path calls the same permission-checked API operation, a project\ncreated by the agent is identical to one created by hand.\n\n## Ownership and access\n\nProjects inherit their organization's membership and roles. Access is\npermission-scoped from day one: a token or agent can only act on a project if its\nscope allows it, and tenant isolation is enforced in the database with row-level\nsecurity, so one organization can never see another's projects."
     },
     {
-      "slug": "platform/what-is-flagon",
-      "title": "What is Flagon",
-      "description": "Flagon is a self-hostable developer platform built API-first and AI-first.",
-      "section": "Platform",
+      "slug": "self-hosting/overview",
+      "title": "Self-hosting Flagon",
+      "description": "Run the whole platform yourself. Flagon is open source and self-hostable end to end.",
+      "section": "Self hosting",
       "visibility": "public",
       "headings": [
-        "Three principles",
-        "The suite"
+        "What you run",
+        "Running locally",
+        "Going further"
       ],
-      "body": "Flagon is a self-hostable **developer platform**. The core unit is a **Project**:\na deployable app, in the Vercel model, with no separate \"app\" layer. Everything\noperates inside an **organization**, so URLs look like `app.flagon.io/<org>/...`,\nwith personal account settings at `/settings` as the one exception.\n\n## Three principles\n\nFlagon is built on three principles that shape everything in the product.\n\n**API-first.** Every capability is an API operation first. The OpenAPI spec is\ngenerated from the code, never hand-written, so if it isn't in the API, it\ndoesn't exist.\n\n**AI-first.** Anything you can do in the UI you can do by asking the AI, and vice\nversa. The assistant is wired in at the root, so every new capability becomes\navailable to it as it ships.\n\n**AI, MCP, and API stay in lockstep.** The in-product agent, the MCP server at\n`mcp.flagon.io`, and the HTTP API all expose the same operations from one shared\ntool registry. Three front doors, one set of capabilities.\n\n## The suite\n\nThe product suite is intentionally broad and grows over time: projects and\ndeployments today, with observability, a package registry, reporting and DORA\nmetrics, and repository insights over time."
+      "body": "Flagon is open source and runs entirely on your own infrastructure. Nothing about\nthe platform requires the hosted service.\n\n## What you run\n\nFlagon is a few services around one Postgres database:\n\n- **`app`** the web UI and gateway.\n- **`api`** the source of truth: it owns all data and logic and hosts the\n  assistant and the MCP server.\n- **`packages/ui`** the shared design system.\n\nThe API enforces tenant isolation in Postgres itself, so your data stays\nseparated even if application code forgets to scope a query.\n\n## Running locally\n\nOne Postgres instance in Docker, with the services run directly:\n\n```sh\ndocker compose up -d postgres\ncd api && go run ./cmd/flagon serve\ncd app && npm install && npm run dev\n```\n\nThat is enough to bring the platform up with sane local defaults. The assistant\nworks locally with no keys against an offline mock, and points at a real model\nonce you configure one.\n\n## Going further\n\nFull deployment guidance (managed Postgres, secrets, running the services in\nproduction) is being written. For now, the source and its setup live in the\n[repository](https://github.com/flagon-io/flagon); see\n[Contributing](/docs/open-source/contributing) to get oriented."
     }
   ]
 }

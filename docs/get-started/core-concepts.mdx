@@ -1,0 +1,34 @@
+---
+title: Core concepts
+description: Organizations, projects, members, and how access works across Flagon.
+order: 2
+---
+
+A quick map of the pieces you will work with. Each has its own page under
+[Platform](/docs/platform/projects); this is the overview.
+
+## Organizations
+
+The **organization** is the top-level container. Your projects, members, tokens,
+and settings all live inside one, and URLs are org-scoped
+(`app.flagon.io/<org>/...`). Your personal account settings at `/settings` are
+the one exception.
+
+## Projects
+
+A **project** is a deployable app, the core unit you build on. There is no
+separate "app" layer above it. See [Projects](/docs/platform/projects).
+
+## Members and access
+
+People join an organization as **members** with roles, and access is
+**permission-scoped** from day one. A token or an agent can only ever do what the
+person behind it is allowed to do, and tenant isolation is enforced in the
+database, so one organization can never see another's data.
+
+## One set of capabilities, three front doors
+
+The dashboard, the [assistant](/docs/ai/assistant), and the
+[API](/docs/api/using-the-api) (and [MCP](/docs/ai/mcp)) all drive the same
+permission-checked operations. Whatever you learn one way carries over to the
+others.

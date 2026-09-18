@@ -1,0 +1,41 @@
+---
+title: Self-hosting Flagon
+description: Run the whole platform yourself. Flagon is open source and self-hostable end to end.
+order: 0
+---
+
+Flagon is open source and runs entirely on your own infrastructure. Nothing about
+the platform requires the hosted service.
+
+## What you run
+
+Flagon is a few services around one Postgres database:
+
+- **`app`** the web UI and gateway.
+- **`api`** the source of truth: it owns all data and logic and hosts the
+  assistant and the MCP server.
+- **`packages/ui`** the shared design system.
+
+The API enforces tenant isolation in Postgres itself, so your data stays
+separated even if application code forgets to scope a query.
+
+## Running locally
+
+One Postgres instance in Docker, with the services run directly:
+
+```sh
+docker compose up -d postgres
+cd api && go run ./cmd/flagon serve
+cd app && npm install && npm run dev
+```
+
+That is enough to bring the platform up with sane local defaults. The assistant
+works locally with no keys against an offline mock, and points at a real model
+once you configure one.
+
+## Going further
+
+Full deployment guidance (managed Postgres, secrets, running the services in
+production) is being written. For now, the source and its setup live in the
+[repository](https://github.com/flagon-io/flagon); see
+[Contributing](/docs/open-source/contributing) to get oriented.

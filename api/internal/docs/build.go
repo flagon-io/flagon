@@ -58,17 +58,24 @@ func BuildFromDir(dir string) (Corpus, error) {
 func docFrom(p string, fm map[string]string, body string) Doc {
 	slug := strings.TrimSuffix(filepath.ToSlash(p), filepath.Ext(p))
 
-	section := fm["section"]
+	section := strings.TrimSpace(fm["section"])
 	if section == "" {
-		// Default the section to the top-level folder under docs/.
+		// Default the section to a humanized label derived from the top-level
+		// directory, so the folder name is the category unless a page overrides
+		// it (docs/get-started/x.mdx -> "Get started", docs/api/y.mdx -> "API").
 		if i := strings.Index(slug, "/"); i > 0 {
-			section = slug[:i]
+			section = humanize(slug[:i])
 		}
 	}
 
 	visibility := Visibility(strings.ToLower(strings.TrimSpace(fm["visibility"])))
 	if visibility != Internal {
 		visibility = Public
+	}
+
+	status := strings.ToLower(strings.TrimSpace(fm["status"]))
+	if status != "planned" {
+		status = ""
 	}
 
 	order := 0
@@ -82,10 +89,38 @@ func docFrom(p string, fm map[string]string, body string) Doc {
 		Description: strings.TrimSpace(fm["description"]),
 		Section:     section,
 		Visibility:  visibility,
+		Status:      status,
 		Order:       order,
 		Headings:    headings(body),
 		Body:        strings.TrimSpace(body),
 	}
+}
+
+// acronyms are directory words rendered upper-case in a humanized section label.
+var acronyms = map[string]string{
+	"api": "API", "ai": "AI", "mcp": "MCP", "cli": "CLI", "sdk": "SDK",
+	"ci": "CI", "cd": "CD", "ui": "UI", "dora": "DORA", "rls": "RLS",
+}
+
+// humanize turns a directory name into a display label: dashes become spaces,
+// the first word is capitalized (sentence case), and known acronyms are upper-
+// cased. "get-started" -> "Get started"; "api" -> "API"; "self-hosting" ->
+// "Self hosting". A page's own `section:` frontmatter always wins over this.
+func humanize(dir string) string {
+	words := strings.Split(dir, "-")
+	for i, w := range words {
+		if w == "" {
+			continue
+		}
+		if a, ok := acronyms[strings.ToLower(w)]; ok {
+			words[i] = a
+			continue
+		}
+		if i == 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // splitFrontmatter separates a leading YAML frontmatter block (fenced by ---)

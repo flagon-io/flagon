@@ -1,0 +1,31 @@
+---
+title: The assistant
+description: Operate Flagon by asking. Reads run automatically; changes are proposed for you to confirm.
+order: 0
+---
+
+Flagon is AI-first: anything you can do in the dashboard, you can do by asking
+the assistant, and anything the assistant can do, you can also do yourself. It is
+built into the platform, not bolted on, so it gains new abilities as the product
+grows.
+
+## How it behaves
+
+- **It acts as you.** The assistant runs operations with your identity and your
+  organization's scope, so it can never do anything you could not do yourself.
+- **Reads run, changes are proposed.** Read-only actions happen immediately.
+  Anything that changes data is returned as a proposed action for you to confirm
+  first, so you stay in control.
+- **It is scoped to Flagon.** The assistant helps you operate Flagon. It is not a
+  general chatbot, and it will steer back to what it can actually do.
+- **It can read the docs.** Ask it how something works and it searches this
+  documentation to answer, rather than guessing.
+
+## Model choice and cost
+
+The model is configuration, not code. Flagon ships with a hosted default and can
+point at any OpenAI-compatible endpoint or a self-hosted model, so you can run
+your own for a flat cost. Usage is metered per organization so plans can be
+enforced.
+
+See [MCP server](/docs/ai/mcp) to give the same abilities to an external agent.

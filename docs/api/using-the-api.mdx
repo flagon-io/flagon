@@ -1,0 +1,35 @@
+---
+title: Using the API
+description: The base URL, how requests authenticate, and the live OpenAPI reference.
+order: 1
+---
+
+Flagon is API-first: every capability in the product is an HTTP API operation
+first, so anything you can do in the dashboard you can do over the API.
+
+## Base URL
+
+All requests go to `https://api.flagon.io`. Most resources are org-scoped, for
+example `GET /orgs/<org>/projects`.
+
+## Authentication
+
+Requests authenticate with a bearer token that carries a set of scopes:
+
+```bash
+curl https://api.flagon.io/orgs/<org>/projects \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+See [Authentication and scopes](/docs/api/authentication) for how tokens are
+minted and how scopes gate each operation.
+
+## The reference is generated from the code
+
+The OpenAPI document is generated from the API's source, never hand-written, so
+it always matches what the API actually does. It is served live at
+`https://api.flagon.io/openapi.json`, and the interactive reference lives at
+[/docs/api](/docs/api).
+
+Because the spec is generated, new endpoints and fields appear in the reference
+the moment they ship.

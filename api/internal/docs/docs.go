@@ -34,10 +34,17 @@ type Doc struct {
 	Description string     `json:"description,omitempty"`
 	Section     string     `json:"section,omitempty"`
 	Visibility  Visibility `json:"visibility"`
-	Order       int        `json:"order,omitempty"`
-	Headings    []string   `json:"headings,omitempty"`
-	Body        string     `json:"body"`
+	// Status is empty for a published page, or "planned" for a placeholder we
+	// intend to write: the structure appears in the nav and grid, but the page
+	// renders a "not written yet" state instead of an empty article.
+	Status   string   `json:"status,omitempty"`
+	Order    int      `json:"order,omitempty"`
+	Headings []string `json:"headings,omitempty"`
+	Body     string   `json:"body"`
 }
+
+// Planned reports whether the page is a placeholder without real content yet.
+func (d Doc) Planned() bool { return d.Status == "planned" }
 
 // Meta is a Doc without its body: the shape used for listings and search results,
 // so callers that only need to browse never pay to move full pages around.
@@ -47,6 +54,7 @@ type Meta struct {
 	Description string     `json:"description,omitempty"`
 	Section     string     `json:"section,omitempty"`
 	Visibility  Visibility `json:"visibility"`
+	Status      string     `json:"status,omitempty"`
 	Order       int        `json:"order,omitempty"`
 }
 
@@ -58,6 +66,7 @@ func (d Doc) Meta() Meta {
 		Description: d.Description,
 		Section:     d.Section,
 		Visibility:  d.Visibility,
+		Status:      d.Status,
 		Order:       d.Order,
 	}
 }
