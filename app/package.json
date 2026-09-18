@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "registry": "node scripts/build-registry.mjs",
-    "db:migrate": "node --env-file-if-exists=.env.local scripts/rename-auth-tables.mjs && npx @better-auth/cli@latest migrate --yes && node --env-file-if-exists=.env.local scripts/migrate-user-emails.mjs",
+    "db:migrate": "node --env-file-if-exists=.env.local scripts/rename-auth-tables.mjs && node --env-file-if-exists=.env.local --import tsx scripts/auth-migrate.ts && node --env-file-if-exists=.env.local scripts/migrate-user-emails.mjs",
     "db:seed": "node --env-file-if-exists=.env.local scripts/seed.mjs",
     "restore-user": "node --env-file-if-exists=.env.local scripts/restore-user.mjs"
   },
@@ -42,6 +42,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

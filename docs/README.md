@@ -25,13 +25,18 @@ Every doc is a Markdown/MDX file with YAML frontmatter. The fields:
 | --- | --- | --- |
 | `title` | yes | Human title. A file with no `title` is ignored (so this README is skipped). |
 | `description` | no | One-line summary, weighted heavily in search and shown in listings. |
-| `section` | no | Grouping label, and the column a page appears under in the docs site's "All docs" grid. **Defaults to a humanized version of the top-level directory** (`get-started/` → `Get started`, `api/` → `API`, `self-hosting/` → `Self hosting`), so the folder is the category unless you set this. Only override when the folder name isn't the label you want. Grouping is case-insensitive. |
+| `section` | no | Grouping label, and the column a page appears under in the docs site's "All docs" grid. **Defaults to a humanized version of the page's immediate parent directory** (`get-started/` → `Get started`, `api/` → `API`, `handbook/hiring/` → `Hiring`), so the folder is the category unless you set this. Only override when the folder name isn't the label you want (e.g. `Pay & perks`). Grouping is case-insensitive. |
 | `status` | no | `published` (default) or `planned`. A `planned` page is a placeholder: it shows in the nav and grid so the structure is visible, but renders a "not written yet" state instead of an empty article. Give it a `title` and `description` and leave the body empty until you write it. |
 | `visibility` | no | `public` (default) or `internal`. `internal` docs never leave the org: they are excluded from the public HTTP endpoints and the public MCP, but the in-product agent can still read them. |
 | `order` | no | Sort order within a section (ascending). Defaults to `0`. |
 
-The **slug** is the path under `docs/` without the extension: `docs/platform/projects.mdx`
-is `platform/projects`.
+The **slug** (a page's URL) is `<top-level-section>/<filename>`, without the
+extension. **Intermediate directories are dropped**, so you can group pages into
+category subfolders for tidiness without changing their URLs:
+`docs/get-started/quickstart.mdx` is `get-started/quickstart`, and
+`docs/handbook/how-we-work/communication.mdx` is still `handbook/communication`.
+Leaf filenames must therefore be unique within a top-level section (`make docs`
+fails on a collision).
 
 ## The rule for what lives here
 

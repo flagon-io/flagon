@@ -1,47 +1,53 @@
 ---
 title: Introduction
-description: Flagon is a developer platform for shipping and operating projects, drivable from the UI, an assistant, or the API.
+description: Flagon is a developer platform for operating your whole system, from the dashboard, the API, or an AI assistant.
 order: 0
 ---
 
-Flagon is a **developer platform** for building, shipping, and operating your
-projects. Use it hosted at [app.flagon.io](https://app.flagon.io), or run the
-whole thing yourself: it is open source and self-hostable end to end.
+Flagon is a **developer platform** for operating your whole system: a single
+place to bring your projects and tools together, understand what's happening
+across them, and act on it, from the dashboard, the API, or an AI assistant. It's
+powerful with AI, and great without it.
 
-The core unit is a **project**: a deployable app. Every project lives inside an
-**organization**, so your work, your team, and your access all sit in one place.
+Use it hosted at [app.flagon.io](https://app.flagon.io), or run the whole thing
+yourself. It is open source and self-hostable end to end.
 
-## Three ways to do everything
+## The idea
 
-Anything you can do in Flagon, you can do three ways, backed by the same
-permission-checked operations:
+Your work is spread across a dozen tools. Flagon's job is to pull that together
+into one system you can operate and reason about, with AI wired through all of it.
+The point is not another dashboard to check; it's to ask
+_"what changed across everything this week?"_ and get a real answer, grounded in
+your actual data.
 
-- **The dashboard.** A fast UI for creating and managing your organization,
-  projects, members, and tokens.
-- **The assistant.** Ask for what you want ("create a project called billing")
-  and Flagon does it, or proposes it for you to confirm. The assistant is wired
-  into the platform, so it grows as the product does.
-- **The API and MCP.** Every capability is an HTTP API operation first, so you
-  can script it, build on it, or point an external agent at
-  [mcp.flagon.io](https://mcp.flagon.io).
+Everything runs on a few ideas:
+
+- **One place, many surfaces.** Anything you can do in the dashboard you can do by
+  asking the [assistant](/docs/ai/assistant), or over the
+  [API](/docs/api/using-the-api) and [MCP](/docs/ai/mcp). Same operations, same
+  permissions, three front doors.
+- **AI over your real data, safely.** The assistant acts as you, with your scopes,
+  and changes are proposed for you to confirm. AI is a first-class way to operate
+  Flagon, not a bolt-on.
+- **Open and yours.** Self-hostable, permission-scoped, and built in the open.
 
 ## What you can do today
 
 - Create and manage **organizations** and invite **members** with scoped roles.
-- Create **projects** and organize your work inside an org.
-- Mint **API tokens** with fine-grained **scopes** and drive the platform
-  programmatically.
-- Ask the **assistant** to do any of the above, and read these docs, on your
-  behalf.
+- Create **projects** to organize the systems you operate.
+- Mint **API tokens** with fine-grained **scopes**, and drive everything
+  programmatically or over MCP.
+- Ask the **assistant** to do any of the above, and to read these docs, for you.
 
-The suite grows from here: deployments, observability, a package registry, and
-reporting are on the way, and each becomes available across the UI, the
-assistant, and the API as it ships.
+## Where it's going
+
+Flagon is growing into the hub for your whole engineering system: connected
+context across your tools, metrics and insights, agents and orchestration with
+humans in the loop, and the governance to run AI safely over real data. Those
+areas are marked _Soon_ in the navigation as they land.
 
 ## Next steps
 
-- **[Quickstart](/docs/get-started/quickstart)** gets you from nothing to your
-  first project in a few minutes.
-- **[Projects](/docs/platform/projects)** explains the core unit you build on.
-- **[Authentication and scopes](/docs/api/authentication)** covers driving
-  Flagon from the API.
+- **[Quickstart](/docs/get-started/quickstart)** to get your first project going.
+- **[Core concepts](/docs/get-started/core-concepts)** for the model behind it all.
+- **[The assistant](/docs/ai/assistant)** to start operating Flagon by asking.

@@ -21,8 +21,10 @@ const steps = [
   // Rename BetterAuth's default singular tables to our plural convention, if
   // they still exist under the old names. No-op once renamed. Must run first.
   "node scripts/rename-auth-tables.mjs",
-  // BetterAuth's own core tables (users, sessions, accounts, verifications).
-  "npx @better-auth/cli@latest migrate --yes",
+  // BetterAuth's own tables (users, sessions, accounts, verifications, two_factors,
+  // rateLimit, ...), migrated with the INSTALLED better-auth version via its
+  // programmatic engine - not the deprecated, version-lagging @better-auth/cli.
+  "node --import tsx scripts/auth-migrate.ts",
   // Our custom migrations (currently the user_emails table). Idempotent.
   "node scripts/migrate-user-emails.mjs",
 ];

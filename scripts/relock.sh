@@ -18,6 +18,11 @@
 set -eu
 cd "$(dirname "$0")/.."
 
+# Stop Git Bash / MSYS from rewriting the container-side paths (/repo -> C:\...).
+# Harmless no-ops on Linux/macOS shells.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL="*"
+
 docker run --rm -v "$PWD:/repo" -w /repo node:24 sh -c '
   set -eu
   mkdir -p /work/app

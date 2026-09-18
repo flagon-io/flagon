@@ -51,21 +51,41 @@ func BuildFromDir(dir string) (Corpus, error) {
 	}
 
 	sort.SliceStable(docsOut, func(i, j int) bool { return docsOut[i].Slug < docsOut[j].Slug })
+
+	// Slugs must be unique. Because intermediate directories are dropped from the
+	// slug, two files could collide (docs/a/x.mdx and docs/a/sub/x.mdx); fail
+	// loudly rather than silently drop one.
+	seen := map[string]bool{}
+	for _, d := range docsOut {
+		if seen[d.Slug] {
+			return Corpus{}, fmt.Errorf("duplicate doc slug %q: leaf filenames must be unique within a top-level section", d.Slug)
+		}
+		seen[d.Slug] = true
+	}
 	return Corpus{Docs: docsOut}, nil
 }
 
 // docFrom assembles a Doc from a file's path, frontmatter, and body.
 func docFrom(p string, fm map[string]string, body string) Doc {
-	slug := strings.TrimSuffix(filepath.ToSlash(p), filepath.Ext(p))
+	rel := strings.TrimSuffix(filepath.ToSlash(p), filepath.Ext(p))
+	parts := strings.Split(rel, "/")
+
+	// The slug keeps <top-section>/<leaf> and drops intermediate (category)
+	// directories, so a page can be grouped into a subfolder for tidiness without
+	// changing its URL: docs/handbook/how-we-work/communication.mdx still serves
+	// as handbook/communication.
+	slug := rel
+	if len(parts) > 2 {
+		slug = parts[0] + "/" + parts[len(parts)-1]
+	}
 
 	section := strings.TrimSpace(fm["section"])
-	if section == "" {
-		// Default the section to a humanized label derived from the top-level
-		// directory, so the folder name is the category unless a page overrides
-		// it (docs/get-started/x.mdx -> "Get started", docs/api/y.mdx -> "API").
-		if i := strings.Index(slug, "/"); i > 0 {
-			section = humanize(slug[:i])
-		}
+	if section == "" && len(parts) >= 2 {
+		// Default the category to the immediate parent directory, humanized, so
+		// the folder is the category unless a page overrides it
+		// (docs/get-started/x.mdx -> "Get started"; docs/handbook/hiring/y.mdx ->
+		// "Hiring").
+		section = humanize(parts[len(parts)-2])
 	}
 
 	visibility := Visibility(strings.ToLower(strings.TrimSpace(fm["visibility"])))
