@@ -24,9 +24,14 @@ const (
 	ScopeAdminOrg Scope = "admin:org" // create and leave orgs (implies write:org)
 
 	// Projects.
-	ScopeReadProject  Scope = "read:project"  // read projects and collaborators
+	ScopeReadProject  Scope = "read:project"  // read projects, collaborators, teams and owners
 	ScopeWriteProject Scope = "write:project" // create and update projects (implies read:project)
-	ScopeAdminProject Scope = "admin:project" // delete/restore and manage collaborators (implies write:project)
+	ScopeAdminProject Scope = "admin:project" // delete/restore, manage collaborators/teams/owners (implies write:project)
+
+	// Teams.
+	ScopeReadTeam  Scope = "read:team"  // read teams and their members
+	ScopeWriteTeam Scope = "write:team" // create/edit teams and manage membership (implies read:team)
+	ScopeAdminTeam Scope = "admin:team" // delete teams (implies write:team)
 
 	// Notifications.
 	ScopeNotifications Scope = "notifications" // read and manage notifications
@@ -39,6 +44,7 @@ var AllScopes = []Scope{
 	ScopeReadUser, ScopeUser, ScopeAdminUser,
 	ScopeReadOrg, ScopeWriteOrg, ScopeAdminOrg,
 	ScopeReadProject, ScopeWriteProject, ScopeAdminProject,
+	ScopeReadTeam, ScopeWriteTeam, ScopeAdminTeam,
 	ScopeNotifications,
 }
 
@@ -52,6 +58,8 @@ var scopeImplies = map[Scope][]Scope{
 	ScopeAdminOrg:     {ScopeWriteOrg, ScopeReadOrg},
 	ScopeWriteProject: {ScopeReadProject},
 	ScopeAdminProject: {ScopeWriteProject, ScopeReadProject},
+	ScopeWriteTeam:    {ScopeReadTeam},
+	ScopeAdminTeam:    {ScopeWriteTeam, ScopeReadTeam},
 }
 
 // operationScopes maps each token-reachable operation to the scope it requires.
@@ -66,11 +74,13 @@ var operationScopes = map[string]Scope{
 	// token-reachable API operation it maps here to ScopeAdminUser.
 	"list-orgs":         ScopeReadOrg,
 	"list-members":      ScopeReadOrg,
+	"query-members":     ScopeReadOrg,
 	"update-org":        ScopeWriteOrg,
 	"add-member":        ScopeWriteOrg,
 	"set-member-role":   ScopeWriteOrg,
 	"remove-member":     ScopeWriteOrg,
 	"list-invitations":  ScopeReadOrg,
+	"query-invitations": ScopeReadOrg,
 	"list-audit-log":    ScopeReadOrg,
 	"get-audit-config":  ScopeReadOrg,
 	"set-audit-config":  ScopeWriteOrg,
@@ -83,15 +93,41 @@ var operationScopes = map[string]Scope{
 	"create-org":                 ScopeAdminOrg,
 	"leave-org":                  ScopeAdminOrg,
 	"list-projects":              ScopeReadProject,
+	"query-projects":             ScopeReadProject,
+	"list-deleted-projects":      ScopeReadProject,
+	"query-deleted-projects":     ScopeReadProject,
 	"get-project":                ScopeReadProject,
 	"create-project":             ScopeWriteProject,
 	"update-project":             ScopeWriteProject,
 	"delete-project":             ScopeAdminProject,
 	"restore-project":            ScopeAdminProject,
 	"list-project-members":       ScopeReadProject,
+	"query-project-members":      ScopeReadProject,
 	"add-project-member":         ScopeAdminProject,
 	"set-project-member-role":    ScopeAdminProject,
 	"remove-project-member":      ScopeAdminProject,
+	"list-project-teams":         ScopeReadProject,
+	"query-project-teams":        ScopeReadProject,
+	"add-project-team":           ScopeAdminProject,
+	"set-project-team-role":      ScopeAdminProject,
+	"remove-project-team":        ScopeAdminProject,
+	"list-project-owners":        ScopeReadProject,
+	"query-project-owners":       ScopeReadProject,
+	"add-project-owner":          ScopeAdminProject,
+	"remove-project-owner":       ScopeAdminProject,
+	"list-teams":                 ScopeReadTeam,
+	"query-teams":                ScopeReadTeam,
+	"get-team":                   ScopeReadTeam,
+	"create-team":                ScopeWriteTeam,
+	"update-team":                ScopeWriteTeam,
+	"delete-team":                ScopeAdminTeam,
+	"list-team-members":          ScopeReadTeam,
+	"query-team-members":         ScopeReadTeam,
+	"list-team-projects":         ScopeReadTeam,
+	"query-team-projects":        ScopeReadTeam,
+	"add-team-member":            ScopeWriteTeam,
+	"set-team-member-role":       ScopeWriteTeam,
+	"remove-team-member":         ScopeWriteTeam,
 	"list-notifications":         ScopeNotifications,
 	"notifications-unread-count": ScopeNotifications,
 	"read-notification":          ScopeNotifications,

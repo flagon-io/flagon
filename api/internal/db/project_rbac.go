@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/flagon-io/flagon/api/internal/audit"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // Project (repo-style) roles, lowest privilege first. The ladder is intentionally
@@ -92,11 +94,15 @@ const (
 	ProjCapView   ProjectCapability = "project:view"   // see the project and its collaborators (read+)
 	ProjCapWrite  ProjectCapability = "project:write"  // edit project metadata (write+)
 	ProjCapManage ProjectCapability = "project:manage" // manage project settings/environments (maintain+)
-	ProjCapAdmin  ProjectCapability = "project:admin"  // delete/restore and manage collaborators (admin)
+	ProjCapAdmin  ProjectCapability = "project:admin"  // manage collaborators/teams (admin+)
+	ProjCapOwn    ProjectCapability = "project:own"    // delete/restore, transfer, manage owners (owner tier)
 )
 
-// ProjectCan reports whether an effective project role holds a capability. The
-// single source of truth for "who can do what" on a project.
+// ProjectCan reports whether an effective project ROLE (the read..admin ladder)
+// holds a capability. Ownership is a separate tier above the ladder and is not
+// expressible as a role, so ProjCapOwn is never satisfied by a role alone - use
+// projectAuthority.can, which folds ownership in. The single source of truth for
+// "who can do what" on a project by role.
 func ProjectCan(role string, cap ProjectCapability) bool {
 	rank := projectRoleRank(role)
 	switch cap {
@@ -109,8 +115,36 @@ func ProjectCan(role string, cap ProjectCapability) bool {
 	case ProjCapAdmin:
 		return rank >= projectRoleRank(ProjectRoleAdmin)
 	default:
+		// ProjCapOwn (and any unknown capability) needs ownership, not a role.
 		return false
 	}
+}
+
+// projectAuthority is a user's resolved authority on a project: their effective
+// role on the read..admin ladder (the higher of the org floor, their explicit
+// user grant, and any team grant) plus whether they are an OWNER. Ownership is a
+// separate relation a tier above admin (held directly, via a team, or implicitly
+// by every org owner/admin) and grants every project capability.
+type projectAuthority struct {
+	Role  string
+	Owner bool
+}
+
+// can reports whether the authority holds a capability. An owner holds every
+// capability (including ProjCapOwn); otherwise the role ladder decides.
+func (a projectAuthority) can(cap ProjectCapability) bool {
+	if a.Owner {
+		return true
+	}
+	return ProjectCan(a.Role, cap)
+}
+
+// maxProjectRole returns the higher-ranked of two project roles ("" ranks 0).
+func maxProjectRole(a, b string) string {
+	if projectRoleRank(b) > projectRoleRank(a) {
+		return b
+	}
+	return a
 }
 
 // Project collaborator errors.
@@ -134,8 +168,9 @@ type ProjectMember struct {
 // ListProjectMembers returns a project's explicit collaborator grants. Any org
 // member may view them (the SECURITY DEFINER helper gates on org membership).
 // Errors ErrNotMember / ErrProjectNotFound if the caller can't see the project.
-func (d *DB) ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string) ([]ProjectMember, error) {
+func (d *DB) ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]ProjectMember, string, error) {
 	var members []ProjectMember
+	var next string
 	err := d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
 		orgID, _, err := resolveOrg(ctx, tx, orgSlug)
 		if err != nil {
@@ -144,9 +179,13 @@ func (d *DB) ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSl
 		if _, err := resolveProject(ctx, tx, orgID, projectSlug); err != nil {
 			return err
 		}
+		cur, err := cursorArg(q, 2)
+		if err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx,
 			`SELECT user_id, name, email, username, avatar_url, role, created_at
-			 FROM flagon.project_members($1, $2, $3)`, actorID, orgSlug, projectSlug)
+			 FROM flagon.project_members($1, $2, $3, $4, $5, $6)`, actorID, orgSlug, projectSlug, q.Q, q.Clamp()+1, cur)
 		if err != nil {
 			return err
 		}
@@ -159,9 +198,15 @@ func (d *DB) ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSl
 			}
 			members = append(members, m)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		members, next = paginate.Slice(members, q.Clamp(), func(m ProjectMember) []string {
+			return []string{strings.ToLower(m.Email), m.UserID}
+		})
+		return nil
 	})
-	return members, err
+	return members, next, err
 }
 
 // AddProjectMember grants an existing org member a role on a project. The actor
@@ -289,7 +334,8 @@ func orgBasePermission(ctx context.Context, tx pgx.Tx, orgID string) (string, er
 }
 
 // effectiveProjectRole computes the actor's effective role on a project from
-// their org role, the org's base permission, and any explicit grant.
+// their org role, the org's base permission, and any explicit grant. This is the
+// role-ladder view only (no ownership); most callers want resolveProjectAuthority.
 func effectiveProjectRole(ctx context.Context, tx pgx.Tx, orgID, projectID, userID string) (string, error) {
 	orgRole, err := memberRole(ctx, tx, orgID, userID)
 	if err != nil {
@@ -306,25 +352,85 @@ func effectiveProjectRole(ctx context.Context, tx pgx.Tx, orgID, projectID, user
 	return EffectiveProjectRole(orgRole, base, grant), nil
 }
 
+// projectTeamGrant returns the highest role a user is granted on a project through
+// any team they belong to ("" if none).
+func projectTeamGrant(ctx context.Context, tx pgx.Tx, projectID, userID string) (string, error) {
+	var role *string
+	if err := tx.QueryRow(ctx, `SELECT flagon.project_team_role($1, $2)`, projectID, userID).Scan(&role); err != nil {
+		return "", err
+	}
+	if role == nil {
+		return "", nil
+	}
+	return *role, nil
+}
+
+// userOwnsProject reports whether a user owns a project directly or via a team.
+func userOwnsProject(ctx context.Context, tx pgx.Tx, projectID, userID string) (bool, error) {
+	var owns bool
+	err := tx.QueryRow(ctx, `SELECT flagon.user_owns_project($1, $2)`, projectID, userID).Scan(&owns)
+	return owns, err
+}
+
+// resolveProjectAuthority computes the actor's full authority on a project: the
+// effective role (max of the org floor, their user grant, and any team grant) plus
+// ownership. Org owners/admins always resolve to owner-level authority, so the org
+// is never locked out of its own project.
+func resolveProjectAuthority(ctx context.Context, tx pgx.Tx, orgID, projectID, userID string) (projectAuthority, error) {
+	orgRole, err := memberRole(ctx, tx, orgID, userID)
+	if err != nil {
+		return projectAuthority{}, err
+	}
+	if orgRole == RoleOwner || orgRole == RoleAdmin {
+		return projectAuthority{Role: ProjectRoleAdmin, Owner: true}, nil
+	}
+	base, err := orgBasePermission(ctx, tx, orgID)
+	if err != nil {
+		return projectAuthority{}, err
+	}
+	userGrant, err := projectGrant(ctx, tx, projectID, userID)
+	if err != nil {
+		return projectAuthority{}, err
+	}
+	teamGrant, err := projectTeamGrant(ctx, tx, projectID, userID)
+	if err != nil {
+		return projectAuthority{}, err
+	}
+	role := maxProjectRole(impliedProjectRole(orgRole, base), maxProjectRole(userGrant, teamGrant))
+	owns, err := userOwnsProject(ctx, tx, projectID, userID)
+	if err != nil {
+		return projectAuthority{}, err
+	}
+	return projectAuthority{Role: role, Owner: owns}, nil
+}
+
 // resolveOrgProjectAsAdmin resolves the org + live project and asserts the actor
-// is an effective project admin. The shared front half of every grant mutation.
+// can administer the project's access (effective admin or owner). The shared front
+// half of every access-grant mutation.
 func (d *DB) resolveOrgProjectAsAdmin(ctx context.Context, tx pgx.Tx, actorID, orgSlug, projectSlug string) (orgID, projectID string, err error) {
+	orgID, projectID, _, err = d.resolveOrgProjectAuthority(ctx, tx, actorID, orgSlug, projectSlug, ProjCapAdmin)
+	return orgID, projectID, err
+}
+
+// resolveOrgProjectAuthority resolves the org + live project, computes the actor's
+// authority, and asserts it holds cap. Errors ErrForbidden otherwise.
+func (d *DB) resolveOrgProjectAuthority(ctx context.Context, tx pgx.Tx, actorID, orgSlug, projectSlug string, cap ProjectCapability) (orgID, projectID string, auth projectAuthority, err error) {
 	orgID, _, err = resolveOrg(ctx, tx, orgSlug)
 	if err != nil {
-		return "", "", err
+		return "", "", projectAuthority{}, err
 	}
 	projectID, err = resolveProject(ctx, tx, orgID, projectSlug)
 	if err != nil {
-		return "", "", err
+		return "", "", projectAuthority{}, err
 	}
-	role, err := effectiveProjectRole(ctx, tx, orgID, projectID, actorID)
+	auth, err = resolveProjectAuthority(ctx, tx, orgID, projectID, actorID)
 	if err != nil {
-		return "", "", err
+		return "", "", projectAuthority{}, err
 	}
-	if !ProjectCan(role, ProjCapAdmin) {
-		return "", "", ErrForbidden
+	if !auth.can(cap) {
+		return "", "", projectAuthority{}, ErrForbidden
 	}
-	return orgID, projectID, nil
+	return orgID, projectID, auth, nil
 }
 
 // requireOrgMemberByLogin resolves a user by email/username and asserts they are

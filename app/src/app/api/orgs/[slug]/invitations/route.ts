@@ -4,13 +4,19 @@ import { auth } from "@/lib/auth";
 import { inviteMember, listInvitations } from "@/lib/flagon-api";
 import { sendInviteEmail } from "@/lib/mailer";
 
-export async function GET(_request: Request, ctx: { params: Promise<{ slug: string }> }) {
+export async function GET(request: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
+  const url = new URL(request.url);
+  const limitParam = url.searchParams.get("limit");
   try {
-    const invitations = await listInvitations(slug);
-    return NextResponse.json({ invitations });
+    const page = await listInvitations(slug, {
+      q: url.searchParams.get("q") ?? undefined,
+      cursor: url.searchParams.get("cursor") ?? undefined,
+      limit: limitParam ? Number(limitParam) : undefined,
+    });
+    return NextResponse.json({ items: page.items, next: page.next });
   } catch {
-    return NextResponse.json({ invitations: [] });
+    return NextResponse.json({ items: [], next: null });
   }
 }
 

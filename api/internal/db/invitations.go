@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/flagon-io/flagon/api/internal/audit"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // invitePrefix namespaces invite tokens (mirrors the access-token prefixes). A
@@ -177,20 +178,25 @@ func (d *DB) InviteMember(ctx context.Context, actorID, slug, login, role string
 	return res, nil
 }
 
-// ListInvitations returns an org's pending invitations, newest first, but only
-// when the caller is a member (the SECURITY DEFINER helper gates on that).
-func (d *DB) ListInvitations(ctx context.Context, actorID, slug string) ([]Invitation, error) {
+// ListInvitations returns a page of an org's pending invitations (searched by
+// email, ordered by email), but only when the caller is a member (the SECURITY
+// DEFINER helper gates on that). Returns the items plus the opaque next cursor.
+func (d *DB) ListInvitations(ctx context.Context, actorID, slug string, q paginate.Query) ([]Invitation, string, error) {
 	if d == nil || d.pool == nil {
-		return nil, ErrUnavailable
+		return nil, "", ErrUnavailable
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	cur, err := cursorArg(q, 2)
+	if err != nil {
+		return nil, "", err
+	}
 	rows, err := d.pool.Query(ctx,
 		`SELECT id, email, role, status, inviter, expires_at, created_at
-		 FROM flagon.org_invitations($1, $2)`, actorID, slug)
+		 FROM flagon.org_invitations($1, $2, $3, $4, $5)`, actorID, slug, q.Q, q.Clamp()+1, cur)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer rows.Close()
 
@@ -198,11 +204,17 @@ func (d *DB) ListInvitations(ctx context.Context, actorID, slug string) ([]Invit
 	for rows.Next() {
 		var inv Invitation
 		if err := rows.Scan(&inv.ID, &inv.Email, &inv.Role, &inv.Status, &inv.Inviter, &inv.ExpiresAt, &inv.CreatedAt); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		invites = append(invites, inv)
 	}
-	return invites, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	invites, next := paginate.Slice(invites, q.Clamp(), func(inv Invitation) []string {
+		return []string{strings.ToLower(inv.Email), inv.ID}
+	})
+	return invites, next, nil
 }
 
 // RevokeInvitation marks a pending invitation revoked. The actor must be an

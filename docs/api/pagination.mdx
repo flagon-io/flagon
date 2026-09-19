@@ -1,0 +1,81 @@
+---
+title: Pagination and search
+description: How list endpoints page and search - keyset cursors, Link headers, and the HTTP QUERY method.
+order: 5
+---
+
+Every list endpoint in Flagon shares one convention: results are **searched on the
+server** and returned a page at a time, with the next page reached through a
+**cursor**. The rules below are identical for projects, members, teams,
+collaborators, owners, invitations, and every other list, so a client that can
+page one list can page them all.
+
+## Parameters
+
+A list request takes three optional parameters:
+
+| Param | Meaning |
+| --- | --- |
+| `q` | Free-text search. Matched case-insensitively against the human columns of the resource (a project's name and slug, a person's name, email and username, and so on). Omit it for no filter. |
+| `limit` | Page size, 1-100. Defaults to 30; values above 100 are clamped. |
+| `cursor` | An opaque keyset cursor marking where the previous page ended. Omit it for the first page. |
+
+```sh
+# First page of projects whose name or slug contains "api":
+GET /orgs/acme/projects?q=api&limit=20
+```
+
+## Paging with the Link header
+
+The response carries the rows in its body and, when more results exist, a
+[Link header](https://www.rfc-editor.org/info/rfc8288) pointing at the next page:
+
+```
+Link: </orgs/acme/projects?q=api&limit=20&cursor=eyJ2IjoxLCJrIjpbImFwaS1ndyJdfQ>; rel="next"
+```
+
+Follow that URL to get the next page; it already carries your `q` and `limit`, so
+you only ever hand back the cursor Flagon gave you. When there is no `rel="next"`
+link, you have reached the last page.
+
+Pagination is **keyset**, not page-number based: each page resumes exactly after
+the last row of the previous one, ordered by a stable key. This stays fast no
+matter how deep you page and never skips or repeats a row when the data changes
+underneath you. The trade is that there is **no total count or page count** - you
+page until there is no next link, rather than jumping to "page 7".
+
+- **The cursor is opaque.** Treat it as a token to echo back, not something to
+  parse or build. Its contents can change without notice.
+- **A cursor belongs to its query.** Keep `q` (and `limit`) the same as you page;
+  changing the search means starting a new sequence from the first page.
+- **A malformed or foreign cursor** is rejected with `422`.
+
+## Querying with a request body: the QUERY method
+
+Long searches, or structured filters you would rather not cram into a URL, can be
+sent with the **[HTTP QUERY method](https://www.rfc-editor.org/info/rfc9110)**
+instead of GET. QUERY is a safe, read-only method that carries its parameters in
+the request body. Every list endpoint accepts it at the same path, with the same
+three fields in a JSON body:
+
+```sh
+QUERY /orgs/acme/projects
+Content-Type: application/json
+
+{ "q": "api", "limit": 20, "cursor": "eyJ2IjoxLCJrIjpbImFwaS1ndyJdfQ" }
+```
+
+The behavior is identical to the GET form, including the `Link` header on the
+response. QUERY is offered for clients that support it; it is not required, and
+Flagon's own dashboard uses the GET form. Because QUERY is newer than OpenAPI's
+fixed method set, these endpoints are not listed under a `query` verb in the
+generated spec, but they are fully supported at runtime.
+
+## Rules
+
+- **Search is always server-side.** There is no "fetch everything and filter"
+  path; `q` does the work in the database, so a client never has to hold a whole
+  list in memory.
+- **Permission-scoped.** Paging and search never widen access: you only ever see
+  rows you could already read, and the same token scope that guards the GET form
+  guards the QUERY form.

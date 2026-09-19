@@ -5,7 +5,7 @@ import { getMe } from "@/lib/flagon-api";
 import { MembersManager } from "@/components/orgs/members-manager";
 import { PageBody } from "@/components/shell/page-header";
 
-export default async function MembersPage({ params }: { params: Promise<{ org: string }> }) {
+export default async function PeoplePage({ params }: { params: Promise<{ org: string }> }) {
   const { org: slug } = await params;
 
   const session = await auth.api.getSession({ headers: await headers() });

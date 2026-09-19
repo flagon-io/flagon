@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/humatest"
 
 	"github.com/flagon-io/flagon/api/internal/db"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // TestScopeAllows locks down the classic-token rules directly: implication
@@ -32,6 +33,8 @@ func TestScopeAllows(t *testing.T) {
 		{"admin:user implies read:user", []string{"admin:user"}, "get-me", true},
 		{"user does not imply admin:user-only ops", []string{"user"}, "get-me", true},
 		{"read:user cannot write profile", []string{"read:user"}, "sync-profile", false},
+		{"read:project allows the QUERY twin of list-projects", []string{"read:project"}, "query-projects", true},
+		{"read:org does not allow query-projects", []string{"read:org"}, "query-projects", false},
 		{"read:org reads security policy", []string{"read:org"}, "get-org-security", true},
 		{"read:org cannot set security policy", []string{"read:org"}, "set-org-security", false},
 		{"write:org sets security policy", []string{"write:org"}, "set-org-security", true},
@@ -76,6 +79,7 @@ func TestEndpointScopeEnforcement(t *testing.T) {
 		{"read:org cannot read profile", []string{"read:org"}, http.MethodGet, "/me", http.StatusForbidden},
 		{"admin:user reads profile (implied)", []string{"admin:user"}, http.MethodGet, "/me", http.StatusOK},
 		{"read:project lists projects", []string{"read:project"}, http.MethodGet, "/orgs/acme/projects", http.StatusOK},
+		{"read:project lists deleted projects", []string{"read:project"}, http.MethodGet, "/orgs/acme/deleted-projects", http.StatusOK},
 		{"read:project cannot create project", []string{"read:project"}, http.MethodPost, "/orgs/acme/projects", http.StatusForbidden},
 		{"write:project creates project (implies read)", []string{"write:project"}, http.MethodPost, "/orgs/acme/projects", http.StatusOK},
 		{"read:project cannot update project", []string{"read:project"}, http.MethodPatch, "/orgs/acme/projects/web", http.StatusForbidden},
@@ -99,6 +103,19 @@ func TestEndpointScopeEnforcement(t *testing.T) {
 		{"read:org reads security policy", []string{"read:org"}, http.MethodGet, "/orgs/acme/security", http.StatusOK},
 		{"read:org cannot set security policy", []string{"read:org"}, http.MethodPut, "/orgs/acme/security", http.StatusForbidden},
 		{"write:org sets security policy", []string{"write:org"}, http.MethodPut, "/orgs/acme/security", http.StatusOK},
+		{"read:team lists teams", []string{"read:team"}, http.MethodGet, "/orgs/acme/teams", http.StatusOK},
+		{"read:team cannot create team", []string{"read:team"}, http.MethodPost, "/orgs/acme/teams", http.StatusForbidden},
+		{"write:team creates team (implies read)", []string{"write:team"}, http.MethodPost, "/orgs/acme/teams", http.StatusOK},
+		{"write:team cannot delete team (needs admin)", []string{"write:team"}, http.MethodDelete, "/orgs/acme/teams/platform", http.StatusForbidden},
+		{"admin:team deletes team", []string{"admin:team"}, http.MethodDelete, "/orgs/acme/teams/platform", http.StatusOK},
+		{"write:team adds team member", []string{"write:team"}, http.MethodPost, "/orgs/acme/teams/platform/members", http.StatusOK},
+		{"read:team lists team projects", []string{"read:team"}, http.MethodGet, "/orgs/acme/teams/platform/projects", http.StatusOK},
+		{"read:team does not leak to projects", []string{"read:team"}, http.MethodGet, "/orgs/acme/projects/web/teams", http.StatusForbidden},
+		{"read:project lists project teams", []string{"read:project"}, http.MethodGet, "/orgs/acme/projects/web/teams", http.StatusOK},
+		{"write:project cannot grant team (needs admin)", []string{"write:project"}, http.MethodPost, "/orgs/acme/projects/web/teams", http.StatusForbidden},
+		{"admin:project grants team", []string{"admin:project"}, http.MethodPost, "/orgs/acme/projects/web/teams", http.StatusOK},
+		{"read:project lists owners", []string{"read:project"}, http.MethodGet, "/orgs/acme/projects/web/owners", http.StatusOK},
+		{"admin:project adds owner", []string{"admin:project"}, http.MethodPost, "/orgs/acme/projects/web/owners", http.StatusOK},
 		{"full access adds member", nil, http.MethodPost, "/orgs/acme/members", http.StatusOK},
 	}
 	for _, tc := range cases {
@@ -142,6 +159,11 @@ func registerScopeProbe(api huma.API, store IdentityStore) {
 
 	huma.Register(api, huma.Operation{
 		OperationID: "create-project", Method: http.MethodPost, Path: "/orgs/{slug}/projects",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-deleted-projects", Method: http.MethodGet, Path: "/orgs/{slug}/deleted-projects",
 		Middlewares: huma.Middlewares{auth},
 	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
 
@@ -214,6 +236,78 @@ func registerScopeProbe(api huma.API, store IdentityStore) {
 		OperationID: "set-org-security", Method: http.MethodPut, Path: "/orgs/{slug}/security",
 		Middlewares: huma.Middlewares{auth},
 	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	// Teams.
+	huma.Register(api, huma.Operation{
+		OperationID: "list-teams", Method: http.MethodGet, Path: "/orgs/{slug}/teams",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "create-team", Method: http.MethodPost, Path: "/orgs/{slug}/teams",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "get-team", Method: http.MethodGet, Path: "/orgs/{slug}/teams/{team}",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeTeamInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "update-team", Method: http.MethodPatch, Path: "/orgs/{slug}/teams/{team}",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeTeamInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-team", Method: http.MethodDelete, Path: "/orgs/{slug}/teams/{team}",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeTeamInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "list-team-members", Method: http.MethodGet, Path: "/orgs/{slug}/teams/{team}/members",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeTeamInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "list-team-projects", Method: http.MethodGet, Path: "/orgs/{slug}/teams/{team}/projects",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeTeamInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "add-team-member", Method: http.MethodPost, Path: "/orgs/{slug}/teams/{team}/members",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeTeamInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "set-team-member-role", Method: http.MethodPut, Path: "/orgs/{slug}/teams/{team}/members/{userId}/role",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeTeamMemberInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "remove-team-member", Method: http.MethodDelete, Path: "/orgs/{slug}/teams/{team}/members/{userId}",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeTeamMemberInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	// Project teams & owners.
+	huma.Register(api, huma.Operation{
+		OperationID: "list-project-teams", Method: http.MethodGet, Path: "/orgs/{slug}/projects/{project}/teams",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "add-project-team", Method: http.MethodPost, Path: "/orgs/{slug}/projects/{project}/teams",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "set-project-team-role", Method: http.MethodPut, Path: "/orgs/{slug}/projects/{project}/teams/{team}/role",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectTeamInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "remove-project-team", Method: http.MethodDelete, Path: "/orgs/{slug}/projects/{project}/teams/{team}",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectTeamInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "list-project-owners", Method: http.MethodGet, Path: "/orgs/{slug}/projects/{project}/owners",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "add-project-owner", Method: http.MethodPost, Path: "/orgs/{slug}/projects/{project}/owners",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
+	huma.Register(api, huma.Operation{
+		OperationID: "remove-project-owner", Method: http.MethodDelete, Path: "/orgs/{slug}/projects/{project}/owners/{type}/{principalId}",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeOwnerInput) (*probeOK, error) { return &probeOK{}, nil })
 }
 
 type probeSlugInput struct {
@@ -229,6 +323,30 @@ type probeProjectMemberInput struct {
 	Slug    string `path:"slug"`
 	Project string `path:"project"`
 	UserID  string `path:"userId"`
+}
+
+type probeTeamInput struct {
+	Slug string `path:"slug"`
+	Team string `path:"team"`
+}
+
+type probeTeamMemberInput struct {
+	Slug   string `path:"slug"`
+	Team   string `path:"team"`
+	UserID string `path:"userId"`
+}
+
+type probeProjectTeamInput struct {
+	Slug    string `path:"slug"`
+	Project string `path:"project"`
+	Team    string `path:"team"`
+}
+
+type probeOwnerInput struct {
+	Slug        string `path:"slug"`
+	Project     string `path:"project"`
+	Type        string `path:"type"`
+	PrincipalID string `path:"principalId"`
 }
 
 // probeOK gives the probe handlers a body so a permitted request is a plain 200
@@ -258,8 +376,11 @@ func (scopeFakeStore) UpdateOrg(context.Context, string, string, string) (db.Org
 	return db.Org{}, nil
 }
 func (scopeFakeStore) SetUserDeleted(context.Context, string, bool) error { return nil }
-func (scopeFakeStore) ListProjects(context.Context, string, string) ([]db.Project, error) {
-	return nil, nil
+func (scopeFakeStore) ListProjects(context.Context, string, string, paginate.Query) ([]db.Project, string, error) {
+	return nil, "", nil
+}
+func (scopeFakeStore) ListDeletedProjects(context.Context, string, string, paginate.Query) ([]db.Project, string, error) {
+	return nil, "", nil
 }
 func (scopeFakeStore) CreateProject(context.Context, string, string, db.ProjectInput) (db.Project, error) {
 	return db.Project{}, nil
@@ -273,8 +394,8 @@ func (scopeFakeStore) UpdateProject(context.Context, string, string, string, db.
 func (scopeFakeStore) SetProjectDeleted(context.Context, string, string, string, bool) (db.Project, error) {
 	return db.Project{}, nil
 }
-func (scopeFakeStore) ListProjectMembers(context.Context, string, string, string) ([]db.ProjectMember, error) {
-	return nil, nil
+func (scopeFakeStore) ListProjectMembers(context.Context, string, string, string, paginate.Query) ([]db.ProjectMember, string, error) {
+	return nil, "", nil
 }
 func (scopeFakeStore) AddProjectMember(context.Context, string, string, string, string, string) (string, error) {
 	return "", nil
@@ -283,6 +404,55 @@ func (scopeFakeStore) SetProjectMemberRole(context.Context, string, string, stri
 	return nil
 }
 func (scopeFakeStore) RemoveProjectMember(context.Context, string, string, string, string) error {
+	return nil
+}
+func (scopeFakeStore) ListTeams(context.Context, string, string, paginate.Query) ([]db.Team, string, error) {
+	return nil, "", nil
+}
+func (scopeFakeStore) GetTeam(context.Context, string, string, string) (db.Team, error) {
+	return db.Team{}, nil
+}
+func (scopeFakeStore) CreateTeam(context.Context, string, string, db.TeamInput) (db.Team, error) {
+	return db.Team{}, nil
+}
+func (scopeFakeStore) UpdateTeam(context.Context, string, string, string, db.TeamUpdate) (db.Team, error) {
+	return db.Team{}, nil
+}
+func (scopeFakeStore) DeleteTeam(context.Context, string, string, string) error { return nil }
+func (scopeFakeStore) ListTeamMembers(context.Context, string, string, string, paginate.Query) ([]db.TeamMember, string, error) {
+	return nil, "", nil
+}
+func (scopeFakeStore) ListTeamProjects(context.Context, string, string, string, paginate.Query) ([]db.TeamProject, string, error) {
+	return nil, "", nil
+}
+func (scopeFakeStore) AddTeamMember(context.Context, string, string, string, string, string) (string, error) {
+	return "", nil
+}
+func (scopeFakeStore) SetTeamMemberRole(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (scopeFakeStore) RemoveTeamMember(context.Context, string, string, string, string) error {
+	return nil
+}
+func (scopeFakeStore) ListProjectTeams(context.Context, string, string, string, paginate.Query) ([]db.ProjectTeam, string, error) {
+	return nil, "", nil
+}
+func (scopeFakeStore) AddProjectTeam(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (scopeFakeStore) SetProjectTeamRole(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (scopeFakeStore) RemoveProjectTeam(context.Context, string, string, string, string) error {
+	return nil
+}
+func (scopeFakeStore) ListProjectOwners(context.Context, string, string, string, paginate.Query) ([]db.ProjectOwner, string, error) {
+	return nil, "", nil
+}
+func (scopeFakeStore) AddProjectOwner(context.Context, string, string, string, string, string) (string, error) {
+	return "", nil
+}
+func (scopeFakeStore) RemoveProjectOwner(context.Context, string, string, string, string, string) error {
 	return nil
 }
 func (scopeFakeStore) GetOrg(context.Context, string, string) (db.Org, error) {
@@ -301,7 +471,7 @@ func (scopeFakeStore) SetOrgSecurity(context.Context, string, string, db.OrgSecu
 func (scopeFakeStore) ProvisionSSOMember(context.Context, string, string, string, string) error {
 	return nil
 }
-func (scopeFakeStore) ListOrgs(context.Context, string) ([]db.Org, error)         { return nil, nil }
+func (scopeFakeStore) ListOrgs(context.Context, string) ([]db.Org, error) { return nil, nil }
 func (scopeFakeStore) UpsertUserProfile(context.Context, string, string, db.ProfileInput) error {
 	return nil
 }
@@ -309,8 +479,8 @@ func (scopeFakeStore) PublicUserProfile(context.Context, string) (*db.PublicProf
 	return nil, nil
 }
 func (scopeFakeStore) LeaveOrg(context.Context, string, string) error { return nil }
-func (scopeFakeStore) ListMembers(context.Context, string, string) ([]db.Member, error) {
-	return nil, nil
+func (scopeFakeStore) ListMembers(context.Context, string, string, paginate.Query) ([]db.Member, string, error) {
+	return nil, "", nil
 }
 func (scopeFakeStore) AddMember(context.Context, string, string, string, string) (string, string, error) {
 	return "", "", nil
@@ -322,8 +492,8 @@ func (scopeFakeStore) RemoveMember(context.Context, string, string, string) erro
 func (scopeFakeStore) InviteMember(context.Context, string, string, string, string) (db.InviteResult, error) {
 	return db.InviteResult{}, nil
 }
-func (scopeFakeStore) ListInvitations(context.Context, string, string) ([]db.Invitation, error) {
-	return nil, nil
+func (scopeFakeStore) ListInvitations(context.Context, string, string, paginate.Query) ([]db.Invitation, string, error) {
+	return nil, "", nil
 }
 func (scopeFakeStore) RevokeInvitation(context.Context, string, string, string) error { return nil }
 func (scopeFakeStore) InvitationByToken(context.Context, string) (*db.InviteLookup, error) {

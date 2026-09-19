@@ -70,7 +70,7 @@ export const components: ComponentMeta[] = [
   { name: "Color Input", slug: "color-input", category: "forms", status: "stable", description: "A hex field with a full HSV picker, eyedropper, and swatches." },
   { name: "Slider", slug: "slider", category: "forms", status: "stable", description: "Pick a number (or range) by dragging along a track.", dependencies: ["@radix-ui/react-slider"], radix: "https://www.radix-ui.com/primitives/docs/components/slider" },
   { name: "Radio Group", slug: "radio-group", category: "forms", status: "stable", description: "A set of mutually exclusive options.", dependencies: ["@radix-ui/react-radio-group"], radix: "https://www.radix-ui.com/primitives/docs/components/radio-group", shadcn: sc("radio-group") },
-  { name: "Combobox", slug: "combobox", category: "forms", status: "stable", description: "A typeahead select with search and keyboard nav.", dependencies: ["cmdk", "@radix-ui/react-popover"], shadcn: sc("combobox") },
+  { name: "Combobox", slug: "combobox", category: "forms", status: "stable", description: "A typeahead select with search and keyboard nav; static options or an async server search.", dependencies: ["cmdk", "@radix-ui/react-popover"], shadcn: sc("combobox") },
   { name: "Field", slug: "field", category: "forms", status: "stable", description: "A label + control + description + error wrapper for consistent form rows.", shadcn: sc("field") },
 
   // --- Buttons & actions ----------------------------------------------------

@@ -56,4 +56,19 @@ test.describe("form components", () => {
     await expect(page.getByRole("combobox").first()).toBeVisible();
     await expect(page.locator("select").first()).toBeAttached();
   });
+
+  test("combobox with an async source loads options and selects one", async ({ page }) => {
+    await page.goto("/ui/components/combobox");
+    // The server-backed example (loadOptions) starts unset and its trigger reads
+    // "Find a region"; the static example reads "Select a region".
+    await expect(page.getByText("Selected: none")).toBeVisible();
+    // Options arrive asynchronously (the demo simulates a server search), so the
+    // option only appears after the load resolves.
+    await page.getByRole("combobox", { name: /find a region/i }).click();
+    const firstOption = page.getByRole("option").first();
+    await expect(firstOption).toBeVisible();
+    await firstOption.click();
+    // Selecting updates the bound value (no longer "none").
+    await expect(page.getByText("Selected: none")).toHaveCount(0);
+  });
 });

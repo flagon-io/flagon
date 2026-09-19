@@ -16,7 +16,9 @@ import (
 
 	"github.com/flagon-io/flagon/api/internal/ai"
 	"github.com/flagon-io/flagon/api/internal/audit"
+	"github.com/flagon-io/flagon/api/internal/changelog"
 	"github.com/flagon-io/flagon/api/internal/docs"
+	"github.com/flagon-io/flagon/api/internal/roadmap"
 )
 
 // Options configures optional server dependencies.
@@ -44,6 +46,12 @@ type Options struct {
 
 	// Docs backs the public documentation endpoints (/docs*). Nil disables them.
 	Docs *docs.Index
+
+	// Roadmap backs the public roadmap endpoint (/roadmap). Nil disables it.
+	Roadmap *roadmap.Board
+
+	// Changelog backs the public changelog endpoint (/changelog). Nil disables it.
+	Changelog *changelog.Log
 
 	// Registry backs the public MCP server (/mcp), exposing the read-only,
 	// public-safe tools. Nil disables the MCP front door.
@@ -93,6 +101,16 @@ func WithDocs(index *docs.Index) Option {
 	return func(o *Options) { o.Docs = index }
 }
 
+// WithRoadmap wires the public roadmap endpoint (/roadmap) to the compiled board.
+func WithRoadmap(board *roadmap.Board) Option {
+	return func(o *Options) { o.Roadmap = board }
+}
+
+// WithChangelog wires the public changelog endpoint (/changelog) to the log.
+func WithChangelog(log *changelog.Log) Option {
+	return func(o *Options) { o.Changelog = log }
+}
+
 // WithMCP wires the public MCP front door (/mcp) to the shared tool registry.
 func WithMCP(registry *ai.Registry) Option {
 	return func(o *Options) { o.Registry = registry }
@@ -120,6 +138,12 @@ func New(opts ...Option) (chi.Router, huma.API) {
 		opt(&options)
 	}
 
+	// The HTTP QUERY method (RFC 9110's safe, idempotent query method) is not one
+	// of chi's built-in methods, so register it before any routes. It lets list
+	// endpoints accept a body-based query in addition to their GET form; see
+	// registerQueryList in listing.go.
+	chi.RegisterMethod("QUERY")
+
 	router := chi.NewMux()
 
 	// The MCP host gate is middleware, so it must be installed before any routes
@@ -143,6 +167,8 @@ func New(opts ...Option) (chi.Router, huma.API) {
 	registerInvitationsAPI(api, options.Identity, options.InternalToken)
 	registerProjectsAPI(api, options.Identity, options.InternalToken)
 	registerProjectMembersAPI(api, options.Identity, options.InternalToken)
+	registerProjectTeamsAPI(api, options.Identity, options.InternalToken)
+	registerTeamsAPI(api, options.Identity, options.InternalToken)
 	registerAuditAPI(api, options.Identity, options.Audit, options.InternalToken)
 	registerOrgSecurityAPI(api, options.Identity, options.InternalToken)
 	registerSSOAPI(api, options.Identity, options.InternalToken)
@@ -154,6 +180,8 @@ func New(opts ...Option) (chi.Router, huma.API) {
 	// directly - like the health checks and the index. The OpenAPI spec stays the
 	// product's operational contract; documentation delivery is a separate concern.
 	registerDocsAPI(router, options.Docs)
+	registerRoadmapAPI(router, options.Roadmap)
+	registerChangelogAPI(router, options.Changelog)
 	registerMCP(router, options.Registry, options.Identity)
 
 	return router, api

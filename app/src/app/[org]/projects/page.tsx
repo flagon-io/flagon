@@ -14,11 +14,16 @@ export default async function ProjectsPage({ params }: { params: Promise<{ org: 
   const me = await getMe().catch(() => null);
   const role = me?.orgs.find((o) => o.slug === slug)?.role ?? "viewer";
   const canCreate = role !== "viewer";
-  const projects = await listProjects(slug).catch(() => []);
+  const first = await listProjects(slug).catch(() => ({ items: [], next: null }));
 
   return (
     <PageBody>
-      <ProjectsBrowser projects={projects} orgSlug={slug} canCreate={canCreate} />
+      <ProjectsBrowser
+        initialProjects={first.items}
+        initialNext={first.next}
+        orgSlug={slug}
+        canCreate={canCreate}
+      />
     </PageBody>
   );
 }

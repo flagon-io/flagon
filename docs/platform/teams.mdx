@@ -1,0 +1,76 @@
+---
+title: Teams
+description: Named groups of organization members that hold shared access to projects.
+section: platform
+visibility: public
+order: 4
+---
+
+A **team** is a named group of members inside an organization. Instead of granting
+access to one person at a time, you build a team once and grant *the team* access
+to the projects it needs. Every member of the team inherits that access, and when
+someone joins or leaves the team their project reach follows automatically.
+
+Teams are managed under **Settings -> Teams**. Org owners and admins create and
+delete teams; the person who creates a team becomes its first maintainer.
+
+## Team roles
+
+A team has two internal roles that govern the team itself (they are separate from
+any access the team holds on a project):
+
+- **Maintainer** - manage the team's membership (add and remove members, set who
+  is a maintainer) and edit the team's name and description.
+- **Member** - belong to the team and inherit whatever project access the team
+  has been granted.
+
+Creating a team makes the creator its first maintainer. Org owners and admins can
+always manage any team; deleting a team is reserved for them. Teams are
+soft-deleted, so a removed team can be restored rather than lost outright.
+
+## How teams get project access
+
+A team does not carry any project access on its own. You grant a team a
+**project role** - one rung of the collaborator ladder (`read`, `triage`,
+`write`, `maintain`, or `admin`) - on a specific project, and every member of the
+team gains that role on that project. See [Project access](/docs/platform/project-access)
+for what each rung can do and how a person's grants combine.
+
+Two properties make teams the unit of access at scale:
+
+- **A team can hold access to many projects.** Grant the same team `write` on one
+  project and `admin` on another; each grant is independent.
+- **A project can be shared with many teams.** A project lists every team it is
+  shared with alongside its individual collaborators, and the two are managed the
+  same way.
+
+Because a member's effective role is always the **higher** of their grants, being
+on a team can only ever *raise* someone's access on a project, never lower it
+below their organization floor.
+
+## Managing a team
+
+Open a team under **Settings -> Teams** to manage its membership and the projects
+it can reach:
+
+- **Add or remove members** - maintainers manage the roster. Members must already
+  belong to the organization; adding someone to a team elevates an existing
+  member, it does not bring in outsiders.
+- **Grant project access** - give the team a role on a project (or change or
+  remove an existing grant) from the team's page or from a project's
+  **Settings -> Access**.
+
+As everywhere in Flagon, you can do all of this by clicking, by asking the
+in-product assistant, or over the API and MCP - the same permission-checked
+operation backs every path.
+
+## Permissions
+
+Listing teams and their members requires the `read:team` scope. Creating a team
+and managing its membership and details requires `write:team`. Deleting a team
+requires `admin:team`. Granting a team access to a project (like managing any
+project's access) requires `admin:project`. Scopes are a ceiling on top of your
+role: a token can never do something you could not do yourself, and tenant
+isolation is enforced in the database with row-level security.
+
+See also [Roles & permissions](/docs/platform/roles) for the full model.

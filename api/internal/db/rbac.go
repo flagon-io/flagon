@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/flagon-io/flagon/api/internal/audit"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // Roles, highest privilege first. owner > admin > member > viewer.
@@ -88,20 +90,25 @@ type Member struct {
 	JoinedAt  time.Time `json:"joined_at"`
 }
 
-// ListMembers returns an org's members with their profile details, but only when
-// the caller is a member (the SECURITY DEFINER helper gates on that).
-func (d *DB) ListMembers(ctx context.Context, actorID, slug string) ([]Member, error) {
+// ListMembers returns a page of an org's members (searched by name/email/username,
+// ordered by email), but only when the caller is a member (the SECURITY DEFINER
+// helper gates on that). Returns the items plus the opaque next cursor.
+func (d *DB) ListMembers(ctx context.Context, actorID, slug string, q paginate.Query) ([]Member, string, error) {
 	if d == nil || d.pool == nil {
-		return nil, ErrUnavailable
+		return nil, "", ErrUnavailable
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	cur, err := cursorArg(q, 2)
+	if err != nil {
+		return nil, "", err
+	}
 	rows, err := d.pool.Query(ctx,
 		`SELECT user_id, name, email, username, avatar_url, role, joined_at
-		 FROM flagon.org_members($1, $2)`, actorID, slug)
+		 FROM flagon.org_members($1, $2, $3, $4, $5)`, actorID, slug, q.Q, q.Clamp()+1, cur)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer rows.Close()
 
@@ -109,11 +116,17 @@ func (d *DB) ListMembers(ctx context.Context, actorID, slug string) ([]Member, e
 	for rows.Next() {
 		var m Member
 		if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.JoinedAt); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		members = append(members, m)
 	}
-	return members, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	members, next := paginate.Slice(members, q.Clamp(), func(m Member) []string {
+		return []string{strings.ToLower(m.Email), m.UserID}
+	})
+	return members, next, nil
 }
 
 // AddMember adds an existing Flagon user (by email or username) to an org. The

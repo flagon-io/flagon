@@ -39,6 +39,19 @@ const (
 	ActionProjectAccessChanged Action = "project.access_changed"
 	ActionProjectAccessRevoked Action = "project.access_revoked"
 
+	ActionProjectTeamGranted Action = "project.team_access_granted"
+	ActionProjectTeamChanged Action = "project.team_access_changed"
+	ActionProjectTeamRevoked Action = "project.team_access_revoked"
+	ActionProjectOwnerAdded  Action = "project.owner_added"
+	ActionProjectOwnerRemove Action = "project.owner_removed"
+
+	ActionTeamCreated          Action = "team.created"
+	ActionTeamUpdated          Action = "team.updated"
+	ActionTeamDeleted          Action = "team.deleted"
+	ActionTeamMemberAdded      Action = "team.member_added"
+	ActionTeamMemberRoleChange Action = "team.member_role_changed"
+	ActionTeamMemberRemoved    Action = "team.member_removed"
+
 	ActionMemberAdded      Action = "member.added"
 	ActionMemberRoleChange Action = "member.role_changed"
 	ActionMemberRemoved    Action = "member.removed"
@@ -59,6 +72,10 @@ const (
 var Actions = []Action{
 	ActionProjectCreated, ActionProjectUpdated, ActionProjectDeleted, ActionProjectRestored,
 	ActionProjectAccessGranted, ActionProjectAccessChanged, ActionProjectAccessRevoked,
+	ActionProjectTeamGranted, ActionProjectTeamChanged, ActionProjectTeamRevoked,
+	ActionProjectOwnerAdded, ActionProjectOwnerRemove,
+	ActionTeamCreated, ActionTeamUpdated, ActionTeamDeleted,
+	ActionTeamMemberAdded, ActionTeamMemberRoleChange, ActionTeamMemberRemoved,
 	ActionMemberAdded, ActionMemberRoleChange, ActionMemberRemoved, ActionMemberLeft,
 	ActionInvitationSent, ActionInvitationRevoke,
 	ActionTokenCreated, ActionTokenRevoked,

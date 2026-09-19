@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/flagon-io/flagon/api/internal/db"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // registerInvitationsAPI wires org invitations: inviting people (existing users
@@ -20,6 +21,19 @@ import (
 func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken string) {
 	auth := combinedAuth(api, store, internalToken)
 
+	// list-invitations is paginated: a documented GET plus a Hidden QUERY twin
+	// sharing one fetch. See listing.go.
+	listInvitations := func(ctx context.Context, slug string, q paginate.Query) (*InvitationsOutput, error) {
+		actorID, _ := identity(ctx)
+		invites, next, err := store.ListInvitations(ctx, actorID, slug, q)
+		if err != nil {
+			return nil, inviteErr(err, "could not list invitations")
+		}
+		out := &InvitationsOutput{}
+		out.Body.Invitations = invites
+		out.Link = paginate.LinkHeader("/orgs/"+slug+"/invitations", q, next)
+		return out, nil
+	}
 	huma.Register(api, huma.Operation{
 		OperationID: "list-invitations",
 		Method:      http.MethodGet,
@@ -27,15 +41,13 @@ func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken str
 		Summary:     "List an organization's pending invitations",
 		Middlewares: huma.Middlewares{auth},
 	}, func(ctx context.Context, in *InvitationsInput) (*InvitationsOutput, error) {
-		actorID, _ := identity(ctx)
-		invites, err := store.ListInvitations(ctx, actorID, in.Slug)
-		if err != nil {
-			return nil, inviteErr(err, "could not list invitations")
-		}
-		out := &InvitationsOutput{}
-		out.Body.Invitations = invites
-		return out, nil
+		return listInvitations(ctx, in.Slug, in.ListQuery())
 	})
+	registerQueryList(api, auth, "query-invitations", "/orgs/{slug}/invitations",
+		"List an organization's pending invitations (QUERY)",
+		func(ctx context.Context, in *InvitationsQueryInput) (*InvitationsOutput, error) {
+			return listInvitations(ctx, in.Slug, in.Body.ListQuery())
+		})
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "invite-member",
@@ -126,7 +138,7 @@ func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken str
 		if invitedBy != "" {
 			_ = store.CreateNotification(ctx, invitedBy, nil, "org.invite_accepted",
 				email+" joined "+name, email+" accepted your invitation to "+name+".",
-				"/"+slug+"/settings/members")
+				"/"+slug+"/people")
 		}
 		out := &AcceptInvitationOutput{}
 		out.Body.OrgSlug = slug
@@ -163,13 +175,24 @@ func inviteErr(err error, fallback string) error {
 	}
 }
 
-// InvitationsInput lists an org's pending invitations.
+// InvitationsInput lists an org's pending invitations (GET; search + keyset via
+// ListParams).
 type InvitationsInput struct {
 	Slug string `path:"slug"`
+	ListParams
 }
 
-// InvitationsOutput is the pending-invitations list.
+// InvitationsQueryInput is the HTTP QUERY twin of InvitationsInput: the same list
+// query carried in a JSON body.
+type InvitationsQueryInput struct {
+	Slug string `path:"slug"`
+	Body ListBody
+}
+
+// InvitationsOutput is the pending-invitations list. Link carries the RFC 5988
+// next-page header.
 type InvitationsOutput struct {
+	Link string `header:"Link"`
 	Body struct {
 		Invitations []db.Invitation `json:"invitations"`
 	}

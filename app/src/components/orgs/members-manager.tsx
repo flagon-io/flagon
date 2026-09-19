@@ -30,6 +30,12 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
   Tabs,
   TabsContent,
   TabsList,
@@ -84,49 +90,159 @@ export function MembersManager({
 
   const [tab, setTab] = useState<Tab>("members");
   const [members, setMembers] = useState<Member[]>([]);
+  const [membersNext, setMembersNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [pending, setPending] = useState<Invitation[]>([]);
+  const [pendingNext, setPendingNext] = useState<string | null>(null);
   const [pendingLoading, setPendingLoading] = useState(true);
+  const [pendingLoadingMore, setPendingLoadingMore] = useState(false);
 
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [sort, setSort] = useState<Sort>("joined");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const filterRef = useRef<HTMLInputElement>(null);
+  const firstRender = useRef(true);
 
   const [addOpen, setAddOpen] = useState(false);
   const [invites, setInvites] = useState<InviteRow[]>([{ login: "", role: "member" }]);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  // Fetch one page of members. Text search (?q=) and paging (?cursor=) are both
+  // server-side, so the list scales past a single response.
+  const fetchMembers = useCallback(
+    async (q: string, cursor: string | null, signal?: AbortSignal) => {
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (cursor) params.set("cursor", cursor);
+      const res = await fetch(
+        `/api/orgs/${encodeURIComponent(slug)}/members?${params.toString()}`,
+        { signal },
+      );
+      if (!res.ok) throw new Error(`members ${res.status}`);
+      return (await res.json()) as { items: Member[]; next: string | null };
+    },
+    [slug],
+  );
+
+  // Reload page 1 for the current search term (used after a mutation).
+  const reload = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/orgs/${encodeURIComponent(slug)}/members`);
-    if (res.ok) {
-      const d = await res.json();
-      setMembers(d.members ?? []);
+    try {
+      const data = await fetchMembers(query.trim(), null);
+      setMembers(data.items);
+      setMembersNext(data.next);
+    } catch {
+      /* leave the current list in place */
+    } finally {
+      setLoading(false);
+      setSelected(new Set());
     }
-    setLoading(false);
-    setSelected(new Set());
-  }, [slug]);
+  }, [fetchMembers, query]);
+
+  const fetchInvites = useCallback(
+    async (cursor: string | null) => {
+      const params = new URLSearchParams();
+      if (cursor) params.set("cursor", cursor);
+      const res = await fetch(
+        `/api/orgs/${encodeURIComponent(slug)}/invitations?${params.toString()}`,
+      );
+      if (!res.ok) throw new Error(`invitations ${res.status}`);
+      return (await res.json()) as { items: Invitation[]; next: string | null };
+    },
+    [slug],
+  );
 
   const loadInvites = useCallback(async () => {
     setPendingLoading(true);
-    const res = await fetch(`/api/orgs/${encodeURIComponent(slug)}/invitations`);
-    if (res.ok) {
-      const d = await res.json();
-      setPending(d.invitations ?? []);
+    try {
+      const data = await fetchInvites(null);
+      setPending(data.items);
+      setPendingNext(data.next);
+    } catch {
+      /* leave the current list in place */
+    } finally {
+      setPendingLoading(false);
     }
-    setPendingLoading(false);
-  }, [slug]);
+  }, [fetchInvites]);
 
+  const loadMoreInvites = useCallback(async () => {
+    if (!pendingNext) return;
+    setPendingLoadingMore(true);
+    try {
+      const data = await fetchInvites(pendingNext);
+      setPending((prev) => [...prev, ...data.items]);
+      setPendingNext(data.next);
+    } catch {
+      /* leave the list as-is on failure */
+    } finally {
+      setPendingLoadingMore(false);
+    }
+  }, [fetchInvites, pendingNext]);
+
+  // Initial load: the first page of members and of pending invitations.
   useEffect(() => {
-    (async () => {
-      await Promise.all([load(), loadInvites()]);
+    void (async () => {
+      setLoading(true);
+      try {
+        const [data] = await Promise.all([fetchMembers("", null), loadInvites()]);
+        setMembers(data.items);
+        setMembersNext(data.next);
+      } catch {
+        /* leave the current list in place */
+      } finally {
+        setLoading(false);
+      }
     })();
-  }, [load, loadInvites]);
+  }, [fetchMembers, loadInvites]);
+
+  // Debounced server-side search over members. The first render already kicked
+  // off the initial load above, so it is skipped here.
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    const controller = new AbortController();
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await fetchMembers(query.trim(), null, controller.signal);
+        if (!controller.signal.aborted) {
+          setMembers(data.items);
+          setMembersNext(data.next);
+          setSelected(new Set());
+        }
+      } catch {
+        /* aborted or failed - leave the current list in place */
+      } finally {
+        if (!controller.signal.aborted) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      controller.abort();
+      clearTimeout(t);
+    };
+  }, [query, fetchMembers]);
+
+  const loadMoreMembers = useCallback(async () => {
+    if (!membersNext) return;
+    setLoadingMore(true);
+    try {
+      const data = await fetchMembers(query.trim(), membersNext);
+      setMembers((prev) => [...prev, ...data.items]);
+      setMembersNext(data.next);
+    } catch {
+      /* leave the list as-is on failure */
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [membersNext, query, fetchMembers]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -147,19 +263,16 @@ export function MembersManager({
   );
 
   const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = members.filter((m) => {
-      if (roleFilter !== "all" && m.role !== roleFilter) return false;
-      if (!q) return true;
-      return `${m.name ?? ""} ${m.username ?? ""} ${m.email}`.toLowerCase().includes(q);
-    });
+    // The text box drives server-side search (see the search effect); the role
+    // filter and sort below only refine the rows already loaded.
+    const list = members.filter((m) => roleFilter === "all" || m.role === roleFilter);
     list.sort((a, b) => {
       if (sort === "name") return (a.name || a.email).localeCompare(b.name || b.email);
       if (sort === "role") return (ROLE_RANK[b.role] ?? 0) - (ROLE_RANK[a.role] ?? 0);
       return new Date(b.joined_at).getTime() - new Date(a.joined_at).getTime();
     });
     return list;
-  }, [members, query, roleFilter, sort]);
+  }, [members, roleFilter, sort]);
 
   const selectableRows = useMemo(() => rows.filter(isRemovable), [rows, isRemovable]);
   const allSelected = selectableRows.length > 0 && selectableRows.every((m) => selected.has(m.user_id));
@@ -211,7 +324,7 @@ export function MembersManager({
       }
     }
     setAdding(false);
-    await Promise.all([load(), loadInvites()]);
+    await Promise.all([reload(), loadInvites()]);
     if (failures.length > 0) {
       setAddError(failures.join("\n"));
       setInvites(list.filter((r) => failures.some((f) => f.startsWith(`${r.login.trim()}:`))));
@@ -230,7 +343,7 @@ export function MembersManager({
       const d = await res.json().catch(() => ({}));
       setError(d.error ?? "Couldn't change that role.");
     }
-    await load();
+    await reload();
   }
 
   async function removeOne(userId: string) {
@@ -251,7 +364,7 @@ export function MembersManager({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't remove that member.");
     }
-    await load();
+    await reload();
   }
 
   async function removeSelected() {
@@ -266,7 +379,7 @@ export function MembersManager({
       }
     }
     if (firstErr) setError(firstErr);
-    await load();
+    await reload();
   }
 
   async function revokeInvite(id: string) {
@@ -298,7 +411,7 @@ export function MembersManager({
       {error && <Alert variant="destructive">{error}</Alert>}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-        <TabsList className="gap-6">
+        <TabsList>
           <TabsTrigger value="members" className="gap-1.5">
             Members
             <Badge variant="secondary">{members.length}</Badge>
@@ -313,6 +426,9 @@ export function MembersManager({
           <PendingInvites
             invites={pending}
             loading={pendingLoading}
+            next={pendingNext}
+            loadingMore={pendingLoadingMore}
+            onLoadMore={loadMoreInvites}
             canManage={canManage}
             onRevoke={revokeInvite}
             onInvite={canManage ? openAdd : undefined}
@@ -366,176 +482,179 @@ export function MembersManager({
           </div>
 
           {/* Table. */}
-          <Card className="overflow-hidden">
-            <div className="flex h-11 items-center gap-3 border-b border-hairline bg-muted/25 px-4 text-xs font-medium text-muted-foreground">
-              {canManage && (
-                <Checkbox
-                  aria-label="Select all"
-                  checked={allSelected}
-                  disabled={selectableRows.length === 0}
-                  onCheckedChange={toggleAll}
-                />
-              )}
-              {someSelected ? (
-                <>
-                  <span className="text-foreground">{selected.size} selected</span>
-                  <div className="ml-auto">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={removeSelected}
-                    >
-                      <Trash2 className="size-3.5" />
-                      Remove
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <span className="flex-1">Member</span>
-                  <span className="hidden w-28 shrink-0 md:block">Joined</span>
-                  <span className="w-36 shrink-0">Role</span>
-                  <span className="w-8 shrink-0" aria-hidden />
-                </>
-              )}
-            </div>
-
-            {loading ? (
-              <div className="divide-y divide-hairline">
-                {[0, 1].map((i) => (
-                  <div key={i} className="flex items-center gap-3 px-4 py-3.5">
-                    <Skeleton className="size-9 rounded-full" />
-                    <div className="flex-1 space-y-1.5">
-                      <Skeleton className="h-4 w-40" />
-                      <Skeleton className="h-3 w-52" />
-                    </div>
-                    <Skeleton className="h-6 w-16 rounded-full" />
-                  </div>
-                ))}
-              </div>
-            ) : rows.length === 0 ? (
-              <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-                {members.length === 0 ? "No members yet." : "No members match your filters."}
-              </p>
+          {loading ? (
+            <ListSkeleton />
+          ) : rows.length === 0 ? (
+            searching ? (
+              <ListSkeleton />
             ) : (
-              <ul className="divide-y divide-hairline">
-                {rows.map((m) => {
-                  const isSelf = m.user_id === currentUserId;
-                  const editable = isRemovable(m);
-                  const display = m.name || m.username || m.email;
-                  const checked = selected.has(m.user_id);
-                  return (
-                    <li
-                      key={m.user_id}
-                      className={cn(
-                        "flex items-center gap-3 px-4 py-3 transition-colors",
-                        checked ? "bg-brand/6" : "hover:bg-panel/40",
-                      )}
-                    >
-                      {canManage && (
+              <Card className="px-4 py-12 text-center text-sm text-muted-foreground">
+                {members.length === 0 && !query
+                  ? "No members yet."
+                  : "No members match your filters."}
+              </Card>
+            )
+          ) : (
+            <TableShell>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {canManage && (
+                      <TableHead className="w-10">
                         <Checkbox
-                          aria-label={`Select ${display}`}
-                          checked={checked}
-                          disabled={!editable}
-                          onCheckedChange={() => toggleOne(m.user_id)}
-                          className={cn(!editable && "invisible")}
+                          aria-label="Select all"
+                          checked={allSelected}
+                          disabled={selectableRows.length === 0}
+                          onCheckedChange={toggleAll}
                         />
-                      )}
-                      <div className="flex min-w-0 flex-1 items-center gap-3">
-                        <Avatar className="size-9 ring-1 ring-hairline">
-                          {m.avatar_url && <AvatarImage src={m.avatar_url} alt="" />}
-                          <AvatarFallback className="text-xs font-medium">{initials(m)}</AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-foreground">
-                            {display}
-                            {isSelf && (
-                              <span className="ml-1.5 text-xs font-normal text-muted-foreground">(you)</span>
-                            )}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">{m.email}</p>
+                      </TableHead>
+                    )}
+                    {someSelected ? (
+                      <TableHead colSpan={4}>
+                        <div className="flex items-center gap-3">
+                          <span className="text-foreground">{selected.size} selected</span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="ml-auto h-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={removeSelected}
+                          >
+                            <Trash2 className="size-3.5" />
+                            Remove
+                          </Button>
                         </div>
-                      </div>
-
-                      <div className="hidden w-28 shrink-0 text-sm text-muted-foreground md:block">
-                        {formatJoined(m.joined_at)}
-                      </div>
-
-                      <div className="w-36 shrink-0">
-                        {editable ? (
-                          <RoleSelect value={m.role} onChange={(r) => changeRole(m.user_id, r)} allowOwner={isOwner} />
-                        ) : (
-                          <Badge variant={m.role === "owner" ? "brand" : "outline"} className="capitalize">
-                            {m.role}
-                          </Badge>
+                      </TableHead>
+                    ) : (
+                      <>
+                        <TableHead>Member</TableHead>
+                        <TableHead className="hidden w-28 md:table-cell">Joined</TableHead>
+                        <TableHead className="w-36">Role</TableHead>
+                        <TableHead className="w-10" />
+                      </>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((m) => {
+                    const isSelf = m.user_id === currentUserId;
+                    const editable = isRemovable(m);
+                    const display = m.name || m.username || m.email;
+                    const checked = selected.has(m.user_id);
+                    return (
+                      <TableRow key={m.user_id} data-state={checked ? "selected" : undefined}>
+                        {canManage && (
+                          <TableCell>
+                            <Checkbox
+                              aria-label={`Select ${display}`}
+                              checked={checked}
+                              disabled={!editable}
+                              onCheckedChange={() => toggleOne(m.user_id)}
+                              className={cn(!editable && "invisible")}
+                            />
+                          </TableCell>
                         )}
-                      </div>
-
-                      <div className="w-8 shrink-0">
-                        {(editable || isSelf) && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              aria-label={`Actions for ${display}`}
-                              className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-panel hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-panel"
-                            >
-                              <MoreHorizontal className="size-4" />
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
-                              <DropdownMenuItem onClick={() => navigator.clipboard?.writeText(m.email)}>
-                                Copy email address
-                              </DropdownMenuItem>
-                              {editable && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    onClick={() => remove(m.user_id)}
-                                    className="text-destructive focus:text-destructive"
-                                  >
-                                    <Trash2 className="size-4" />
-                                    Remove from organization
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                              {isSelf && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  {canLeaveSelf ? (
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar className="size-9 ring-1 ring-hairline">
+                              {m.avatar_url && <AvatarImage src={m.avatar_url} alt="" />}
+                              <AvatarFallback className="text-xs font-medium">{initials(m)}</AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-foreground">
+                                {display}
+                                {isSelf && (
+                                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">(you)</span>
+                                )}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">{m.email}</p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
+                          {formatJoined(m.joined_at)}
+                        </TableCell>
+                        <TableCell>
+                          {editable ? (
+                            <RoleSelect value={m.role} onChange={(r) => changeRole(m.user_id, r)} allowOwner={isOwner} />
+                          ) : (
+                            <Badge variant={m.role === "owner" ? "brand" : "outline"} className="capitalize">
+                              {m.role}
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {(editable || isSelf) && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger
+                                aria-label={`Actions for ${display}`}
+                                className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-panel hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-panel"
+                              >
+                                <MoreHorizontal className="size-4" />
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-52">
+                                <DropdownMenuItem onClick={() => navigator.clipboard?.writeText(m.email)}>
+                                  Copy email address
+                                </DropdownMenuItem>
+                                {editable && (
+                                  <>
+                                    <DropdownMenuSeparator />
                                     <DropdownMenuItem
-                                      onClick={leave}
+                                      onClick={() => remove(m.user_id)}
                                       className="text-destructive focus:text-destructive"
                                     >
-                                      <LogOut className="size-4" />
-                                      Leave organization
+                                      <Trash2 className="size-4" />
+                                      Remove from organization
                                     </DropdownMenuItem>
-                                  ) : (
-                                    <div title={leaveLockReason}>
-                                      <DropdownMenuItem disabled className="text-muted-foreground">
-                                        <Lock className="size-3.5" />
+                                  </>
+                                )}
+                                {isSelf && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    {canLeaveSelf ? (
+                                      <DropdownMenuItem
+                                        onClick={leave}
+                                        className="text-destructive focus:text-destructive"
+                                      >
+                                        <LogOut className="size-4" />
                                         Leave organization
                                       </DropdownMenuItem>
-                                      <p className="px-2 pt-0.5 pb-1 text-xs text-muted-foreground/80">
-                                        {leaveLockReason} Transfer ownership first.
-                                      </p>
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
+                                    ) : (
+                                      <div title={leaveLockReason}>
+                                        <DropdownMenuItem disabled className="text-muted-foreground">
+                                          <Lock className="size-3.5" />
+                                          Leave organization
+                                        </DropdownMenuItem>
+                                        <p className="px-2 pt-0.5 pb-1 text-xs text-muted-foreground/80">
+                                          {leaveLockReason} Transfer ownership first.
+                                        </p>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableShell>
+          )}
+
+          {membersNext && (
+            <div className="flex justify-center">
+              <Button variant="outline" size="sm" onClick={loadMoreMembers} disabled={loadingMore}>
+                {loadingMore ? "Loading..." : "Load more"}
+              </Button>
+            </div>
+          )}
 
           <p className="text-xs text-muted-foreground">
-            {roleFilter !== "all" || query
-              ? `${rows.length} of ${members.length} members`
-              : `${members.length} ${members.length === 1 ? "member" : "members"}`}
+            {roleFilter !== "all"
+              ? `${rows.length} of ${members.length} loaded`
+              : `${members.length} ${members.length === 1 ? "member" : "members"}${membersNext ? " loaded" : ""}`}
           </p>
         </TabsContent>
       </Tabs>
@@ -615,31 +734,24 @@ export function MembersManager({
 function PendingInvites({
   invites,
   loading,
+  next,
+  loadingMore,
+  onLoadMore,
   canManage,
   onRevoke,
   onInvite,
 }: {
   invites: Invitation[];
   loading: boolean;
+  next: string | null;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   canManage: boolean;
   onRevoke: (id: string) => void;
   onInvite?: () => void;
 }) {
   if (loading) {
-    return (
-      <Card className="divide-y divide-hairline">
-        {[0, 1].map((i) => (
-          <div key={i} className="flex items-center gap-3 px-4 py-3.5">
-            <Skeleton className="size-9 rounded-full" />
-            <div className="flex-1 space-y-1.5">
-              <Skeleton className="h-4 w-48" />
-              <Skeleton className="h-3 w-40" />
-            </div>
-            <Skeleton className="h-6 w-16 rounded-full" />
-          </div>
-        ))}
-      </Card>
-    );
+    return <ListSkeleton />;
   }
 
   if (invites.length === 0) {
@@ -665,41 +777,66 @@ function PendingInvites({
 
   return (
     <div className="space-y-4">
-      <Card>
-        <ul className="divide-y divide-hairline">
-          {invites.map((inv) => (
-            <li key={inv.id} className="flex items-center gap-3 px-4 py-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <Mail className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">{inv.email}</p>
-                <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                  <Clock className="size-3.5 shrink-0" />
-                  {expiresLabel(inv.expires_at)}
-                  {inv.inviter && <span className="truncate">&middot; invited by {inv.inviter}</span>}
-                </p>
-              </div>
-              <Badge variant="outline" className="shrink-0 capitalize">
-                {inv.role}
-              </Badge>
-              {canManage && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => onRevoke(inv.id)}
-                  aria-label={`Revoke the invitation for ${inv.email}`}
-                >
-                  Revoke
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      </Card>
+      <TableShell>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Invitation</TableHead>
+              <TableHead className="w-28">Role</TableHead>
+              <TableHead className="w-24" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {invites.map((inv) => (
+              <TableRow key={inv.id}>
+                <TableCell>
+                  <div className="flex items-center gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                      <Mail className="size-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">{inv.email}</p>
+                      <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                        <Clock className="size-3.5 shrink-0" />
+                        {expiresLabel(inv.expires_at)}
+                        {inv.inviter && <span className="truncate">&middot; invited by {inv.inviter}</span>}
+                      </p>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="capitalize">
+                    {inv.role}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-right">
+                  {canManage && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => onRevoke(inv.id)}
+                      aria-label={`Revoke the invitation for ${inv.email}`}
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableShell>
+      {next && (
+        <div className="flex justify-center">
+          <Button variant="outline" size="sm" onClick={onLoadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading..." : "Load more"}
+          </Button>
+        </div>
+      )}
       <p className="text-xs text-muted-foreground">
         {invites.length} pending {invites.length === 1 ? "invitation" : "invitations"}
+        {next ? " loaded" : ""}
       </p>
     </div>
   );
@@ -739,6 +876,29 @@ function RoleSelect({
         {(allowOwner || value === "owner") && <SelectItem value="owner">Owner</SelectItem>}
       </SelectContent>
     </Select>
+  );
+}
+
+function TableShell({ children }: { children: React.ReactNode }) {
+  return <div className="overflow-hidden rounded-xl border border-hairline">{children}</div>;
+}
+
+function ListSkeleton() {
+  return (
+    <TableShell>
+      <div className="divide-y divide-hairline">
+        {[0, 1].map((i) => (
+          <div key={i} className="flex items-center gap-3 px-4 py-3.5">
+            <Skeleton className="size-9 rounded-full" />
+            <div className="flex-1 space-y-1.5">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-52" />
+            </div>
+            <Skeleton className="h-8 w-28 rounded-md" />
+          </div>
+        ))}
+      </div>
+    </TableShell>
   );
 }
 

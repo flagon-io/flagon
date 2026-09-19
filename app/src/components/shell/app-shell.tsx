@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronsUpDown, Plus, Check, ChevronRight, ChevronLeft, PanelLeft } from "lucide-react";
@@ -26,6 +26,7 @@ import { Logo } from "@/components/logo";
 import { Topbar } from "./topbar";
 import { CommandMenu } from "./command-menu";
 import { orgNav, orgSection, breadcrumbTrail, matches, type NavLink, type OrgSection } from "./nav";
+import { BreadcrumbProvider, type DynamicCrumb } from "./page-breadcrumb";
 import type { ShellOrg, ShellUser } from "./types";
 import { AgentProvider } from "@/components/agent/agent-provider";
 import { AgentPanel } from "@/components/agent/agent-panel";
@@ -47,7 +48,17 @@ export function AppShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
-  const trail = breadcrumbTrail(org.slug, pathname);
+  const navTrail = breadcrumbTrail(org.slug, pathname);
+
+  // A detail page can contribute a trailing crumb with a human label the path
+  // can't give (a team/project name), via <PageBreadcrumb>. It registers on mount
+  // and clears on unmount, so navigating away drops it - no stale name lingers.
+  const [dynamicCrumb, setDynamicCrumb] = useState<DynamicCrumb>(null);
+  const setCrumb = useCallback((crumb: DynamicCrumb) => setDynamicCrumb(crumb), []);
+  const trail =
+    dynamicCrumb && navTrail.length > 0
+      ? [...navTrail, { label: dynamicCrumb.label, href: pathname }]
+      : navTrail;
 
   return (
     <AgentProvider orgId={org.id}>
@@ -111,7 +122,9 @@ export function AppShell({
           {/* Full-bleed: pages own their padding via <PageHeader>/<PageBody> so
               headings can span the full width (border included) while content sits
               in a narrower column. The breadcrumb above handles "back". */}
-          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <BreadcrumbProvider value={setCrumb}>{children}</BreadcrumbProvider>
+          </div>
         </SidebarInset>
 
         {/* Full-height right dock, spanning the whole layout (beside the sidebar
@@ -166,8 +179,28 @@ function MainNav({ groups, pathname }: { groups: NavLink[][]; pathname: string }
           {gi > 0 && <div className="mx-1 my-2 h-px bg-sidebar-border" />}
           <nav className="space-y-0.5">
             {group.map((item) => {
-              const active = matches(pathname, item.href, item.exact);
               const Icon = item.icon;
+              if (item.disabled) {
+                // Not-yet-shipped area: shown for wayfinding but inert.
+                return (
+                  <div
+                    key={item.href}
+                    title={`${item.label} - coming soon`}
+                    aria-disabled="true"
+                    className={cn(
+                      navLinkClasses(false),
+                      "cursor-not-allowed opacity-45 hover:bg-transparent",
+                    )}
+                  >
+                    {Icon && <Icon className="size-4.5 shrink-0" />}
+                    <span className={cn("flex-1 truncate", collapseHidden)}>{item.label}</span>
+                    <Badge variant="outline" className={collapseHidden}>
+                      Soon
+                    </Badge>
+                  </div>
+                );
+              }
+              const active = matches(pathname, item.href, item.exact);
               return (
                 <Link
                   key={item.href}

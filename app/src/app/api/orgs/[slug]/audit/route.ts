@@ -8,8 +8,8 @@ export async function GET(request: Request, ctx: { params: Promise<{ slug: strin
     q: sp.get("q") ?? undefined,
     actions: sp.getAll("action"),
     actor: sp.get("actor") ?? undefined,
-    perPage: sp.get("per_page") ? Number(sp.get("per_page")) : undefined,
-    before: sp.get("before") ?? undefined,
+    perPage: sp.get("limit") ? Number(sp.get("limit")) : undefined,
+    before: sp.get("cursor") ?? undefined,
   }).catch(() => ({ events: [], next: null }));
   return NextResponse.json(page);
 }

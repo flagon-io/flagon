@@ -1,61 +1,95 @@
 ---
 title: Roles & permissions
-description: How organization roles, the base permission, and project roles combine into access.
+description: How organization roles, the base permission, project roles, teams, and ownership combine into access.
 section: Platform
 order: 25
 ---
 
 # Roles & permissions
 
-Flagon uses a two-level model, mirroring how GitHub organizations work.
+Flagon uses a **fixed set of roles**, layered so that broad organization access
+and fine-grained per-project access compose predictably. Custom organization
+roles are **not offered right now**: the vocabulary below is the whole model.
+There are four pieces - organization roles, the base permission, project roles,
+and team roles - plus a separate **ownership** relation on projects.
 
 ## Organization roles
 
-Every member has one organization role:
+Every member has exactly one organization role:
 
 | Role | What it can do |
 | --- | --- |
-| **Owner** | Complete administrative access: members, billing, security settings, and admin on every project. There must always be at least one owner. |
-| **Admin** | Manage the organization and its members; admin on every project. (Owner-only actions like transferring ownership stay restricted.) |
-| **Member** | The default. Access to projects comes from the **base permission** (below), raised by explicit grants. |
+| **Owner** | Complete administrative access: members, billing, security settings, and owner authority on every project. There must always be at least one owner. |
+| **Admin** | Manage the organization and its members, and owner authority on every project. (Owner-only actions like transferring org ownership stay restricted.) |
+| **Member** | The default. Access to projects comes from the **base permission** (below), raised by explicit grants and team grants. |
 
 ## Base permission
 
 The **base permission** is the default project access every member gets across the
-whole organization. Owners/admins set it under **Settings → Member privileges**.
-The four org-wide levels (GitHub's base-permission set) are:
+whole organization. Owners and admins set it under **Settings -> Member
+privileges**. The four org-wide levels are:
 
 `none` · `read` · `write` · `admin` (default: **read**)
 
-(Triage and Maintain exist as finer per-project roles, but aren't org-wide defaults.)
+(Triage and Maintain exist as finer per-project roles, but are not org-wide
+defaults.)
 
-A member can be **raised** above the base on a specific project by an explicit grant,
-but never dropped below it. This is exactly GitHub's base-permission model.
+A member can be **raised** above the base on a specific project by an explicit
+grant, but never dropped below it.
 
 ## Project roles
 
-Projects use the classic repository-role ladder, each a superset of the one below:
+Projects use a five-rung collaborator ladder, each rung a superset of the one
+below:
 
 | Role | Grants |
 | --- | --- |
-| **Read** | View the project and open issues. |
-| **Triage** | Read, plus manage issues/PRs without writing. |
-| **Write** | Push and merge. |
-| **Maintain** | Write, plus manage project settings. |
-| **Admin** | Full control, including destructive actions and collaborators. |
+| **Read** | See the project and its collaborators. |
+| **Triage** | Read, plus manage the project's work items (reserved for deployment and workflow features as they land). |
+| **Write** | Edit the project's name, slug, description, README, and repository URL. |
+| **Maintain** | Write, plus manage project-level settings. |
+| **Admin** | Full control over the project's collaborators, teams, and settings. |
+
+Grants can be made to an individual collaborator or to a **team** (every member
+of the team inherits the team's role on that project). See
+[Project access](/docs/platform/project-access) for the details.
+
+## Team roles
+
+A **team** is a named group of members that holds shared access to projects. A
+team has two internal roles that govern the team itself, separate from any project
+access it carries:
+
+| Role | What it can do |
+| --- | --- |
+| **Maintainer** | Manage the team's membership and edit the team. The creator of a team is its first maintainer. |
+| **Member** | Belong to the team and inherit its project grants. |
+
+Org owners and admins create and delete teams. See [Teams](/docs/platform/teams) for
+the full lifecycle.
+
+## Project ownership
+
+**Ownership** is a distinct relation that sits **above** the admin rung; it is not
+a role on the ladder. An owner can do everything an admin can, plus **delete,
+restore, and transfer** the project and **manage its owners**. A project can have
+several owners, and an owner can be an individual user or a team. Org owners and
+admins always hold owner authority on every project, so the organization is never
+locked out.
 
 ## How they combine
 
-A member's effective role on a project is the **maximum** of:
+A member's effective **role** on a project is the **maximum** of:
 
 ```
-max( role-implied, base permission, explicit project grant )
+max( organization floor, explicit project grant, team grants )
 ```
 
-- **Owner / admin** → `admin` on every project (this can't be reduced).
-- **Member** → the organization **base permission**, raised by any explicit grant on
-  that project.
+where the organization floor is `admin` for owners and admins, and the base
+permission for everyone else. On top of that role, **owner powers** apply whenever
+the person owns the project directly, owns it through a team, or is an org owner
+or admin.
 
-So a read-only member is simply a member in an org whose base permission is `read`
-(or a member with no elevated grants). This replaces the old `viewer` role: read-only
-access now lives in the base permission, where it composes correctly with grants.
+So a read-only member is simply a member in an organization whose base permission
+is `read` (or a member with no elevated grants). Read-only access lives in the
+base permission, where it composes correctly with grants.

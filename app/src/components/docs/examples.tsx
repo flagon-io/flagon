@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import {
   Info,
   CircleCheck,
@@ -177,6 +177,7 @@ import {
   TooltipContent,
   TooltipProvider,
   Combobox,
+  type ComboboxOption,
   Command,
   CommandInput,
   CommandList,
@@ -504,10 +505,35 @@ function ComboboxDemo() {
   return (
     <div className="w-full max-w-xs space-y-2">
       <Combobox
+        aria-label="Select a region"
         options={REGION_OPTIONS}
         value={value}
         onValueChange={setValue}
         placeholder="Select a region"
+        searchPlaceholder="Search regions…"
+      />
+      <p className="text-xs text-muted-foreground">Selected: {value || "none"}</p>
+    </div>
+  );
+}
+
+function AsyncComboboxDemo() {
+  const [value, setValue] = useState("");
+  // Stands in for a server search: filters the regions after a short delay, so the
+  // options arrive asynchronously the way a `?q=` endpoint would return them.
+  const loadOptions = useCallback(async (query: string): Promise<ComboboxOption[]> => {
+    await new Promise((r) => setTimeout(r, 200));
+    const q = query.toLowerCase();
+    return REGION_OPTIONS.filter((o) => !q || o.label.toLowerCase().includes(q));
+  }, []);
+  return (
+    <div className="w-full max-w-xs space-y-2">
+      <Combobox
+        aria-label="Find a region"
+        loadOptions={loadOptions}
+        value={value}
+        onValueChange={setValue}
+        placeholder="Find a region"
         searchPlaceholder="Search regions…"
       />
       <p className="text-xs text-muted-foreground">Selected: {value || "none"}</p>
@@ -2634,6 +2660,18 @@ const [range, setRange] = useState<DateRange>();
   placeholder="Select a region"
 />`,
         render: <ComboboxDemo />,
+      },
+      {
+        title: "Server-backed typeahead",
+        description:
+          "Pass loadOptions instead of options and it re-queries as you type rather than filtering a static list, so it works over lists too large to send at once (pairs with a paginated ?q= endpoint).",
+        code: `<Combobox
+  loadOptions={async (q) => searchRegions(q)}
+  value={value}
+  onValueChange={setValue}
+  placeholder="Find a region"
+/>`,
+        render: <AsyncComboboxDemo />,
       },
     ],
   },

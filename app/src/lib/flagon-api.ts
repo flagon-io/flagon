@@ -166,6 +166,8 @@ export interface Project {
   created_by: string;
   created_at: string;
   updated_at: string;
+  /** Set only for rows from the deleted-projects archive; omitted otherwise. */
+  deleted_at?: string;
 }
 
 export interface CreateProjectBody {
@@ -179,13 +181,60 @@ export interface CreateProjectBody {
 // UpdateProjectBody is a partial edit: omitted fields are left unchanged.
 export type UpdateProjectBody = Partial<CreateProjectBody>;
 
-export async function listProjects(slug: string): Promise<Project[]> {
+// ListOptions are the shared search + keyset-page params for any list call. They
+// map to the API's ?q=&limit=&cursor= (and, for external clients, the HTTP QUERY
+// body). cursor comes from a prior page's `next`.
+export interface ListOptions {
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+// Page is one page of a list: the items plus the opaque cursor for the following
+// page (null on the last page). The cursor is parsed from the API's RFC 5988 Link
+// header, so this shape is identical for every paginated resource.
+export interface Page<T> {
+  items: T[];
+  next: string | null;
+}
+
+function listSearch(opts?: ListOptions): string {
+  const qs = new URLSearchParams();
+  if (opts?.q) qs.set("q", opts.q);
+  if (opts?.cursor) qs.set("cursor", opts.cursor);
+  if (opts?.limit) qs.set("limit", String(opts.limit));
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+export async function listProjects(slug: string, opts?: ListOptions): Promise<Page<Project>> {
   const user = await currentUser();
-  if (!user) return [];
-  const res = await call(`/orgs/${encodeURIComponent(slug)}/projects`, { method: "GET" }, user);
+  if (!user) return { items: [], next: null };
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects${listSearch(opts)}`,
+    { method: "GET" },
+    user,
+  );
   if (!res.ok) throw new Error(`api projects failed (${res.status})`);
   const data = await res.json();
-  return data.projects ?? [];
+  return { items: data.projects ?? [], next: nextCursor(res.headers.get("Link")) };
+}
+
+// listDeletedProjects returns the org's soft-deleted projects (the restore
+// archive). Org owners/admins only; returns an empty page for anyone else
+// (403 -> empty).
+export async function listDeletedProjects(slug: string, opts?: ListOptions): Promise<Page<Project>> {
+  const user = await currentUser();
+  if (!user) return { items: [], next: null };
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/deleted-projects${listSearch(opts)}`,
+    { method: "GET" },
+    user,
+  );
+  if (res.status === 403) return { items: [], next: null };
+  if (!res.ok) throw new Error(`api deleted projects failed (${res.status})`);
+  const data = await res.json();
+  return { items: data.projects ?? [], next: nextCursor(res.headers.get("Link")) };
 }
 
 export async function getProject(slug: string, project: string): Promise<Project | null> {
@@ -288,7 +337,7 @@ export async function listAuditEvents(slug: string, limit = 8): Promise<AuditEve
   const user = await currentUser();
   if (!user) return [];
   const res = await call(
-    `/orgs/${encodeURIComponent(slug)}/audit?per_page=${limit}`,
+    `/orgs/${encodeURIComponent(slug)}/audit?limit=${limit}`,
     { method: "GET" },
     user,
   );
@@ -310,15 +359,18 @@ export interface AuditPage {
   next: string | null;
 }
 
-// pull the `before` cursor out of the API's RFC 5988 Link header (rel="next").
-function nextCursor(link: string | null): string | null {
+// nextCursor pulls the opaque next-page cursor out of an RFC 5988 Link header's
+// rel="next" target, or null when there is no next page. `param` is the cursor's
+// query-param name; every list (including the audit log) uses "cursor". Reusable
+// for every paginated list.
+function nextCursor(link: string | null, param = "cursor"): string | null {
   if (!link) return null;
   for (const part of link.split(",")) {
     if (!/rel="?next"?/.test(part)) continue;
     const m = part.match(/<([^>]+)>/);
     if (!m) continue;
     try {
-      return new URL(m[1], "http://x").searchParams.get("before");
+      return new URL(m[1], "http://internal").searchParams.get(param);
     } catch {
       return null;
     }
@@ -393,8 +445,8 @@ export async function listAuditPage(slug: string, query: AuditQuery = {}): Promi
   if (query.q) qs.set("q", query.q);
   for (const a of query.actions ?? []) qs.append("action", a);
   if (query.actor) qs.set("actor", query.actor);
-  if (query.perPage) qs.set("per_page", String(query.perPage));
-  if (query.before) qs.set("before", query.before);
+  if (query.perPage) qs.set("limit", String(query.perPage));
+  if (query.before) qs.set("cursor", query.before);
   const res = await call(
     `/orgs/${encodeURIComponent(slug)}/audit?${qs.toString()}`,
     { method: "GET" },
@@ -417,13 +469,17 @@ export interface Member {
   joined_at: string;
 }
 
-export async function listMembers(slug: string): Promise<Member[]> {
+export async function listMembers(slug: string, opts?: ListOptions): Promise<Page<Member>> {
   const user = await currentUser();
-  if (!user) return [];
-  const res = await call(`/orgs/${encodeURIComponent(slug)}/members`, { method: "GET" }, user);
+  if (!user) return { items: [], next: null };
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/members${listSearch(opts)}`,
+    { method: "GET" },
+    user,
+  );
   if (!res.ok) throw new Error(`api members failed (${res.status})`);
   const data = await res.json();
-  return data.members ?? [];
+  return { items: data.members ?? [], next: nextCursor(res.headers.get("Link")) };
 }
 
 async function memberMutation(res: Response): Promise<void> {
@@ -481,17 +537,21 @@ export interface ProjectMember {
   created_at: string;
 }
 
-export async function listProjectMembers(slug: string, project: string): Promise<ProjectMember[]> {
+export async function listProjectMembers(
+  slug: string,
+  project: string,
+  opts?: ListOptions,
+): Promise<Page<ProjectMember>> {
   const user = await currentUser();
-  if (!user) return [];
+  if (!user) return { items: [], next: null };
   const res = await call(
-    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/members`,
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/members${listSearch(opts)}`,
     { method: "GET" },
     user,
   );
   if (!res.ok) throw new Error(`api project members failed (${res.status})`);
   const data = await res.json();
-  return data.members ?? [];
+  return { items: data.members ?? [], next: nextCursor(res.headers.get("Link")) };
 }
 
 export async function addProjectMember(
@@ -535,6 +595,339 @@ export async function removeProjectMember(
   if (!user) throw new Error("Not signed in.");
   const res = await call(
     `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+    user,
+  );
+  await memberMutation(res);
+}
+
+// --- Teams ----------------------------------------------------------------
+
+/** A team's own membership role: maintainers manage the team, members belong. */
+export const TEAM_ROLES = ["maintainer", "member"] as const;
+export type TeamRole = (typeof TEAM_ROLES)[number];
+
+export interface Team {
+  id: string;
+  org_id?: string;
+  name: string;
+  slug: string;
+  description: string;
+  member_count: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface TeamMember {
+  user_id: string;
+  name: string | null;
+  email: string;
+  username: string | null;
+  avatar_url: string | null;
+  role: TeamRole;
+  created_at: string;
+}
+
+export interface CreateTeamBody {
+  name: string;
+  slug?: string;
+  description?: string;
+}
+
+export type UpdateTeamBody = Partial<CreateTeamBody>;
+
+export async function listTeams(slug: string, opts?: ListOptions): Promise<Page<Team>> {
+  const user = await currentUser();
+  if (!user) return { items: [], next: null };
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams${listSearch(opts)}`,
+    { method: "GET" },
+    user,
+  );
+  if (!res.ok) throw new Error(`api teams failed (${res.status})`);
+  const data = await res.json();
+  return { items: data.teams ?? [], next: nextCursor(res.headers.get("Link")) };
+}
+
+export async function getTeam(slug: string, team: string): Promise<Team | null> {
+  const user = await currentUser();
+  if (!user) return null;
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}`,
+    { method: "GET" },
+    user,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`api team failed (${res.status})`);
+  return res.json();
+}
+
+export async function createTeam(slug: string, body: CreateTeamBody): Promise<Team> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams`,
+    { method: "POST", body: JSON.stringify(body) },
+    user,
+  );
+  if (res.status === 403) throw new Error("You don't have permission to create teams here.");
+  if (res.status === 409) throw new Error("A team with that slug already exists.");
+  if (res.status === 422) throw new Error("Please enter a valid team name.");
+  if (!res.ok) throw new Error(`api create team failed (${res.status})`);
+  return res.json();
+}
+
+export async function updateTeam(
+  slug: string,
+  team: string,
+  body: UpdateTeamBody,
+): Promise<Team> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}`,
+    { method: "PATCH", body: JSON.stringify(body) },
+    user,
+  );
+  if (res.status === 403) throw new Error("You don't have permission to edit this team.");
+  if (res.status === 404) throw new Error("Team not found.");
+  if (res.status === 409) throw new Error("A team with that slug already exists.");
+  if (res.status === 422) throw new Error("Please enter valid team details.");
+  if (!res.ok) throw new Error(`api update team failed (${res.status})`);
+  return res.json();
+}
+
+export async function deleteTeam(slug: string, team: string): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}`,
+    { method: "DELETE" },
+    user,
+  );
+  if (res.status === 403) throw new Error("You don't have permission to delete this team.");
+  if (res.status === 404) throw new Error("Team not found.");
+  if (!res.ok) throw new Error(`api delete team failed (${res.status})`);
+}
+
+export async function listTeamMembers(
+  slug: string,
+  team: string,
+  opts?: ListOptions,
+): Promise<Page<TeamMember>> {
+  const user = await currentUser();
+  if (!user) return { items: [], next: null };
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members${listSearch(opts)}`,
+    { method: "GET" },
+    user,
+  );
+  if (!res.ok) throw new Error(`api team members failed (${res.status})`);
+  const data = await res.json();
+  return { items: data.members ?? [], next: nextCursor(res.headers.get("Link")) };
+}
+
+// TeamProject is a project a team has access to, with the granted role.
+export interface TeamProject {
+  project_id: string;
+  name: string;
+  slug: string;
+  role: ProjectRole;
+  created_at: string;
+}
+
+export async function listTeamProjects(
+  slug: string,
+  team: string,
+  opts?: ListOptions,
+): Promise<Page<TeamProject>> {
+  const user = await currentUser();
+  if (!user) return { items: [], next: null };
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/projects${listSearch(opts)}`,
+    { method: "GET" },
+    user,
+  );
+  if (!res.ok) throw new Error(`api team projects failed (${res.status})`);
+  const data = await res.json();
+  return { items: data.projects ?? [], next: nextCursor(res.headers.get("Link")) };
+}
+
+export async function addTeamMember(
+  slug: string,
+  team: string,
+  login: string,
+  role: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members`,
+    { method: "POST", body: JSON.stringify({ login, role }) },
+    user,
+  );
+  await memberMutation(res);
+}
+
+export async function setTeamMemberRole(
+  slug: string,
+  team: string,
+  userId: string,
+  role: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(userId)}/role`,
+    { method: "PUT", body: JSON.stringify({ role }) },
+    user,
+  );
+  await memberMutation(res);
+}
+
+export async function removeTeamMember(
+  slug: string,
+  team: string,
+  userId: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+    user,
+  );
+  await memberMutation(res);
+}
+
+// --- Project teams & owners -----------------------------------------------
+
+export interface ProjectTeam {
+  team_id: string;
+  name: string;
+  slug: string;
+  role: ProjectRole;
+  created_at: string;
+}
+
+export interface ProjectOwner {
+  owner_type: "user" | "team";
+  principal_id: string;
+  name: string | null;
+  email: string | null;
+  username: string | null;
+  avatar_url: string | null;
+  team_slug: string | null;
+  created_at: string;
+}
+
+export async function listProjectTeams(
+  slug: string,
+  project: string,
+  opts?: ListOptions,
+): Promise<Page<ProjectTeam>> {
+  const user = await currentUser();
+  if (!user) return { items: [], next: null };
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/teams${listSearch(opts)}`,
+    { method: "GET" },
+    user,
+  );
+  if (!res.ok) throw new Error(`api project teams failed (${res.status})`);
+  const data = await res.json();
+  return { items: data.teams ?? [], next: nextCursor(res.headers.get("Link")) };
+}
+
+export async function addProjectTeam(
+  slug: string,
+  project: string,
+  team: string,
+  role: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/teams`,
+    { method: "POST", body: JSON.stringify({ team, role }) },
+    user,
+  );
+  await memberMutation(res);
+}
+
+export async function setProjectTeamRole(
+  slug: string,
+  project: string,
+  team: string,
+  role: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/teams/${encodeURIComponent(team)}/role`,
+    { method: "PUT", body: JSON.stringify({ role }) },
+    user,
+  );
+  await memberMutation(res);
+}
+
+export async function removeProjectTeam(
+  slug: string,
+  project: string,
+  team: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/teams/${encodeURIComponent(team)}`,
+    { method: "DELETE" },
+    user,
+  );
+  await memberMutation(res);
+}
+
+export async function listProjectOwners(
+  slug: string,
+  project: string,
+  opts?: ListOptions,
+): Promise<Page<ProjectOwner>> {
+  const user = await currentUser();
+  if (!user) return { items: [], next: null };
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/owners${listSearch(opts)}`,
+    { method: "GET" },
+    user,
+  );
+  if (!res.ok) throw new Error(`api project owners failed (${res.status})`);
+  const data = await res.json();
+  return { items: data.owners ?? [], next: nextCursor(res.headers.get("Link")) };
+}
+
+export async function addProjectOwner(
+  slug: string,
+  project: string,
+  type: "user" | "team",
+  login: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/owners`,
+    { method: "POST", body: JSON.stringify({ type, login }) },
+    user,
+  );
+  await memberMutation(res);
+}
+
+export async function removeProjectOwner(
+  slug: string,
+  project: string,
+  type: "user" | "team",
+  principalId: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/owners/${encodeURIComponent(type)}/${encodeURIComponent(principalId)}`,
     { method: "DELETE" },
     user,
   );
@@ -592,13 +985,17 @@ export async function inviteMember(slug: string, login: string, role: string): P
   return res.json();
 }
 
-export async function listInvitations(slug: string): Promise<Invitation[]> {
+export async function listInvitations(slug: string, opts?: ListOptions): Promise<Page<Invitation>> {
   const user = await currentUser();
-  if (!user) return [];
-  const res = await call(`/orgs/${encodeURIComponent(slug)}/invitations`, { method: "GET" }, user);
+  if (!user) return { items: [], next: null };
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/invitations${listSearch(opts)}`,
+    { method: "GET" },
+    user,
+  );
   if (!res.ok) throw new Error(`api invitations failed (${res.status})`);
   const data = await res.json();
-  return data.invitations ?? [];
+  return { items: data.invitations ?? [], next: nextCursor(res.headers.get("Link")) };
 }
 
 export async function revokeInvitation(slug: string, id: string): Promise<void> {

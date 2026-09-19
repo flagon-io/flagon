@@ -33,7 +33,7 @@ func registerAuditAPI(api huma.API, store IdentityStore, auditStore *audit.Store
 	}, func(ctx context.Context, in *AuditListInput) (*AuditOutput, error) {
 		actorID, _ := identity(ctx)
 
-		cursor, err := audit.DecodeCursor(in.Before)
+		cursor, err := audit.DecodeCursor(in.Cursor)
 		if err != nil {
 			return nil, huma.Error422UnprocessableEntity("invalid pagination cursor")
 		}
@@ -49,7 +49,7 @@ func registerAuditAPI(api huma.API, store IdentityStore, auditStore *audit.Store
 			Actions: actions,
 			ActorID: strings.TrimSpace(in.Actor),
 			Cursor:  cursor,
-			Limit:   in.PerPage,
+			Limit:   in.Limit,
 		})
 		if err != nil {
 			return nil, huma.Error500InternalServerError("could not load the audit log", err)
@@ -140,22 +140,22 @@ func auditNextURL(in *AuditListInput, next *audit.Cursor) string {
 	if s := strings.TrimSpace(in.Actor); s != "" {
 		q.Set("actor", s)
 	}
-	if in.PerPage > 0 {
-		q.Set("per_page", fmt.Sprintf("%d", in.PerPage))
+	if in.Limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", in.Limit))
 	}
-	q.Set("before", next.Encode())
+	q.Set("cursor", next.Encode())
 	return fmt.Sprintf("/orgs/%s/audit?%s", url.PathEscape(in.Slug), q.Encode())
 }
 
 // AuditListInput lists an org's audit log, newest first, with search + filters +
 // keyset pagination.
 type AuditListInput struct {
-	Slug    string   `path:"slug"`
-	Q       string   `query:"q" doc:"Search across summary, action, actor, and location"`
-	Action  []string `query:"action" doc:"Filter to these action keys (repeatable)"`
-	Actor   string   `query:"actor" doc:"Filter to this actor's user id"`
-	PerPage int      `query:"per_page" doc:"Results per page (default 30, max 100)"`
-	Before  string   `query:"before" doc:"Opaque cursor from a previous page's Link header"`
+	Slug   string   `path:"slug"`
+	Q      string   `query:"q" doc:"Search across summary, action, actor, and location"`
+	Action []string `query:"action" doc:"Filter to these action keys (repeatable)"`
+	Actor  string   `query:"actor" doc:"Filter to this actor's user id"`
+	Limit  int      `query:"limit" doc:"Results per page (default 30, max 100)"`
+	Cursor string   `query:"cursor" doc:"Opaque cursor from a previous page's Link header"`
 }
 
 // AuditOutput is one page of the audit log; Link carries the next-page cursor.

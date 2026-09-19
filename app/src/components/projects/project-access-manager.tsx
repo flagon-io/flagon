@@ -27,6 +27,12 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@flagon-io/ui";
 
 type ProjectMember = {
@@ -65,6 +71,8 @@ export function ProjectAccessManager({
   const orgAdmin = orgRole === "owner" || orgRole === "admin";
 
   const [members, setMembers] = useState<ProjectMember[]>([]);
+  const [next, setNext] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,11 +88,27 @@ export function ProjectAccessManager({
     setLoading(true);
     const res = await fetch(base);
     if (res.ok) {
-      const d = await res.json();
-      setMembers(d.members ?? []);
+      const d = (await res.json()) as { items: ProjectMember[]; next: string | null };
+      setMembers(d.items ?? []);
+      setNext(d.next ?? null);
     }
     setLoading(false);
   }, [base]);
+
+  const loadMore = useCallback(async () => {
+    if (!next) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(`${base}?cursor=${encodeURIComponent(next)}`);
+      if (res.ok) {
+        const d = (await res.json()) as { items: ProjectMember[]; next: string | null };
+        setMembers((prev) => [...prev, ...(d.items ?? [])]);
+        setNext(d.next ?? null);
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [base, next]);
 
   useEffect(() => {
     void (async () => {
@@ -192,14 +216,8 @@ export function ProjectAccessManager({
         )}
       </div>
 
-      <Card className="overflow-hidden">
-        <div className="flex h-11 items-center gap-3 border-b border-hairline bg-muted/25 px-4 text-xs font-medium text-muted-foreground">
-          <span className="flex-1">Collaborator</span>
-          <span className="w-40 shrink-0">Role</span>
-          <span className="w-8 shrink-0" aria-hidden />
-        </div>
-
-        {loading ? (
+      {loading ? (
+        <TableShell>
           <div className="divide-y divide-hairline">
             {[0, 1].map((i) => (
               <div key={i} className="flex items-center gap-3 px-4 py-3.5">
@@ -208,92 +226,111 @@ export function ProjectAccessManager({
                   <Skeleton className="h-4 w-40" />
                   <Skeleton className="h-3 w-52" />
                 </div>
-                <Skeleton className="h-6 w-20 rounded-full" />
+                <Skeleton className="h-8 w-28 rounded-md" />
               </div>
             ))}
           </div>
-        ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 px-6 py-14 text-center">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-              <UserPlus className="size-5" />
-            </span>
-            <p className="text-sm font-medium text-foreground">No extra collaborators</p>
-            <p className="max-w-sm text-sm text-muted-foreground">
-              Everyone gets their organization-level access to this project. Add a collaborator to
-              raise a specific member&rsquo;s role here.
-            </p>
-            {canManage && (
-              <Button size="sm" className="mt-1" onClick={openAdd}>
-                <Plus className="size-4" />
-                Add collaborator
-              </Button>
-            )}
-          </div>
-        ) : (
-          <ul className="divide-y divide-hairline">
-            {rows.map((m) => {
-              const isSelf = m.user_id === currentUserId;
-              const display = m.name || m.username || m.email;
-              const editable = canManage && !isSelf;
-              return (
-                <li key={m.user_id} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-panel/40">
-                  <div className="flex min-w-0 flex-1 items-center gap-3">
-                    <Avatar className="size-9 ring-1 ring-hairline">
-                      {m.avatar_url && <AvatarImage src={m.avatar_url} alt="" />}
-                      <AvatarFallback className="text-xs font-medium">{initials(m)}</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-foreground">
-                        {display}
-                        {isSelf && (
-                          <span className="ml-1.5 text-xs font-normal text-muted-foreground">(you)</span>
-                        )}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">{m.email}</p>
-                    </div>
-                  </div>
-
-                  <div className="w-40 shrink-0">
-                    {editable ? (
-                      <RoleSelect value={m.role} onChange={(r) => changeRole(m.user_id, r)} />
-                    ) : (
-                      <Badge variant={m.role === "admin" ? "brand" : "outline"} className="capitalize">
-                        {m.role}
-                      </Badge>
-                    )}
-                  </div>
-
-                  <div className="w-8 shrink-0">
-                    {editable && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          aria-label={`Actions for ${display}`}
-                          className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-panel hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-panel"
-                        >
-                          <MoreHorizontal className="size-4" />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-52">
-                          <DropdownMenuItem onClick={() => navigator.clipboard?.writeText(m.email)}>
-                            Copy email address
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => remove(m.user_id)}
-                            className="text-destructive focus:text-destructive"
+        </TableShell>
+      ) : rows.length === 0 ? (
+        <Card className="flex flex-col items-center gap-2 px-6 py-14 text-center">
+          <span className="flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+            <UserPlus className="size-5" />
+          </span>
+          <p className="text-sm font-medium text-foreground">No extra collaborators</p>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            Everyone gets their organization-level access to this project. Add a collaborator to
+            raise a specific member&rsquo;s role here.
+          </p>
+          {canManage && (
+            <Button size="sm" className="mt-1" onClick={openAdd}>
+              <Plus className="size-4" />
+              Add collaborator
+            </Button>
+          )}
+        </Card>
+      ) : (
+        <TableShell>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Collaborator</TableHead>
+                <TableHead className="w-40">Role</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((m) => {
+                const isSelf = m.user_id === currentUserId;
+                const display = m.name || m.username || m.email;
+                const editable = canManage && !isSelf;
+                return (
+                  <TableRow key={m.user_id}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <Avatar className="size-9 ring-1 ring-hairline">
+                          {m.avatar_url && <AvatarImage src={m.avatar_url} alt="" />}
+                          <AvatarFallback className="text-xs font-medium">{initials(m)}</AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {display}
+                            {isSelf && (
+                              <span className="ml-1.5 text-xs font-normal text-muted-foreground">(you)</span>
+                            )}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">{m.email}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {editable ? (
+                        <RoleSelect value={m.role} onChange={(r) => changeRole(m.user_id, r)} />
+                      ) : (
+                        <Badge variant={m.role === "admin" ? "brand" : "outline"} className="capitalize">
+                          {m.role}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {editable && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            aria-label={`Actions for ${display}`}
+                            className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-panel hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-panel"
                           >
-                            <Trash2 className="size-4" />
-                            Remove collaborator
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Card>
+                            <MoreHorizontal className="size-4" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-52">
+                            <DropdownMenuItem onClick={() => navigator.clipboard?.writeText(m.email)}>
+                              Copy email address
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => remove(m.user_id)}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="size-4" />
+                              Remove collaborator
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableShell>
+      )}
+
+      {next && (
+        <div className="flex justify-center">
+          <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading..." : "Load more"}
+          </Button>
+        </div>
+      )}
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-lg p-6">
@@ -365,6 +402,10 @@ function RoleSelect({
       </SelectContent>
     </Select>
   );
+}
+
+function TableShell({ children }: { children: React.ReactNode }) {
+  return <div className="overflow-hidden rounded-xl border border-hairline">{children}</div>;
 }
 
 function initials(m: ProjectMember): string {

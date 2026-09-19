@@ -11,6 +11,7 @@ import (
 
 	"github.com/flagon-io/flagon/api/internal/ai"
 	"github.com/flagon-io/flagon/api/internal/db"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // testMCPRouter wires the public MCP endpoint over the controlled corpus. The
@@ -198,11 +199,14 @@ func (fakeAIStore) ListOrgs(context.Context, string) ([]db.Org, error) {
 func (fakeAIStore) CreateOrg(_ context.Context, _, _, name, slug string) (db.Org, error) {
 	return db.Org{Name: name, Slug: slug}, nil
 }
-func (fakeAIStore) ListProjects(_ context.Context, _, orgSlug string) ([]db.Project, error) {
-	return []db.Project{{Slug: "web", OrgID: orgSlug}}, nil
+func (fakeAIStore) ListProjects(_ context.Context, _, orgSlug string, _ paginate.Query) ([]db.Project, string, error) {
+	return []db.Project{{Slug: "web", OrgID: orgSlug}}, "", nil
 }
 func (fakeAIStore) GetProject(_ context.Context, _, _, projectSlug string) (db.Project, error) {
 	return db.Project{Slug: projectSlug}, nil
+}
+func (fakeAIStore) ListDeletedProjects(context.Context, string, string, paginate.Query) ([]db.Project, string, error) {
+	return []db.Project{{Slug: "old-web"}}, "", nil
 }
 func (fakeAIStore) CreateProject(_ context.Context, _, _ string, in db.ProjectInput) (db.Project, error) {
 	return db.Project{Name: in.Name, Slug: in.Slug}, nil
@@ -213,8 +217,8 @@ func (fakeAIStore) UpdateProject(_ context.Context, _, _, projectSlug string, _ 
 func (fakeAIStore) SetProjectDeleted(_ context.Context, _, _, projectSlug string, _ bool) (db.Project, error) {
 	return db.Project{Slug: projectSlug}, nil
 }
-func (fakeAIStore) ListProjectMembers(context.Context, string, string, string) ([]db.ProjectMember, error) {
-	return []db.ProjectMember{{UserID: "u1", Email: "u@example.com", Role: "admin"}}, nil
+func (fakeAIStore) ListProjectMembers(context.Context, string, string, string, paginate.Query) ([]db.ProjectMember, string, error) {
+	return []db.ProjectMember{{UserID: "u1", Email: "u@example.com", Role: "admin"}}, "", nil
 }
 func (fakeAIStore) AddProjectMember(context.Context, string, string, string, string, string) (string, error) {
 	return "u2", nil
@@ -225,8 +229,57 @@ func (fakeAIStore) SetProjectMemberRole(context.Context, string, string, string,
 func (fakeAIStore) RemoveProjectMember(context.Context, string, string, string, string) error {
 	return nil
 }
-func (fakeAIStore) ListMembers(context.Context, string, string) ([]db.Member, error) {
-	return []db.Member{{UserID: "u1", Email: "u@example.com", Role: "owner"}}, nil
+func (fakeAIStore) ListTeams(context.Context, string, string, paginate.Query) ([]db.Team, string, error) {
+	return []db.Team{{ID: "t1", Name: "Platform", Slug: "platform"}}, "", nil
+}
+func (fakeAIStore) GetTeam(_ context.Context, _, _, teamSlug string) (db.Team, error) {
+	return db.Team{Slug: teamSlug}, nil
+}
+func (fakeAIStore) CreateTeam(_ context.Context, _, _ string, in db.TeamInput) (db.Team, error) {
+	return db.Team{Name: in.Name, Slug: in.Slug}, nil
+}
+func (fakeAIStore) UpdateTeam(_ context.Context, _, _, teamSlug string, _ db.TeamUpdate) (db.Team, error) {
+	return db.Team{Slug: teamSlug}, nil
+}
+func (fakeAIStore) DeleteTeam(context.Context, string, string, string) error { return nil }
+func (fakeAIStore) ListTeamMembers(context.Context, string, string, string, paginate.Query) ([]db.TeamMember, string, error) {
+	return []db.TeamMember{{UserID: "u1", Email: "u@example.com", Role: "maintainer"}}, "", nil
+}
+func (fakeAIStore) ListTeamProjects(context.Context, string, string, string, paginate.Query) ([]db.TeamProject, string, error) {
+	return []db.TeamProject{{ProjectID: "p1", Slug: "web", Role: "write"}}, "", nil
+}
+func (fakeAIStore) AddTeamMember(context.Context, string, string, string, string, string) (string, error) {
+	return "u2", nil
+}
+func (fakeAIStore) SetTeamMemberRole(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (fakeAIStore) RemoveTeamMember(context.Context, string, string, string, string) error {
+	return nil
+}
+func (fakeAIStore) ListProjectTeams(context.Context, string, string, string, paginate.Query) ([]db.ProjectTeam, string, error) {
+	return []db.ProjectTeam{{TeamID: "t1", Slug: "platform", Role: "write"}}, "", nil
+}
+func (fakeAIStore) AddProjectTeam(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (fakeAIStore) SetProjectTeamRole(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (fakeAIStore) RemoveProjectTeam(context.Context, string, string, string, string) error {
+	return nil
+}
+func (fakeAIStore) ListProjectOwners(context.Context, string, string, string, paginate.Query) ([]db.ProjectOwner, string, error) {
+	return []db.ProjectOwner{{OwnerType: "user", PrincipalID: "u1"}}, "", nil
+}
+func (fakeAIStore) AddProjectOwner(context.Context, string, string, string, string, string) (string, error) {
+	return "u2", nil
+}
+func (fakeAIStore) RemoveProjectOwner(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (fakeAIStore) ListMembers(context.Context, string, string, paginate.Query) ([]db.Member, string, error) {
+	return []db.Member{{UserID: "u1", Email: "u@example.com", Role: "owner"}}, "", nil
 }
 func (fakeAIStore) AddMember(context.Context, string, string, string, string) (string, string, error) {
 	return "u2", "Acme", nil
@@ -239,8 +292,8 @@ func (fakeAIStore) GetOrgSecurity(context.Context, string, string) (db.OrgSecuri
 func (fakeAIStore) SetOrgSecurity(context.Context, string, string, db.OrgSecurity) error {
 	return nil
 }
-func (fakeAIStore) ListInvitations(context.Context, string, string) ([]db.Invitation, error) {
-	return nil, nil
+func (fakeAIStore) ListInvitations(context.Context, string, string, paginate.Query) ([]db.Invitation, string, error) {
+	return nil, "", nil
 }
 func (fakeAIStore) InviteMember(_ context.Context, _, _, login, _ string) (db.InviteResult, error) {
 	return db.InviteResult{Status: "invited", Email: login, OrgName: "Acme"}, nil

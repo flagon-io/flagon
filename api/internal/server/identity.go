@@ -12,6 +12,7 @@ import (
 
 	"github.com/flagon-io/flagon/api/internal/audit"
 	"github.com/flagon-io/flagon/api/internal/db"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // IdentityStore is the data layer the identity endpoints need. *db.DB satisfies
@@ -26,16 +27,37 @@ type IdentityStore interface {
 	PublicUserProfile(ctx context.Context, username string) (*db.PublicProfile, error)
 	LeaveOrg(ctx context.Context, userID, slug string) error
 
-	ListProjects(ctx context.Context, actorID, orgSlug string) ([]db.Project, error)
+	ListProjects(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]db.Project, string, error)
+	ListDeletedProjects(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]db.Project, string, error)
 	CreateProject(ctx context.Context, actorID, orgSlug string, in db.ProjectInput) (db.Project, error)
 	GetProject(ctx context.Context, actorID, orgSlug, projectSlug string) (db.Project, error)
 	UpdateProject(ctx context.Context, actorID, orgSlug, projectSlug string, in db.ProjectUpdate) (db.Project, error)
 	SetProjectDeleted(ctx context.Context, actorID, orgSlug, projectSlug string, deleted bool) (db.Project, error)
 
-	ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string) ([]db.ProjectMember, error)
+	ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]db.ProjectMember, string, error)
 	AddProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, login, role string) (targetID string, err error)
 	SetProjectMemberRole(ctx context.Context, actorID, orgSlug, projectSlug, targetID, role string) error
 	RemoveProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, targetID string) error
+
+	ListTeams(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]db.Team, string, error)
+	GetTeam(ctx context.Context, actorID, orgSlug, teamSlug string) (db.Team, error)
+	CreateTeam(ctx context.Context, actorID, orgSlug string, in db.TeamInput) (db.Team, error)
+	UpdateTeam(ctx context.Context, actorID, orgSlug, teamSlug string, in db.TeamUpdate) (db.Team, error)
+	DeleteTeam(ctx context.Context, actorID, orgSlug, teamSlug string) error
+	ListTeamMembers(ctx context.Context, actorID, orgSlug, teamSlug string, q paginate.Query) ([]db.TeamMember, string, error)
+	ListTeamProjects(ctx context.Context, actorID, orgSlug, teamSlug string, q paginate.Query) ([]db.TeamProject, string, error)
+	AddTeamMember(ctx context.Context, actorID, orgSlug, teamSlug, login, role string) (targetID string, err error)
+	SetTeamMemberRole(ctx context.Context, actorID, orgSlug, teamSlug, targetID, role string) error
+	RemoveTeamMember(ctx context.Context, actorID, orgSlug, teamSlug, targetID string) error
+
+	ListProjectTeams(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]db.ProjectTeam, string, error)
+	AddProjectTeam(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug, role string) error
+	SetProjectTeamRole(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug, role string) error
+	RemoveProjectTeam(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug string) error
+
+	ListProjectOwners(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]db.ProjectOwner, string, error)
+	AddProjectOwner(ctx context.Context, actorID, orgSlug, projectSlug, ownerType, login string) (principalID string, err error)
+	RemoveProjectOwner(ctx context.Context, actorID, orgSlug, projectSlug, ownerType, principalID string) error
 
 	GetOrg(ctx context.Context, actorID, orgSlug string) (db.Org, error)
 
@@ -47,13 +69,13 @@ type IdentityStore interface {
 
 	ProvisionSSOMember(ctx context.Context, orgID, userID, email, role string) error
 
-	ListMembers(ctx context.Context, actorID, slug string) ([]db.Member, error)
+	ListMembers(ctx context.Context, actorID, slug string, q paginate.Query) ([]db.Member, string, error)
 	AddMember(ctx context.Context, actorID, slug, login, role string) (targetID, orgName string, err error)
 	SetMemberRole(ctx context.Context, actorID, slug, targetID, newRole string) error
 	RemoveMember(ctx context.Context, actorID, slug, targetID string) error
 
 	InviteMember(ctx context.Context, actorID, slug, login, role string) (db.InviteResult, error)
-	ListInvitations(ctx context.Context, actorID, slug string) ([]db.Invitation, error)
+	ListInvitations(ctx context.Context, actorID, slug string, q paginate.Query) ([]db.Invitation, string, error)
 	RevokeInvitation(ctx context.Context, actorID, slug, id string) error
 	InvitationByToken(ctx context.Context, token string) (*db.InviteLookup, error)
 	AcceptInvitation(ctx context.Context, userID, email, token string) (slug, name, invitedBy string, err error)

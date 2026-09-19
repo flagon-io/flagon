@@ -37,7 +37,9 @@ import (
 	"github.com/flagon-io/flagon/api/internal/ai"
 	"github.com/flagon-io/flagon/api/internal/audit"
 	"github.com/flagon-io/flagon/api/internal/db"
+	"github.com/flagon-io/flagon/api/internal/changelog"
 	"github.com/flagon-io/flagon/api/internal/docs"
+	"github.com/flagon-io/flagon/api/internal/roadmap"
 	"github.com/flagon-io/flagon/api/internal/metrics"
 	"github.com/flagon-io/flagon/api/internal/server"
 )
@@ -225,6 +227,28 @@ func runServe(ctx context.Context, cmd *cli.Command) error {
 		slog.Info("docs corpus loaded", "docs", len(idx.List(true)))
 	}
 
+	// The roadmap is embedded the same way the docs corpus is (see
+	// internal/roadmap), so it ships and deploys atomically with the code. It
+	// backs the public /roadmap endpoint the website renders. A load failure is
+	// non-fatal: the rest of the API still serves.
+	var roadmapBoard *roadmap.Board
+	if board, err := roadmap.Load(); err != nil {
+		slog.Warn("could not load roadmap corpus; /roadmap endpoint disabled", "err", err)
+	} else {
+		roadmapBoard = board
+		slog.Info("roadmap corpus loaded", "items", len(board.Items()))
+	}
+
+	// The changelog is embedded the same way (see internal/changelog) and backs
+	// the public /changelog endpoint. A load failure is non-fatal.
+	var changelogLog *changelog.Log
+	if l, err := changelog.Load(); err != nil {
+		slog.Warn("could not load changelog corpus; /changelog endpoint disabled", "err", err)
+	} else {
+		changelogLog = l
+		slog.Info("changelog corpus loaded", "entries", len(l.Entries()))
+	}
+
 	// Hand the registry a true-nil interface when there is no corpus, so the
 	// docs tools are omitted rather than registered against a nil index.
 	var docsForAgent ai.DocsIndex
@@ -244,6 +268,8 @@ func runServe(ctx context.Context, cmd *cli.Command) error {
 		server.WithIdentity(database, cmd.String("internal-token")),
 		server.WithAI(agent),
 		server.WithDocs(docsIndex),
+		server.WithRoadmap(roadmapBoard),
+		server.WithChangelog(changelogLog),
 		server.WithMCP(registry),
 		server.WithMCPHost(cmd.String("mcp-host")),
 		server.WithAudit(audit.NewStore(database.Pool())),

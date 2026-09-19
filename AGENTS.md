@@ -158,6 +158,32 @@ pages (e.g. parts of the handbook) are readable by the in-product agent for
 authenticated users but never leave the org: they are excluded from the public
 `/docs*` routes and the public MCP.
 
+## Roadmap
+
+The public roadmap works exactly like the docs, because the roadmap is part of
+the work too: it lives next to the code that delivers it, not on the website.
+Items live in the top-level `roadmap/` tree (see `roadmap/README.md`), one
+Markdown file each. `cmd/genroadmap` (`make roadmap`) compiles them into
+`internal/roadmap/roadmap.gen.json`, which the API embeds and serves at `/roadmap`
+(a plain route, not in the OpenAPI spec). The website renders its `/roadmap` page
+entirely as a client of that route, so it holds no copy and cannot drift, and it
+degrades gracefully when the API is unreachable. Move an item as it matures by
+changing its `stage` (`concept` -> `alpha` -> `beta`); when it ships, delete the
+file (it leaves the board for the changelog). CI runs `genroadmap -check` and
+fails if the corpus is stale, so a roadmap edit and its regenerated corpus land
+together.
+
+## Changelog
+
+The changelog is the downstream end of the roadmap lifecycle and works the same
+way. Entries live in the top-level `changelog/` tree (see `changelog/README.md`),
+one dated Markdown file each. `cmd/genchangelog` (`make changelog`) compiles them
+into `internal/changelog/changelog.gen.json`, embedded and served at `GET
+/changelog` (a plain route, not in the OpenAPI spec). The website renders its
+`/changelog` page entirely from that route (no copy, degrades gracefully). When a
+roadmap item ships, delete it from `roadmap/` and add a `changelog/` entry in the
+same change. CI runs `genchangelog -check`.
+
 ## Local development
 
 One Postgres instance in Docker (two databases), servers run natively:
@@ -200,7 +226,13 @@ today (commands return "not implemented"), not yet shipped.
   with live examples) at `/ui/components`, or read `packages/ui/src/components/`.
   Don't reinvent a raw `<input>`/`<select>`/`<button>` with bespoke classes when a
   component exists; controls share one size scale (`sm`/`md`/`lg`, `lib/control.ts`)
-  so they align - pass matching `size`s rather than hardcoding heights. Style with
+  so they align - pass matching `size`s rather than hardcoding heights. **Any
+  tabular list of rows uses `Table` (`TableHeader`/`TableRow`/`TableHead`/`TableCell`)
+  or, when it needs sorting/filtering/pagination, `DataTable` - never a `Card` with
+  hand-rolled `<div>` rows and a fake header row.** Prefer a component's own defaults
+  over ad-hoc class overrides (e.g. don't widen `TabsList` spacing with `gap-6`; the
+  component's `gap-1` is the intended rhythm) - if a default feels wrong across the
+  app, change it in the component, not per call site. Style with
   the design **tokens** (Tailwind utilities backed by CSS vars: `bg-primary`,
   `text-muted-foreground`, `border-hairline`, `bg-chart-1`, `rounded-md`), never
   raw hex or fixed px - a **Brand** (`@flagon-io/ui`'s `BrandProvider` + token

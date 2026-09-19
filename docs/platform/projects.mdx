@@ -46,9 +46,16 @@ a new project with the same name right away.
 Restoring brings the project back, but only if its slug is still free. If a new
 project has since taken that name, restore is refused until you free the slug (for
 example by renaming the new project). Because they are destructive, **delete and
-restore require admin access on the project** (an org owner/admin, or a project
-admin grant). Like everything else, all three actions go through the same
-permission-checked API operation whether you use the UI, the assistant, or MCP.
+restore are an owner-tier action**: a project owner (an individual or a team) or an
+org owner/admin, who always have owner authority. A plain project admin can manage
+access but cannot delete the project. Like everything else, all three actions go
+through the same permission-checked API operation whether you use the UI, the
+assistant, or MCP.
+
+Deleted projects are listed under **Settings > Archive > Deleted projects**, with
+the time each was deleted and a one-click restore. The same list is available to
+the assistant and MCP for reading, so you can ask which projects were recently
+deleted and restore one by name.
 
 ## Ownership and access
 

@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/flagon-io/flagon/api/internal/db"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // registerMembersAPI wires org member management (the RBAC baseline). Gated by
@@ -17,6 +18,19 @@ import (
 func registerMembersAPI(api huma.API, store IdentityStore, internalToken string) {
 	auth := combinedAuth(api, store, internalToken)
 
+	// list-members is paginated: a documented GET plus a Hidden QUERY twin sharing
+	// one fetch. See listing.go.
+	listMembers := func(ctx context.Context, slug string, q paginate.Query) (*MembersOutput, error) {
+		actorID, _ := identity(ctx)
+		members, next, err := store.ListMembers(ctx, actorID, slug, q)
+		if err != nil {
+			return nil, memberErr(err, "could not list members")
+		}
+		out := &MembersOutput{}
+		out.Body.Members = members
+		out.Link = paginate.LinkHeader("/orgs/"+slug+"/members", q, next)
+		return out, nil
+	}
 	huma.Register(api, huma.Operation{
 		OperationID: "list-members",
 		Method:      http.MethodGet,
@@ -24,15 +38,13 @@ func registerMembersAPI(api huma.API, store IdentityStore, internalToken string)
 		Summary:     "List an organization's members",
 		Middlewares: huma.Middlewares{auth},
 	}, func(ctx context.Context, in *MembersInput) (*MembersOutput, error) {
-		actorID, _ := identity(ctx)
-		members, err := store.ListMembers(ctx, actorID, in.Slug)
-		if err != nil {
-			return nil, memberErr(err, "could not list members")
-		}
-		out := &MembersOutput{}
-		out.Body.Members = members
-		return out, nil
+		return listMembers(ctx, in.Slug, in.ListQuery())
 	})
+	registerQueryList(api, auth, "query-members", "/orgs/{slug}/members",
+		"List an organization's members (QUERY)",
+		func(ctx context.Context, in *MembersQueryInput) (*MembersOutput, error) {
+			return listMembers(ctx, in.Slug, in.Body.ListQuery())
+		})
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "add-member",
@@ -122,13 +134,22 @@ func memberErr(err error, fallback string) error {
 	}
 }
 
-// MembersInput lists members of an org.
+// MembersInput lists members of an org (GET; search + keyset via ListParams).
 type MembersInput struct {
 	Slug string `path:"slug"`
+	ListParams
 }
 
-// MembersOutput is the member list.
+// MembersQueryInput is the HTTP QUERY twin of MembersInput: the same list query
+// carried in a JSON body.
+type MembersQueryInput struct {
+	Slug string `path:"slug"`
+	Body ListBody
+}
+
+// MembersOutput is the member list. Link carries the RFC 5988 next-page header.
 type MembersOutput struct {
+	Link string `header:"Link"`
 	Body struct {
 		Members []db.Member `json:"members"`
 	}

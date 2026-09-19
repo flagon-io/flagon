@@ -9,6 +9,7 @@ import (
 
 	"github.com/flagon-io/flagon/api/internal/db"
 	"github.com/flagon-io/flagon/api/internal/docs"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // DocsIndex is the documentation retrieval surface the docs tools query. It is
@@ -27,18 +28,39 @@ type Store interface {
 	ListOrgs(ctx context.Context, userID string) ([]db.Org, error)
 	CreateOrg(ctx context.Context, userID, email, name, slug string) (db.Org, error)
 
-	ListProjects(ctx context.Context, actorID, orgSlug string) ([]db.Project, error)
+	ListProjects(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]db.Project, string, error)
+	ListDeletedProjects(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]db.Project, string, error)
 	GetProject(ctx context.Context, actorID, orgSlug, projectSlug string) (db.Project, error)
 	CreateProject(ctx context.Context, actorID, orgSlug string, in db.ProjectInput) (db.Project, error)
 	UpdateProject(ctx context.Context, actorID, orgSlug, projectSlug string, in db.ProjectUpdate) (db.Project, error)
 	SetProjectDeleted(ctx context.Context, actorID, orgSlug, projectSlug string, deleted bool) (db.Project, error)
 
-	ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string) ([]db.ProjectMember, error)
+	ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]db.ProjectMember, string, error)
 	AddProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, login, role string) (targetID string, err error)
 	SetProjectMemberRole(ctx context.Context, actorID, orgSlug, projectSlug, targetID, role string) error
 	RemoveProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, targetID string) error
 
-	ListMembers(ctx context.Context, actorID, slug string) ([]db.Member, error)
+	ListTeams(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]db.Team, string, error)
+	GetTeam(ctx context.Context, actorID, orgSlug, teamSlug string) (db.Team, error)
+	CreateTeam(ctx context.Context, actorID, orgSlug string, in db.TeamInput) (db.Team, error)
+	UpdateTeam(ctx context.Context, actorID, orgSlug, teamSlug string, in db.TeamUpdate) (db.Team, error)
+	DeleteTeam(ctx context.Context, actorID, orgSlug, teamSlug string) error
+	ListTeamMembers(ctx context.Context, actorID, orgSlug, teamSlug string, q paginate.Query) ([]db.TeamMember, string, error)
+	ListTeamProjects(ctx context.Context, actorID, orgSlug, teamSlug string, q paginate.Query) ([]db.TeamProject, string, error)
+	AddTeamMember(ctx context.Context, actorID, orgSlug, teamSlug, login, role string) (targetID string, err error)
+	SetTeamMemberRole(ctx context.Context, actorID, orgSlug, teamSlug, targetID, role string) error
+	RemoveTeamMember(ctx context.Context, actorID, orgSlug, teamSlug, targetID string) error
+
+	ListProjectTeams(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]db.ProjectTeam, string, error)
+	AddProjectTeam(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug, role string) error
+	SetProjectTeamRole(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug, role string) error
+	RemoveProjectTeam(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug string) error
+
+	ListProjectOwners(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]db.ProjectOwner, string, error)
+	AddProjectOwner(ctx context.Context, actorID, orgSlug, projectSlug, ownerType, login string) (principalID string, err error)
+	RemoveProjectOwner(ctx context.Context, actorID, orgSlug, projectSlug, ownerType, principalID string) error
+
+	ListMembers(ctx context.Context, actorID, slug string, q paginate.Query) ([]db.Member, string, error)
 	AddMember(ctx context.Context, actorID, slug, login, role string) (targetID, orgName string, err error)
 	SetMemberRole(ctx context.Context, actorID, slug, targetID, newRole string) error
 	RemoveMember(ctx context.Context, actorID, slug, targetID string) error
@@ -46,7 +68,7 @@ type Store interface {
 	GetOrgSecurity(ctx context.Context, actorID, slug string) (db.OrgSecurity, error)
 	SetOrgSecurity(ctx context.Context, actorID, slug string, s db.OrgSecurity) error
 
-	ListInvitations(ctx context.Context, actorID, slug string) ([]db.Invitation, error)
+	ListInvitations(ctx context.Context, actorID, slug string, q paginate.Query) ([]db.Invitation, string, error)
 	InviteMember(ctx context.Context, actorID, slug, login, role string) (db.InviteResult, error)
 	RevokeInvitation(ctx context.Context, actorID, slug, id string) error
 
@@ -223,7 +245,32 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 	r.add(Tool{
 		Def: ToolDef{
 			Name:        "list_projects",
-			Description: "List the projects in an organization by its slug.",
+			Description: "List the projects in an organization by its slug. Optionally filter by a search term (name or slug); pass cursor to page through results (next_cursor from a prior call).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"q":{"type":"string","description":"Optional search term matched against project name and slug"},"cursor":{"type":"string","description":"Optional pagination cursor from a previous result's next_cursor"}},"required":["org"],"additionalProperties":false}`),
+		},
+		Scope: "read:project",
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectQueryInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org := strings.TrimSpace(in.Org)
+			if org == "" {
+				return nil, fmt.Errorf("org is required")
+			}
+			projects, next, err := store.ListProjects(ctx, tc.UserID, org,
+				paginate.Query{Q: strings.TrimSpace(in.Q), Cursor: strings.TrimSpace(in.Cursor), Limit: paginate.MaxLimit})
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"projects": projects, "next_cursor": next}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "list_deleted_projects",
+			Description: "List an organization's soft-deleted projects (the restore archive). Use restore_project to bring one back. Org owners/admins only.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"}},"required":["org"],"additionalProperties":false}`),
 		},
 		Scope: "read:project",
@@ -236,7 +283,7 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 			if org == "" {
 				return nil, fmt.Errorf("org is required")
 			}
-			projects, err := store.ListProjects(ctx, tc.UserID, org)
+			projects, _, err := store.ListDeletedProjects(ctx, tc.UserID, org, paginate.Query{Limit: paginate.MaxLimit})
 			if err != nil {
 				return nil, err
 			}
@@ -432,7 +479,7 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 			if org == "" || project == "" {
 				return nil, fmt.Errorf("org and project are required")
 			}
-			members, err := store.ListProjectMembers(ctx, tc.UserID, org, project)
+			members, _, err := store.ListProjectMembers(ctx, tc.UserID, org, project, paginate.Query{Limit: paginate.MaxLimit})
 			if err != nil {
 				return nil, err
 			}
@@ -531,6 +578,506 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 		},
 	})
 
+	// Teams --------------------------------------------------------------------
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "list_teams",
+			Description: "List an organization's teams (named groups of members) with their member counts.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"}},"required":["org"],"additionalProperties":false}`),
+		},
+		Scope: "read:team",
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org := strings.TrimSpace(in.Org)
+			if org == "" {
+				return nil, fmt.Errorf("org is required")
+			}
+			teams, _, err := store.ListTeams(ctx, tc.UserID, org, paginate.Query{Limit: paginate.MaxLimit})
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"teams": teams}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "get_team",
+			Description: "Get one team in an organization by its slug.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"team":{"type":"string","description":"Team slug"}},"required":["org","team"],"additionalProperties":false}`),
+		},
+		Scope: "read:team",
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, team := strings.TrimSpace(in.Org), strings.TrimSpace(in.Team)
+			if org == "" || team == "" {
+				return nil, fmt.Errorf("org and team are required")
+			}
+			t, err := store.GetTeam(ctx, tc.UserID, org, team)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"team": t}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "create_team",
+			Description: "Create a team in an organization. The slug is derived from the name if not given. The creator becomes the team's first maintainer.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"name":{"type":"string","description":"Team name"},"slug":{"type":"string","description":"Optional slug; derived from the name when omitted"},"description":{"type":"string","description":"Optional one-line summary"}},"required":["org","name"],"additionalProperties":false}`),
+		},
+		Scope:    "write:team",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in teamInput
+			_ = json.Unmarshal(input, &in)
+			name := ""
+			if in.Name != nil {
+				name = *in.Name
+			}
+			return fmt.Sprintf("Create team %q in %q", name, strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org := strings.TrimSpace(in.Org)
+			name := ""
+			if in.Name != nil {
+				name = strings.TrimSpace(*in.Name)
+			}
+			if org == "" || name == "" {
+				return nil, fmt.Errorf("org and name are required")
+			}
+			slug := name
+			if in.Slug != nil && strings.TrimSpace(*in.Slug) != "" {
+				slug = strings.TrimSpace(*in.Slug)
+			}
+			desc := ""
+			if in.Description != nil {
+				desc = strings.TrimSpace(*in.Description)
+			}
+			t, err := store.CreateTeam(ctx, tc.UserID, org, db.TeamInput{Name: name, Slug: slugify(slug), Description: desc})
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"team": t}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "update_team",
+			Description: "Update a team's name, slug (renames it), or description. Only the fields you pass change.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"team":{"type":"string","description":"Team slug"},"name":{"type":"string"},"slug":{"type":"string"},"description":{"type":"string"}},"required":["org","team"],"additionalProperties":false}`),
+		},
+		Scope:    "write:team",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in teamInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Update team %q in %q", strings.TrimSpace(in.Team), strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, team := strings.TrimSpace(in.Org), strings.TrimSpace(in.Team)
+			if org == "" || team == "" {
+				return nil, fmt.Errorf("org and team are required")
+			}
+			update := db.TeamUpdate{Name: in.Name, Description: in.Description}
+			if in.Slug != nil {
+				s := slugify(*in.Slug)
+				update.Slug = &s
+			}
+			t, err := store.UpdateTeam(ctx, tc.UserID, org, team, update)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"team": t}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "delete_team",
+			Description: "Delete a team. Its project grants and ownerships stop having effect. Org owners/admins only.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"team":{"type":"string","description":"Team slug"}},"required":["org","team"],"additionalProperties":false}`),
+		},
+		Scope:    "admin:team",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in teamInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Delete team %q in %q", strings.TrimSpace(in.Team), strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, team := strings.TrimSpace(in.Org), strings.TrimSpace(in.Team)
+			if org == "" || team == "" {
+				return nil, fmt.Errorf("org and team are required")
+			}
+			if err := store.DeleteTeam(ctx, tc.UserID, org, team); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "list_team_members",
+			Description: "List a team's members and their team roles (maintainer or member).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"team":{"type":"string","description":"Team slug"}},"required":["org","team"],"additionalProperties":false}`),
+		},
+		Scope: "read:team",
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, team := strings.TrimSpace(in.Org), strings.TrimSpace(in.Team)
+			if org == "" || team == "" {
+				return nil, fmt.Errorf("org and team are required")
+			}
+			members, _, err := store.ListTeamMembers(ctx, tc.UserID, org, team, paginate.Query{Limit: paginate.MaxLimit})
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"members": members}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "list_team_projects",
+			Description: "List the projects a team has access to and the repository-style role granted to the team on each.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"team":{"type":"string","description":"Team slug"}},"required":["org","team"],"additionalProperties":false}`),
+		},
+		Scope: "read:team",
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, team := strings.TrimSpace(in.Org), strings.TrimSpace(in.Team)
+			if org == "" || team == "" {
+				return nil, fmt.Errorf("org and team are required")
+			}
+			projects, _, err := store.ListTeamProjects(ctx, tc.UserID, org, team, paginate.Query{Limit: paginate.MaxLimit})
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"projects": projects}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "add_team_member",
+			Description: "Add an existing org member to a team as a maintainer or member.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"team":{"type":"string","description":"Team slug"},"login":{"type":"string","description":"Username or email of an existing org member"},"role":{"type":"string","description":"Team role: maintainer or member"}},"required":["org","team","login","role"],"additionalProperties":false}`),
+		},
+		Scope:    "write:team",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in teamInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Add %q to team %q in %q as %s", strings.TrimSpace(in.Login), strings.TrimSpace(in.Team), strings.TrimSpace(in.Org), strings.TrimSpace(in.Role))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, team := strings.TrimSpace(in.Org), strings.TrimSpace(in.Team)
+			login, role := strings.TrimSpace(in.Login), strings.TrimSpace(in.Role)
+			if org == "" || team == "" || login == "" || role == "" {
+				return nil, fmt.Errorf("org, team, login and role are required")
+			}
+			targetID, err := store.AddTeamMember(ctx, tc.UserID, org, team, login, role)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"user_id": targetID}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "set_team_member_role",
+			Description: "Change a team member's role (maintainer or member). Identify them by user id (from list_team_members).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"team":{"type":"string","description":"Team slug"},"user_id":{"type":"string","description":"The member's user id"},"role":{"type":"string","description":"New role: maintainer or member"}},"required":["org","team","user_id","role"],"additionalProperties":false}`),
+		},
+		Scope:    "write:team",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in teamInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Set role of %q on team %q in %q to %s", strings.TrimSpace(in.UserID), strings.TrimSpace(in.Team), strings.TrimSpace(in.Org), strings.TrimSpace(in.Role))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, team := strings.TrimSpace(in.Org), strings.TrimSpace(in.Team)
+			userID, role := strings.TrimSpace(in.UserID), strings.TrimSpace(in.Role)
+			if org == "" || team == "" || userID == "" || role == "" {
+				return nil, fmt.Errorf("org, team, user_id and role are required")
+			}
+			if err := store.SetTeamMemberRole(ctx, tc.UserID, org, team, userID, role); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "remove_team_member",
+			Description: "Remove a member from a team. Identify them by user id (from list_team_members).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"team":{"type":"string","description":"Team slug"},"user_id":{"type":"string","description":"The member's user id"}},"required":["org","team","user_id"],"additionalProperties":false}`),
+		},
+		Scope:    "write:team",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in teamInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Remove %q from team %q in %q", strings.TrimSpace(in.UserID), strings.TrimSpace(in.Team), strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in teamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, team := strings.TrimSpace(in.Org), strings.TrimSpace(in.Team)
+			userID := strings.TrimSpace(in.UserID)
+			if org == "" || team == "" || userID == "" {
+				return nil, fmt.Errorf("org, team and user_id are required")
+			}
+			if err := store.RemoveTeamMember(ctx, tc.UserID, org, team, userID); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+
+	// Project teams & owners ----------------------------------------------------
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "list_project_teams",
+			Description: "List the teams granted access to a project and their repository-style roles.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"}},"required":["org","project"],"additionalProperties":false}`),
+		},
+		Scope: "read:project",
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectTeamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			if org == "" || project == "" {
+				return nil, fmt.Errorf("org and project are required")
+			}
+			teams, _, err := store.ListProjectTeams(ctx, tc.UserID, org, project, paginate.Query{Limit: paginate.MaxLimit})
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"teams": teams}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "add_project_team",
+			Description: "Grant a team a repository-style role on a project (read, triage, write, maintain, or admin). Every member of the team inherits that access on the project.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"},"team":{"type":"string","description":"Team slug"},"role":{"type":"string","description":"Role: read, triage, write, maintain, or admin"}},"required":["org","project","team","role"],"additionalProperties":false}`),
+		},
+		Scope:    "admin:project",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in projectTeamInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Grant team %q %s on project %q in %q", strings.TrimSpace(in.Team), strings.TrimSpace(in.Role), strings.TrimSpace(in.Project), strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectTeamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			team, role := strings.TrimSpace(in.Team), strings.TrimSpace(in.Role)
+			if org == "" || project == "" || team == "" || role == "" {
+				return nil, fmt.Errorf("org, project, team and role are required")
+			}
+			if err := store.AddProjectTeam(ctx, tc.UserID, org, project, team, role); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "set_project_team_role",
+			Description: "Change a team's role on a project.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"},"team":{"type":"string","description":"Team slug"},"role":{"type":"string","description":"New role: read, triage, write, maintain, or admin"}},"required":["org","project","team","role"],"additionalProperties":false}`),
+		},
+		Scope:    "admin:project",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in projectTeamInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Set team %q role on project %q in %q to %s", strings.TrimSpace(in.Team), strings.TrimSpace(in.Project), strings.TrimSpace(in.Org), strings.TrimSpace(in.Role))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectTeamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			team, role := strings.TrimSpace(in.Team), strings.TrimSpace(in.Role)
+			if org == "" || project == "" || team == "" || role == "" {
+				return nil, fmt.Errorf("org, project, team and role are required")
+			}
+			if err := store.SetProjectTeamRole(ctx, tc.UserID, org, project, team, role); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "remove_project_team",
+			Description: "Revoke a team's access to a project.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"},"team":{"type":"string","description":"Team slug"}},"required":["org","project","team"],"additionalProperties":false}`),
+		},
+		Scope:    "admin:project",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in projectTeamInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Revoke team %q on project %q in %q", strings.TrimSpace(in.Team), strings.TrimSpace(in.Project), strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectTeamInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			team := strings.TrimSpace(in.Team)
+			if org == "" || project == "" || team == "" {
+				return nil, fmt.Errorf("org, project and team are required")
+			}
+			if err := store.RemoveProjectTeam(ctx, tc.UserID, org, project, team); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "list_project_owners",
+			Description: "List a project's owners (individual users and teams). Owners are a tier above admin: they can delete/transfer the project and manage its owners.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"}},"required":["org","project"],"additionalProperties":false}`),
+		},
+		Scope: "read:project",
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectOwnerInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			if org == "" || project == "" {
+				return nil, fmt.Errorf("org and project are required")
+			}
+			owners, _, err := store.ListProjectOwners(ctx, tc.UserID, org, project, paginate.Query{Limit: paginate.MaxLimit})
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"owners": owners}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "add_project_owner",
+			Description: "Make a user or a team an owner of a project (the tier above admin). For a user owner, login is an org member's username/email; for a team owner, login is the team slug.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"},"type":{"type":"string","description":"Owner kind: user or team"},"login":{"type":"string","description":"For a user owner: an org member's username/email. For a team owner: the team slug."}},"required":["org","project","type","login"],"additionalProperties":false}`),
+		},
+		Scope:    "admin:project",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in projectOwnerInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Make %s %q an owner of project %q in %q", strings.TrimSpace(in.Type), strings.TrimSpace(in.Login), strings.TrimSpace(in.Project), strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectOwnerInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			ownerType, login := strings.TrimSpace(in.Type), strings.TrimSpace(in.Login)
+			if org == "" || project == "" || ownerType == "" || login == "" {
+				return nil, fmt.Errorf("org, project, type and login are required")
+			}
+			principalID, err := store.AddProjectOwner(ctx, tc.UserID, org, project, ownerType, login)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"principal_id": principalID}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "remove_project_owner",
+			Description: "Remove an owner (user or team) from a project. Identify them by the principal id and type from list_project_owners.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"},"type":{"type":"string","description":"Owner kind: user or team"},"principal_id":{"type":"string","description":"The owner's user id (user) or team id (team)"}},"required":["org","project","type","principal_id"],"additionalProperties":false}`),
+		},
+		Scope:    "admin:project",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in projectOwnerInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Remove %s owner %q from project %q in %q", strings.TrimSpace(in.Type), strings.TrimSpace(in.PrincipalID), strings.TrimSpace(in.Project), strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectOwnerInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			ownerType, principalID := strings.TrimSpace(in.Type), strings.TrimSpace(in.PrincipalID)
+			if org == "" || project == "" || ownerType == "" || principalID == "" {
+				return nil, fmt.Errorf("org, project, type and principal_id are required")
+			}
+			if err := store.RemoveProjectOwner(ctx, tc.UserID, org, project, ownerType, principalID); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+
 	// Members ------------------------------------------------------------------
 
 	r.add(Tool{
@@ -548,7 +1095,7 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 			if strings.TrimSpace(in.Org) == "" {
 				return nil, fmt.Errorf("org is required")
 			}
-			members, err := store.ListMembers(ctx, tc.UserID, strings.TrimSpace(in.Org))
+			members, _, err := store.ListMembers(ctx, tc.UserID, strings.TrimSpace(in.Org), paginate.Query{Limit: paginate.MaxLimit})
 			if err != nil {
 				return nil, err
 			}
@@ -739,7 +1286,7 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 			if strings.TrimSpace(in.Org) == "" {
 				return nil, fmt.Errorf("org is required")
 			}
-			invites, err := store.ListInvitations(ctx, tc.UserID, strings.TrimSpace(in.Org))
+			invites, _, err := store.ListInvitations(ctx, tc.UserID, strings.TrimSpace(in.Org), paginate.Query{Limit: paginate.MaxLimit})
 			if err != nil {
 				return nil, err
 			}
@@ -986,6 +1533,8 @@ type createOrgInput struct {
 type projectQueryInput struct {
 	Org     string `json:"org"`
 	Project string `json:"project"`
+	Q       string `json:"q"`
+	Cursor  string `json:"cursor"`
 }
 
 type createProjectInput struct {
@@ -1016,6 +1565,36 @@ type projectMemberInput struct {
 	Login   string `json:"login"`
 	UserID  string `json:"user_id"`
 	Role    string `json:"role"`
+}
+
+// teamInput covers the team + team-membership tools; each uses the subset of
+// fields its schema declares.
+type teamInput struct {
+	Org         string  `json:"org"`
+	Team        string  `json:"team"`
+	Name        *string `json:"name"`
+	Slug        *string `json:"slug"`
+	Description *string `json:"description"`
+	Login       string  `json:"login"`
+	UserID      string  `json:"user_id"`
+	Role        string  `json:"role"`
+}
+
+// projectTeamInput covers the project team-grant tools.
+type projectTeamInput struct {
+	Org     string `json:"org"`
+	Project string `json:"project"`
+	Team    string `json:"team"`
+	Role    string `json:"role"`
+}
+
+// projectOwnerInput covers the project-owner tools.
+type projectOwnerInput struct {
+	Org         string `json:"org"`
+	Project     string `json:"project"`
+	Type        string `json:"type"`
+	Login       string `json:"login"`
+	PrincipalID string `json:"principal_id"`
 }
 
 // orgScopedInput is the shared shape for tools that take only an org slug.

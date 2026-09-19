@@ -1,0 +1,149 @@
+{
+  "items": [
+    {
+      "slug": "access-and-security",
+      "title": "Access and security",
+      "stage": "beta",
+      "team": "Platform",
+      "summary": "Who can do what, proven rather than assumed. Role-based access across the org and each product, backed by tenant isolation and a full audit trail, with the account protections teams expect.",
+      "includes": [
+        "Org-wide and per-product roles and permissions",
+        "Single sign-on and two-factor authentication",
+        "Org security policies and session controls",
+        "Scoped access tokens for programmatic use",
+        "An audit log of every sensitive action"
+      ],
+      "order": 2
+    },
+    {
+      "slug": "agents-and-insight",
+      "title": "Agents and cross-system insight",
+      "stage": "concept",
+      "team": "AI",
+      "summary": "Beyond a single assistant: run, route, and orchestrate agents over your data with humans in the loop, and get real cross-system insight, like what actually changed across everything this week.",
+      "includes": [
+        "Run, route, and orchestrate agents",
+        "Humans in the loop by default",
+        "Insight across every connected system",
+        "\"What changed everywhere this week\", answered"
+      ],
+      "order": 4
+    },
+    {
+      "slug": "ai-assistant-mcp",
+      "title": "AI assistant and MCP",
+      "stage": "beta",
+      "team": "AI",
+      "summary": "Operate Flagon by asking. An assistant that acts with your identity and permissions: it reads instantly and proposes changes for you to confirm, and a public MCP server gives external agents the same abilities.",
+      "includes": [
+        "Operate the platform in natural language",
+        "Runs as you, within your permissions",
+        "Reads run immediately; changes are proposed to confirm",
+        "A public MCP server for external agents and editors",
+        "Usage metered per organization"
+      ],
+      "order": 4
+    },
+    {
+      "slug": "bidirectional-sync",
+      "title": "Bidirectional sync with external systems",
+      "stage": "concept",
+      "team": "Platform",
+      "tag": "Next",
+      "summary": "The heart of Flagon: your products and teams stay in sync with the systems those definitions already live in, in both directions. Define once, and let it flow to and from the tools you already use.",
+      "includes": [
+        "Two-way sync, not one-way import",
+        "Connect the systems your definitions already live in",
+        "Changes reconcile in both directions",
+        "Built on the same API and permissions model as everything else"
+      ],
+      "order": 1
+    },
+    {
+      "slug": "cli-and-sdks",
+      "title": "CLI and SDKs",
+      "stage": "concept",
+      "team": "Developer experience",
+      "summary": "The platform from your terminal and your code. A first-class CLI for projects, deploys, and logs, and client SDKs so Flagon fits into whatever you already build with.",
+      "includes": [
+        "A CLI for auth, projects, deploys, and logs",
+        "Client SDKs generated from the API",
+        "Local MCP over stdio for editors and agents",
+        "One consistent contract across all of them"
+      ],
+      "order": 3
+    },
+    {
+      "slug": "multi-tenant-core",
+      "title": "Multi-tenant platform core",
+      "stage": "beta",
+      "team": "Platform",
+      "tag": "Foundation",
+      "summary": "The home base every tenant lives in: organizations, the people who belong to them, and the roles that decide what each can do. Multi-tenant from the first commit, with every tenant's data isolated at the database itself.",
+      "includes": [
+        "Organizations as the top-level tenant",
+        "People, membership, and ownership",
+        "Roles that decide who can do what",
+        "Tenant isolation enforced in the database with row-level security"
+      ],
+      "order": 1
+    },
+    {
+      "slug": "products-and-teams",
+      "title": "Products and teams",
+      "stage": "alpha",
+      "team": "Platform",
+      "tag": "In progress",
+      "summary": "The core objects people create and manage inside an org: the products they ship and the teams that own them. This is what we're building out right now.",
+      "includes": [
+        "Products as first-class objects",
+        "Teams that own and organize them",
+        "Assigning teams to the products they own",
+        "The same permissions model as the rest of the platform"
+      ],
+      "order": 1
+    },
+    {
+      "slug": "public-api",
+      "title": "Public API",
+      "stage": "beta",
+      "team": "Developer experience",
+      "summary": "Everything the product does is an API call first. A documented HTTP API with token authentication and scopes, so anything you can do in the dashboard you can automate.",
+      "includes": [
+        "OpenAPI-documented endpoints, always current with the product",
+        "Token authentication with fine-grained scopes",
+        "Consistent pagination and error shapes",
+        "The same contract the dashboard itself is built on"
+      ],
+      "order": 3
+    },
+    {
+      "slug": "skills-and-governance",
+      "title": "Skills and governance",
+      "stage": "concept",
+      "team": "Platform",
+      "summary": "Make the platform's power reusable and safe to run. Packaged skills that capture how your team works, and the governance to let agents and people operate confidently at scale.",
+      "includes": [
+        "Reusable skills that encode how you work",
+        "Guardrails and approvals",
+        "Policy and governance across the org",
+        "Safe autonomy as the surface grows"
+      ],
+      "order": 5
+    },
+    {
+      "slug": "usage-and-billing",
+      "title": "Usage and billing",
+      "stage": "concept",
+      "team": "Platform",
+      "summary": "Metering turned into plans and limits. Usage is already tracked per organization; this turns it into transparent limits and billing, priced to sit below what it costs to run.",
+      "includes": [
+        "Per-organization usage and limits",
+        "Plan enforcement",
+        "Transparent, honest pricing",
+        "Billing and invoicing"
+      ],
+      "order": 2
+    }
+  ]
+}

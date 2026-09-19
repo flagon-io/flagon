@@ -17,6 +17,7 @@ import { getMe, getProject } from "@/lib/flagon-api";
 import { Badge, Card } from "@flagon-io/ui";
 import { Markdown } from "@/components/markdown";
 import { PageBody } from "@/components/shell/page-header";
+import { PageBreadcrumb } from "@/components/shell/page-breadcrumb";
 import { ProjectAboutEdit } from "@/components/projects/project-about-edit";
 
 function repoHost(url: string): string | null {
@@ -49,6 +50,7 @@ export default async function ProjectPage({
 
   return (
     <PageBody className="max-w-6xl">
+      <PageBreadcrumb label={project.name} />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <Card className="overflow-hidden p-0">

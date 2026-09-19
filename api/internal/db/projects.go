@@ -3,12 +3,15 @@ package db
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/flagon-io/flagon/api/internal/audit"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // ErrProjectSlugTaken is returned when a project slug already exists in the org.
@@ -29,6 +32,9 @@ type Project struct {
 	CreatedBy     string    `json:"created_by"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+	// DeletedAt is set only on rows read from the deleted-projects archive; it is
+	// nil (omitted) for the normal live-project reads.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 // ProjectInput is the create payload (already trimmed/validated by the caller).
@@ -60,23 +66,47 @@ func scanProject(row pgx.Row) (Project, error) {
 	return p, err
 }
 
-// ListProjects returns an org's non-deleted projects, newest first. RLS ensures
-// only members can see them; resolveOrg errors (ErrNotMember) otherwise.
-func (d *DB) ListProjects(ctx context.Context, actorID, orgSlug string) ([]Project, error) {
+// ListProjects returns a page of an org's non-deleted projects, searched by name
+// and slug and ordered by name (a stable keyset over lower(name), id). RLS ensures
+// only members can see them; resolveOrg errors (ErrNotMember) otherwise. Returns
+// the items plus the opaque next cursor ("" when this is the last page).
+func (d *DB) ListProjects(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]Project, string, error) {
 	var projects []Project
+	var next string
 	err := d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
 		orgID, _, err := resolveOrg(ctx, tx, orgSlug)
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx,
-			`SELECT `+projectCols+` FROM public.projects
-			 WHERE org_id = $1 AND deleted_at IS NULL
-			 ORDER BY created_at DESC`, orgID)
+		keys, err := q.Keys()
+		if err != nil {
+			return err
+		}
+		limit := q.Clamp()
+
+		// name + slug substring search; keyset over (lower(name), id) for a stable
+		// order that a trigram index (migration 0027) can accelerate.
+		args := []any{orgID, q.Q}
+		where := `org_id = $1 AND deleted_at IS NULL
+			AND ($2 = '' OR name ILIKE '%' || $2 || '%' OR slug ILIKE '%' || $2 || '%')`
+		if len(keys) == 2 {
+			args = append(args, keys[0], keys[1])
+			where += ` AND (lower(name) > $3 OR (lower(name) = $3 AND id > $4))`
+		} else if len(keys) != 0 {
+			return paginate.ErrBadCursor
+		}
+		args = append(args, limit+1)
+		sql := `SELECT ` + projectCols + ` FROM public.projects
+			WHERE ` + where + `
+			ORDER BY lower(name), id
+			LIMIT $` + strconv.Itoa(len(args))
+
+		rows, err := tx.Query(ctx, sql, args...)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
+		projects = []Project{}
 		for rows.Next() {
 			p, err := scanProject(rows)
 			if err != nil {
@@ -84,9 +114,78 @@ func (d *DB) ListProjects(ctx context.Context, actorID, orgSlug string) ([]Proje
 			}
 			projects = append(projects, p)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		projects, next = paginate.Slice(projects, limit, func(p Project) []string {
+			return []string{strings.ToLower(p.Name), p.ID}
+		})
+		return nil
 	})
-	return projects, err
+	return projects, next, err
+}
+
+// ListDeletedProjects returns an org's soft-deleted projects (the restore
+// archive), newest-deleted first. Owner/admin only - the archive is an
+// administrative view, like the audit log. RLS lets members read soft-deleted
+// rows (a relaxed select), so the role check is enforced here in the Go layer.
+func (d *DB) ListDeletedProjects(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]Project, string, error) {
+	var projects []Project
+	var next string
+	err := d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID, _, err := resolveOrg(ctx, tx, orgSlug)
+		if err != nil {
+			return err
+		}
+		role, err := memberRole(ctx, tx, orgID, actorID)
+		if err != nil {
+			return err
+		}
+		if role != RoleOwner && role != RoleAdmin {
+			return ErrForbidden
+		}
+		keys, err := q.Keys()
+		if err != nil {
+			return err
+		}
+		limit := q.Clamp()
+		args := []any{orgID, q.Q}
+		where := `org_id = $1 AND deleted_at IS NOT NULL
+			AND ($2 = '' OR name ILIKE '%' || $2 || '%' OR slug ILIKE '%' || $2 || '%')`
+		if len(keys) == 2 {
+			args = append(args, keys[0], keys[1])
+			where += ` AND (lower(name) > $3 OR (lower(name) = $3 AND id > $4))`
+		} else if len(keys) != 0 {
+			return paginate.ErrBadCursor
+		}
+		args = append(args, limit+1)
+		sql := `SELECT ` + projectCols + `, deleted_at FROM public.projects
+			WHERE ` + where + `
+			ORDER BY lower(name), id
+			LIMIT $` + strconv.Itoa(len(args))
+		rows, err := tx.Query(ctx, sql, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		projects = []Project{}
+		for rows.Next() {
+			var p Project
+			if err := rows.Scan(&p.ID, &p.OrgID, &p.Name, &p.Slug, &p.Description, &p.Readme,
+				&p.RepositoryURL, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt); err != nil {
+				return err
+			}
+			projects = append(projects, p)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		projects, next = paginate.Slice(projects, limit, func(p Project) []string {
+			return []string{strings.ToLower(p.Name), p.ID}
+		})
+		return nil
+	})
+	return projects, next, err
 }
 
 // GetProject returns a single project by its slug within the org.
@@ -218,11 +317,13 @@ func (d *DB) SetProjectDeleted(ctx context.Context, actorID, orgSlug, projectSlu
 			}
 			return err
 		}
-		role, err := effectiveProjectRole(ctx, tx, orgID, projectID, actorID)
+		// Delete/restore is an owner-tier power (a step above admin): only a project
+		// owner (direct or via a team) or an org owner/admin may do it.
+		auth, err := resolveProjectAuthority(ctx, tx, orgID, projectID, actorID)
 		if err != nil {
 			return err
 		}
-		if !ProjectCan(role, ProjCapAdmin) {
+		if !auth.can(ProjCapOwn) {
 			return ErrForbidden
 		}
 		// Delete matches the single live row and stamps deleted_at. Restore targets

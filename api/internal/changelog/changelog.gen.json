@@ -1,0 +1,12 @@
+{
+  "entries": [
+    {
+      "slug": "2026-09-19-flagon-ui",
+      "title": "Flagon UI is live at ui.flagon.io",
+      "date": "2026-09-19",
+      "tag": "Shipped",
+      "area": "UI",
+      "body": "Flagon UI (`@flagon-io/ui`) is our design system: an accessible, Radix-based\nReact component library, documented and published at\n[ui.flagon.io](https://ui.flagon.io). It is the shared vocabulary the product is\nbuilt from, so the button you see in a login flow is the same button, with the\nsame behavior and the same accessibility guarantees, everywhere it appears.\n\nWe are shipping it as a first-class, long-term product, not an internal detail:\n\n- Accessible by default, built on Radix primitives, keyboard and screen-reader\n  ready out of the box.\n- One place to change a component, so the app and everything downstream stay\n  consistent.\n- Documented on its own site, with every component and its usage in the open.\n\nIt is the foundation the rest of the platform's interface is built on, and it is\nhere to stay."
+    }
+  ]
+}

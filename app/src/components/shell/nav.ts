@@ -10,11 +10,13 @@ import {
   CircleUserRound,
   ShieldCheck,
   ScrollText,
-  UserCog,
   UsersRound,
   Webhook,
   KeySquare,
   Fingerprint,
+  Package,
+  LineChart,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -39,9 +41,19 @@ export type NavLink = {
 export function orgNav(slug: string): NavLink[][] {
   const base = `/${slug}`;
   return [
+    // The product: what you build, ship, and measure. Packages and Insights are
+    // stubbed until they ship.
     [
       { label: "Dashboard", href: base, icon: LayoutDashboard, exact: true },
       { label: "Projects", href: `${base}/projects`, icon: Boxes },
+      { label: "Packages", href: `${base}/packages`, icon: Package, disabled: true },
+      { label: "Insights", href: `${base}/insights`, icon: LineChart, disabled: true },
+    ],
+    // The org's people: who is in it and how they're grouped. Kept apart from the
+    // product surface on purpose.
+    [
+      { label: "Teams", href: `${base}/teams`, icon: UsersRound },
+      { label: "People", href: `${base}/people`, icon: Users },
     ],
     [
       { label: "Usage", href: `${base}/usage`, icon: Gauge },
@@ -65,9 +77,6 @@ export function settingsGroups(slug: string): NavGroup[] {
     {
       label: "Access",
       items: [
-        { label: "Members", href: `${base}/settings/members`, icon: Users },
-        { label: "Teams", href: `${base}/settings/teams`, icon: UsersRound, disabled: true },
-        { label: "Roles", href: `${base}/settings/roles`, icon: UserCog, disabled: true },
         {
           label: "Member privileges",
           href: `${base}/settings/member-privileges`,
@@ -100,6 +109,12 @@ export function settingsGroups(slug: string): NavGroup[] {
     {
       label: "Logs",
       items: [{ label: "Audit log", href: `${base}/settings/audit`, icon: ScrollText }],
+    },
+    {
+      label: "Archive",
+      items: [
+        { label: "Deleted projects", href: `${base}/settings/deleted-projects`, icon: Trash2 },
+      ],
     },
   ];
 }
@@ -193,10 +208,12 @@ export function commandItems(slug: string): CommandItem[] {
   // below, so including the parent would duplicate its destination.
   const nav = orgNav(slug)
     .flat()
-    .filter((l) => !l.section);
+    .filter((l) => !l.section && !l.disabled);
   const keywords: Record<string, string> = {
     [base]: "home overview start",
     [`${base}/projects`]: "apps services repos",
+    [`${base}/teams`]: "team group squad collaborators",
+    [`${base}/people`]: "people members invite membership humans",
     [`${base}/usage`]: "billing metering consumption credits plan",
   };
 
@@ -219,12 +236,12 @@ export function commandItems(slug: string): CommandItem[] {
       keywords:
         l.label === "API tokens"
           ? "pat personal access token"
-          : l.label === "Members"
-            ? "team people invite roles"
-            : l.label === "Billing"
-              ? "plan payment card credit invoice upgrade"
-              : l.label === "Audit log"
-                ? "audit history events changes who did what security"
+          : l.label === "Billing"
+            ? "plan payment card credit invoice upgrade"
+            : l.label === "Audit log"
+              ? "audit history events changes who did what security"
+              : l.label === "Deleted projects"
+                ? "archive restore trash recover soft delete"
                 : "org organization preferences",
     })),
     { group: "Account", label: "Account settings", href: "/settings", icon: CircleUserRound, keywords: "personal profile me" },

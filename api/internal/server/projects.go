@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/flagon-io/flagon/api/internal/db"
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // registerProjectsAPI wires org-scoped projects (the core deployable unit). The
@@ -16,6 +17,19 @@ import (
 func registerProjectsAPI(api huma.API, store IdentityStore, internalToken string) {
 	auth := combinedAuth(api, store, internalToken)
 
+	// list-projects is paginated: a documented GET (query-string params) plus a
+	// Hidden QUERY twin (body params) sharing one fetch. See listing.go.
+	listProjects := func(ctx context.Context, slug string, q paginate.Query) (*ProjectsOutput, error) {
+		actorID, _ := identity(ctx)
+		projects, next, err := store.ListProjects(ctx, actorID, slug, q)
+		if err != nil {
+			return nil, projectErr(err, "could not list projects")
+		}
+		out := &ProjectsOutput{}
+		out.Body.Projects = projects
+		out.Link = paginate.LinkHeader("/orgs/"+slug+"/projects", q, next)
+		return out, nil
+	}
 	huma.Register(api, huma.Operation{
 		OperationID: "list-projects",
 		Method:      http.MethodGet,
@@ -23,15 +37,13 @@ func registerProjectsAPI(api huma.API, store IdentityStore, internalToken string
 		Summary:     "List an organization's projects",
 		Middlewares: huma.Middlewares{auth},
 	}, func(ctx context.Context, in *ProjectsListInput) (*ProjectsOutput, error) {
-		actorID, _ := identity(ctx)
-		projects, err := store.ListProjects(ctx, actorID, in.Slug)
-		if err != nil {
-			return nil, projectErr(err, "could not list projects")
-		}
-		out := &ProjectsOutput{}
-		out.Body.Projects = projects
-		return out, nil
+		return listProjects(ctx, in.Slug, in.ListQuery())
 	})
+	registerQueryList(api, auth, "query-projects", "/orgs/{slug}/projects",
+		"List an organization's projects (QUERY)",
+		func(ctx context.Context, in *ProjectsQueryInput) (*ProjectsOutput, error) {
+			return listProjects(ctx, in.Slug, in.Body.ListQuery())
+		})
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "create-project",
@@ -64,6 +76,34 @@ func registerProjectsAPI(api huma.API, store IdentityStore, internalToken string
 		out.Body = project
 		return out, nil
 	})
+
+	// list-deleted-projects is paginated: a documented GET plus a Hidden QUERY twin
+	// sharing one fetch. See listing.go.
+	listDeletedProjects := func(ctx context.Context, slug string, q paginate.Query) (*ProjectsOutput, error) {
+		actorID, _ := identity(ctx)
+		projects, next, err := store.ListDeletedProjects(ctx, actorID, slug, q)
+		if err != nil {
+			return nil, projectErr(err, "could not list deleted projects")
+		}
+		out := &ProjectsOutput{}
+		out.Body.Projects = projects
+		out.Link = paginate.LinkHeader("/orgs/"+slug+"/deleted-projects", q, next)
+		return out, nil
+	}
+	huma.Register(api, huma.Operation{
+		OperationID: "list-deleted-projects",
+		Method:      http.MethodGet,
+		Path:        "/orgs/{slug}/deleted-projects",
+		Summary:     "List an organization's soft-deleted projects (restore archive)",
+		Middlewares: huma.Middlewares{auth},
+	}, func(ctx context.Context, in *ProjectsListInput) (*ProjectsOutput, error) {
+		return listDeletedProjects(ctx, in.Slug, in.ListQuery())
+	})
+	registerQueryList(api, auth, "query-deleted-projects", "/orgs/{slug}/deleted-projects",
+		"List an organization's soft-deleted projects (QUERY)",
+		func(ctx context.Context, in *ProjectsQueryInput) (*ProjectsOutput, error) {
+			return listDeletedProjects(ctx, in.Slug, in.Body.ListQuery())
+		})
 
 	huma.Register(api, huma.Operation{
 		OperationID: "get-project",
@@ -180,9 +220,17 @@ func projectErr(err error, fallback string) error {
 	}
 }
 
-// ProjectsListInput lists an org's projects.
+// ProjectsListInput lists an org's projects (GET; search + keyset via ListParams).
 type ProjectsListInput struct {
 	Slug string `path:"slug"`
+	ListParams
+}
+
+// ProjectsQueryInput is the HTTP QUERY twin of ProjectsListInput: the same list
+// query carried in a JSON body.
+type ProjectsQueryInput struct {
+	Slug string `path:"slug"`
+	Body ListBody
 }
 
 // CreateProjectInput creates a project.
@@ -228,8 +276,9 @@ type UpdateProjectInput struct {
 	}
 }
 
-// ProjectsOutput is the project list.
+// ProjectsOutput is the project list. Link carries the RFC 5988 next-page header.
 type ProjectsOutput struct {
+	Link string `header:"Link"`
 	Body struct {
 		Projects []db.Project `json:"projects"`
 	}

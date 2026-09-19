@@ -45,6 +45,11 @@ jobs:
       # doc edit that skipped `make docs` (or code that changed without its docs)
       # never lands on main.
       - run: go run ./cmd/gendocs -check
+      # The roadmap is part of the work too: fail if its corpus is stale, so a
+      # roadmap edit that skipped `make roadmap` never lands on main.
+      - run: go run ./cmd/genroadmap -check
+      # Same for the changelog corpus.
+      - run: go run ./cmd/genchangelog -check
 
   app:
     runs-on: ubuntu-latest

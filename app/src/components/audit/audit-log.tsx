@@ -86,8 +86,8 @@ function Events({ orgSlug, initial }: { orgSlug: string; initial: AuditPage }) {
       const qs = new URLSearchParams();
       if (q.trim()) qs.set("q", q.trim());
       for (const a of actions) qs.append("action", a);
-      qs.set("per_page", String(PER_PAGE));
-      if (opts.before) qs.set("before", opts.before);
+      qs.set("limit", String(PER_PAGE));
+      if (opts.before) qs.set("cursor", opts.before);
       const res = await fetch(`/api/orgs/${encodeURIComponent(orgSlug)}/audit?${qs.toString()}`);
       const data: AuditPage = res.ok ? await res.json() : { events: [], next: null };
       setEvents((prev) => (opts.append ? [...prev, ...data.events] : data.events));

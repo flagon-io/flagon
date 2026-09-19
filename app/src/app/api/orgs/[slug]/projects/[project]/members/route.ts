@@ -2,15 +2,21 @@ import { NextResponse } from "next/server";
 import { addProjectMember, listProjectMembers } from "@/lib/flagon-api";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   ctx: { params: Promise<{ slug: string; project: string }> },
 ) {
   const { slug, project } = await ctx.params;
+  const url = new URL(request.url);
+  const limitParam = url.searchParams.get("limit");
   try {
-    const members = await listProjectMembers(slug, project);
-    return NextResponse.json({ members });
+    const page = await listProjectMembers(slug, project, {
+      q: url.searchParams.get("q") ?? undefined,
+      cursor: url.searchParams.get("cursor") ?? undefined,
+      limit: limitParam ? Number(limitParam) : undefined,
+    });
+    return NextResponse.json({ items: page.items, next: page.next });
   } catch {
-    return NextResponse.json({ members: [] });
+    return NextResponse.json({ items: [], next: null });
   }
 }
 

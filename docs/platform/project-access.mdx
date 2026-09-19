@@ -22,29 +22,72 @@ A project role is one of five rungs, lowest to highest:
   URL.
 - **Maintain** - write, plus manage project-level settings (reserved for
   environments and configuration as they land).
-- **Admin** - full control: delete and restore the project, and manage its
-  collaborators.
+- **Admin** - full control over the project's collaborators and settings.
 
 The ladder is cumulative: each role can do everything the ones below it can.
+**Ownership** sits above the ladder as a separate tier - it is not a rung, and it
+carries powers admin does not (see [Project ownership](#project-ownership) below).
 
-## How org and project roles combine
+## How access combines
 
-Your effective role on a project is the **higher** of two things: what your
-organization role already grants, and any explicit collaborator role you have been
-given on that project.
+A person can pick up access to a project three different ways, and their
+**effective role** is the **higher** of all of them:
 
-| Org role | Implicit project role |
+- the **organization floor** - what their org role and the base permission grant
+  on every project;
+- their **explicit collaborator grant** on this project, if any;
+- any grant from a **team** they belong to that has been given a role on this
+  project.
+
+| Org role | Floor project role |
 | --- | --- |
-| Owner | Admin |
-| Admin | Admin |
-| Member | Write |
-| Viewer | Read |
+| Owner | Admin (plus ownership) |
+| Admin | Admin (plus ownership) |
+| Member | Base permission |
 
-Because the effective role is a **maximum**, a collaborator grant can only ever
-**raise** someone on a specific project, never lower them below their org floor.
-Granting `read` to an org member changes nothing (their org role already gives
-them `write`); granting `admin` lets that same member delete the project and
-manage its collaborators, without making them an org admin everywhere else.
+Because the effective role is a **maximum**, any grant can only ever **raise**
+someone on a specific project, never lower them below their organization floor.
+Granting `read` to a member whose floor is already `write` changes nothing;
+granting `admin` lets that same member manage the project's collaborators and
+settings, without making them an org admin everywhere else.
+
+## Team access
+
+You can share a project with a **team** instead of listing members one by one.
+Grant the team a project role from the ladder above, and every member of the team
+inherits that role on the project. A project can be shared with many teams, and a
+team can hold access to many projects; each grant is independent.
+
+Team grants fold into the same maximum as everything else: a member's effective
+role is the highest of their org floor, their own collaborator grant, and the
+roles of any teams they are on. Managing team grants uses the same
+**Settings -> Access** surface as individual collaborators. See
+[Teams](/docs/platform/teams) for how teams themselves are built and managed.
+
+## Project ownership
+
+**Ownership** is a distinct relation that sits **above** the admin rung, not a
+step on the ladder. An owner can do everything an admin can, and in addition can:
+
+- **delete and restore** the project;
+- **transfer** the project;
+- **manage the project's owners**.
+
+A project can have **multiple owners**, and an owner can be an **individual user
+or a team** - adding a team as an owner makes every member of that team an owner.
+Ownership can be held directly, inherited through a team, or come from being an
+org owner or admin.
+
+**Org owners and admins always have owner-level authority on every project**, so
+an organization can never be locked out of its own project even if the explicit
+owner list changes. In full, a person has owner powers on a project when any of
+these is true: they are an org owner or admin, they are listed as a direct owner,
+or they belong to a team that is listed as an owner.
+
+So the complete picture of a person's authority on a project is: the **role** is
+the maximum of their org floor, their explicit grant, and their team grants; and
+**owner powers** apply on top of that role when they own the project directly,
+through a team, or as an org owner or admin.
 
 ## Managing collaborators
 
@@ -65,7 +108,10 @@ operation backs every path.
 ## Permissions
 
 Listing collaborators requires the `read:project` scope. Adding, changing, and
-removing them - like deleting or restoring the project itself - requires
-`admin:project`. Scopes are a ceiling on top of your role: a token can never do
-something you could not do yourself, and tenant isolation is enforced in the
-database with row-level security.
+removing collaborators and teams on a project requires `admin:project`. The
+owner-tier actions - deleting, restoring, and transferring the project, and
+managing its owners - also go through `admin:project` but additionally require
+owner authority (a direct owner, an owner via a team, or an org owner/admin), not
+merely a project `admin` grant. Scopes are a ceiling on top of your role: a token
+can never do something you could not do yourself, and tenant isolation is enforced
+in the database with row-level security.
