@@ -5,7 +5,7 @@ import { pool } from "@/lib/db";
 import { resolveSSOUserToCurrentSession } from "@/lib/sso-resolve";
 import { APIError } from "better-auth/api";
 import { createPrimaryUserEmail, syncPrimaryUserEmail } from "@/lib/user-emails";
-import { mirrorUserProfile } from "@/lib/user-profile";
+import { mirrorUserProfile, mirrorUserById } from "@/lib/user-profile";
 import { isUserSoftDeleted } from "@/lib/user-account";
 import { provisionSSOMembership } from "@/lib/sso-provision";
 import { sendOtpEmail, sendResetPasswordEmail } from "@/lib/mailer";
@@ -120,6 +120,14 @@ export const auth = betterAuth({
               message: "This account has been deleted. Contact support to restore it.",
             });
           }
+        },
+        // Re-mirror the user's public profile to the API on every sign-in, so the
+        // API knows every account from its first login - not only after a profile
+        // edit (the user.create/update hooks). This self-heals existing accounts
+        // and any drift (e.g. after the API's DB is rebuilt). Best-effort: never
+        // blocks sign-in.
+        after: async (session) => {
+          await mirrorUserById(session.userId);
         },
       },
     },
