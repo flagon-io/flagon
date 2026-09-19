@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@flagon-io/ui";
 import { CodeBlock } from "./code-block";
@@ -9,7 +10,15 @@ import type { ComponentMeta } from "./registry";
 
 export function ComponentDocView({ meta }: { meta: ComponentMeta }) {
   const entry = docs[meta.slug];
-  const cliCmd = `npx shadcn@latest add https://ui.flagon.io/r/${meta.slug}.json`;
+  // Registry links follow the current host - localhost:3000 in dev, the real
+  // domain in production - so the copyable command works wherever you're reading.
+  const [origin, setOrigin] = useState("https://ui.flagon.io");
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read the host once on mount
+    setOrigin(window.location.origin);
+  }, []);
+  const registryUrl = `${origin}/r/${meta.slug}.json`;
+  const cliCmd = `npx shadcn@latest add ${registryUrl}`;
   const deps = meta.dependencies ?? [];
   const installDeps = deps.length
     ? `npm install ${deps.join(" ")}`
@@ -17,9 +26,48 @@ export function ComponentDocView({ meta }: { meta: ComponentMeta }) {
 
   const hero = entry?.examples[0];
   const moreExamples = entry ? entry.examples.slice(1) : [];
+  const planned = meta.status === "planned";
+
+  if (planned) {
+    return (
+      <article className="mx-auto max-w-4xl">
+        <header>
+          <p className="text-sm font-medium text-brand-bright">Components</p>
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">{meta.name}</h1>
+            <span className="rounded-full border border-hairline bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+              Planned
+            </span>
+          </div>
+          <p className="mt-2 text-lg text-muted-foreground">{meta.description}</p>
+        </header>
+
+        <div className="mt-8 rounded-xl border border-dashed border-hairline bg-panel/30 p-6">
+          <p className="text-sm text-foreground">
+            This component is on the roadmap to complete Flagon UI&rsquo;s parity with the shadcn/ui
+            catalog. It isn&rsquo;t shipped in <code className="font-mono">@flagon-io/ui</code> yet.
+          </p>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Until it lands, build on the primitives we already ship, or copy the reference
+            implementation and adapt it to our tokens.
+          </p>
+          {meta.shadcn && (
+            <a
+              href={meta.shadcn}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-4 inline-flex items-center rounded-md border border-hairline px-2.5 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              shadcn/ui reference &#8599;
+            </a>
+          )}
+        </div>
+      </article>
+    );
+  }
 
   return (
-    <article className="mx-auto max-w-3xl">
+    <article className="mx-auto max-w-4xl">
       <header>
         <p className="text-sm font-medium text-brand-bright">Components</p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight text-foreground">{meta.name}</h1>
@@ -35,14 +83,26 @@ export function ComponentDocView({ meta }: { meta: ComponentMeta }) {
               Radix primitive ↗
             </a>
           )}
-          <a
-            href={`/r/${meta.slug}.json`}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-md border border-hairline px-2.5 py-1 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Registry item ↗
-          </a>
+          {!meta.block && (
+            <a
+              href={registryUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md border border-hairline px-2.5 py-1 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Registry item ↗
+            </a>
+          )}
+          {meta.block && meta.shadcn && (
+            <a
+              href={meta.shadcn}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md border border-hairline px-2.5 py-1 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              shadcn reference ↗
+            </a>
+          )}
         </div>
       </header>
 
@@ -94,6 +154,10 @@ export function ComponentDocView({ meta }: { meta: ComponentMeta }) {
         </section>
       )}
 
+      {/* Charts and other composition blocks aren't installable registry items -
+          their code above is the whole recipe, so skip the shadcn CLI section. */}
+      {!meta.block && (
+      <>
       {/* Copy-in is the alternative for teams that want to own the source. */}
       <section className="mt-14 border-t border-hairline pt-10">
         <h2 id="copy-in" className="scroll-mt-20 text-xl font-semibold tracking-tight text-foreground">
@@ -117,7 +181,7 @@ export function ComponentDocView({ meta }: { meta: ComponentMeta }) {
             <p className="text-sm text-muted-foreground">
               Then copy <code className="font-mono text-foreground">{meta.slug}.tsx</code> into your{" "}
               <code className="font-mono text-foreground">components/ui</code> folder from the{" "}
-              <a href={`/r/${meta.slug}.json`} className="text-link underline">
+              <a href={registryUrl} className="text-link underline">
                 registry item
               </a>{" "}
               (it imports <code className="font-mono text-foreground">cn</code> from{" "}
@@ -126,6 +190,8 @@ export function ComponentDocView({ meta }: { meta: ComponentMeta }) {
           </TabsContent>
         </Tabs>
       </section>
+      </>
+      )}
     </article>
   );
 }

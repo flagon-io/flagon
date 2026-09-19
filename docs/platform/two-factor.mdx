@@ -1,0 +1,37 @@
+---
+title: Two-factor authentication
+description: Add a second sign-in step for your account, and require it for everyone in an organization.
+section: Platform
+order: 31
+---
+
+# Two-factor authentication (2FA)
+
+Two-factor authentication adds a second step at sign-in, so a leaked password alone
+can't access an account.
+
+## For your account
+
+Go to **Settings → Security** and enable **Authenticator app (TOTP)**. You'll:
+
+1. Confirm your password.
+2. Scan the QR code with an authenticator app (1Password, Google Authenticator,
+   Authy, ...).
+3. Save your **backup codes** somewhere safe - they let you sign in if you lose your
+   device.
+
+After that, signing in asks for a 6-digit code (or a backup code) as the second step.
+
+## Requiring 2FA for an organization
+
+An organization owner or admin can require every member to have 2FA enabled. Go to
+**your org → Settings → Authentication** and turn on **Require two-factor
+authentication**.
+
+- Members who don't have 2FA yet are sent to set it up before they can access the
+  organization.
+- **Lockout safety:** you can only turn the requirement *on* if your own 2FA is
+  already enabled - so enabling it can never lock you out.
+- The change is recorded in the organization's [audit log](/platform/organizations).
+
+This pairs with [single sign-on](/platform/sso): require SSO, 2FA, or both.

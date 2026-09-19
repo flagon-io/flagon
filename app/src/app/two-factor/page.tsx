@@ -56,16 +56,16 @@ export default function TwoFactorPage() {
               {error}
             </Alert>
           )}
-          <button
-            type="button"
+          <Button
+            variant="link"
             onClick={() => {
               setMode("backup");
               setError(null);
             }}
-            className="mt-6 text-sm font-medium text-muted-foreground underline hover:text-foreground"
+            className="mt-6 h-auto p-0 text-sm font-medium"
           >
             Use a backup code
-          </button>
+          </Button>
         </div>
       ) : (
         <form onSubmit={verifyBackup} className="flex flex-col gap-3">
@@ -83,16 +83,16 @@ export default function TwoFactorPage() {
           <Button type="submit" disabled={busy || !backup.trim()}>
             {busy ? "Verifying..." : "Verify"}
           </Button>
-          <button
-            type="button"
+          <Button
+            variant="link"
             onClick={() => {
               setMode("totp");
               setError(null);
             }}
-            className="text-sm font-medium text-muted-foreground underline hover:text-foreground"
+            className="h-auto p-0 text-sm font-medium"
           >
             Use your authenticator app instead
-          </button>
+          </Button>
         </form>
       )}
     </AuthCard>

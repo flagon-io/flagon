@@ -135,13 +135,14 @@ export function TokensList({
                   </p>
                 </div>
                 {canManage && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setRevoking(t)}
-                    className="rounded-md px-2 py-1 text-sm font-medium text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-destructive"
+                    className="text-destructive hover:text-destructive"
                   >
                     Revoke
-                  </button>
+                  </Button>
                 )}
               </li>
             ))}

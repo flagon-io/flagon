@@ -284,10 +284,10 @@ function BackupCodes({ codes }: { codes: string[] }) {
     <div className="mt-4 rounded-lg border border-hairline bg-panel/40 p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-foreground">Save your backup codes</p>
-        <button
-          type="button"
+        <Button
+          variant="link"
           onClick={copy}
-          className="flex items-center gap-1 text-xs font-medium text-link outline-none hover:underline focus-visible:underline"
+          className="h-auto gap-1 p-0 text-xs font-medium"
         >
           {copied ? (
             <>
@@ -298,7 +298,7 @@ function BackupCodes({ codes }: { codes: string[] }) {
               <Copy className="size-3" /> Copy
             </>
           )}
-        </button>
+        </Button>
       </div>
       <p className="mt-0.5 text-xs text-muted-foreground">
         Use one if you lose your device. Each code works once.

@@ -20,13 +20,21 @@ func TestRegistryRoster(t *testing.T) {
 		"get_project":     "read:project",
 		"create_project":  "write:project",
 		"update_project":  "write:project",
-		"delete_project":  "write:project",
-		"restore_project": "write:project",
+		"delete_project":  "admin:project",
+		"restore_project": "admin:project",
+		// Project access (collaborators).
+		"list_project_members":    "read:project",
+		"add_project_member":      "admin:project",
+		"set_project_member_role": "admin:project",
+		"remove_project_member":   "admin:project",
 		// Members.
 		"list_members":    "read:org",
 		"add_member":      "write:org",
 		"set_member_role": "write:org",
 		"remove_member":   "write:org",
+		// Org security policy.
+		"get_org_security": "read:org",
+		"set_org_security": "write:org",
 		// Invitations.
 		"list_invitations":  "read:org",
 		"invite_member":     "write:org",
@@ -58,7 +66,9 @@ func TestRegistryRoster(t *testing.T) {
 	for _, name := range []string{
 		"create_organization",
 		"create_project", "update_project", "delete_project", "restore_project",
+		"add_project_member", "set_project_member_role", "remove_project_member",
 		"add_member", "set_member_role", "remove_member",
+		"set_org_security",
 		"invite_member", "revoke_invitation",
 		"mark_notification_read", "mark_all_notifications_read",
 	} {

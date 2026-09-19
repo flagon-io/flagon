@@ -30,6 +30,10 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   cn,
 } from "@flagon-io/ui";
 
@@ -293,46 +297,46 @@ export function MembersManager({
     <div className="space-y-5">
       {error && <Alert variant="destructive">{error}</Alert>}
 
-      {/* Tabs. */}
-      <div className="flex items-center gap-6 border-b border-hairline">
-        <TabButton active={tab === "members"} onClick={() => setTab("members")} count={members.length}>
-          Members
-        </TabButton>
-        <TabButton
-          active={tab === "pending"}
-          onClick={() => setTab("pending")}
-          count={pending.length || undefined}
-        >
-          Pending invitations
-        </TabButton>
-      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+        <TabsList className="gap-6">
+          <TabsTrigger value="members" className="gap-1.5">
+            Members
+            <Badge variant="secondary">{members.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="pending" className="gap-1.5">
+            Pending invitations
+            {pending.length > 0 && <Badge variant="secondary">{pending.length}</Badge>}
+          </TabsTrigger>
+        </TabsList>
 
-      {tab === "pending" ? (
-        <PendingInvites
-          invites={pending}
-          loading={pendingLoading}
-          canManage={canManage}
-          onRevoke={revokeInvite}
-          onInvite={canManage ? openAdd : undefined}
-        />
-      ) : (
-        <div className="space-y-4">
+        <TabsContent value="pending" className="mt-5">
+          <PendingInvites
+            invites={pending}
+            loading={pendingLoading}
+            canManage={canManage}
+            onRevoke={revokeInvite}
+            onInvite={canManage ? openAdd : undefined}
+          />
+        </TabsContent>
+
+        <TabsContent value="members" className="mt-5 space-y-4">
           {/* Toolbar. */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative min-w-56 flex-1">
-              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input
+              <Search className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
                 ref={filterRef}
+                size="sm"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Filter members..."
                 aria-label="Filter members"
-                className="h-9 w-full rounded-lg border border-input bg-background pr-10 pl-9 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="pr-10 pl-9"
               />
               <Kbd className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2">/</Kbd>
             </div>
             <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger className="h-9 w-36">
+              <SelectTrigger size="sm" className="w-36">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -340,11 +344,10 @@ export function MembersManager({
                 <SelectItem value="owner">Owner</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
                 <SelectItem value="member">Member</SelectItem>
-                <SelectItem value="viewer">Viewer</SelectItem>
               </SelectContent>
             </Select>
             <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
-              <SelectTrigger className="h-9 w-36">
+              <SelectTrigger size="sm" className="w-36">
                 <ArrowUpDown className="size-3.5 text-muted-foreground" />
                 <SelectValue />
               </SelectTrigger>
@@ -534,8 +537,8 @@ export function MembersManager({
               ? `${rows.length} of ${members.length} members`
               : `${members.length} ${members.length === 1 ? "member" : "members"}`}
           </p>
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
 
       {/* Invite modal. */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -563,25 +566,29 @@ export function MembersManager({
                     onChange={(e) => setInvite(i, { login: e.target.value })}
                   />
                   <RoleSelect value={row.role} onChange={(r) => setInvite(i, { role: r })} allowOwner={isOwner} />
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon"
                     onClick={() => setInvites((r) => r.filter((_, idx) => idx !== i))}
                     disabled={invites.length === 1}
                     aria-label="Remove row"
-                    className="hidden size-9 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-panel hover:text-foreground disabled:opacity-30 sm:flex"
+                    className="hidden size-9 disabled:opacity-30 sm:flex"
                   >
                     <Trash2 className="size-4" />
-                  </button>
+                  </Button>
                 </div>
               ))}
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => setInvites((r) => [...r, { login: "", role: "member" }])}
-                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-fit gap-1.5"
               >
                 <UserPlus className="size-4" />
                 Add more
-              </button>
+              </Button>
             </div>
 
             {addError && (
@@ -709,35 +716,6 @@ function expiresLabel(iso: string): string {
   return `expires in ${days} days`;
 }
 
-function TabButton({
-  active,
-  count,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  count?: number;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "relative -mb-px flex items-center gap-1.5 py-2.5 text-sm font-medium outline-none transition-colors",
-        active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {children}
-      {count !== undefined && (
-        <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">{count}</span>
-      )}
-      {active && <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-bright" />}
-    </button>
-  );
-}
-
 function RoleSelect({
   value,
   onChange,
@@ -749,11 +727,13 @@ function RoleSelect({
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-8 w-full capitalize">
+      <SelectTrigger size="sm" className="w-full capitalize">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="viewer">Viewer</SelectItem>
+        {/* "viewer" is legacy (read-only membership is now the org base permission);
+            still shown if an existing member somehow has it, so their role is visible. */}
+        {value === "viewer" && <SelectItem value="viewer">Viewer</SelectItem>}
         <SelectItem value="member">Member</SelectItem>
         <SelectItem value="admin">Admin</SelectItem>
         {(allowOwner || value === "owner") && <SelectItem value="owner">Owner</SelectItem>}

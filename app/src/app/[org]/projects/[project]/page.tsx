@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { getMe, getProject } from "@/lib/flagon-api";
-import { Card } from "@flagon-io/ui";
+import { Badge, Card } from "@flagon-io/ui";
 import { Markdown } from "@/components/markdown";
 import { PageBody } from "@/components/shell/page-header";
 import { ProjectAboutEdit } from "@/components/projects/project-about-edit";
@@ -149,9 +149,9 @@ function AboutRow({ icon: Icon, label, hint }: { icon: LucideIcon; label: string
         <span className="block text-sm font-medium text-muted-foreground">{label}</span>
         <span className="block text-xs text-muted-foreground/70">{hint}</span>
       </span>
-      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+      <Badge variant="secondary" className="normal-case tracking-normal">
         Soon
-      </span>
+      </Badge>
     </div>
   );
 }

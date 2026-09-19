@@ -13,6 +13,9 @@ export interface Org {
   name: string;
   slug: string;
   role: string;
+  /** Org security policy (the app gate enforces both). */
+  enforce_two_factor: boolean;
+  require_sso: boolean;
   created_at: string;
 }
 
@@ -348,6 +351,41 @@ export async function setAuditConfig(slug: string, ipDisclosure: boolean): Promi
   return res.json();
 }
 
+export type BasePermission = "none" | "read" | "triage" | "write" | "maintain" | "admin";
+
+export interface OrgSecurity {
+  enforce_two_factor: boolean;
+  require_sso: boolean;
+  base_permission: BasePermission;
+}
+
+const DEFAULT_ORG_SECURITY: OrgSecurity = {
+  enforce_two_factor: false,
+  require_sso: false,
+  base_permission: "read",
+};
+
+export async function getOrgSecurity(slug: string): Promise<OrgSecurity> {
+  const user = await currentUser();
+  if (!user) return DEFAULT_ORG_SECURITY;
+  const res = await call(`/orgs/${encodeURIComponent(slug)}/security`, { method: "GET" }, user);
+  if (!res.ok) return DEFAULT_ORG_SECURITY;
+  return res.json();
+}
+
+export async function setOrgSecurity(slug: string, security: OrgSecurity): Promise<OrgSecurity> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/security`,
+    { method: "PUT", body: JSON.stringify(security) },
+    user,
+  );
+  if (res.status === 403) throw new Error("You don't have permission to change this.");
+  if (!res.ok) throw new Error("Couldn't save the setting.");
+  return res.json();
+}
+
 export async function listAuditPage(slug: string, query: AuditQuery = {}): Promise<AuditPage> {
   const user = await currentUser();
   if (!user) return { events: [], next: null };
@@ -421,6 +459,82 @@ export async function removeMember(slug: string, userId: string): Promise<void> 
   if (!user) throw new Error("Not signed in.");
   const res = await call(
     `/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+    user,
+  );
+  await memberMutation(res);
+}
+
+// --- Project collaborators (per-project RBAC) -----------------------------
+
+/** Repository-style project roles, lowest to highest privilege. */
+export const PROJECT_ROLES = ["read", "triage", "write", "maintain", "admin"] as const;
+export type ProjectRole = (typeof PROJECT_ROLES)[number];
+
+export interface ProjectMember {
+  user_id: string;
+  name: string | null;
+  email: string;
+  username: string | null;
+  avatar_url: string | null;
+  role: string;
+  created_at: string;
+}
+
+export async function listProjectMembers(slug: string, project: string): Promise<ProjectMember[]> {
+  const user = await currentUser();
+  if (!user) return [];
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/members`,
+    { method: "GET" },
+    user,
+  );
+  if (!res.ok) throw new Error(`api project members failed (${res.status})`);
+  const data = await res.json();
+  return data.members ?? [];
+}
+
+export async function addProjectMember(
+  slug: string,
+  project: string,
+  login: string,
+  role: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/members`,
+    { method: "POST", body: JSON.stringify({ login, role }) },
+    user,
+  );
+  await memberMutation(res);
+}
+
+export async function setProjectMemberRole(
+  slug: string,
+  project: string,
+  userId: string,
+  role: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(userId)}/role`,
+    { method: "PUT", body: JSON.stringify({ role }) },
+    user,
+  );
+  await memberMutation(res);
+}
+
+export async function removeProjectMember(
+  slug: string,
+  project: string,
+  userId: string,
+): Promise<void> {
+  const user = await currentUser();
+  if (!user) throw new Error("Not signed in.");
+  const res = await call(
+    `/orgs/${encodeURIComponent(slug)}/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(userId)}`,
     { method: "DELETE" },
     user,
   );

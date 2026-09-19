@@ -7,6 +7,7 @@ import { Info } from "lucide-react";
 import { Alert, Button, Input, Label } from "@flagon-io/ui";
 import { authClient } from "@/lib/auth-client";
 import { SocialButtons, SOCIAL_ENABLED } from "@/components/auth/social-buttons";
+import { SsoSignin } from "@/components/auth/sso-signin";
 import { AuthCard } from "@/components/auth/auth-card";
 import type { DemoAutofill } from "@/lib/demo";
 
@@ -108,16 +109,15 @@ export function LoginForm({ demo }: { demo: DemoAutofill | null }) {
         </Button>
       </form>
 
-      {SOCIAL_ENABLED && (
-        <>
-          <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-hairline" />
-            or
-            <span className="h-px flex-1 bg-hairline" />
-          </div>
-          <SocialButtons />
-        </>
-      )}
+      <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="h-px flex-1 bg-hairline" />
+        or
+        <span className="h-px flex-1 bg-hairline" />
+      </div>
+      <div className="flex flex-col gap-2">
+        {SOCIAL_ENABLED && <SocialButtons />}
+        <SsoSignin />
+      </div>
     </AuthCard>
   );
 }

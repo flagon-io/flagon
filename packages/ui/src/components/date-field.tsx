@@ -5,6 +5,7 @@ import { Calendar as CalendarIcon } from "lucide-react";
 import type { Matcher } from "react-day-picker";
 import { format as formatDate, isValid, parse } from "date-fns";
 import { cn } from "../lib/cn";
+import { controlHeight } from "../lib/control";
 import { buttonClasses } from "./button";
 import { Calendar } from "./calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
@@ -177,7 +178,8 @@ export function DateField({
           placeholder={placeholder ?? "Select a date"}
           onChange={(e) => emit(e.target.value)}
           className={cn(
-            "h-10 w-full rounded-md border bg-background pr-10 pl-3 text-sm text-foreground",
+            controlHeight.md,
+            "w-full rounded-md border bg-background pr-10 pl-3 text-sm text-foreground",
             "placeholder:text-muted-foreground",
             "outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             "disabled:cursor-not-allowed disabled:opacity-50",

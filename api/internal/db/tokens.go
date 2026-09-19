@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/flagon-io/flagon/api/internal/audit"
 )
 
 // ErrInvalidToken is returned by ResolveToken for an unknown/revoked/expired token.
@@ -119,15 +121,22 @@ func (d *DB) CreateOAT(ctx context.Context, actorID, slug, name, role string, sc
 		return "", "", err
 	}
 	err = d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID, _, rerr := resolveOrg(ctx, tx, slug)
+		if rerr != nil {
+			return rerr
+		}
 		if err := tx.QueryRow(ctx, `SELECT flagon.create_oat($1, $2, $3, $4, $5, $6)`,
 			actorID, slug, name, role, hash, prefix).Scan(&tokenID); err != nil {
 			return mapDefinerErr(err)
 		}
 		// Apply scopes + expiry (RLS access_tokens_manage lets owner/admin update).
-		_, err := tx.Exec(ctx,
+		if _, err := tx.Exec(ctx,
 			`UPDATE public.access_tokens SET scopes = $2::jsonb, expires_at = $3 WHERE id = $1`,
-			tokenID, scopesParam(scopes), expiresAt)
-		return err
+			tokenID, scopesParam(scopes), expiresAt); err != nil {
+			return err
+		}
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionTokenCreated, "token", tokenID,
+			"created organization token "+name)
 	})
 	if err != nil {
 		return "", "", err
@@ -208,8 +217,24 @@ func (d *DB) RevokePAT(ctx context.Context, userID, id string) error {
 // RevokeOAT deletes an org access token (and its service principal).
 func (d *DB) RevokeOAT(ctx context.Context, actorID, id string) error {
 	return d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `SELECT flagon.delete_oat($1, $2)`, actorID, id)
-		return mapDefinerErr(err)
+		// Read the org + name BEFORE deleting so the audit entry has them. An admin
+		// who may delete the token can also see it (access_tokens_select), so a
+		// missing row means "not visible" - defer to delete_oat for the real error.
+		var orgID, name string
+		rerr := tx.QueryRow(ctx,
+			`SELECT org_id, name FROM public.access_tokens WHERE id = $1 AND kind = 'oat'`,
+			id).Scan(&orgID, &name)
+		if rerr != nil && !errors.Is(rerr, pgx.ErrNoRows) {
+			return rerr
+		}
+		if _, err := tx.Exec(ctx, `SELECT flagon.delete_oat($1, $2)`, actorID, id); err != nil {
+			return mapDefinerErr(err)
+		}
+		if errors.Is(rerr, pgx.ErrNoRows) {
+			return nil // delete_oat succeeded but we never saw the row; nothing to audit
+		}
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionTokenRevoked, "token", id,
+			"revoked organization token "+name)
 	})
 }
 

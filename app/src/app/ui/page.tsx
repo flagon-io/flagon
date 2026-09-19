@@ -33,7 +33,7 @@ const features = [
 
 export default function UiIntroPage() {
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-4xl">
       <p className="text-sm font-medium text-brand-bright">@flagon-io/ui</p>
       <h1 className="mt-1 text-4xl font-bold tracking-tight text-foreground">Introduction</h1>
       <p className="mt-3 text-lg text-muted-foreground">

@@ -9,6 +9,9 @@
 # The running api server also serves it live at /openapi.json, /openapi.yaml, /docs.
 /openapi/openapi.json
 
+# Dependencies (any workspace, any depth)
+node_modules/
+
 # OS
 .DS_Store
 Thumbs.db

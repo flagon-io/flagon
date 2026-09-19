@@ -1,0 +1,61 @@
+---
+title: Roles & permissions
+description: How organization roles, the base permission, and project roles combine into access.
+section: Platform
+order: 25
+---
+
+# Roles & permissions
+
+Flagon uses a two-level model, mirroring how GitHub organizations work.
+
+## Organization roles
+
+Every member has one organization role:
+
+| Role | What it can do |
+| --- | --- |
+| **Owner** | Complete administrative access: members, billing, security settings, and admin on every project. There must always be at least one owner. |
+| **Admin** | Manage the organization and its members; admin on every project. (Owner-only actions like transferring ownership stay restricted.) |
+| **Member** | The default. Access to projects comes from the **base permission** (below), raised by explicit grants. |
+
+## Base permission
+
+The **base permission** is the default project access every member gets across the
+whole organization. Owners/admins set it under **Settings → Member privileges**.
+The four org-wide levels (GitHub's base-permission set) are:
+
+`none` · `read` · `write` · `admin` (default: **read**)
+
+(Triage and Maintain exist as finer per-project roles, but aren't org-wide defaults.)
+
+A member can be **raised** above the base on a specific project by an explicit grant,
+but never dropped below it. This is exactly GitHub's base-permission model.
+
+## Project roles
+
+Projects use the classic repository-role ladder, each a superset of the one below:
+
+| Role | Grants |
+| --- | --- |
+| **Read** | View the project and open issues. |
+| **Triage** | Read, plus manage issues/PRs without writing. |
+| **Write** | Push and merge. |
+| **Maintain** | Write, plus manage project settings. |
+| **Admin** | Full control, including destructive actions and collaborators. |
+
+## How they combine
+
+A member's effective role on a project is the **maximum** of:
+
+```
+max( role-implied, base permission, explicit project grant )
+```
+
+- **Owner / admin** → `admin` on every project (this can't be reduced).
+- **Member** → the organization **base permission**, raised by any explicit grant on
+  that project.
+
+So a read-only member is simply a member in an org whose base permission is `read`
+(or a member with no elevated grants). This replaces the old `viewer` role: read-only
+access now lives in the base permission, where it composes correctly with grants.

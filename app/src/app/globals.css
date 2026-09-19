@@ -19,6 +19,28 @@
 @theme {
   --animate-fade-in: fade-in 180ms ease-out;
   --animate-caret-blink: caret-blink 1s ease-out infinite;
+  --animate-accordion-down: accordion-down 200ms ease-out;
+  --animate-accordion-up: accordion-up 200ms ease-out;
+  --animate-slide-in-left: slide-in-left 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-slide-in-right: slide-in-right 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-slide-in-top: slide-in-top 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-slide-in-bottom: slide-in-bottom 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
 }
 @keyframes fade-in {
   from {
@@ -39,6 +61,38 @@
   20%,
   50% {
     opacity: 0;
+  }
+}
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes slide-in-top {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes slide-in-bottom {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
   }
 }
 
@@ -80,20 +134,47 @@
   --color-hairline: var(--hairline);
   --color-panel: var(--panel);
 
+  /* Chart palette (a Brand's series colors): bg-chart-1, stroke-chart-1, ... */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
-  --font-heading: var(--font-display), var(--font-geist-sans), ui-sans-serif,
-    system-ui, sans-serif;
+  /* A Brand's font tokens (--font-body/display/code) win when set; otherwise the
+     app's own next/font families are the fallback. */
+  --font-sans: var(--font-body, var(--font-geist-sans)), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-code, var(--font-jetbrains-mono)), ui-monospace, monospace;
+  --font-heading: var(--font-display, var(--font-geist-sans)), ui-sans-serif, system-ui, sans-serif;
 }
 
 /* ── Flagon theme · light (default) ─────────────────────── */
 :root {
+  /* Paint native controls (select option lists, scrollbars, autofill, date/number
+     spinners) in the matching scheme. Without this the browser draws native UI
+     light even on our dark theme, e.g. a white <select> dropdown. */
+  color-scheme: light;
+
   --radius: 0.375rem;
+
+  /* Density: control heights the shared control scale reads (sm/md/lg). */
+  --control-sm: 2rem;
+  --control-md: 2.5rem;
+  --control-lg: 2.75rem;
+
+  /* Chart palette (light). A Brand overrides these; charts read var(--chart-N). */
+  --chart-1: #0d9488;
+  --chart-2: #3b82f6;
+  --chart-3: #f59e0b;
+  --chart-4: #8b5cf6;
+  --chart-5: #ec4899;
+  --chart-6: #14b8a6;
 
   --background: #fbfbfc;
   --foreground: #0b0b0d;
@@ -140,6 +221,16 @@
 
 /* ── Flagon theme · dark (true black, hyperscale-style) ──── */
 .dark {
+  color-scheme: dark;
+
+  /* Chart palette (dark) - brighter for contrast on dark surfaces. */
+  --chart-1: #2dd4bf;
+  --chart-2: #60a5fa;
+  --chart-3: #fbbf24;
+  --chart-4: #a78bfa;
+  --chart-5: #f472b6;
+  --chart-6: #5eead4;
+
   --background: #000000;
   --foreground: #ededed;
   --card: #0b0b0d;

@@ -32,10 +32,20 @@ type IdentityStore interface {
 	UpdateProject(ctx context.Context, actorID, orgSlug, projectSlug string, in db.ProjectUpdate) (db.Project, error)
 	SetProjectDeleted(ctx context.Context, actorID, orgSlug, projectSlug string, deleted bool) (db.Project, error)
 
+	ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string) ([]db.ProjectMember, error)
+	AddProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, login, role string) (targetID string, err error)
+	SetProjectMemberRole(ctx context.Context, actorID, orgSlug, projectSlug, targetID, role string) error
+	RemoveProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, targetID string) error
+
 	GetOrg(ctx context.Context, actorID, orgSlug string) (db.Org, error)
 
 	GetAuditConfig(ctx context.Context, actorID, orgSlug string) (ipDisclosure bool, err error)
 	SetAuditConfig(ctx context.Context, actorID, orgSlug string, ipDisclosure bool) error
+
+	GetOrgSecurity(ctx context.Context, actorID, orgSlug string) (db.OrgSecurity, error)
+	SetOrgSecurity(ctx context.Context, actorID, orgSlug string, s db.OrgSecurity) error
+
+	ProvisionSSOMember(ctx context.Context, orgID, userID, email, role string) error
 
 	ListMembers(ctx context.Context, actorID, slug string) ([]db.Member, error)
 	AddMember(ctx context.Context, actorID, slug, login, role string) (targetID, orgName string, err error)

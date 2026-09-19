@@ -76,7 +76,7 @@ export function ThemeToggle() {
         <button
           type="button"
           aria-label={`Theme: ${pref}`}
-          className={buttonClasses({ variant: "ghost", size: "icon" })}
+          className={buttonClasses({ variant: "outline", size: "sm", className: "aspect-square px-0" })}
         >
           <Current className="size-4.5" strokeWidth={2} />
         </button>

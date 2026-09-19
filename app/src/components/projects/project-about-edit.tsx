@@ -64,18 +64,19 @@ export function ProjectAboutEdit({
 
   return (
     <>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={() => {
           reset();
           setOpen(true);
         }}
         aria-label="Edit About"
         title="Edit repository details"
-        className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        className="size-6"
       >
         <Settings className="size-4" />
-      </button>
+      </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="p-6">

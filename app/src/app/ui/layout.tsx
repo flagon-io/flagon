@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { cn, buttonClasses } from "@flagon-io/ui";
 import { Logo } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
-import { components } from "@/components/docs/registry";
+import { components, componentsByCategory } from "@/components/docs/registry";
 import { UiThemeProvider, ThemeSelect } from "@/components/docs/ui-theme";
 
 const gettingStarted = [
@@ -21,6 +21,15 @@ export default function UiDocsLayout({ children }: { children: ReactNode }) {
 
   return (
     <UiThemeProvider>
+    {/* Fonts the demo Brands approximate their (proprietary) typefaces with. */}
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+    {/* Docs-only demo fonts for the Brand presets; page-scoped is intentional. */}
+    {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+    <link
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
     <div className="min-h-dvh bg-background">
       <header className="sticky top-0 z-30 border-b border-hairline bg-background/80 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 lg:px-6">
@@ -33,6 +42,27 @@ export default function UiDocsLayout({ children }: { children: ReactNode }) {
           <span className="rounded-full border border-hairline px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
             v0.0.0
           </span>
+          <nav className="ml-4 hidden items-center gap-0.5 md:flex lg:ml-6">
+            {gettingStarted.map((item) => {
+              const active =
+                item.href === "/ui" ? pathname === "/ui" : pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                    active
+                      ? "font-medium text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
           <div className="ml-auto flex items-center gap-2">
             <ThemeSelect />
             <ThemeToggle />
@@ -86,17 +116,20 @@ export default function UiDocsLayout({ children }: { children: ReactNode }) {
               ))}
             </NavGroup>
 
-            <NavGroup label="Components">
-              {components.map((c) => (
-                <NavLink
-                  key={c.slug}
-                  href={`/ui/components/${c.slug}`}
-                  active={pathname === `/ui/components/${c.slug}`}
-                >
-                  {c.name}
-                </NavLink>
-              ))}
-            </NavGroup>
+            {componentsByCategory().map(({ category, items }) => (
+              <NavGroup key={category.id} label={category.label}>
+                {items.map((c) => (
+                  <NavLink
+                    key={c.slug}
+                    href={`/ui/components/${c.slug}`}
+                    active={pathname === `/ui/components/${c.slug}`}
+                    planned={c.status === "planned"}
+                  >
+                    {c.name}
+                  </NavLink>
+                ))}
+              </NavGroup>
+            ))}
           </nav>
         </aside>
 
@@ -121,10 +154,12 @@ function NavGroup({ label, children }: { label: string; children: ReactNode }) {
 function NavLink({
   href,
   active,
+  planned,
   children,
 }: {
   href: string;
   active: boolean;
+  planned?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -132,13 +167,20 @@ function NavLink({
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "block rounded-md px-2 py-1.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand",
+        "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand",
         active
           ? "bg-secondary font-medium text-foreground"
           : "text-muted-foreground hover:bg-panel hover:text-foreground",
       )}
     >
-      {children}
+      <span className={cn("truncate", planned && !active && "text-muted-foreground/70")}>{children}</span>
+      {planned && (
+        <span
+          title="Planned"
+          className="size-1.5 shrink-0 rounded-full bg-muted-foreground/40"
+          aria-label="planned"
+        />
+      )}
     </Link>
   );
 }

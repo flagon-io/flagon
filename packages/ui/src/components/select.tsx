@@ -4,6 +4,7 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { controlHeight, type ControlSize } from "../lib/control";
 import { useIsMobile } from "../lib/use-is-mobile";
 
 export const Select = SelectPrimitive.Root;
@@ -13,13 +14,15 @@ export const SelectValue = SelectPrimitive.Value;
 export function SelectTrigger({
   className,
   children,
+  size = "md",
   ...props
-}: ComponentProps<typeof SelectPrimitive.Trigger>) {
+}: ComponentProps<typeof SelectPrimitive.Trigger> & { size?: ControlSize }) {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       className={cn(
-        "flex h-10 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition",
+        controlHeight[size],
+        "flex w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         "disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground [&>span]:truncate",
         className,
@@ -47,6 +50,7 @@ export function SelectContent({
         position={position}
         className={cn(
           "relative z-50 max-h-72 min-w-32 overflow-hidden rounded-lg border border-hairline bg-popover p-1 text-popover-foreground shadow-lg",
+          "data-[state=open]:animate-fade-in",
           position === "popper" && "data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1",
           className,
         )}
@@ -113,14 +117,19 @@ export type SelectOption = { value: string; label: string; disabled?: boolean };
 export function NativeSelect({
   options,
   className,
+  size = "md",
   ...props
-}: Omit<ComponentProps<"select">, "children"> & { options: SelectOption[] }) {
+}: Omit<ComponentProps<"select">, "children" | "size"> & {
+  options: SelectOption[];
+  size?: ControlSize;
+}) {
   return (
     <div className="relative inline-flex w-full">
       <select
         data-slot="native-select"
         className={cn(
-          "h-10 w-full appearance-none rounded-md border border-input bg-background pr-8 pl-3 text-sm text-foreground outline-none transition",
+          controlHeight[size],
+          "w-full appearance-none rounded-md border border-input bg-background pr-8 pl-3 text-sm text-foreground outline-none transition",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
           "disabled:cursor-not-allowed disabled:opacity-50",
           className,
@@ -138,6 +147,16 @@ export function NativeSelect({
   );
 }
 
+/**
+ * How a SelectField renders its picker:
+ * - `auto` (default): the native OS picker on touch devices, the Radix menu
+ *   everywhere else - the best of both, chosen per device.
+ * - `radix`: always the fully themed Radix menu (rich, consistent styling).
+ * - `native`: always a native `<select>` (smallest, most accessible baseline;
+ *   good for very long lists or when you want the OS picker on every device).
+ */
+export type SelectMode = "auto" | "radix" | "native";
+
 export type SelectFieldProps = {
   options: SelectOption[];
   value?: string;
@@ -145,6 +164,10 @@ export type SelectFieldProps = {
   placeholder?: string;
   disabled?: boolean;
   name?: string;
+  /** Render strategy: auto-detect (default), always Radix, or always native. */
+  mode?: SelectMode;
+  /** Control size (sm/md/lg), matching the shared control scale. */
+  size?: ControlSize;
   /** Class for the native <select> (mobile) and, if `triggerClassName` is unset, the Radix trigger. */
   className?: string;
   /** Class for the Radix trigger (desktop) only. */
@@ -154,10 +177,10 @@ export type SelectFieldProps = {
 };
 
 /**
- * The design system's adaptive select: a native `<select>` on mobile (best OS
- * picker, dark-mode-correct by the platform) and our Radix Select on desktop
- * (fully themed menu). Data-driven via `options`, so one call site works on
- * every device. For rich, composed menus use the primitives directly.
+ * The design system's data-driven select. By default it adapts per device (see
+ * `SelectMode`): a native `<select>` on touch (best OS picker, dark-mode-correct
+ * by the platform) and our Radix Select on desktop (fully themed menu). Force
+ * one with `mode`. For rich, composed menus use the primitives directly.
  */
 export function SelectField({
   options,
@@ -166,20 +189,24 @@ export function SelectField({
   placeholder,
   disabled,
   name,
+  mode = "auto",
+  size = "md",
   className,
   triggerClassName,
   contentClassName,
   "aria-label": ariaLabel,
 }: SelectFieldProps) {
   const isMobile = useIsMobile();
+  const useNative = mode === "native" || (mode === "auto" && isMobile);
 
-  if (isMobile) {
+  if (useNative) {
     return (
       <NativeSelect
         options={options}
         value={value}
         disabled={disabled}
         name={name}
+        size={size}
         aria-label={ariaLabel}
         className={cn(triggerClassName, className)}
         onChange={(e) => onValueChange?.(e.currentTarget.value)}
@@ -189,7 +216,7 @@ export function SelectField({
 
   return (
     <Select value={value} onValueChange={onValueChange} disabled={disabled} name={name}>
-      <SelectTrigger className={triggerClassName ?? className} aria-label={ariaLabel}>
+      <SelectTrigger size={size} className={triggerClassName ?? className} aria-label={ariaLabel}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent className={contentClassName}>

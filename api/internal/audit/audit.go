@@ -30,26 +30,39 @@ import (
 type Action string
 
 const (
-	ActionProjectCreated   Action = "project.created"
-	ActionProjectUpdated   Action = "project.updated"
-	ActionProjectDeleted   Action = "project.deleted"
-	ActionProjectRestored  Action = "project.restored"
+	ActionProjectCreated  Action = "project.created"
+	ActionProjectUpdated  Action = "project.updated"
+	ActionProjectDeleted  Action = "project.deleted"
+	ActionProjectRestored Action = "project.restored"
+
+	ActionProjectAccessGranted Action = "project.access_granted"
+	ActionProjectAccessChanged Action = "project.access_changed"
+	ActionProjectAccessRevoked Action = "project.access_revoked"
+
 	ActionMemberAdded      Action = "member.added"
 	ActionMemberRoleChange Action = "member.role_changed"
 	ActionMemberRemoved    Action = "member.removed"
+	ActionMemberLeft       Action = "member.left"
 	ActionInvitationSent   Action = "invitation.sent"
 	ActionInvitationRevoke Action = "invitation.revoked"
+	ActionOrgCreated       Action = "organization.created"
 	ActionOrgUpdated       Action = "organization.updated"
 	ActionOrgAuditConfig   Action = "organization.audit_config_changed"
+	ActionOrgSecurity      Action = "organization.security_changed"
+
+	ActionTokenCreated Action = "token.created"
+	ActionTokenRevoked Action = "token.revoked"
 )
 
 // Actions is the full set, in a sensible display order, for the filter UI and
 // for validating input. Keep in sync with the constants above.
 var Actions = []Action{
 	ActionProjectCreated, ActionProjectUpdated, ActionProjectDeleted, ActionProjectRestored,
-	ActionMemberAdded, ActionMemberRoleChange, ActionMemberRemoved,
+	ActionProjectAccessGranted, ActionProjectAccessChanged, ActionProjectAccessRevoked,
+	ActionMemberAdded, ActionMemberRoleChange, ActionMemberRemoved, ActionMemberLeft,
 	ActionInvitationSent, ActionInvitationRevoke,
-	ActionOrgUpdated, ActionOrgAuditConfig,
+	ActionTokenCreated, ActionTokenRevoked,
+	ActionOrgCreated, ActionOrgUpdated, ActionOrgAuditConfig, ActionOrgSecurity,
 }
 
 // Entry is one append to the log (the write shape). The "where" (IP/country/UA)

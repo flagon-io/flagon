@@ -186,34 +186,34 @@ export default function EmailSettingsPage() {
                   </div>
                   <div className="flex shrink-0 gap-1">
                     {!e.verified && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="link"
                         onClick={() => handleResendVerify(e.email)}
                         aria-label={`Verify ${e.email}`}
-                        className="rounded-md px-2 py-1 text-xs font-medium text-link outline-none transition-colors hover:bg-panel focus-visible:ring-2 focus-visible:ring-ring"
+                        className="h-auto p-0 text-xs font-medium"
                       >
                         Verify
-                      </button>
+                      </Button>
                     )}
                     {!e.isPrimary && e.verified && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="link"
                         onClick={() => handleSetPrimary(e.id)}
                         aria-label={`Make ${e.email} the primary email`}
-                        className="rounded-md px-2 py-1 text-xs font-medium text-link outline-none transition-colors hover:bg-panel focus-visible:ring-2 focus-visible:ring-ring"
+                        className="h-auto p-0 text-xs font-medium"
                       >
                         Make primary
-                      </button>
+                      </Button>
                     )}
                     {!e.isPrimary && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="link"
                         onClick={() => handleDelete(e.id)}
                         aria-label={`Remove ${e.email}`}
-                        className="rounded-md px-2 py-1 text-xs font-medium text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-destructive"
+                        className="h-auto p-0 text-xs font-medium text-destructive hover:text-destructive"
                       >
                         Remove
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </li>
@@ -288,13 +288,13 @@ export default function EmailSettingsPage() {
               </div>
               {dialogError && <Alert variant="destructive">{dialogError}</Alert>}
               <div>
-                <button
-                  type="button"
+                <Button
+                  variant="link"
                   onClick={() => handleResendVerify(pendingEmail)}
-                  className="text-xs font-medium text-link underline underline-offset-2"
+                  className="h-auto p-0 text-xs font-medium"
                 >
                   Resend code
-                </button>
+                </Button>
               </div>
             </div>
           )}

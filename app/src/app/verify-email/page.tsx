@@ -167,14 +167,14 @@ function VerifyEmailForm() {
             <p className="mt-4 text-sm text-muted-foreground">A new code is on its way.</p>
           )}
 
-          <button
-            type="button"
+          <Button
+            variant="link"
             onClick={handleResend}
             disabled={cooldown > 0}
-            className="mt-6 text-sm font-medium text-muted-foreground underline hover:text-foreground disabled:cursor-not-allowed disabled:no-underline disabled:opacity-60"
+            className="mt-6 h-auto p-0 text-sm font-medium disabled:no-underline"
           >
             {cooldown > 0 ? `Resend in ${cooldown}s` : "Not seeing it?"}
-          </button>
+          </Button>
         </div>
       )}
     </AuthCard>

@@ -1,27 +1,19 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Sparkles, ArrowRight } from "lucide-react";
 import {
-  Dialog,
-  DialogPortal,
-  DialogOverlay,
-  DialogPanel,
-  DialogTitle,
   Badge,
+  CommandDialog,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
   Kbd,
-  cn,
 } from "@flagon-io/ui";
 import { useAgent } from "@/components/agent/agent-provider";
-import { commandItems, type CommandItem } from "./nav";
+import { commandItems, type CommandItem as NavCommandItem } from "./nav";
 
 // Client-only reads without a setState-in-effect: server snapshot is the neutral
 // default, and useSyncExternalStore swaps to the client value after hydration.
@@ -77,14 +69,14 @@ export function CommandMenu({ slug }: { slug: string }) {
           </Kbd>
         )}
       </button>
-      <CommandDialog slug={slug} open={open} onOpenChange={setOpen} />
+      <CommandDialogMenu slug={slug} open={open} onOpenChange={setOpen} />
     </div>
   );
 }
 
-type Row = { kind: "item"; item: CommandItem } | { kind: "ask"; query: string };
+type Row = { kind: "item"; item: NavCommandItem } | { kind: "ask"; query: string };
 
-function CommandDialog({
+function CommandDialogMenu({
   slug,
   open,
   onOpenChange,
@@ -96,46 +88,22 @@ function CommandDialog({
   const router = useRouter();
   const { send } = useAgent();
   const [q, setQ] = useState("");
-  const [active, setActive] = useState(0);
-  const listRef = useRef<HTMLDivElement>(null);
 
   const items = useMemo(() => commandItems(slug), [slug]);
-
-  const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    if (!query) return items;
-    const terms = query.split(/\s+/);
-    return items.filter((it) => {
-      const hay = `${it.label} ${it.keywords ?? ""} ${it.group}`.toLowerCase();
-      return terms.every((t) => hay.includes(t));
-    });
-  }, [items, q]);
-
-  // The interactive rows: matched destinations, then an Ask AI fallthrough when
-  // there's a query - it's the "not what I meant" escape hatch.
-  const rows = useMemo<Row[]>(() => {
-    const r: Row[] = filtered.map((item) => ({ kind: "item", item }));
-    const query = q.trim();
-    if (query) r.push({ kind: "ask", query });
-    return r;
-  }, [filtered, q]);
-
-  // Clamp the selection into range at render time (the result set shrinks as you
-  // type) instead of chasing it with a reset effect.
-  const activeIndex = rows.length ? Math.min(active, rows.length - 1) : 0;
-
-  const close = useCallback(() => {
-    setQ("");
-    setActive(0);
-    onOpenChange(false);
-  }, [onOpenChange]);
+  // Preserve first-seen group order for the section headings.
+  const grouped = useMemo(() => {
+    const map = new Map<string, NavCommandItem[]>();
+    for (const it of items) {
+      const arr = map.get(it.group) ?? [];
+      arr.push(it);
+      map.set(it.group, arr);
+    }
+    return [...map.entries()];
+  }, [items]);
 
   const handleOpenChange = useCallback(
     (o: boolean) => {
-      if (!o) {
-        setQ("");
-        setActive(0);
-      }
+      if (!o) setQ("");
       onOpenChange(o);
     },
     [onOpenChange],
@@ -143,155 +111,88 @@ function CommandDialog({
 
   const run = useCallback(
     (row: Row) => {
-      close();
-      if (row.kind === "item") {
-        router.push(row.item.href);
-      } else {
-        void send(row.query);
-      }
+      handleOpenChange(false);
+      if (row.kind === "item") router.push(row.item.href);
+      else void send(row.query);
     },
-    [close, router, send],
+    [handleOpenChange, router, send],
   );
 
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActive(rows.length ? (activeIndex + 1) % rows.length : 0);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActive(rows.length ? (activeIndex - 1 + rows.length) % rows.length : 0);
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        // Shift+Enter always asks the AI with the current query.
-        if (e.shiftKey && q.trim()) {
-          run({ kind: "ask", query: q.trim() });
-        } else if (rows[activeIndex]) {
-          run(rows[activeIndex]);
-        }
-      }
-    },
-    [rows, activeIndex, q, run],
-  );
+  // cmdk owns arrows / Enter / typeahead filtering. We add one shortcut on top:
+  // Shift+Enter always hands the current query to Ask AI, whatever is highlighted.
+  function onInputKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && e.shiftKey && q.trim()) {
+      e.preventDefault();
+      e.stopPropagation();
+      run({ kind: "ask", query: q.trim() });
+    }
+  }
 
-  // Keep the active row scrolled into view as you arrow through.
-  useEffect(() => {
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`);
-    el?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex]);
+  const query = q.trim();
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogPortal>
-        {/* Overlay is the flex centering context, so the panel sits centered and
-         * top-anchored regardless of any transformed ancestor. */}
-        <DialogOverlay className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 pt-[12vh] backdrop-blur-[1px]">
-          <DialogPanel className="w-[min(40rem,92vw)] overflow-hidden rounded-xl border border-hairline bg-popover text-popover-foreground shadow-2xl outline-none">
-            <DialogTitle className="sr-only">Search and quick actions</DialogTitle>
-
-        <div className="flex items-center gap-2.5 border-b border-hairline px-4">
-          <Search className="size-4 shrink-0 text-muted-foreground" />
-          <input
-            autoFocus
-            value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
-              setActive(0);
-            }}
-            onKeyDown={onKeyDown}
-            placeholder="Search or ask AI..."
-            autoComplete="off"
-            spellCheck={false}
-            className="h-12 w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-          />
-        </div>
-
-        <div ref={listRef} className="max-h-[min(24rem,60vh)] overflow-y-auto p-1.5">
-          {rows.length === 0 && (
-            <p className="px-3 py-6 text-center text-sm text-muted-foreground">No matches.</p>
-          )}
-
-          {rows.map((row, index) => {
-            const isActive = index === activeIndex;
-
-            if (row.kind === "ask") {
+    <CommandDialog open={open} onOpenChange={handleOpenChange} title="Search and quick actions">
+      <CommandInput
+        autoFocus
+        value={q}
+        onValueChange={setQ}
+        onKeyDown={onInputKeyDown}
+        placeholder="Search or ask AI..."
+      />
+      <CommandList className="max-h-[min(24rem,60vh)]">
+        {grouped.map(([group, groupItems]) => (
+          <CommandGroup key={group} heading={group}>
+            {groupItems.map((item) => {
+              const Icon = item.icon;
               return (
-                <div key="ask" className="mt-1 border-t border-hairline pt-1.5">
-                  <button
-                    type="button"
-                    data-index={index}
-                    onMouseMove={() => setActive(index)}
-                    onClick={() => run(row)}
-                    className={cn(
-                      "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm outline-none",
-                      isActive ? "bg-accent text-accent-foreground" : "text-foreground",
-                    )}
-                  >
-                    <Sparkles className="size-4 shrink-0 text-brand-bright" />
-                    <span className="flex-1 truncate">
-                      Ask AI <span className="text-muted-foreground">- &ldquo;{row.query}&rdquo;</span>
-                    </span>
-                    <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
-                  </button>
-                </div>
-              );
-            }
-
-            const { item } = row;
-            // First item of its group (previous row is a different group or a
-            // non-item) gets a header. Pure derivation, no render-time mutation.
-            const prev = rows[index - 1];
-            const header =
-              !prev || prev.kind !== "item" || prev.item.group !== item.group
-                ? item.group
-                : null;
-            const Icon = item.icon;
-
-            return (
-              <div key={`${item.group}:${item.href}`}>
-                {header && (
-                  <p className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground">
-                    {header}
-                  </p>
-                )}
-                <button
-                  type="button"
-                  data-index={index}
-                  onMouseMove={() => setActive(index)}
-                  onClick={() => run(row)}
-                  className={cn(
-                    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm outline-none",
-                    isActive ? "bg-accent text-accent-foreground" : "text-foreground",
-                  )}
+                <CommandItem
+                  key={`${item.group}:${item.href}`}
+                  // value + group keeps values unique (avoids same-label collisions)
+                  // and both are useful search terms; synonyms go in keywords.
+                  value={`${item.label} ${item.group}`}
+                  keywords={item.keywords ? item.keywords.split(/\s+/) : undefined}
+                  onSelect={() => run({ kind: "item", item })}
                 >
                   {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" />}
                   <span className="flex-1 truncate">{item.label}</span>
                   {item.badge && <Badge variant="outline">{item.badge}</Badge>}
-                </button>
-              </div>
-            );
-          })}
-        </div>
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+        ))}
 
-        <div className="flex items-center gap-4 border-t border-hairline px-3 py-2 text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <Kbd>{"↑"}</Kbd>
-            <Kbd>{"↓"}</Kbd>
-            to navigate
-          </span>
-          <span className="flex items-center gap-1">
-            <Kbd>{"↵"}</Kbd>
-            to select
-          </span>
-          <span className="flex items-center gap-1">
-            <Kbd>{"⇧"}</Kbd>
-            <Kbd>{"↵"}</Kbd>
-            to ask AI
-          </span>
-            </div>
-          </DialogPanel>
-        </DialogOverlay>
-      </DialogPortal>
-    </Dialog>
+        {/* The Ask AI fallthrough: force-mounted so it survives an empty filter -
+            the "not what I meant" escape hatch is always one Enter away. */}
+        {query && (
+          <CommandGroup forceMount className="border-t border-hairline">
+            <CommandItem forceMount value={`ask ${query}`} onSelect={() => run({ kind: "ask", query })}>
+              <Sparkles className="size-4 shrink-0 text-brand-bright" />
+              <span className="flex-1 truncate">
+                Ask AI <span className="text-muted-foreground">- &ldquo;{query}&rdquo;</span>
+              </span>
+              <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+            </CommandItem>
+          </CommandGroup>
+        )}
+      </CommandList>
+
+      <div className="flex items-center gap-4 border-t border-hairline px-3 py-2 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <Kbd>{"↑"}</Kbd>
+          <Kbd>{"↓"}</Kbd>
+          to navigate
+        </span>
+        <span className="flex items-center gap-1">
+          <Kbd>{"↵"}</Kbd>
+          to select
+        </span>
+        <span className="flex items-center gap-1">
+          <Kbd>{"⇧"}</Kbd>
+          <Kbd>{"↵"}</Kbd>
+          to ask AI
+        </span>
+      </div>
+    </CommandDialog>
   );
 }

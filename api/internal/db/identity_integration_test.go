@@ -52,12 +52,14 @@ func TestIdentityOrgsAreTenantIsolated(t *testing.T) {
 		t.Errorf("bob should have no orgs, has %d", len(bobOrgs))
 	}
 
-	// Duplicate slug is rejected.
+	// Duplicate slug is rejected. Use two fresh users so neither trips the free
+	// owned-org limit (alice already owns one) before the slug check.
+	const carol, dave = "user-carol", "user-dave"
 	slug := "dupe-" + unique(t)
-	if _, err := d.CreateOrg(ctx, alice, "alice@example.com", "Dupe", slug); err != nil {
+	if _, err := d.CreateOrg(ctx, carol, "carol@example.com", "Dupe", slug); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	if _, err := d.CreateOrg(ctx, bob, "bob@example.com", "Dupe", slug); err != ErrOrgSlugTaken {
+	if _, err := d.CreateOrg(ctx, dave, "dave@example.com", "Dupe", slug); err != ErrOrgSlugTaken {
 		t.Errorf("duplicate slug error = %v, want ErrOrgSlugTaken", err)
 	}
 }

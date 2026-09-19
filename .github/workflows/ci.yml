@@ -11,6 +11,24 @@ jobs:
     defaults:
       run:
         working-directory: api
+    # A throwaway Postgres so the DB integration tests actually run in CI - most
+    # importantly the tenant-isolation (RLS) and audit round-trip tests, which
+    # otherwise SKIP (they gate on FLAGON_TEST_DATABASE_URL) and leave our core
+    # multi-tenant guarantee unverified. The default `postgres` superuser can
+    # CREATE ROLE, which Setup needs to provision the NOBYPASSRLS app role.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: flagon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -21,6 +39,8 @@ jobs:
       # -race catches data races (the API is heavily concurrent: HTTP handlers,
       # the agent, background workers); -shuffle=on stops tests depending on order.
       - run: go test -race -shuffle=on ./...
+        env:
+          FLAGON_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/flagon_test?sslmode=disable
       # Documentation is part of the work: fail if the docs corpus is stale, so a
       # doc edit that skipped `make docs` (or code that changed without its docs)
       # never lands on main.
@@ -44,4 +64,34 @@ jobs:
       # it with a clean from-scratch resolve (run `scripts/relock.sh`).
       - run: npm ci
       - run: npm run lint
+      # Unit tests for the design system's pure logic + component render smokes
+      # (Vitest in packages/ui). Integration behavior is covered by the e2e job.
+      - run: npm run test:unit
       - run: npm run build
+
+  # Real integration tests: Playwright drives a production build of the app and
+  # exercises the component library through its live /ui docs. Every new component
+  # gets a spec here (see app/tests) so the library stays provably stable.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+        working-directory: app
+      - run: npm run build
+      - run: npm run test:e2e
+        working-directory: app
+        env:
+          CI: "true"
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: app/playwright-report/
+          retention-days: 7

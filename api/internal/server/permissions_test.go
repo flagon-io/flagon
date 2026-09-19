@@ -32,6 +32,9 @@ func TestScopeAllows(t *testing.T) {
 		{"admin:user implies read:user", []string{"admin:user"}, "get-me", true},
 		{"user does not imply admin:user-only ops", []string{"user"}, "get-me", true},
 		{"read:user cannot write profile", []string{"read:user"}, "sync-profile", false},
+		{"read:org reads security policy", []string{"read:org"}, "get-org-security", true},
+		{"read:org cannot set security policy", []string{"read:org"}, "set-org-security", false},
+		{"write:org sets security policy", []string{"write:org"}, "set-org-security", true},
 		{"notifications reads and writes", []string{"notifications"}, "read-all-notifications", true},
 		{"unmapped operation is denied (fail closed)", []string{"admin:org", "admin:user"}, "delete-universe", false},
 		{"empty scope set grants nothing", []string{}, "get-me", false},
@@ -77,9 +80,14 @@ func TestEndpointScopeEnforcement(t *testing.T) {
 		{"write:project creates project (implies read)", []string{"write:project"}, http.MethodPost, "/orgs/acme/projects", http.StatusOK},
 		{"read:project cannot update project", []string{"read:project"}, http.MethodPatch, "/orgs/acme/projects/web", http.StatusForbidden},
 		{"write:project updates project", []string{"write:project"}, http.MethodPatch, "/orgs/acme/projects/web", http.StatusOK},
-		{"read:project cannot delete project", []string{"read:project"}, http.MethodDelete, "/orgs/acme/projects/web", http.StatusForbidden},
-		{"write:project deletes project", []string{"write:project"}, http.MethodDelete, "/orgs/acme/projects/web", http.StatusOK},
-		{"write:project restores project", []string{"write:project"}, http.MethodPost, "/orgs/acme/projects/web/restore", http.StatusOK},
+		{"write:project cannot delete project (needs admin)", []string{"write:project"}, http.MethodDelete, "/orgs/acme/projects/web", http.StatusForbidden},
+		{"admin:project deletes project", []string{"admin:project"}, http.MethodDelete, "/orgs/acme/projects/web", http.StatusOK},
+		{"admin:project restores project", []string{"admin:project"}, http.MethodPost, "/orgs/acme/projects/web/restore", http.StatusOK},
+		{"read:project lists collaborators", []string{"read:project"}, http.MethodGet, "/orgs/acme/projects/web/members", http.StatusOK},
+		{"write:project cannot add collaborator (needs admin)", []string{"write:project"}, http.MethodPost, "/orgs/acme/projects/web/members", http.StatusForbidden},
+		{"admin:project adds collaborator (implies read)", []string{"admin:project"}, http.MethodPost, "/orgs/acme/projects/web/members", http.StatusOK},
+		{"admin:project sets collaborator role", []string{"admin:project"}, http.MethodPut, "/orgs/acme/projects/web/members/u9/role", http.StatusOK},
+		{"admin:project removes collaborator", []string{"admin:project"}, http.MethodDelete, "/orgs/acme/projects/web/members/u9", http.StatusOK},
 		{"read:org lists audit log", []string{"read:org"}, http.MethodGet, "/orgs/acme/audit", http.StatusOK},
 		{"read:project cannot read audit log", []string{"read:project"}, http.MethodGet, "/orgs/acme/audit", http.StatusForbidden},
 		{"read:org reads audit config", []string{"read:org"}, http.MethodGet, "/orgs/acme/audit/config", http.StatusOK},
@@ -88,6 +96,9 @@ func TestEndpointScopeEnforcement(t *testing.T) {
 		{"read:org lists invitations", []string{"read:org"}, http.MethodGet, "/orgs/acme/invitations", http.StatusOK},
 		{"read:org cannot invite", []string{"read:org"}, http.MethodPost, "/orgs/acme/invitations", http.StatusForbidden},
 		{"write:org invites (implies read)", []string{"write:org"}, http.MethodPost, "/orgs/acme/invitations", http.StatusOK},
+		{"read:org reads security policy", []string{"read:org"}, http.MethodGet, "/orgs/acme/security", http.StatusOK},
+		{"read:org cannot set security policy", []string{"read:org"}, http.MethodPut, "/orgs/acme/security", http.StatusForbidden},
+		{"write:org sets security policy", []string{"write:org"}, http.MethodPut, "/orgs/acme/security", http.StatusOK},
 		{"full access adds member", nil, http.MethodPost, "/orgs/acme/members", http.StatusOK},
 	}
 	for _, tc := range cases {
@@ -150,6 +161,26 @@ func registerScopeProbe(api huma.API, store IdentityStore) {
 	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
 
 	huma.Register(api, huma.Operation{
+		OperationID: "list-project-members", Method: http.MethodGet, Path: "/orgs/{slug}/projects/{project}/members",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "add-project-member", Method: http.MethodPost, Path: "/orgs/{slug}/projects/{project}/members",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "set-project-member-role", Method: http.MethodPut, Path: "/orgs/{slug}/projects/{project}/members/{userId}/role",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectMemberInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "remove-project-member", Method: http.MethodDelete, Path: "/orgs/{slug}/projects/{project}/members/{userId}",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeProjectMemberInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
 		OperationID: "list-invitations", Method: http.MethodGet, Path: "/orgs/{slug}/invitations",
 		Middlewares: huma.Middlewares{auth},
 	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
@@ -173,6 +204,16 @@ func registerScopeProbe(api huma.API, store IdentityStore) {
 		OperationID: "invite-member", Method: http.MethodPost, Path: "/orgs/{slug}/invitations",
 		Middlewares: huma.Middlewares{auth},
 	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-org-security", Method: http.MethodGet, Path: "/orgs/{slug}/security",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
+
+	huma.Register(api, huma.Operation{
+		OperationID: "set-org-security", Method: http.MethodPut, Path: "/orgs/{slug}/security",
+		Middlewares: huma.Middlewares{auth},
+	}, func(context.Context, *probeSlugInput) (*probeOK, error) { return &probeOK{}, nil })
 }
 
 type probeSlugInput struct {
@@ -182,6 +223,12 @@ type probeSlugInput struct {
 type probeProjectInput struct {
 	Slug    string `path:"slug"`
 	Project string `path:"project"`
+}
+
+type probeProjectMemberInput struct {
+	Slug    string `path:"slug"`
+	Project string `path:"project"`
+	UserID  string `path:"userId"`
 }
 
 // probeOK gives the probe handlers a body so a permitted request is a plain 200
@@ -226,6 +273,18 @@ func (scopeFakeStore) UpdateProject(context.Context, string, string, string, db.
 func (scopeFakeStore) SetProjectDeleted(context.Context, string, string, string, bool) (db.Project, error) {
 	return db.Project{}, nil
 }
+func (scopeFakeStore) ListProjectMembers(context.Context, string, string, string) ([]db.ProjectMember, error) {
+	return nil, nil
+}
+func (scopeFakeStore) AddProjectMember(context.Context, string, string, string, string, string) (string, error) {
+	return "", nil
+}
+func (scopeFakeStore) SetProjectMemberRole(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (scopeFakeStore) RemoveProjectMember(context.Context, string, string, string, string) error {
+	return nil
+}
 func (scopeFakeStore) GetOrg(context.Context, string, string) (db.Org, error) {
 	return db.Org{}, nil
 }
@@ -233,7 +292,16 @@ func (scopeFakeStore) GetAuditConfig(context.Context, string, string) (bool, err
 	return false, nil
 }
 func (scopeFakeStore) SetAuditConfig(context.Context, string, string, bool) error { return nil }
-func (scopeFakeStore) ListOrgs(context.Context, string) ([]db.Org, error) { return nil, nil }
+func (scopeFakeStore) GetOrgSecurity(context.Context, string, string) (db.OrgSecurity, error) {
+	return db.OrgSecurity{}, nil
+}
+func (scopeFakeStore) SetOrgSecurity(context.Context, string, string, db.OrgSecurity) error {
+	return nil
+}
+func (scopeFakeStore) ProvisionSSOMember(context.Context, string, string, string, string) error {
+	return nil
+}
+func (scopeFakeStore) ListOrgs(context.Context, string) ([]db.Org, error)         { return nil, nil }
 func (scopeFakeStore) UpsertUserProfile(context.Context, string, string, db.ProfileInput) error {
 	return nil
 }
@@ -279,7 +347,9 @@ func (scopeFakeStore) CreatePAT(context.Context, string, string, []string, *time
 func (scopeFakeStore) CreateOAT(context.Context, string, string, string, string, []string, *time.Time) (string, string, error) {
 	return "", "", nil
 }
-func (scopeFakeStore) ListPATs(context.Context, string) ([]db.AccessToken, error)         { return nil, nil }
-func (scopeFakeStore) ListOATs(context.Context, string, string) ([]db.AccessToken, error) { return nil, nil }
-func (scopeFakeStore) RevokePAT(context.Context, string, string) error                    { return nil }
-func (scopeFakeStore) RevokeOAT(context.Context, string, string) error                    { return nil }
+func (scopeFakeStore) ListPATs(context.Context, string) ([]db.AccessToken, error) { return nil, nil }
+func (scopeFakeStore) ListOATs(context.Context, string, string) ([]db.AccessToken, error) {
+	return nil, nil
+}
+func (scopeFakeStore) RevokePAT(context.Context, string, string) error { return nil }
+func (scopeFakeStore) RevokeOAT(context.Context, string, string) error { return nil }

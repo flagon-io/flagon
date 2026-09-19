@@ -193,6 +193,45 @@ today (commands return "not implemented"), not yet shipped.
   tenant scoping. The agent gets no special powers here.
 - **UI/UX bar**: hybrid Vercel/Cloudflare/GitHub feel - real dialogs, typeahead
   pickers, no toy forms. Build on `@flagon-io/ui`.
+- **Reach for `@flagon-io/ui` first.** Before hand-rolling any UI element, use the
+  design system's component for it - `Button`, `Input`, `Select`/`SelectField`,
+  `MoneyInput`, `DateField`/`DateRangeField`, `Dialog`, `DropdownMenu`, `Card`,
+  `Badge`, `Alert`, `Tabs`, and the rest. Browse the catalog (grouped by type,
+  with live examples) at `/ui/components`, or read `packages/ui/src/components/`.
+  Don't reinvent a raw `<input>`/`<select>`/`<button>` with bespoke classes when a
+  component exists; controls share one size scale (`sm`/`md`/`lg`, `lib/control.ts`)
+  so they align - pass matching `size`s rather than hardcoding heights. Style with
+  the design **tokens** (Tailwind utilities backed by CSS vars: `bg-primary`,
+  `text-muted-foreground`, `border-hairline`, `bg-chart-1`, `rounded-md`), never
+  raw hex or fixed px - a **Brand** (`@flagon-io/ui`'s `BrandProvider` + token
+  contract: colors, radius, fonts, chart palette, density) re-skins everything
+  through those tokens, so hardcoded values break theming. If the
+  right component is only a shadcn parity stub (`status: "planned"` in the docs
+  registry), that's the cue to BUILD it in `packages/ui` (and add its example +
+  registry entry) rather than one-off it in the app - the library is meant to
+  reach 100% coverage. When a screen would clearly benefit from a component we
+  don't have yet, say so and propose adding it.
+- **Every UI component ships an integration test.** Real Playwright specs live in
+  `app/tests/` and run in CI (the `e2e` job) against a production build, driving
+  each component through its live `/ui` example page. When you add or change a
+  component, add/extend its spec (the existing specs are the pattern: assert real
+  behavior - typing shorthand into MoneyInput formats it, switching a Brand
+  re-skins buttons, etc.), and run `npm run test:e2e` in `app/` (it reuses your dev
+  server locally). A component isn't "done" until it's covered. Run these before
+  claiming the library is stable. **Pure logic ships a unit test too:** parsers,
+  formatters, and compilers (MoneyInput's `evaluateMoney`, DateField's
+  `parseFlexibleDate`, the Brand `serializeBrand`/`brandCss`, ...) get a Vitest
+  spec under `packages/ui/src/**/*.test.ts`, run with `npm run test:unit`. Unit
+  tests cover the logic; Playwright covers the rendered behavior.
+- **Never reach for a raw native control when a component fits - build the
+  component instead.** A bare `<input type="range">`, `<input type="color">`,
+  `<select>`, `<input type="date">`, `<progress>`, etc. dropped into a page is a
+  smell: it won't carry our tokens/sizing/theming and it breaks the system. If the
+  design system has the component (`Slider`, `ColorInput`, `Select`, `DateField`,
+  ...), use it; if it doesn't, BUILD it in `packages/ui` first (component +
+  registry entry + example), then use it. That is how `Slider` and `ColorInput`
+  were added rather than shipping native inputs. Default to creating the reusable
+  component - that's the whole point of the library.
 - **Creation is a destination, not an afterthought.** Prefer a dedicated
   creation page for anything a user makes (tokens, members, emails, projects,
   orgs); use a modal only when a full page is overkill. Never an inline

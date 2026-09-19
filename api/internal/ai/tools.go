@@ -33,10 +33,18 @@ type Store interface {
 	UpdateProject(ctx context.Context, actorID, orgSlug, projectSlug string, in db.ProjectUpdate) (db.Project, error)
 	SetProjectDeleted(ctx context.Context, actorID, orgSlug, projectSlug string, deleted bool) (db.Project, error)
 
+	ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string) ([]db.ProjectMember, error)
+	AddProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, login, role string) (targetID string, err error)
+	SetProjectMemberRole(ctx context.Context, actorID, orgSlug, projectSlug, targetID, role string) error
+	RemoveProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, targetID string) error
+
 	ListMembers(ctx context.Context, actorID, slug string) ([]db.Member, error)
 	AddMember(ctx context.Context, actorID, slug, login, role string) (targetID, orgName string, err error)
 	SetMemberRole(ctx context.Context, actorID, slug, targetID, newRole string) error
 	RemoveMember(ctx context.Context, actorID, slug, targetID string) error
+
+	GetOrgSecurity(ctx context.Context, actorID, slug string) (db.OrgSecurity, error)
+	SetOrgSecurity(ctx context.Context, actorID, slug string, s db.OrgSecurity) error
 
 	ListInvitations(ctx context.Context, actorID, slug string) ([]db.Invitation, error)
 	InviteMember(ctx context.Context, actorID, slug, login, role string) (db.InviteResult, error)
@@ -352,7 +360,7 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 			Description: "Delete a project. This is a soft delete: the project is restorable and its slug is freed for reuse.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"}},"required":["org","project"],"additionalProperties":false}`),
 		},
-		Scope:    "write:project",
+		Scope:    "admin:project",
 		Mutating: true,
 		Summarize: func(input json.RawMessage) string {
 			var in projectQueryInput
@@ -382,7 +390,7 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 			Description: "Restore a soft-deleted project by slug. Fails if another live project has since taken that slug.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"}},"required":["org","project"],"additionalProperties":false}`),
 		},
-		Scope:    "write:project",
+		Scope:    "admin:project",
 		Mutating: true,
 		Summarize: func(input json.RawMessage) string {
 			var in projectQueryInput
@@ -403,6 +411,123 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 				return nil, err
 			}
 			return map[string]any{"project": p, "restored": true}, nil
+		},
+	})
+
+	// Project access -----------------------------------------------------------
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "list_project_members",
+			Description: "List a project's explicit collaborators and their repository-style roles (read, triage, write, maintain, admin). Org owners/admins have admin on every project implicitly and may not appear here.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"}},"required":["org","project"],"additionalProperties":false}`),
+		},
+		Scope: "read:project",
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectMemberInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			if org == "" || project == "" {
+				return nil, fmt.Errorf("org and project are required")
+			}
+			members, err := store.ListProjectMembers(ctx, tc.UserID, org, project)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"members": members}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "add_project_member",
+			Description: "Grant an existing org member a role on a project (read, triage, write, maintain, or admin). A grant only elevates the member on this project; it never lowers their org-level access.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"},"login":{"type":"string","description":"Username or email of an existing org member"},"role":{"type":"string","description":"Role: read, triage, write, maintain, or admin"}},"required":["org","project","login","role"],"additionalProperties":false}`),
+		},
+		Scope:    "admin:project",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in projectMemberInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Grant %q %s on project %q in %q", strings.TrimSpace(in.Login), strings.TrimSpace(in.Role), strings.TrimSpace(in.Project), strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectMemberInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			login, role := strings.TrimSpace(in.Login), strings.TrimSpace(in.Role)
+			if org == "" || project == "" || login == "" || role == "" {
+				return nil, fmt.Errorf("org, project, login and role are required")
+			}
+			targetID, err := store.AddProjectMember(ctx, tc.UserID, org, project, login, role)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"user_id": targetID}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "set_project_member_role",
+			Description: "Change a collaborator's role on a project. Identify the collaborator by their user id (from list_project_members).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"},"user_id":{"type":"string","description":"The collaborator's user id"},"role":{"type":"string","description":"New role: read, triage, write, maintain, or admin"}},"required":["org","project","user_id","role"],"additionalProperties":false}`),
+		},
+		Scope:    "admin:project",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in projectMemberInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Set role of %q on project %q in %q to %s", strings.TrimSpace(in.UserID), strings.TrimSpace(in.Project), strings.TrimSpace(in.Org), strings.TrimSpace(in.Role))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectMemberInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			userID, role := strings.TrimSpace(in.UserID), strings.TrimSpace(in.Role)
+			if org == "" || project == "" || userID == "" || role == "" {
+				return nil, fmt.Errorf("org, project, user_id and role are required")
+			}
+			if err := store.SetProjectMemberRole(ctx, tc.UserID, org, project, userID, role); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "remove_project_member",
+			Description: "Revoke a collaborator's role on a project, dropping them back to their org-level access. Identify the collaborator by their user id (from list_project_members).",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"project":{"type":"string","description":"Project slug"},"user_id":{"type":"string","description":"The collaborator's user id"}},"required":["org","project","user_id"],"additionalProperties":false}`),
+		},
+		Scope:    "admin:project",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in projectMemberInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Revoke %q on project %q in %q", strings.TrimSpace(in.UserID), strings.TrimSpace(in.Project), strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in projectMemberInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org, project := strings.TrimSpace(in.Org), strings.TrimSpace(in.Project)
+			userID := strings.TrimSpace(in.UserID)
+			if org == "" || project == "" || userID == "" {
+				return nil, fmt.Errorf("org, project and user_id are required")
+			}
+			if err := store.RemoveProjectMember(ctx, tc.UserID, org, project, userID); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
 		},
 	})
 
@@ -516,6 +641,84 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 				return nil, err
 			}
 			return map[string]any{"ok": true}, nil
+		},
+	})
+
+	// Org security policy ------------------------------------------------------
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "get_org_security",
+			Description: "Get an organization's security policy: whether two-factor authentication and single sign-on are required, and the member base permission.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"}},"required":["org"],"additionalProperties":false}`),
+		},
+		Scope: "read:org",
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in orgScopedInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org := strings.TrimSpace(in.Org)
+			if org == "" {
+				return nil, fmt.Errorf("org is required")
+			}
+			s, err := store.GetOrgSecurity(ctx, tc.UserID, org)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"enforce_two_factor": s.EnforceTwoFactor,
+				"require_sso":        s.RequireSSO,
+				"base_permission":    s.BasePermission,
+			}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "set_org_security",
+			Description: "Update an organization's security policy. Only the fields you provide change. base_permission is one of none, read, triage, write, maintain, admin.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"org":{"type":"string","description":"Organization slug"},"enforce_two_factor":{"type":"boolean","description":"Require members to have two-factor authentication enabled"},"require_sso":{"type":"boolean","description":"Require members to sign in through the org's SSO provider"},"base_permission":{"type":"string","description":"Default project access for members","enum":["none","read","triage","write","maintain","admin"]}},"required":["org"],"additionalProperties":false}`),
+		},
+		Scope:    "write:org",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in orgSecurityInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Update security policy for %q", strings.TrimSpace(in.Org))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in orgSecurityInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			org := strings.TrimSpace(in.Org)
+			if org == "" {
+				return nil, fmt.Errorf("org is required")
+			}
+			// Merge onto the current policy so an omitted field is left unchanged,
+			// matching the app gateway's partial-update behavior.
+			s, err := store.GetOrgSecurity(ctx, tc.UserID, org)
+			if err != nil {
+				return nil, err
+			}
+			if in.EnforceTwoFactor != nil {
+				s.EnforceTwoFactor = *in.EnforceTwoFactor
+			}
+			if in.RequireSSO != nil {
+				s.RequireSSO = *in.RequireSSO
+			}
+			if in.BasePermission != nil {
+				s.BasePermission = strings.TrimSpace(*in.BasePermission)
+			}
+			if err := store.SetOrgSecurity(ctx, tc.UserID, org, s); err != nil {
+				return nil, err
+			}
+			return map[string]any{
+				"enforce_two_factor": s.EnforceTwoFactor,
+				"require_sso":        s.RequireSSO,
+				"base_permission":    s.BasePermission,
+			}, nil
 		},
 	})
 
@@ -695,8 +898,8 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 			Description: "Mark all of the current user's notifications as read.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		},
-		Scope:    "notifications",
-		Mutating: true,
+		Scope:     "notifications",
+		Mutating:  true,
 		Summarize: func(json.RawMessage) string { return "Mark all notifications read" },
 		Run: func(ctx context.Context, tc ToolContext, _ json.RawMessage) (any, error) {
 			if err := store.MarkAllNotificationsRead(ctx, tc.UserID); err != nil {
@@ -805,9 +1008,28 @@ type updateProjectInput struct {
 	RepositoryURL *string `json:"repository_url"`
 }
 
+// projectMemberInput covers the project-collaborator tools; each uses the subset
+// of fields its schema declares.
+type projectMemberInput struct {
+	Org     string `json:"org"`
+	Project string `json:"project"`
+	Login   string `json:"login"`
+	UserID  string `json:"user_id"`
+	Role    string `json:"role"`
+}
+
 // orgScopedInput is the shared shape for tools that take only an org slug.
 type orgScopedInput struct {
 	Org string `json:"org"`
+}
+
+// orgSecurityInput drives set_org_security. The policy fields are pointers so an
+// omitted field is left unchanged (partial update), not reset to its zero value.
+type orgSecurityInput struct {
+	Org              string  `json:"org"`
+	EnforceTwoFactor *bool   `json:"enforce_two_factor"`
+	RequireSSO       *bool   `json:"require_sso"`
+	BasePermission   *string `json:"base_permission"`
 }
 
 // memberInput covers the member + invitation tools; each uses the subset of

@@ -1,0 +1,348 @@
+package db
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/flagon-io/flagon/api/internal/audit"
+)
+
+// Project (repo-style) roles, lowest privilege first. The ladder is intentionally
+// data, not a hardcoded switch: add a rung here (and to the migration's CHECK)
+// and the rank-based capability checks pick it up. read < triage < write <
+// maintain < admin, matching the classic repository-role model.
+const (
+	ProjectRoleRead     = "read"
+	ProjectRoleTriage   = "triage"
+	ProjectRoleWrite    = "write"
+	ProjectRoleMaintain = "maintain"
+	ProjectRoleAdmin    = "admin"
+)
+
+// projectRoleRanks orders the ladder. A higher rank strictly implies every
+// capability of the ranks below it.
+var projectRoleRanks = map[string]int{
+	ProjectRoleRead:     1,
+	ProjectRoleTriage:   2,
+	ProjectRoleWrite:    3,
+	ProjectRoleMaintain: 4,
+	ProjectRoleAdmin:    5,
+}
+
+// ProjectRoles is the selectable set, lowest to highest, for validation and the
+// grant UI. Keep in sync with the migration's role CHECK constraint.
+var ProjectRoles = []string{
+	ProjectRoleRead, ProjectRoleTriage, ProjectRoleWrite, ProjectRoleMaintain, ProjectRoleAdmin,
+}
+
+func projectRoleRank(role string) int { return projectRoleRanks[role] }
+
+func validProjectRole(role string) bool { return projectRoleRank(role) > 0 }
+
+// BasePermissionNone is the "no floor" base permission - members get no project
+// access at all except where explicitly granted. The other base-permission values
+// are the project-role strings themselves (read..admin).
+const BasePermissionNone = "none"
+
+// impliedProjectRole maps an org role to the project role it grants on every
+// project in the org (the floor), GitHub-style: owners/admins are admins
+// everywhere; a plain member's floor is the org's BASE PERMISSION (default read,
+// or none for no floor). "" means no implied access (non-member, or a member in a
+// base=none org). "viewer" is legacy (folded into member by migration 0023) and
+// maps to read for any rows that predate the change.
+func impliedProjectRole(orgRole, basePermission string) string {
+	switch orgRole {
+	case RoleOwner, RoleAdmin:
+		return ProjectRoleAdmin
+	case RoleMember:
+		if basePermission == BasePermissionNone || basePermission == "" {
+			return ""
+		}
+		return basePermission
+	case RoleViewer:
+		return ProjectRoleRead
+	default:
+		return ""
+	}
+}
+
+// EffectiveProjectRole is max(org-implied, explicit grant): a grant can only
+// elevate a member on a specific project, never drop them below their org floor
+// (the base permission). An empty grant means "no explicit grant" and yields the
+// org-implied role.
+func EffectiveProjectRole(orgRole, basePermission, grant string) string {
+	implied := impliedProjectRole(orgRole, basePermission)
+	if projectRoleRank(grant) > projectRoleRank(implied) {
+		return grant
+	}
+	return implied
+}
+
+// ProjectCapability is a coarse per-project permission, checked by minimum role
+// rank so the ladder stays the single source of truth. Distinct powers for
+// triage/maintain land as the deploy features they gate arrive; today the
+// wired-up gates are view (read), write (write) and admin.
+type ProjectCapability string
+
+const (
+	ProjCapView   ProjectCapability = "project:view"   // see the project and its collaborators (read+)
+	ProjCapWrite  ProjectCapability = "project:write"  // edit project metadata (write+)
+	ProjCapManage ProjectCapability = "project:manage" // manage project settings/environments (maintain+)
+	ProjCapAdmin  ProjectCapability = "project:admin"  // delete/restore and manage collaborators (admin)
+)
+
+// ProjectCan reports whether an effective project role holds a capability. The
+// single source of truth for "who can do what" on a project.
+func ProjectCan(role string, cap ProjectCapability) bool {
+	rank := projectRoleRank(role)
+	switch cap {
+	case ProjCapView:
+		return rank >= projectRoleRank(ProjectRoleRead)
+	case ProjCapWrite:
+		return rank >= projectRoleRank(ProjectRoleWrite)
+	case ProjCapManage:
+		return rank >= projectRoleRank(ProjectRoleMaintain)
+	case ProjCapAdmin:
+		return rank >= projectRoleRank(ProjectRoleAdmin)
+	default:
+		return false
+	}
+}
+
+// Project collaborator errors.
+var (
+	ErrAlreadyCollaborator = errors.New("that user already has a role on this project")
+	ErrNotCollaborator     = errors.New("that user has no role on this project")
+)
+
+// ProjectMember is an explicit collaborator grant with the user's profile
+// details. Org-level (implicit) access is not represented here.
+type ProjectMember struct {
+	UserID    string    `json:"user_id"`
+	Name      *string   `json:"name"`
+	Email     string    `json:"email"`
+	Username  *string   `json:"username"`
+	AvatarURL *string   `json:"avatar_url"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ListProjectMembers returns a project's explicit collaborator grants. Any org
+// member may view them (the SECURITY DEFINER helper gates on org membership).
+// Errors ErrNotMember / ErrProjectNotFound if the caller can't see the project.
+func (d *DB) ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string) ([]ProjectMember, error) {
+	var members []ProjectMember
+	err := d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID, _, err := resolveOrg(ctx, tx, orgSlug)
+		if err != nil {
+			return err
+		}
+		if _, err := resolveProject(ctx, tx, orgID, projectSlug); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx,
+			`SELECT user_id, name, email, username, avatar_url, role, created_at
+			 FROM flagon.project_members($1, $2, $3)`, actorID, orgSlug, projectSlug)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		members = []ProjectMember{}
+		for rows.Next() {
+			var m ProjectMember
+			if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.CreatedAt); err != nil {
+				return err
+			}
+			members = append(members, m)
+		}
+		return rows.Err()
+	})
+	return members, err
+}
+
+// AddProjectMember grants an existing org member a role on a project. The actor
+// must be an effective project admin (org owner/admin, or an explicit admin
+// grant). The target must already be an org member (grants elevate members;
+// outside collaborators are a later seam). Returns the target's user id.
+func (d *DB) AddProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, login, role string) (targetID string, err error) {
+	if !validProjectRole(role) {
+		return "", ErrInvalidRole
+	}
+	err = d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID, projectID, err := d.resolveOrgProjectAsAdmin(ctx, tx, actorID, orgSlug, projectSlug)
+		if err != nil {
+			return err
+		}
+		targetID, err = requireOrgMemberByLogin(ctx, tx, orgID, login)
+		if err != nil {
+			return err
+		}
+		if targetID == actorID {
+			return ErrSelfManage
+		}
+		ct, err := tx.Exec(ctx,
+			`INSERT INTO public.project_members (project_id, user_id, role, created_by)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (project_id, user_id) DO NOTHING`,
+			projectID, targetID, role, actorID)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() == 0 {
+			return ErrAlreadyCollaborator
+		}
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionProjectAccessGranted, "project", projectSlug,
+			fmt.Sprintf("granted %s %s on %s", login, role, projectSlug))
+	})
+	return targetID, err
+}
+
+// SetProjectMemberRole changes an existing collaborator's role. Actor must be an
+// effective project admin; the target must already hold a grant.
+func (d *DB) SetProjectMemberRole(ctx context.Context, actorID, orgSlug, projectSlug, targetID, role string) error {
+	if !validProjectRole(role) {
+		return ErrInvalidRole
+	}
+	return d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID, projectID, err := d.resolveOrgProjectAsAdmin(ctx, tx, actorID, orgSlug, projectSlug)
+		if err != nil {
+			return err
+		}
+		if targetID == actorID {
+			return ErrSelfManage
+		}
+		ct, err := tx.Exec(ctx,
+			`UPDATE public.project_members SET role = $3, updated_at = now()
+			 WHERE project_id = $1 AND user_id = $2`,
+			projectID, targetID, role)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() == 0 {
+			return ErrNotCollaborator
+		}
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionProjectAccessChanged, "project", projectSlug,
+			fmt.Sprintf("changed a collaborator's role to %s on %s", role, projectSlug))
+	})
+}
+
+// RemoveProjectMember revokes a collaborator's grant (dropping them back to their
+// org-implied role). Actor must be an effective project admin.
+func (d *DB) RemoveProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, targetID string) error {
+	return d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID, projectID, err := d.resolveOrgProjectAsAdmin(ctx, tx, actorID, orgSlug, projectSlug)
+		if err != nil {
+			return err
+		}
+		if targetID == actorID {
+			return ErrSelfManage
+		}
+		ct, err := tx.Exec(ctx,
+			`DELETE FROM public.project_members WHERE project_id = $1 AND user_id = $2`,
+			projectID, targetID)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() == 0 {
+			return ErrNotCollaborator
+		}
+		return recordAudit(ctx, tx, orgID, actorID, audit.ActionProjectAccessRevoked, "project", projectSlug,
+			"revoked a collaborator's access to "+projectSlug)
+	})
+}
+
+// resolveProject returns a live project's id from its slug within an org, in the
+// caller's RLS context. Errors ErrProjectNotFound if no live project matches.
+func resolveProject(ctx context.Context, tx pgx.Tx, orgID, slug string) (string, error) {
+	var id string
+	err := tx.QueryRow(ctx,
+		`SELECT id FROM public.projects WHERE org_id = $1 AND slug = $2 AND deleted_at IS NULL`,
+		orgID, slug).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrProjectNotFound
+	}
+	return id, err
+}
+
+// projectGrant returns a user's explicit project grant ("" if none).
+func projectGrant(ctx context.Context, tx pgx.Tx, projectID, userID string) (string, error) {
+	var role *string
+	if err := tx.QueryRow(ctx, `SELECT flagon.project_member_role($1, $2)`, projectID, userID).Scan(&role); err != nil {
+		return "", err
+	}
+	if role == nil {
+		return "", nil
+	}
+	return *role, nil
+}
+
+// orgBasePermission reads an org's base permission (the member project-access
+// floor). Runs in the caller's tx; the org is already resolved/visible.
+func orgBasePermission(ctx context.Context, tx pgx.Tx, orgID string) (string, error) {
+	var base string
+	err := tx.QueryRow(ctx, `SELECT base_permission FROM public.orgs WHERE id = $1`, orgID).Scan(&base)
+	return base, err
+}
+
+// effectiveProjectRole computes the actor's effective role on a project from
+// their org role, the org's base permission, and any explicit grant.
+func effectiveProjectRole(ctx context.Context, tx pgx.Tx, orgID, projectID, userID string) (string, error) {
+	orgRole, err := memberRole(ctx, tx, orgID, userID)
+	if err != nil {
+		return "", err
+	}
+	base, err := orgBasePermission(ctx, tx, orgID)
+	if err != nil {
+		return "", err
+	}
+	grant, err := projectGrant(ctx, tx, projectID, userID)
+	if err != nil {
+		return "", err
+	}
+	return EffectiveProjectRole(orgRole, base, grant), nil
+}
+
+// resolveOrgProjectAsAdmin resolves the org + live project and asserts the actor
+// is an effective project admin. The shared front half of every grant mutation.
+func (d *DB) resolveOrgProjectAsAdmin(ctx context.Context, tx pgx.Tx, actorID, orgSlug, projectSlug string) (orgID, projectID string, err error) {
+	orgID, _, err = resolveOrg(ctx, tx, orgSlug)
+	if err != nil {
+		return "", "", err
+	}
+	projectID, err = resolveProject(ctx, tx, orgID, projectSlug)
+	if err != nil {
+		return "", "", err
+	}
+	role, err := effectiveProjectRole(ctx, tx, orgID, projectID, actorID)
+	if err != nil {
+		return "", "", err
+	}
+	if !ProjectCan(role, ProjCapAdmin) {
+		return "", "", ErrForbidden
+	}
+	return orgID, projectID, nil
+}
+
+// requireOrgMemberByLogin resolves a user by email/username and asserts they are
+// a member of the org (collaborators are org members). Returns their user id.
+func requireOrgMemberByLogin(ctx context.Context, tx pgx.Tx, orgID, login string) (string, error) {
+	var found *string
+	if err := tx.QueryRow(ctx, `SELECT flagon.find_user_by_login($1)`, login).Scan(&found); err != nil {
+		return "", err
+	}
+	if found == nil {
+		return "", ErrUserNotFound
+	}
+	role, err := memberRole(ctx, tx, orgID, *found)
+	if err != nil {
+		return "", err
+	}
+	if role == "" {
+		return "", ErrTargetNotMember
+	}
+	return *found, nil
+}

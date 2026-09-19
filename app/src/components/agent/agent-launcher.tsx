@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Sparkles, ArrowUp } from "lucide-react";
+import { Button } from "@flagon-io/ui";
 import { useAgent } from "./agent-provider";
 
 function greetingFor(hour: number): string {
@@ -55,14 +56,15 @@ export function AgentLauncher({ name }: { name?: string | null }) {
           autoComplete="off"
           className="h-14 w-full rounded-2xl border border-hairline bg-card py-4 pr-14 pl-11 text-[15px] text-foreground shadow-sm outline-none transition focus-visible:border-brand/50 focus-visible:ring-4 focus-visible:ring-brand/10"
         />
-        <button
+        <Button
           type="submit"
+          size="icon"
           disabled={!input.trim()}
           aria-label="Ask"
-          className="absolute top-1/2 right-2.5 flex size-9 -translate-y-1/2 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-40"
+          className="absolute top-1/2 right-2.5 size-9 -translate-y-1/2 rounded-xl disabled:opacity-40"
         >
           <ArrowUp className="size-4.5" />
-        </button>
+        </Button>
       </form>
     </div>
   );

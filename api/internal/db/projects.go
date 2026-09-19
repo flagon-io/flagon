@@ -190,11 +190,13 @@ func (d *DB) UpdateProject(ctx context.Context, actorID, orgSlug, projectSlug st
 }
 
 // SetProjectDeleted soft-deletes (deleted=true) or restores (deleted=false) a
-// project by slug. Member and above (CapWrite). Soft delete frees the slug at
-// once (a live-rows-only unique index), so a new project may reuse the name.
-// Restore brings back the most recently deleted project with that slug, and only
-// when the slug is still free among live projects - otherwise ErrProjectSlugTaken.
-// Returns ErrProjectNotFound when nothing matches in the opposite state.
+// project by slug. Destructive, so it requires effective project admin (org
+// owner/admin, or an explicit admin grant) - not merely write. Soft delete frees
+// the slug at once (a live-rows-only unique index), so a new project may reuse
+// the name. Restore brings back the most recently deleted project with that slug,
+// and only when the slug is still free among live projects - otherwise
+// ErrProjectSlugTaken. Returns ErrProjectNotFound when nothing matches in the
+// opposite state.
 func (d *DB) SetProjectDeleted(ctx context.Context, actorID, orgSlug, projectSlug string, deleted bool) (Project, error) {
 	var p Project
 	err := d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
@@ -202,11 +204,25 @@ func (d *DB) SetProjectDeleted(ctx context.Context, actorID, orgSlug, projectSlu
 		if err != nil {
 			return err
 		}
-		role, err := memberRole(ctx, tx, orgID, actorID)
+		// Resolve the target row so we can check the caller's effective role on it.
+		// Delete acts on the live row; restore on the newest soft-deleted one.
+		var projectID string
+		idQuery := `SELECT id FROM public.projects WHERE org_id = $1 AND slug = $2 AND deleted_at IS NULL`
+		if !deleted {
+			idQuery = `SELECT id FROM public.projects WHERE org_id = $1 AND slug = $2 AND deleted_at IS NOT NULL
+				ORDER BY deleted_at DESC LIMIT 1`
+		}
+		if err := tx.QueryRow(ctx, idQuery, orgID, projectSlug).Scan(&projectID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrProjectNotFound
+			}
+			return err
+		}
+		role, err := effectiveProjectRole(ctx, tx, orgID, projectID, actorID)
 		if err != nil {
 			return err
 		}
-		if !Can(role, CapWrite) {
+		if !ProjectCan(role, ProjCapAdmin) {
 			return ErrForbidden
 		}
 		// Delete matches the single live row and stamps deleted_at. Restore targets

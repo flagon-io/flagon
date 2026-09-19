@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Alert,
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -140,9 +141,9 @@ export function ProjectSettingsForm({ orgSlug, project }: { orgSlug: string; pro
           <div>
             <p className="flex items-center gap-2 text-sm font-medium text-foreground">
               Manage project access
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <Badge variant="secondary" className="normal-case tracking-normal">
                 Soon
-              </span>
+              </Badge>
             </p>
             <p className="mt-0.5 text-sm text-muted-foreground">
               Grant people and teams roles on this project, on top of the organization&rsquo;s

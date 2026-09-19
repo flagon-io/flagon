@@ -1,0 +1,106 @@
+---
+title: Single sign-on (SSO)
+description: Connect your identity provider so members sign in to Flagon with OIDC or SAML.
+section: Platform
+order: 30
+---
+
+# Single sign-on (SSO)
+
+Flagon organizations can require members to sign in through your identity provider
+(IdP). SSO is configured **per organization**, so each org connects its own IdP:
+one org can use Okta, another Azure AD, another Google Workspace. Both **OIDC**
+(OpenID Connect) and **SAML 2.0** are supported.
+
+When a user signs in through your IdP, Flagon **provisions their membership**
+automatically: they become a member of the organization the provider is bound to,
+so you manage access in your IdP and it flows into Flagon.
+
+## Set up a provider
+
+Go to **your org → Settings → Authentication → SSO providers → New provider**. You
+need to be an **owner or admin** of the organization.
+
+### OIDC (OpenID Connect)
+
+1. In your IdP, create an OIDC/OAuth app. Set the **redirect (callback) URI** to:
+
+   ```
+   https://app.flagon.io/api/auth/sso/callback/<providerId>
+   ```
+
+   where `<providerId>` is the id you choose in Flagon (for example `acme-okta`).
+2. In Flagon, choose **OIDC** and fill in:
+   - **Provider ID** - a short slug, e.g. `acme-okta`.
+   - **Email domain** - your users' email domain, e.g. `acme.com`. This is how the
+     "Sign in with SSO" flow routes a user to the right provider.
+   - **Issuer URL** - your IdP's issuer, e.g. `https://acme.okta.com`. Flagon
+     discovers the rest from `<issuer>/.well-known/openid-configuration`.
+   - **Client ID** and **Client secret** from the IdP app.
+3. Save. Members can now sign in with SSO.
+
+### SAML 2.0
+
+1. In Flagon, choose **SAML**, set a **Provider ID** and **email domain**, and paste
+   your IdP's **SSO URL (entry point)** and **signing certificate (PEM)**. The
+   **SP entity ID** is an identifier for this connection (e.g.
+   `https://app.flagon.io/saml/acme`).
+2. Save, then copy the two URLs Flagon shows for the provider into your IdP app:
+   - **ACS (Assertion Consumer Service) URL**:
+     `https://app.flagon.io/api/auth/sso/saml2/sp/acs/<providerId>`
+   - **SP metadata URL** (many IdPs can import this directly):
+     `https://app.flagon.io/api/auth/sso/saml2/sp/metadata?providerId=<providerId>`
+
+#### Okta (SAML) example
+
+1. Okta admin → **Applications → Create App Integration → SAML 2.0**.
+2. **Single sign-on URL** = Flagon's ACS URL (above). **Audience URI (SP Entity ID)**
+   = the SP entity ID you set in Flagon.
+3. Map attributes so the assertion includes at least the user's **email** (and name).
+4. Copy Okta's **Identity Provider metadata** (or the SSO URL + signing cert) into
+   Flagon's provider form.
+5. Assign your Okta users/groups to the app.
+
+## Signing in
+
+On the login page, members choose **Sign in with SSO** and enter their work email.
+Flagon matches the email domain to the provider and redirects to the IdP. On return,
+the member is signed in and their organization membership is ensured automatically.
+
+## Requiring SSO
+
+Once a provider is configured, an owner/admin can turn on **Require single sign-on**
+under **Settings → Authentication**. When it's on, members and admins who haven't
+signed in through the org's provider are sent to a "single sign-on required" page and
+must continue with SSO before they can access the organization.
+
+- **Lockout safety:** you can only turn the requirement *on* once you've signed in
+  through the org's SSO yourself - so enabling it can't lock out the person enabling
+  it.
+- **Owner break-glass:** owners are exempt from the redirect, so an owner can always
+  reach settings to fix or disable the requirement even if SSO is misconfigured.
+
+See also [Two-factor authentication](/platform/two-factor) for the 2FA requirement -
+you can require SSO, 2FA, or both.
+
+## One account, many organizations
+
+You have a single Flagon account, and each organization connects its own IdP. When
+you go through an org's SSO while already signed in, Flagon **links that org's SSO
+identity to your current account** - whatever email the IdP asserts - the way GitHub
+does. So one account can belong to org A (via Okta), org B (via Azure AD), and a
+personal org with no SSO at all, and a single sign-in reaches all of them. Each org
+independently decides whether to require SSO; a non-SSO org keeps working normally.
+A brand-new person with no Flagon account who signs in through an org's SSO gets an
+account created and is added to that org automatically.
+
+## How it fits together
+
+- The IdP integration (OIDC/SAML, assertion validation, signing) is handled by a
+  battle-tested SSO engine in the app's auth layer. Providers are stored in the
+  app's auth database.
+- Organizations, memberships, and roles remain in Flagon's API (the source of
+  truth). A verified SSO login calls the API across the internal trust boundary to
+  ensure the member exists - so SSO users flow through the same membership, RBAC,
+  and audit paths as everyone else. The join is recorded in the [audit
+  log](/platform/organizations).

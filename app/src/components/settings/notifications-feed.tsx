@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Bell, Check, CheckCheck } from "lucide-react";
 import {
   Alert,
+  Badge,
   Button,
   Card,
   Skeleton,
@@ -93,9 +94,9 @@ export function NotificationsFeed() {
             <TabsTrigger value="unread">
               Unread
               {unreadCount > 0 && (
-                <span className="ml-1.5 rounded-full bg-brand/15 px-1.5 text-[11px] font-semibold text-brand-bright">
+                <Badge variant="brand" className="ml-1.5">
                   {unreadCount}
-                </span>
+                </Badge>
               )}
             </TabsTrigger>
           </TabsList>
@@ -161,15 +162,16 @@ function FeedRow({
       {unread && (
         <>
           <span className="pointer-events-none absolute top-4 right-4 size-2 rounded-full bg-brand group-hover/row:opacity-0 group-focus-within/row:opacity-0" />
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onMarkRead(n.id)}
             aria-label="Mark as read"
             title="Mark as read"
-            className="absolute top-3 right-3 flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-secondary hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+            className="absolute top-3 right-3 size-7 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
           >
             <Check className="size-4" />
-          </button>
+          </Button>
         </>
       )}
     </li>

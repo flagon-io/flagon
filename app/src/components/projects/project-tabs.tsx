@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Activity, BookText, Rocket, Settings, type LucideIcon } from "lucide-react";
-import { cn } from "@flagon-io/ui";
+import { Badge, cn } from "@flagon-io/ui";
 
 type Tab = {
   label: string;
@@ -54,9 +54,9 @@ export function ProjectTabs({ base, canManage }: { base: string; canManage: bool
             >
               <Icon className="size-4" />
               {t.label}
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <Badge variant="outline" className="normal-case tracking-normal">
                 Soon
-              </span>
+              </Badge>
             </span>
           );
         }

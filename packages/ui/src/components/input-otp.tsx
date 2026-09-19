@@ -5,6 +5,10 @@ import { Minus } from "lucide-react";
 import { useContext, type ComponentProps } from "react";
 import { cn } from "../lib/cn";
 
+// Input filters, re-exported so consumers restrict what can be typed/pasted
+// without importing input-otp directly: digits-only, letters-only, or both.
+export { REGEXP_ONLY_DIGITS, REGEXP_ONLY_CHARS, REGEXP_ONLY_DIGITS_AND_CHARS } from "input-otp";
+
 /**
  * One-time-code input (paste-aware, single logical field rendered as slots).
  * Built on `input-otp`, shadcn-style: compose InputOTP > InputOTPGroup >

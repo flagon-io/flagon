@@ -45,13 +45,18 @@ a new project with the same name right away.
 
 Restoring brings the project back, but only if its slug is still free. If a new
 project has since taken that name, restore is refused until you free the slug (for
-example by renaming the new project). Delete and restore both require write
-access. Like everything else, all three actions go through the same
+example by renaming the new project). Because they are destructive, **delete and
+restore require admin access on the project** (an org owner/admin, or a project
+admin grant). Like everything else, all three actions go through the same
 permission-checked API operation whether you use the UI, the assistant, or MCP.
 
 ## Ownership and access
 
-Projects inherit their organization's membership and roles. Access is
-permission-scoped from day one: a token or agent can only act on a project if its
-scope allows it, and tenant isolation is enforced in the database with row-level
-security, so one organization can never see another's projects.
+Projects inherit their organization's membership and roles, and can layer
+repository-style **collaborator roles** on top for finer control on a single
+project. See [Project access](/docs/platform/project-access) for the roles and how
+they combine.
+
+Access is permission-scoped from day one: a token or agent can only act on a
+project if its scope allows it, and tenant isolation is enforced in the database
+with row-level security, so one organization can never see another's projects.

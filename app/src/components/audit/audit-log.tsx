@@ -14,6 +14,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Input,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   cn,
 } from "@flagon-io/ui";
 import type { AuditConfig, AuditEvent, AuditPage } from "@/lib/flagon-api";
@@ -49,36 +53,23 @@ export function AuditLog({
   const [tab, setTab] = useState<Tab>("events");
 
   return (
-    <div>
-      {/* GitHub-style tabs: a full-width bottom border under the whole row, the
-          active tab sitting on it with a brand underline. */}
-      <div className="border-b border-hairline">
-        <nav className="-mb-px flex gap-5" aria-label="Audit log">
-          {(["events", "settings"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              aria-current={tab === t ? "page" : undefined}
-              className={cn(
-                "border-b-2 px-0.5 py-3 text-sm capitalize transition-colors outline-none",
-                tab === t
-                  ? "border-brand font-semibold text-foreground"
-                  : "border-transparent font-medium text-muted-foreground hover:border-hairline hover:text-foreground",
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </nav>
-      </div>
+    <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+      <TabsList className="w-full gap-5" aria-label="Audit log">
+        <TabsTrigger value="events" className="py-3 capitalize">
+          events
+        </TabsTrigger>
+        <TabsTrigger value="settings" className="py-3 capitalize">
+          settings
+        </TabsTrigger>
+      </TabsList>
 
-      {tab === "events" ? (
+      <TabsContent value="events" className="mt-4">
         <Events orgSlug={orgSlug} initial={initial} />
-      ) : (
+      </TabsContent>
+      <TabsContent value="settings" className="mt-4">
         <AuditSettings orgSlug={orgSlug} initial={initialConfig} />
-      )}
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 

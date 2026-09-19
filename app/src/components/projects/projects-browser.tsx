@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Boxes, GitBranch, Plus, Search } from "lucide-react";
-import { Button, Kbd } from "@flagon-io/ui";
+import { Button, Input, Kbd } from "@flagon-io/ui";
 import type { Project } from "@/lib/flagon-api";
 
 function repoHost(url: string): string | null {
@@ -57,14 +57,14 @@ export function ProjectsBrowser({
     <div>
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
             ref={searchRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search projects..."
             aria-label="Search projects"
-            className="h-10 w-full rounded-lg border border-input bg-background pr-10 pl-10 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="pr-10 pl-10"
           />
           <Kbd className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2">/</Kbd>
         </div>

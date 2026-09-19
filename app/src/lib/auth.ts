@@ -1,10 +1,13 @@
 import { betterAuth } from "better-auth";
 import { username, emailOTP, twoFactor } from "better-auth/plugins";
+import { sso } from "@better-auth/sso";
 import { pool } from "@/lib/db";
+import { resolveSSOUserToCurrentSession } from "@/lib/sso-resolve";
 import { APIError } from "better-auth/api";
 import { createPrimaryUserEmail, syncPrimaryUserEmail } from "@/lib/user-emails";
 import { mirrorUserProfile } from "@/lib/user-profile";
 import { isUserSoftDeleted } from "@/lib/user-account";
+import { provisionSSOMembership } from "@/lib/sso-provision";
 import { sendOtpEmail, sendResetPasswordEmail } from "@/lib/mailer";
 
 const googleConfigured = Boolean(
@@ -18,6 +21,19 @@ export const auth = betterAuth({
   database: pool,
   baseURL: process.env.BETTER_AUTH_URL,
   secret: process.env.BETTER_AUTH_SECRET,
+
+  // SAML posts its assertion back cross-site (IdP -> our ACS), so a SameSite=Lax
+  // session cookie wouldn't ride along and we couldn't link the SSO identity to the
+  // already-signed-in account (GitHub's model). In production (HTTPS) use
+  // SameSite=None; Secure so the cookie survives that POST; in local dev keep Lax
+  // over HTTP so normal login still works. CSRF stays covered by Better Auth's
+  // origin checks, not SameSite.
+  advanced: {
+    defaultCookieAttributes:
+      process.env.NODE_ENV === "production"
+        ? { sameSite: "none", secure: true }
+        : { sameSite: "lax" },
+  },
 
   emailAndPassword: {
     enabled: true,
@@ -59,7 +75,16 @@ export const auth = betterAuth({
   // The rename-auth-tables migration step renames existing singular tables so
   // data is preserved. Columns keep BetterAuth's camelCase.
   session: { modelName: "sessions" },
-  account: { modelName: "accounts" },
+  // Account linking is how one Flagon account carries several org SSO identities
+  // (GitHub's model). allowDifferentEmails: the SSO identity an org's IdP asserts
+  // often won't match your account's primary email - linking must still attach it.
+  // trustedProviders stays empty so nothing auto-links by email for a LOGGED-OUT
+  // user; linking to an existing account only happens for the CURRENT signed-in
+  // user, decided explicitly in the SSO resolveUser hook below.
+  account: {
+    modelName: "accounts",
+    accountLinking: { enabled: true, allowDifferentEmails: true },
+  },
   verification: { modelName: "verifications" },
 
   // Extended public-profile fields. These live on the user in the
@@ -156,6 +181,33 @@ export const auth = betterAuth({
             : undefined;
         await sendOtpEmail(email, otp, type, verifyUrl);
       },
+    }),
+    // Enterprise SSO (OIDC + SAML). Providers are registered PER ORGANIZATION
+    // (each carries its Flagon organizationId), so org A can use Okta and org B
+    // Azure AD. Flagon orgs live in the Go API, not BetterAuth's org plugin, so we
+    // DON'T use organizationProvisioning; instead provisionUser hands the verified
+    // user to the Go API to ensure their membership. Plural table name to match
+    // our convention.
+    sso({
+      schema: { ssoProvider: { modelName: "sso_providers" } },
+      // GitHub's model: if you're ALREADY signed in when you go through an org's
+      // SSO, link that org's SSO identity to your CURRENT account - whatever email
+      // the IdP asserts - instead of resolving a separate identity by email. So one
+      // account carries many org SSO identities (org A -> Okta, org B -> Azure,
+      // different emails, one login). Linking to your own account is safe: the
+      // verified assertion proves you control that IdP identity, and you initiated
+      // it. When nobody's signed in, "continue" = the plugin default (sign into the
+      // already-linked account, or create a new one).
+      resolveUser: resolveSSOUserToCurrentSession,
+      provisionUser: async ({ user, provider }) => {
+        await provisionSSOMembership({
+          userId: user.id,
+          email: user.email,
+          organizationId: provider.organizationId,
+        });
+      },
+      // Re-run on every login so upstream membership stays in sync (idempotent).
+      provisionUserOnEveryLogin: true,
     }),
   ],
 });

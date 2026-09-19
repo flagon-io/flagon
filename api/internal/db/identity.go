@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/flagon-io/flagon/api/internal/audit"
 )
 
 // User is an app user mirrored into the API's database.
@@ -19,11 +21,16 @@ type User struct {
 
 // Org is an organization plus the caller's role in it.
 type Org struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Slug      string    `json:"slug"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+	Role string `json:"role"`
+	// EnforceTwoFactor and RequireSSO are the org's security policy. They travel on
+	// the org object so the app gate can enforce them for every member without a
+	// second round-trip. Written via SetOrgSecurity (owner/admin only).
+	EnforceTwoFactor bool      `json:"enforce_two_factor"`
+	RequireSSO       bool      `json:"require_sso"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // ErrOrgSlugTaken is returned when creating an org whose slug already exists.
@@ -197,9 +204,14 @@ func (d *DB) CreateOrg(ctx context.Context, userID, email, name, slug string) (O
 		}
 
 		// Now visible via the membership - read the full record back.
-		return tx.QueryRow(ctx,
-			`SELECT id, name, slug, 'owner', created_at FROM public.orgs WHERE id = $1`,
-			orgID).Scan(&o.ID, &o.Name, &o.Slug, &o.Role, &o.CreatedAt)
+		if err := tx.QueryRow(ctx,
+			`SELECT id, name, slug, 'owner', enforce_two_factor, require_sso, created_at FROM public.orgs WHERE id = $1`,
+			orgID).Scan(&o.ID, &o.Name, &o.Slug, &o.Role, &o.EnforceTwoFactor, &o.RequireSSO, &o.CreatedAt); err != nil {
+			return err
+		}
+
+		return recordAudit(ctx, tx, orgID, userID, audit.ActionOrgCreated, "organization", orgID,
+			"created organization "+name)
 	})
 	return o, err
 }
@@ -310,9 +322,12 @@ func (d *DB) LeaveOrg(ctx context.Context, userID, slug string) error {
 			}
 		}
 
-		_, err = tx.Exec(ctx,
-			`DELETE FROM public.memberships WHERE org_id = $1 AND user_id = $2`, orgID, userID)
-		return err
+		if _, err = tx.Exec(ctx,
+			`DELETE FROM public.memberships WHERE org_id = $1 AND user_id = $2`, orgID, userID); err != nil {
+			return err
+		}
+		return recordAudit(ctx, tx, orgID, userID, audit.ActionMemberLeft, "member", userID,
+			"left the organization")
 	})
 }
 
@@ -331,7 +346,7 @@ func upsertUserExec(ctx context.Context, tx pgx.Tx, userID, email string) (pgcon
 
 func queryOrgs(ctx context.Context, tx pgx.Tx, userID string) ([]Org, error) {
 	rows, err := tx.Query(ctx,
-		`SELECT o.id, o.name, o.slug, m.role, o.created_at
+		`SELECT o.id, o.name, o.slug, m.role, o.enforce_two_factor, o.require_sso, o.created_at
 		 FROM public.orgs o
 		 JOIN public.memberships m ON m.org_id = o.id
 		 WHERE m.user_id = $1 AND o.deleted_at IS NULL
@@ -344,7 +359,7 @@ func queryOrgs(ctx context.Context, tx pgx.Tx, userID string) ([]Org, error) {
 	orgs := []Org{}
 	for rows.Next() {
 		var o Org
-		if err := rows.Scan(&o.ID, &o.Name, &o.Slug, &o.Role, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.Name, &o.Slug, &o.Role, &o.EnforceTwoFactor, &o.RequireSSO, &o.CreatedAt); err != nil {
 			return nil, err
 		}
 		orgs = append(orgs, o)

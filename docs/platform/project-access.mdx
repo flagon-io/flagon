@@ -1,0 +1,71 @@
+---
+title: Project access
+description: Repository-style collaborator roles that layer on top of organization roles for a single project.
+visibility: public
+order: 3
+---
+
+Most teams run on **organization roles** alone: owners and admins run the org,
+members build, viewers read. But sometimes one person needs more (or less) reach
+on a **single project** than their org role gives them. Project access adds
+repository-style **collaborator roles** for exactly that, without changing what
+they can do anywhere else.
+
+## The roles
+
+A project role is one of five rungs, lowest to highest:
+
+- **Read** - see the project and its collaborators.
+- **Triage** - read, plus manage the project's work items (reserved for
+  deployment and workflow features as they land).
+- **Write** - edit the project's name, slug, description, README, and repository
+  URL.
+- **Maintain** - write, plus manage project-level settings (reserved for
+  environments and configuration as they land).
+- **Admin** - full control: delete and restore the project, and manage its
+  collaborators.
+
+The ladder is cumulative: each role can do everything the ones below it can.
+
+## How org and project roles combine
+
+Your effective role on a project is the **higher** of two things: what your
+organization role already grants, and any explicit collaborator role you have been
+given on that project.
+
+| Org role | Implicit project role |
+| --- | --- |
+| Owner | Admin |
+| Admin | Admin |
+| Member | Write |
+| Viewer | Read |
+
+Because the effective role is a **maximum**, a collaborator grant can only ever
+**raise** someone on a specific project, never lower them below their org floor.
+Granting `read` to an org member changes nothing (their org role already gives
+them `write`); granting `admin` lets that same member delete the project and
+manage its collaborators, without making them an org admin everywhere else.
+
+## Managing collaborators
+
+Open a project and go to **Settings -> Access**. Anyone who can see the project
+can see its collaborators; **project admins** (org owners/admins, or someone with
+an explicit `admin` grant) can add, change, and remove them.
+
+- **Add** a collaborator by username or email. They must already be a member of
+  the organization - a project grant elevates an existing member, it does not add
+  outsiders.
+- **Change** a collaborator's role at any time.
+- **Remove** a collaborator to drop them back to their organization-level access.
+
+As everywhere in Flagon, you can do all of this by clicking, by asking the
+in-product assistant, or over the API and MCP - the same permission-checked
+operation backs every path.
+
+## Permissions
+
+Listing collaborators requires the `read:project` scope. Adding, changing, and
+removing them - like deleting or restoring the project itself - requires
+`admin:project`. Scopes are a ceiling on top of your role: a token can never do
+something you could not do yourself, and tenant isolation is enforced in the
+database with row-level security.

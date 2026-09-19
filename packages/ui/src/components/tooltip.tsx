@@ -19,7 +19,7 @@ export function TooltipContent({
         sideOffset={sideOffset}
         className={cn(
           "z-50 overflow-hidden rounded-md border border-hairline bg-popover px-2.5 py-1.5 text-xs font-medium text-popover-foreground shadow-md",
-          "data-[state=delayed-open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0",
+          "data-[state=delayed-open]:animate-fade-in",
           className,
         )}
         {...props}

@@ -10,11 +10,15 @@ export const SheetClose = DialogPrimitive.Close;
 export const SheetTitle = DialogPrimitive.Title;
 export const SheetDescription = DialogPrimitive.Description;
 
-type Side = "left" | "right";
+type Side = "top" | "right" | "bottom" | "left";
 
+// Each side pins its two axes, sets which edge gets the border, and slides in
+// from that edge. Left/right are vertical panels; top/bottom are horizontal.
 const sideClasses: Record<Side, string> = {
-  left: "inset-y-0 left-0 border-r",
-  right: "inset-y-0 right-0 border-l",
+  top: "inset-x-0 top-0 h-auto max-h-[85vh] w-full border-b data-[state=open]:animate-slide-in-top",
+  right: "inset-y-0 right-0 h-full w-[min(22rem,85vw)] border-l data-[state=open]:animate-slide-in-right",
+  bottom: "inset-x-0 bottom-0 h-auto max-h-[85vh] w-full border-t data-[state=open]:animate-slide-in-bottom",
+  left: "inset-y-0 left-0 h-full w-[min(22rem,85vw)] border-r data-[state=open]:animate-slide-in-left",
 };
 
 export function SheetContent({
@@ -29,8 +33,9 @@ export function SheetContent({
         className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] data-[state=closed]:opacity-0"
       />
       <DialogPrimitive.Content
+        data-side={side}
         className={cn(
-          "fixed z-50 flex h-full w-[min(20rem,85vw)] flex-col border-hairline bg-card shadow-xl outline-none",
+          "fixed z-50 flex flex-col border-hairline bg-card shadow-xl outline-none",
           sideClasses[side],
           className,
         )}

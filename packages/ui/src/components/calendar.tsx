@@ -43,7 +43,13 @@ function CaptionDropdown({ options, value, onChange, disabled, "aria-label": ari
  * dropdowns (`captionLayout="dropdown"`, bounded by `startMonth`/`endMonth`), and
  * any disabled-date matcher (`disabled`).
  */
-export function Calendar({ className, classNames, showOutsideDays = true, ...props }: CalendarProps) {
+export function Calendar({
+  className,
+  classNames,
+  showOutsideDays = true,
+  components,
+  ...props
+}: CalendarProps) {
   const navButton = cn(
     buttonClasses({ variant: "outline", size: "icon" }),
     // pointer-events-auto: the nav bar spans the full width over the caption, so
@@ -79,14 +85,21 @@ export function Calendar({ className, classNames, showOutsideDays = true, ...pro
           buttonClasses({ variant: "ghost", size: "icon" }),
           "size-9 rounded-md p-0 font-normal aria-selected:opacity-100",
         ),
-        // rdp v9 applies these to the day <td>; target the inner button.
+        // rdp v9 applies these to the day <td>; target the inner button. Range
+        // endpoints are solid and round only their OUTER corner so they merge
+        // seamlessly into the connecting band; the middle is a flat accent band.
         selected:
           "[&>button]:bg-primary [&>button]:font-medium [&>button]:text-primary-foreground [&>button]:hover:bg-primary [&>button]:hover:text-primary-foreground",
-        today: "[&>button:not([aria-selected='true'])]:bg-accent [&>button]:font-semibold",
+        range_start: "[&>button]:rounded-r-none",
+        range_end: "[&>button]:rounded-l-none",
+        range_middle:
+          "[&>button]:!rounded-none [&>button]:!bg-accent [&>button]:!font-normal [&>button]:!text-accent-foreground [&>button]:hover:!bg-accent",
+        // Today: a bold number, and a subtle ring so it reads as "today" without
+        // fighting a selection or range band it may sit inside.
+        today:
+          "[&>button]:font-semibold [&>button:not([aria-selected=true])]:ring-1 [&>button:not([aria-selected=true])]:ring-inset [&>button:not([aria-selected=true])]:ring-border",
         outside: "text-muted-foreground/40",
         disabled: "text-muted-foreground/40 opacity-50",
-        range_middle:
-          "[&>button]:rounded-none [&>button]:bg-accent [&>button]:text-accent-foreground [&>button]:hover:bg-accent",
         hidden: "invisible",
         ...classNames,
       }}
@@ -108,6 +121,7 @@ export function Calendar({ className, classNames, showOutsideDays = true, ...pro
                   : ChevronDown;
           return <Icon className={cn("size-4", cls)} />;
         },
+        ...components,
       }}
       {...props}
     />

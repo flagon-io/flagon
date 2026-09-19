@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Check, CheckCheck } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger, Skeleton, buttonClasses, cn } from "@flagon-io/ui";
+import { Button, Popover, PopoverContent, PopoverTrigger, Skeleton, buttonClasses, cn } from "@flagon-io/ui";
 import { type Notification, notificationMeta, timeAgo } from "@/lib/notifications";
 
 export function Notifications() {
@@ -91,14 +91,15 @@ export function Notifications() {
             {unread > 0 && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{unread} unread</span>}
           </span>
           {unread > 0 && (
-            <button
+            <Button
               type="button"
+              variant="link"
               onClick={markAll}
-              className="flex items-center gap-1 text-xs font-medium text-link outline-none hover:underline focus-visible:underline"
+              className="h-auto gap-1 p-0 text-xs font-medium"
             >
               <CheckCheck className="size-3.5" />
               Mark all read
-            </button>
+            </Button>
           )}
         </div>
 
@@ -179,15 +180,17 @@ function NotificationRow({
       {unread && (
         <>
           <span className="pointer-events-none absolute top-1/2 right-3 size-2 -translate-y-1/2 rounded-full bg-brand group-hover/row:opacity-0 group-focus-within/row:opacity-0" />
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => onMarkRead(n.id)}
             aria-label="Mark as read"
             title="Mark as read"
-            className="absolute top-1/2 right-2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-secondary hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+            className="absolute top-1/2 right-2 size-6 -translate-y-1/2 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
           >
             <Check className="size-3.5" />
-          </button>
+          </Button>
         </>
       )}
     </li>

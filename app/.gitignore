@@ -42,3 +42,9 @@ next-env.d.ts
 
 # generated shadcn registry (built from @flagon-io/ui by scripts/build-registry.mjs)
 /public/r/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

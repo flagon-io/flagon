@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { headers, cookies } from "next/headers";
 import { getMe } from "@/lib/flagon-api";
 import { auth } from "@/lib/auth";
+import { userHasSSOForOrg } from "@/lib/sso-admin";
 import { AppShell } from "@/components/shell/app-shell";
 
 export default async function OrgLayout({
@@ -26,6 +27,27 @@ export default async function OrgLayout({
   }
 
   const session = await auth.api.getSession({ headers: await headers() });
+
+  // Org security policy: if this org requires 2FA and the member hasn't enabled it,
+  // send them to the challenge page (which lives OUTSIDE this layout so it can't
+  // loop through the gate). The settings page won't let an owner turn on the
+  // requirement without their own 2FA on, so enabling it can't lock them out.
+  const twoFactorEnabled = Boolean(
+    (session?.user as { twoFactorEnabled?: boolean } | undefined)?.twoFactorEnabled,
+  );
+  if (org.enforce_two_factor && !twoFactorEnabled) {
+    redirect(`/2fa-required?org=${encodeURIComponent(slug)}`);
+  }
+
+  // If this org requires SSO, members and admins must have signed in through its
+  // provider. Owners are exempt (break-glass): SSO linking can fail in ways 2FA
+  // can't, and an owner must always be able to reach settings to fix or disable it.
+  // The settings page only lets you turn the requirement on once your own SSO is
+  // linked, so enabling it can't lock out the person who enabled it.
+  if (org.require_sso && org.role !== "owner" && !(await userHasSSOForOrg(me.user.id, org.id))) {
+    redirect(`/sso-required?org=${encodeURIComponent(slug)}`);
+  }
+
   const user = {
     email: me.user.email,
     name: session?.user?.name ?? null,

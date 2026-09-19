@@ -2,7 +2,6 @@ import { headers } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getMe, getProject } from "@/lib/flagon-api";
-import { PageBody } from "@/components/shell/page-header";
 import { ProjectSettingsForm } from "@/components/projects/project-settings-form";
 
 export default async function ProjectSettingsPage({
@@ -23,9 +22,5 @@ export default async function ProjectSettingsPage({
   const project = await getProject(slug, projectSlug).catch(() => null);
   if (!project) notFound();
 
-  return (
-    <PageBody>
-      <ProjectSettingsForm orgSlug={slug} project={project} />
-    </PageBody>
-  );
+  return <ProjectSettingsForm orgSlug={slug} project={project} />;
 }

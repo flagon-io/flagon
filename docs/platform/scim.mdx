@@ -1,0 +1,48 @@
+---
+title: SCIM provisioning
+description: Automatically provision and deprovision members from your identity provider.
+section: Platform
+status: planned
+order: 32
+---
+
+# SCIM provisioning
+
+SCIM (System for Cross-domain Identity Management) lets your identity provider
+(Okta, Azure AD, ...) **push** users into a Flagon organization and remove them
+automatically, so membership stays in lockstep with your directory - a step beyond
+[SSO](/platform/sso), which provisions a member the first time they sign in.
+
+## How it will work
+
+An organization owner/admin mints a **SCIM provisioning token** (a scoped
+organization token) and gives your IdP two values:
+
+- **SCIM base URL:** `https://api.flagon.io/scim/v2`
+- **Bearer token:** the provisioning token.
+
+The IdP then calls Flagon's SCIM API to create, update, deactivate, and remove users,
+which maps onto Flagon organization memberships. All writes go through the same
+membership, RBAC, and [audit](/platform/organizations) paths as everything else.
+
+## Endpoints (SCIM 2.0)
+
+| Method / path | Effect |
+| --- | --- |
+| `GET /scim/v2/ServiceProviderConfig` | Advertises supported capabilities. |
+| `GET /scim/v2/Users?filter=userName eq "…"` | Look up a user by email (existence check). |
+| `POST /scim/v2/Users` | Provision a member. If the person already has a Flagon account, they're added to the org; otherwise a pending invitation is created and completed when they sign up. |
+| `GET /scim/v2/Users/{id}` | Read one provisioned user. |
+| `PATCH /scim/v2/Users/{id}` | `active: false` deactivates (removes membership); `active: true` re-activates. |
+| `DELETE /scim/v2/Users/{id}` | Deprovision (remove membership). |
+| `GET/POST/PATCH /scim/v2/Groups` | Optional: map IdP groups to org roles (a later step). |
+
+Responses use standard SCIM envelopes (`schemas`, `meta`, `ListResponse` with
+`totalResults`/`startIndex`/`itemsPerPage`) and SCIM error format.
+
+## Status
+
+SCIM is designed and scoped but not yet enabled. Provisioning on **first SSO login**
+already works today (see [SSO](/platform/sso)) - SCIM adds directory-driven
+create/deactivate ahead of first login. When it ships, this page moves to
+`published` and the settings surface gains **Settings → Authentication → SCIM**.

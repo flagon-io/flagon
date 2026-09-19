@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Monitor } from "lucide-react";
-import { Alert, Button, Card, Skeleton } from "@flagon-io/ui";
+import { Alert, Badge, Button, Card, Skeleton } from "@flagon-io/ui";
 import { authClient, useSession } from "@/lib/auth-client";
 
 type Session = {
@@ -89,9 +89,9 @@ export function SessionsList() {
                   <p className="flex items-center gap-2 text-sm font-medium text-foreground">
                     {describeAgent(s.userAgent)}
                     {isCurrent && (
-                      <span className="rounded-full bg-brand/12 px-1.5 py-0.5 text-[11px] font-medium text-brand-bright">
+                      <Badge variant="brand" className="normal-case tracking-normal">
                         This device
-                      </span>
+                      </Badge>
                     )}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">

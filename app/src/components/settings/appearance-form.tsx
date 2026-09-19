@@ -1,8 +1,8 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { Check, Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
-import { cn } from "@flagon-io/ui";
+import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
+import { RadioGroup, RadioGroupItem, cn } from "@flagon-io/ui";
 
 // Same store the topbar ThemeToggle uses (shared key + event), so both stay in
 // sync: light/dark/system, applied via the `.dark` class on <html>.
@@ -61,33 +61,33 @@ export function AppearanceForm() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <RadioGroup
+      value={pref}
+      onValueChange={(v) => choose(v as Theme)}
+      className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+    >
       {OPTIONS.map(({ value, label, hint, icon: Icon }) => {
         const active = pref === value;
         return (
-          <button
+          <label
             key={value}
-            type="button"
-            onClick={() => choose(value)}
-            aria-pressed={active}
+            htmlFor={`theme-${value}`}
             className={cn(
-              "flex items-start gap-3 rounded-lg border px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand",
+              "flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 text-left transition-colors",
               active
                 ? "border-brand bg-brand/5"
                 : "border-hairline hover:border-muted-foreground/30 hover:bg-panel",
             )}
           >
+            <RadioGroupItem id={`theme-${value}`} value={value} className="mt-0.5" />
             <Icon className={cn("mt-0.5 size-5 shrink-0", active ? "text-brand-bright" : "text-muted-foreground")} />
             <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                {label}
-                {active && <Check className="size-3.5 text-brand" />}
-              </span>
+              <span className="block text-sm font-medium text-foreground">{label}</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
             </span>
-          </button>
+          </label>
         );
       })}
-    </div>
+    </RadioGroup>
   );
 }

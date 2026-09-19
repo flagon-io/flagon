@@ -5,6 +5,7 @@ import {
   twoFactorClient,
   inferAdditionalFields,
 } from "better-auth/client/plugins";
+import { ssoClient } from "@better-auth/sso/client";
 
 export const authClient = createAuthClient({
   plugins: [
@@ -26,6 +27,7 @@ export const authClient = createAuthClient({
     usernameClient(),
     emailOTPClient(),
     twoFactorClient(),
+    ssoClient(),
   ],
 });
 

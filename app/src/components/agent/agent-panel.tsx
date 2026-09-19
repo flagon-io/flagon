@@ -177,31 +177,37 @@ function PanelBody({
         <Badge variant="outline">Beta</Badge>
         <div className="ml-auto flex items-center gap-1">
           {!empty && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8"
               onClick={clear}
               aria-label="New conversation"
-              className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-panel hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand"
             >
               <Plus className="size-4" />
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={onToggleExpand}
             aria-label={expanded ? "Collapse panel" : "Expand panel"}
-            className="hidden size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-panel hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand md:flex"
+            className="hidden size-8 md:flex"
           >
             {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
+            className="size-8"
             onClick={() => setOpen(false)}
             aria-label="Close assistant"
-            className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-panel hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand"
           >
             <X className="size-4" />
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -241,9 +247,9 @@ function PanelBody({
                       <span className="block truncate text-xs text-muted-foreground">{s.subtitle}</span>
                     </span>
                     {s.soon && (
-                      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      <Badge variant="secondary" className="shrink-0 normal-case tracking-normal">
                         Soon
-                      </span>
+                      </Badge>
                     )}
                   </button>
                 );

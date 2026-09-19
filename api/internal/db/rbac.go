@@ -311,8 +311,8 @@ func (d *DB) GetOrg(ctx context.Context, actorID, slug string) (Org, error) {
 			return err
 		}
 		if err := tx.QueryRow(ctx,
-			`SELECT id, name, slug, created_at FROM public.orgs WHERE id = $1`, orgID).
-			Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt); err != nil {
+			`SELECT id, name, slug, enforce_two_factor, require_sso, created_at FROM public.orgs WHERE id = $1`, orgID).
+			Scan(&o.ID, &o.Name, &o.Slug, &o.EnforceTwoFactor, &o.RequireSSO, &o.CreatedAt); err != nil {
 			return err
 		}
 		o.Role = role

@@ -213,6 +213,18 @@ func (fakeAIStore) UpdateProject(_ context.Context, _, _, projectSlug string, _ 
 func (fakeAIStore) SetProjectDeleted(_ context.Context, _, _, projectSlug string, _ bool) (db.Project, error) {
 	return db.Project{Slug: projectSlug}, nil
 }
+func (fakeAIStore) ListProjectMembers(context.Context, string, string, string) ([]db.ProjectMember, error) {
+	return []db.ProjectMember{{UserID: "u1", Email: "u@example.com", Role: "admin"}}, nil
+}
+func (fakeAIStore) AddProjectMember(context.Context, string, string, string, string, string) (string, error) {
+	return "u2", nil
+}
+func (fakeAIStore) SetProjectMemberRole(context.Context, string, string, string, string, string) error {
+	return nil
+}
+func (fakeAIStore) RemoveProjectMember(context.Context, string, string, string, string) error {
+	return nil
+}
 func (fakeAIStore) ListMembers(context.Context, string, string) ([]db.Member, error) {
 	return []db.Member{{UserID: "u1", Email: "u@example.com", Role: "owner"}}, nil
 }
@@ -221,6 +233,12 @@ func (fakeAIStore) AddMember(context.Context, string, string, string, string) (s
 }
 func (fakeAIStore) SetMemberRole(context.Context, string, string, string, string) error { return nil }
 func (fakeAIStore) RemoveMember(context.Context, string, string, string) error          { return nil }
+func (fakeAIStore) GetOrgSecurity(context.Context, string, string) (db.OrgSecurity, error) {
+	return db.OrgSecurity{BasePermission: "read"}, nil
+}
+func (fakeAIStore) SetOrgSecurity(context.Context, string, string, db.OrgSecurity) error {
+	return nil
+}
 func (fakeAIStore) ListInvitations(context.Context, string, string) ([]db.Invitation, error) {
 	return nil, nil
 }

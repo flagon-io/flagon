@@ -29,7 +29,7 @@ function Step({
 
 export default function InstallationPage() {
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-4xl">
       <h1 className="text-4xl font-bold tracking-tight text-foreground">Installation</h1>
       <p className="mt-3 text-lg text-muted-foreground">
         The recommended way to use Flagon UI is to install the{" "}
