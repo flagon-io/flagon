@@ -18,7 +18,7 @@ jobs:
     # CREATE ROLE, which Setup needs to provision the NOBYPASSRLS app role.
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: flagon_test
