@@ -162,6 +162,9 @@ func registerProjectTeamsAPI(api huma.API, store IdentityStore, internalToken st
 
 // projectTeamErr maps team-grant/owner errors to HTTP statuses.
 func projectTeamErr(err error, fallback string) error {
+	if e := cursorHTTPErr(err); e != nil {
+		return e
+	}
 	switch {
 	case errors.Is(err, db.ErrNotMember):
 		return huma.Error404NotFound("organization not found")

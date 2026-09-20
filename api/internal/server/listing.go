@@ -2,11 +2,24 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/flagon-io/flagon/api/internal/paginate"
 )
+
+// cursorHTTPErr maps a bad pagination cursor to 422 Unprocessable Entity. The
+// cursor is client-supplied input (it rides the query string / request body), so
+// a malformed or wrong-arity cursor is a client error, not a server fault. Every
+// list error mapper calls this first and falls through to its own mapping when it
+// returns nil, keeping the 422 contract (see paginate.ErrBadCursor) in one place.
+func cursorHTTPErr(err error) error {
+	if errors.Is(err, paginate.ErrBadCursor) {
+		return huma.Error422UnprocessableEntity("invalid pagination cursor")
+	}
+	return nil
+}
 
 // This file holds the reusable server-side half of the list convention (the core
 // lives in internal/paginate): the standard search + keyset params, in both their

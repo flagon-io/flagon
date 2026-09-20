@@ -112,6 +112,9 @@ func registerMembersAPI(api huma.API, store IdentityStore, internalToken string)
 
 // memberErr maps the store's member-management errors to HTTP statuses.
 func memberErr(err error, fallback string) error {
+	if e := cursorHTTPErr(err); e != nil {
+		return e
+	}
 	switch {
 	case errors.Is(err, db.ErrNotMember):
 		return huma.Error404NotFound("organization not found")

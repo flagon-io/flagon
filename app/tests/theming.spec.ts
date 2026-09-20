@@ -28,4 +28,21 @@ test.describe("brand theming", () => {
     );
     expect(font.toLowerCase()).toContain("montserrat");
   });
+
+  // No flash on refresh: the chosen Brand rides a cookie, so the SERVER renders it
+  // on first paint. We assert the raw server HTML carries the Brand's tokens (not
+  // the default's), which is what makes the reload flash-free.
+  test("the chosen Brand is server-rendered (no flash on reload)", async ({ request }) => {
+    const flagonPrimary = "#0c8074";
+    const cobaltPrimary = "#1877f2";
+
+    const def = await (await request.get("/ui")).text();
+    expect(def).toContain(flagonPrimary); // default server render is Flagon
+    expect(def).not.toContain(cobaltPrimary);
+
+    const cobalt = await (
+      await request.get("/ui", { headers: { cookie: "flagon-ui-theme=cobalt" } })
+    ).text();
+    expect(cobalt).toContain(cobaltPrimary); // cookie makes the server render Cobalt
+  });
 });

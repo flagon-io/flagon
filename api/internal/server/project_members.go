@@ -108,6 +108,9 @@ func registerProjectMembersAPI(api huma.API, store IdentityStore, internalToken 
 
 // projectMemberErr maps collaborator-management errors to HTTP statuses.
 func projectMemberErr(err error, fallback string) error {
+	if e := cursorHTTPErr(err); e != nil {
+		return e
+	}
 	switch {
 	case errors.Is(err, db.ErrNotMember):
 		return huma.Error404NotFound("organization not found")

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -105,7 +104,7 @@ func (d *DB) ListMembers(ctx context.Context, actorID, slug string, q paginate.Q
 		return nil, "", err
 	}
 	rows, err := d.pool.Query(ctx,
-		`SELECT user_id, name, email, username, avatar_url, role, joined_at
+		`SELECT user_id, name, email, username, avatar_url, role, joined_at, sort_key
 		 FROM flagon.org_members($1, $2, $3, $4, $5)`, actorID, slug, q.Q, q.Clamp()+1, cur)
 	if err != nil {
 		return nil, "", err
@@ -113,19 +112,20 @@ func (d *DB) ListMembers(ctx context.Context, actorID, slug string, q paginate.Q
 	defer rows.Close()
 
 	members := []Member{}
+	keys := [][]string{}
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.JoinedAt); err != nil {
+		var sk []string
+		if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.JoinedAt, &sk); err != nil {
 			return nil, "", err
 		}
 		members = append(members, m)
+		keys = append(keys, sk)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, "", err
 	}
-	members, next := paginate.Slice(members, q.Clamp(), func(m Member) []string {
-		return []string{strings.ToLower(m.Email), m.UserID}
-	})
+	members, next := paginate.SliceKeyed(members, keys, q.Clamp())
 	return members, next, nil
 }
 

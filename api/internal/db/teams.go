@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -130,26 +129,27 @@ func (d *DB) ListTeams(ctx context.Context, actorID, orgSlug string, q paginate.
 			return err
 		}
 		rows, err := tx.Query(ctx,
-			`SELECT id, name, slug, description, member_count, created_at
+			`SELECT id, name, slug, description, member_count, created_at, sort_key
 			 FROM flagon.teams($1, $2, $3, $4, $5)`, actorID, orgSlug, q.Q, q.Clamp()+1, cur)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		teams = []Team{}
+		keys := [][]string{}
 		for rows.Next() {
 			var t Team
-			if err := rows.Scan(&t.ID, &t.Name, &t.Slug, &t.Description, &t.MemberCount, &t.CreatedAt); err != nil {
+			var sk []string
+			if err := rows.Scan(&t.ID, &t.Name, &t.Slug, &t.Description, &t.MemberCount, &t.CreatedAt, &sk); err != nil {
 				return err
 			}
 			teams = append(teams, t)
+			keys = append(keys, sk)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		teams, next = paginate.Slice(teams, q.Clamp(), func(t Team) []string {
-			return []string{strings.ToLower(t.Name), t.ID}
-		})
+		teams, next = paginate.SliceKeyed(teams, keys, q.Clamp())
 		return nil
 	})
 	return teams, next, err
@@ -297,26 +297,27 @@ func (d *DB) ListTeamMembers(ctx context.Context, actorID, orgSlug, teamSlug str
 			return err
 		}
 		rows, err := tx.Query(ctx,
-			`SELECT user_id, name, email, username, avatar_url, role, created_at
+			`SELECT user_id, name, email, username, avatar_url, role, created_at, sort_key
 			 FROM flagon.team_members($1, $2, $3, $4, $5, $6)`, actorID, orgSlug, teamSlug, q.Q, q.Clamp()+1, cur)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		members = []TeamMember{}
+		keys := [][]string{}
 		for rows.Next() {
 			var m TeamMember
-			if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.CreatedAt); err != nil {
+			var sk []string
+			if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.CreatedAt, &sk); err != nil {
 				return err
 			}
 			members = append(members, m)
+			keys = append(keys, sk)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		members, next = paginate.Slice(members, q.Clamp(), func(m TeamMember) []string {
-			return []string{strings.ToLower(m.Email), m.UserID}
-		})
+		members, next = paginate.SliceKeyed(members, keys, q.Clamp())
 		return nil
 	})
 	return members, next, err
@@ -340,26 +341,27 @@ func (d *DB) ListTeamProjects(ctx context.Context, actorID, orgSlug, teamSlug st
 			return err
 		}
 		rows, err := tx.Query(ctx,
-			`SELECT project_id, name, slug, role, created_at
+			`SELECT project_id, name, slug, role, created_at, sort_key
 			 FROM flagon.team_projects($1, $2, $3, $4, $5, $6)`, actorID, orgSlug, teamSlug, q.Q, q.Clamp()+1, cur)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		projects = []TeamProject{}
+		keys := [][]string{}
 		for rows.Next() {
 			var p TeamProject
-			if err := rows.Scan(&p.ProjectID, &p.Name, &p.Slug, &p.Role, &p.CreatedAt); err != nil {
+			var sk []string
+			if err := rows.Scan(&p.ProjectID, &p.Name, &p.Slug, &p.Role, &p.CreatedAt, &sk); err != nil {
 				return err
 			}
 			projects = append(projects, p)
+			keys = append(keys, sk)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		projects, next = paginate.Slice(projects, q.Clamp(), func(p TeamProject) []string {
-			return []string{strings.ToLower(p.Name), p.ProjectID}
-		})
+		projects, next = paginate.SliceKeyed(projects, keys, q.Clamp())
 		return nil
 	})
 	return projects, next, err
@@ -457,26 +459,27 @@ func (d *DB) ListProjectTeams(ctx context.Context, actorID, orgSlug, projectSlug
 			return err
 		}
 		rows, err := tx.Query(ctx,
-			`SELECT team_id, name, slug, role, created_at
+			`SELECT team_id, name, slug, role, created_at, sort_key
 			 FROM flagon.project_teams($1, $2, $3, $4, $5, $6)`, actorID, orgSlug, projectSlug, q.Q, q.Clamp()+1, cur)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		teams = []ProjectTeam{}
+		keys := [][]string{}
 		for rows.Next() {
 			var t ProjectTeam
-			if err := rows.Scan(&t.TeamID, &t.Name, &t.Slug, &t.Role, &t.CreatedAt); err != nil {
+			var sk []string
+			if err := rows.Scan(&t.TeamID, &t.Name, &t.Slug, &t.Role, &t.CreatedAt, &sk); err != nil {
 				return err
 			}
 			teams = append(teams, t)
+			keys = append(keys, sk)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		teams, next = paginate.Slice(teams, q.Clamp(), func(t ProjectTeam) []string {
-			return []string{strings.ToLower(t.Name), t.TeamID}
-		})
+		teams, next = paginate.SliceKeyed(teams, keys, q.Clamp())
 		return nil
 	})
 	return teams, next, err
@@ -581,30 +584,27 @@ func (d *DB) ListProjectOwners(ctx context.Context, actorID, orgSlug, projectSlu
 			return err
 		}
 		rows, err := tx.Query(ctx,
-			`SELECT owner_type, principal_id, name, email, username, avatar_url, team_slug, created_at
+			`SELECT owner_type, principal_id, name, email, username, avatar_url, team_slug, created_at, sort_key
 			 FROM flagon.project_owners($1, $2, $3, $4, $5, $6)`, actorID, orgSlug, projectSlug, q.Q, q.Clamp()+1, cur)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		owners = []ProjectOwner{}
+		keys := [][]string{}
 		for rows.Next() {
 			var o ProjectOwner
-			if err := rows.Scan(&o.OwnerType, &o.PrincipalID, &o.Name, &o.Email, &o.Username, &o.AvatarURL, &o.TeamSlug, &o.CreatedAt); err != nil {
+			var sk []string
+			if err := rows.Scan(&o.OwnerType, &o.PrincipalID, &o.Name, &o.Email, &o.Username, &o.AvatarURL, &o.TeamSlug, &o.CreatedAt, &sk); err != nil {
 				return err
 			}
 			owners = append(owners, o)
+			keys = append(keys, sk)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		owners, next = paginate.Slice(owners, q.Clamp(), func(o ProjectOwner) []string {
-			name := ""
-			if o.Name != nil {
-				name = strings.ToLower(*o.Name)
-			}
-			return []string{o.OwnerType, name, o.PrincipalID}
-		})
+		owners, next = paginate.SliceKeyed(owners, keys, q.Clamp())
 		return nil
 	})
 	return owners, next, err

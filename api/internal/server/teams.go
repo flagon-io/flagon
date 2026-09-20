@@ -255,6 +255,9 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 
 // teamErr maps team store errors to HTTP statuses.
 func teamErr(err error, fallback string) error {
+	if e := cursorHTTPErr(err); e != nil {
+		return e
+	}
 	switch {
 	case errors.Is(err, db.ErrNotMember):
 		return huma.Error404NotFound("organization not found")

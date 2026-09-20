@@ -284,6 +284,7 @@ function SelectFieldDemo() {
   return (
     <SelectField
       className="w-60"
+      aria-label="Region"
       placeholder="Select a region"
       value={region}
       onValueChange={setRegion}
@@ -361,11 +362,17 @@ function SliderDemo() {
   return (
     <div className="w-full max-w-sm space-y-6">
       <div className="space-y-2">
-        <Slider value={value} onValueChange={setValue} max={100} step={1} />
+        <Slider value={value} onValueChange={setValue} max={100} step={1} aria-label="Level" />
         <p className="text-xs text-muted-foreground">Single: {value[0]}</p>
       </div>
       <div className="space-y-2">
-        <Slider value={range} onValueChange={setRange} max={100} step={1} />
+        <Slider
+          value={range}
+          onValueChange={setRange}
+          max={100}
+          step={1}
+          thumbLabels={["Minimum", "Maximum"]}
+        />
         <p className="text-xs text-muted-foreground">
           Range: {range[0]} - {range[1]}
         </p>
@@ -403,7 +410,14 @@ function InputOTPDemo() {
   const [value, setValue] = useState("");
   return (
     <div className="space-y-2">
-      <InputOTP maxLength={6} value={value} onChange={setValue} pattern={REGEXP_ONLY_DIGITS} inputMode="numeric">
+      <InputOTP
+        maxLength={6}
+        value={value}
+        onChange={setValue}
+        pattern={REGEXP_ONLY_DIGITS}
+        inputMode="numeric"
+        aria-label="Verification code"
+      >
         <InputOTPGroup>
           <InputOTPSlot index={0} />
           <InputOTPSlot index={1} />
@@ -434,11 +448,25 @@ function SelectModesDemo() {
     <div className="grid w-full gap-4 sm:grid-cols-2">
       <div className="space-y-1.5">
         <Label>Radix (always themed menu)</Label>
-        <SelectField mode="radix" className="w-full" options={MODE_OPTIONS} value={a} onValueChange={setA} />
+        <SelectField
+          mode="radix"
+          aria-label="Region (Radix menu)"
+          className="w-full"
+          options={MODE_OPTIONS}
+          value={a}
+          onValueChange={setA}
+        />
       </div>
       <div className="space-y-1.5">
         <Label>Native (always OS picker)</Label>
-        <SelectField mode="native" className="w-full" options={MODE_OPTIONS} value={b} onValueChange={setB} />
+        <SelectField
+          mode="native"
+          aria-label="Region (native picker)"
+          className="w-full"
+          options={MODE_OPTIONS}
+          value={b}
+          onValueChange={setB}
+        />
       </div>
     </div>
   );
@@ -477,7 +505,7 @@ function ProgressDemo() {
   const [v, setV] = useState(30);
   return (
     <div className="w-full max-w-sm space-y-3">
-      <Progress value={v} />
+      <Progress value={v} aria-label="Task progress" />
       <div className="flex items-center gap-2">
         <Button size="sm" variant="outline" onClick={() => setV((x) => Math.max(0, x - 10))}>
           -10
@@ -1884,7 +1912,7 @@ const [color, setColor] = useState("#0d9488");
 </Select>`,
         render: (
           <Select defaultValue="iad">
-            <SelectTrigger className="w-60">
+            <SelectTrigger className="w-60" aria-label="Region">
               <SelectValue placeholder="Select a region" />
             </SelectTrigger>
             <SelectContent>

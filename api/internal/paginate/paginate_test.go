@@ -75,6 +75,28 @@ func TestSlice(t *testing.T) {
 	}
 }
 
+func TestSliceKeyed(t *testing.T) {
+	rows := []string{"a", "b", "c"}
+	// The DB-supplied keys are parallel to rows; here they carry a lowercased sort
+	// value the caller did NOT compute in Go.
+	keys := [][]string{{"A", "1"}, {"B", "2"}, {"C", "3"}}
+
+	// limit+1 rows: trimmed to limit, next is built from keys[limit-1] (not the row).
+	items, next := SliceKeyed(rows, keys, 2)
+	if len(items) != 2 || items[1] != "b" {
+		t.Fatalf("over-limit items = %v, want [a b]", items)
+	}
+	got, _ := DecodeCursor(next)
+	if len(got) != 2 || got[0] != "B" || got[1] != "2" {
+		t.Fatalf("next cursor keys = %v, want [B 2] (the DB key, verbatim)", got)
+	}
+
+	// Exactly limit rows: last page, no next.
+	if _, next := SliceKeyed(rows[:2], keys[:2], 2); next != "" {
+		t.Fatalf("full-but-not-over next = %q, want empty", next)
+	}
+}
+
 func TestLinkHeader(t *testing.T) {
 	if got := LinkHeader("/orgs/acme/projects", Query{}, ""); got != "" {
 		t.Fatalf("no next should yield empty Link, got %q", got)

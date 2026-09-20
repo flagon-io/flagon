@@ -16,10 +16,20 @@ export function Slider({
   value,
   min = 0,
   max = 100,
+  "aria-label": ariaLabel,
+  thumbLabels,
   ...props
-}: ComponentProps<typeof SliderPrimitive.Root>) {
+}: ComponentProps<typeof SliderPrimitive.Root> & {
+  /** Accessible name(s) for the thumb(s). The ARIA `slider` role lives on the
+   * thumb, not the root, so a name must land there: pass one per thumb for a
+   * range (e.g. ["Minimum", "Maximum"]), or a single `aria-label` for all. */
+  thumbLabels?: string[];
+}) {
   const thumbs = value ?? defaultValue ?? [min, max];
   const count = Array.isArray(thumbs) ? thumbs.length : 1;
+  const thumbName = (i: number) =>
+    thumbLabels?.[i] ??
+    (ariaLabel && count > 1 ? `${ariaLabel} ${i === 0 ? "(minimum)" : "(maximum)"}` : ariaLabel);
   return (
     <SliderPrimitive.Root
       data-slot="slider"
@@ -49,6 +59,7 @@ export function Slider({
       {Array.from({ length: count }, (_, i) => (
         <SliderPrimitive.Thumb
           key={i}
+          aria-label={thumbName(i)}
           data-slot="slider-thumb"
           className={cn(
             "block size-4 shrink-0 rounded-full border-2 border-primary bg-background shadow-sm transition-[color,box-shadow]",

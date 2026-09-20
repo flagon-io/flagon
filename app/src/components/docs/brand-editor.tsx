@@ -79,12 +79,12 @@ const DEFAULT_COLORS: Record<string, string> = {
   muted: "#f1f2f3",
   mutedForeground: "#52525a",
   border: "#e3e3e6",
-  primary: "#0d9488",
+  primary: "#0c8074",
   primaryForeground: "#ffffff",
   secondary: "#f4f5f6",
   accent: "#f1f2f3",
   ring: "#0d9488",
-  destructive: "#e5484d",
+  destructive: "#d83a40",
 };
 
 type EditorState = {
@@ -238,6 +238,7 @@ export function BrandEditor() {
                 <Label className="text-xs text-muted-foreground">Density</Label>
                 <SelectField
                   size="sm"
+                  aria-label="Density"
                   className="w-full"
                   options={DENSITY_OPTIONS}
                   value={state.density}
@@ -248,6 +249,7 @@ export function BrandEditor() {
                 <Label className="text-xs text-muted-foreground">Body font</Label>
                 <SelectField
                   size="sm"
+                  aria-label="Body font"
                   className="w-full"
                   options={FONT_OPTIONS}
                   value={state.bodyFont}
@@ -258,6 +260,7 @@ export function BrandEditor() {
                 <Label className="text-xs text-muted-foreground">Heading font</Label>
                 <SelectField
                   size="sm"
+                  aria-label="Heading font"
                   className="w-full"
                   options={FONT_OPTIONS}
                   value={state.headingFont}

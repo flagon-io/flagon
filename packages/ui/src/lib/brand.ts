@@ -179,17 +179,27 @@ function block(vars: Record<string, string>): string {
 }
 
 /**
- * Compile a Brand to CSS scoped to `selector`. Structural + light tokens apply at
- * the scope; dark tokens apply when a `.dark` ancestor (or the scope itself) is
- * dark - so both modes work under one Brand.
+ * Compile a Brand to CSS scoped to `selector`. Structural tokens (radius, density,
+ * fonts, elevation) are mode-independent and apply at the scope unconditionally.
+ * COLOR tokens are gated by mode: light colors apply only outside a `.dark` context
+ * and dark colors only inside one. This matters for a partial Brand: if it sets a
+ * background token but not its foreground pair (or defines only `light`), the unset
+ * token falls back to the BASE contract for the CURRENT mode rather than leaking the
+ * other mode's value - so you never get, say, a light surface with dark-mode text.
  */
 export function brandCss(brand: Brand, selector: string): string {
-  const light = { ...structuralVars(brand), ...colorVars(brand.light) };
+  const structural = structuralVars(brand);
+  const light = colorVars(brand.light);
   const dark = colorVars(brand.dark);
-  // Re-anchor the font on the scope so the Brand's --font-body takes effect: the
+  // Structural block + re-anchored font. Re-anchoring is required because the
   // document font is computed at <html> and inherits as a resolved value, so a
   // nested scope must re-declare font-family to pick up its own token.
-  let css = `${selector} {\n${block(light)}\n  font-family: var(--font-sans);\n}`;
+  let css = `${selector} {\n${block(structural)}\n  font-family: var(--font-sans);\n}`;
+  // Light colors only when no `.dark` ancestor and the scope itself isn't dark, so
+  // they never bleed into dark mode. (The app toggles dark mode on <html>.)
+  if (Object.keys(light).length) {
+    css += `\n:root:not(.dark) ${selector}, ${selector}:not(.dark) {\n${block(light)}\n}`;
+  }
   if (Object.keys(dark).length) {
     css += `\n.dark ${selector}, ${selector}.dark {\n${block(dark)}\n}`;
   }

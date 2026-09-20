@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -184,26 +183,27 @@ func (d *DB) ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSl
 			return err
 		}
 		rows, err := tx.Query(ctx,
-			`SELECT user_id, name, email, username, avatar_url, role, created_at
+			`SELECT user_id, name, email, username, avatar_url, role, created_at, sort_key
 			 FROM flagon.project_members($1, $2, $3, $4, $5, $6)`, actorID, orgSlug, projectSlug, q.Q, q.Clamp()+1, cur)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		members = []ProjectMember{}
+		keys := [][]string{}
 		for rows.Next() {
 			var m ProjectMember
-			if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.CreatedAt); err != nil {
+			var sk []string
+			if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.CreatedAt, &sk); err != nil {
 				return err
 			}
 			members = append(members, m)
+			keys = append(keys, sk)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		members, next = paginate.Slice(members, q.Clamp(), func(m ProjectMember) []string {
-			return []string{strings.ToLower(m.Email), m.UserID}
-		})
+		members, next = paginate.SliceKeyed(members, keys, q.Clamp())
 		return nil
 	})
 	return members, next, err

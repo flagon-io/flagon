@@ -67,7 +67,7 @@ export default function InstallationPage() {
               code={`/* globals.css */
 @import "tailwindcss";
 @import "@flagon-io/ui/styles.css";
-@source "../node_modules/@flagon-io/ui/src";`}
+@source "../node_modules/@flagon-io/ui/dist";`}
             />
           </Step>
           <Step n={3} title="Wrap your app in a ThemeProvider">

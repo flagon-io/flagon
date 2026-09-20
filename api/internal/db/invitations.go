@@ -193,7 +193,7 @@ func (d *DB) ListInvitations(ctx context.Context, actorID, slug string, q pagina
 		return nil, "", err
 	}
 	rows, err := d.pool.Query(ctx,
-		`SELECT id, email, role, status, inviter, expires_at, created_at
+		`SELECT id, email, role, status, inviter, expires_at, created_at, sort_key
 		 FROM flagon.org_invitations($1, $2, $3, $4, $5)`, actorID, slug, q.Q, q.Clamp()+1, cur)
 	if err != nil {
 		return nil, "", err
@@ -201,19 +201,20 @@ func (d *DB) ListInvitations(ctx context.Context, actorID, slug string, q pagina
 	defer rows.Close()
 
 	invites := []Invitation{}
+	keys := [][]string{}
 	for rows.Next() {
 		var inv Invitation
-		if err := rows.Scan(&inv.ID, &inv.Email, &inv.Role, &inv.Status, &inv.Inviter, &inv.ExpiresAt, &inv.CreatedAt); err != nil {
+		var sk []string
+		if err := rows.Scan(&inv.ID, &inv.Email, &inv.Role, &inv.Status, &inv.Inviter, &inv.ExpiresAt, &inv.CreatedAt, &sk); err != nil {
 			return nil, "", err
 		}
 		invites = append(invites, inv)
+		keys = append(keys, sk)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, "", err
 	}
-	invites, next := paginate.Slice(invites, q.Clamp(), func(inv Invitation) []string {
-		return []string{strings.ToLower(inv.Email), inv.ID}
-	})
+	invites, next := paginate.SliceKeyed(invites, keys, q.Clamp())
 	return invites, next, nil
 }
 

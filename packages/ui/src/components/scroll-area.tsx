@@ -8,7 +8,12 @@ import { cn } from "../lib/cn";
 export function ScrollArea({ className, children, ...props }: ComponentProps<typeof ScrollAreaPrimitive.Root>) {
   return (
     <ScrollAreaPrimitive.Root data-slot="scroll-area" className={cn("relative overflow-hidden", className)} {...props}>
-      <ScrollAreaPrimitive.Viewport className="size-full rounded-[inherit] outline-none">
+      {/* tabIndex makes the scroll region keyboard-operable (arrow keys / page keys)
+       * for people not using a pointer - Radix leaves the viewport unfocusable. */}
+      <ScrollAreaPrimitive.Viewport
+        tabIndex={0}
+        className="size-full rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      >
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar />

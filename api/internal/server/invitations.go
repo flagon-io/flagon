@@ -149,6 +149,9 @@ func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken str
 
 // inviteErr maps the invitation store errors to HTTP statuses.
 func inviteErr(err error, fallback string) error {
+	if e := cursorHTTPErr(err); e != nil {
+		return e
+	}
 	switch {
 	case errors.Is(err, db.ErrNotMember):
 		return huma.Error404NotFound("organization not found")

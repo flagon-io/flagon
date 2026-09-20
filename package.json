@@ -7,8 +7,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace app",
-    "build": "npm run build --workspace app",
+    "dev": "npm run build --workspace @flagon-io/ui && npm run dev --workspace app",
+    "build": "npm run build --workspace @flagon-io/ui && npm run build --workspace app",
     "lint": "npm run lint --workspace app",
     "test:unit": "npm run test --workspace @flagon-io/ui"
   },

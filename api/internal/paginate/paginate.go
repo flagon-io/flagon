@@ -95,10 +95,28 @@ func DecodeCursor(token string) ([]string, error) {
 //
 // The one-extra-row probe is how we know another page exists without a COUNT:
 // keyset pagination has no total, by design (it stays O(1) at any depth).
+//
+// Prefer SliceKeyed: keyOf re-derives the sort key in Go, which must match the
+// query's ORDER BY exactly - a hazard for case-folded keys (Go's strings.ToLower
+// vs Postgres lower() can differ for some characters). SliceKeyed takes the key the
+// database itself produced, so the cursor can never disagree with the query.
 func Slice[T any](rows []T, limit int, keyOf func(T) []string) (items []T, next string) {
 	if limit > 0 && len(rows) > limit {
 		last := rows[limit-1]
 		return rows[:limit], EncodeCursor(keyOf(last)...)
+	}
+	return rows, ""
+}
+
+// SliceKeyed trims rows fetched with LIMIT limit+1 to a single page and builds the
+// next cursor from the DATABASE-computed sort key of the last kept row. keys[i] holds
+// the ordered ORDER BY values for rows[i] exactly as the query produced them (select
+// the ORDER BY tuple as a text[] and scan it), so the cursor is always consistent
+// with the query's own keyset comparison - the sort key is never re-derived in Go.
+// keys must be parallel to rows (same length and order). next is "" on the last page.
+func SliceKeyed[T any](rows []T, keys [][]string, limit int) (items []T, next string) {
+	if limit > 0 && len(rows) > limit {
+		return rows[:limit], EncodeCursor(keys[limit-1]...)
 	}
 	return rows, ""
 }

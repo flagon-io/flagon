@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { Check, Palette } from "lucide-react";
 import {
   BrandProvider,
@@ -43,10 +43,19 @@ function getSnapshot() {
     return "flagon";
   }
 }
-const getServerSnapshot = () => "flagon";
-
 function brandFor(value: string): Brand {
   return THEMES.find((t) => t.value === value)?.brand ?? THEMES[0].brand;
+}
+
+// The cookie mirrors the localStorage choice so the SERVER can render the chosen
+// Brand on first paint (localStorage is client-only). That is what prevents the
+// flash of the default Brand on refresh.
+function writeCookie(t: string) {
+  try {
+    document.cookie = `${KEY}=${encodeURIComponent(t)}; path=/; max-age=31536000; samesite=lax`;
+  } catch {
+    /* ignore */
+  }
 }
 
 function setTheme(t: string) {
@@ -55,6 +64,7 @@ function setTheme(t: string) {
   } catch {
     /* ignore */
   }
+  writeCookie(t);
   window.dispatchEvent(new Event(EVENT));
 }
 
@@ -63,9 +73,31 @@ const Ctx = createContext<{ theme: string; setTheme: (t: string) => void }>({
   setTheme,
 });
 
-/** Wraps the docs and applies the chosen Brand (full token set) live. */
-export function UiThemeProvider({ children }: { children: ReactNode }) {
-  const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+/**
+ * Wraps the docs and applies the chosen Brand (full token set) live. `initialTheme`
+ * comes from the server (a cookie), so the very first render already uses the right
+ * Brand and there is no flash of the default on refresh. After hydration the store
+ * reconciles with localStorage (the source of truth for the user's choice).
+ */
+export function UiThemeProvider({
+  initialTheme = "flagon",
+  children,
+}: {
+  initialTheme?: string;
+  children: ReactNode;
+}) {
+  const theme = useSyncExternalStore(subscribe, getSnapshot, () => initialTheme);
+
+  // Self-heal the cookie from localStorage on mount, so a user who chose a Brand
+  // before cookies were written gets a flash-free load next time.
+  useEffect(() => {
+    try {
+      writeCookie(localStorage.getItem(KEY) || "flagon");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   return (
     <Ctx.Provider value={{ theme, setTheme }}>
       <BrandProvider brand={brandFor(theme)}>{children}</BrandProvider>

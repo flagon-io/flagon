@@ -32,6 +32,19 @@ describe("brandCss", () => {
     // Pop sets an elevation, so the geometry vars should be present.
     expect(css).toMatch(/--el-(ring|x|y)/);
   });
+
+  it("gates light colors to light mode so a partial Brand can't leak into dark", () => {
+    // A Brand that sets a light background token but no dark counterpart (and no
+    // matching foreground) - the exact shape that used to paint a light surface
+    // with dark-mode text (invisible). The light color must be scoped away from a
+    // dark context, and with no dark colors there is no dark block: the base
+    // contract fills dark mode instead.
+    const partial = { name: "Partial", light: { secondary: "#f4f5f6" } };
+    const css = brandCss(partial, ".p");
+    expect(css).toContain(":root:not(.dark) .p");
+    expect(css).toContain("#f4f5f6");
+    expect(css).not.toContain(".dark .p");
+  });
 });
 
 describe("densityScales", () => {

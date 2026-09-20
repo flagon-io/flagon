@@ -4,19 +4,41 @@
   "description": "Flagon design system - accessible Radix-based React components.",
   "license": "MIT",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flagon-io/flagon.git",
+    "directory": "packages/ui"
+  },
+  "homepage": "https://github.com/flagon-io/flagon/tree/main/packages/ui#readme",
   "sideEffects": [
     "*.css"
   ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
-    "src"
+    "dist"
   ],
   "exports": {
-    ".": "./src/index.ts",
-    "./styles.css": "./src/styles.css",
-    "./*": "./src/components/*.tsx"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./styles.css": "./dist/styles.css",
+    "./*": {
+      "types": "./dist/components/*.d.ts",
+      "import": "./dist/components/*.js"
+    }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "dev": "node scripts/copy-assets.mjs && tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:watch": "vitest"

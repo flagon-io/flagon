@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -96,7 +95,9 @@ func (d *DB) ListProjects(ctx context.Context, actorID, orgSlug string, q pagina
 			return paginate.ErrBadCursor
 		}
 		args = append(args, limit+1)
-		sql := `SELECT ` + projectCols + ` FROM public.projects
+		// ARRAY[lower(name), id] is the keyset sort key the DB itself computes (same
+		// as the ORDER BY), returned so the cursor is never re-derived in Go.
+		sql := `SELECT ` + projectCols + `, ARRAY[lower(name), id] AS sort_key FROM public.projects
 			WHERE ` + where + `
 			ORDER BY lower(name), id
 			LIMIT $` + strconv.Itoa(len(args))
@@ -107,19 +108,21 @@ func (d *DB) ListProjects(ctx context.Context, actorID, orgSlug string, q pagina
 		}
 		defer rows.Close()
 		projects = []Project{}
+		sortKeys := [][]string{}
 		for rows.Next() {
-			p, err := scanProject(rows)
-			if err != nil {
+			var p Project
+			var sk []string
+			if err := rows.Scan(&p.ID, &p.OrgID, &p.Name, &p.Slug, &p.Description, &p.Readme,
+				&p.RepositoryURL, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &sk); err != nil {
 				return err
 			}
 			projects = append(projects, p)
+			sortKeys = append(sortKeys, sk)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		projects, next = paginate.Slice(projects, limit, func(p Project) []string {
-			return []string{strings.ToLower(p.Name), p.ID}
-		})
+		projects, next = paginate.SliceKeyed(projects, sortKeys, limit)
 		return nil
 	})
 	return projects, next, err
@@ -159,7 +162,7 @@ func (d *DB) ListDeletedProjects(ctx context.Context, actorID, orgSlug string, q
 			return paginate.ErrBadCursor
 		}
 		args = append(args, limit+1)
-		sql := `SELECT ` + projectCols + `, deleted_at FROM public.projects
+		sql := `SELECT ` + projectCols + `, deleted_at, ARRAY[lower(name), id] AS sort_key FROM public.projects
 			WHERE ` + where + `
 			ORDER BY lower(name), id
 			LIMIT $` + strconv.Itoa(len(args))
@@ -169,20 +172,21 @@ func (d *DB) ListDeletedProjects(ctx context.Context, actorID, orgSlug string, q
 		}
 		defer rows.Close()
 		projects = []Project{}
+		sortKeys := [][]string{}
 		for rows.Next() {
 			var p Project
+			var sk []string
 			if err := rows.Scan(&p.ID, &p.OrgID, &p.Name, &p.Slug, &p.Description, &p.Readme,
-				&p.RepositoryURL, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt); err != nil {
+				&p.RepositoryURL, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt, &sk); err != nil {
 				return err
 			}
 			projects = append(projects, p)
+			sortKeys = append(sortKeys, sk)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		projects, next = paginate.Slice(projects, limit, func(p Project) []string {
-			return []string{strings.ToLower(p.Name), p.ID}
-		})
+		projects, next = paginate.SliceKeyed(projects, sortKeys, limit)
 		return nil
 	})
 	return projects, next, err
