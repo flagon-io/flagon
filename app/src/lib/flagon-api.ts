@@ -1152,6 +1152,12 @@ export async function markNotificationRead(id: string): Promise<void> {
   await call(`/notifications/${encodeURIComponent(id)}/read`, { method: "POST" }, user);
 }
 
+export async function markNotificationUnread(id: string): Promise<void> {
+  const user = await currentUser();
+  if (!user) return;
+  await call(`/notifications/${encodeURIComponent(id)}/unread`, { method: "POST" }, user);
+}
+
 export async function markAllNotificationsRead(): Promise<void> {
   const user = await currentUser();
   if (!user) return;

@@ -302,8 +302,9 @@ func (fakeAIStore) RevokeInvitation(context.Context, string, string, string) err
 func (fakeAIStore) ListNotifications(context.Context, string, int) ([]db.Notification, error) {
 	return []db.Notification{{ID: "n1", Type: "test", Title: "Hi"}}, nil
 }
-func (fakeAIStore) MarkNotificationRead(context.Context, string, string) error { return nil }
-func (fakeAIStore) MarkAllNotificationsRead(context.Context, string) error     { return nil }
+func (fakeAIStore) MarkNotificationRead(context.Context, string, string) error   { return nil }
+func (fakeAIStore) MarkNotificationUnread(context.Context, string, string) error { return nil }
+func (fakeAIStore) MarkAllNotificationsRead(context.Context, string) error       { return nil }
 func (fakeAIStore) ListAuditLog(context.Context, string, string, int) ([]db.AuditEvent, error) {
 	return []db.AuditEvent{{ID: "a1", Action: "project.created", Summary: "created project Web"}}, nil
 }

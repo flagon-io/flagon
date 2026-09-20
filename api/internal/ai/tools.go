@@ -74,6 +74,7 @@ type Store interface {
 
 	ListNotifications(ctx context.Context, userID string, limit int) ([]db.Notification, error)
 	MarkNotificationRead(ctx context.Context, userID, id string) error
+	MarkNotificationUnread(ctx context.Context, userID, id string) error
 	MarkAllNotificationsRead(ctx context.Context, userID string) error
 
 	ListAuditLog(ctx context.Context, actorID, orgSlug string, limit int) ([]db.AuditEvent, error)
@@ -1433,6 +1434,34 @@ func NewRegistry(store Store, docsIdx DocsIndex) *Registry {
 				return nil, fmt.Errorf("id is required")
 			}
 			if err := store.MarkNotificationRead(ctx, tc.UserID, strings.TrimSpace(in.ID)); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+
+	r.add(Tool{
+		Def: ToolDef{
+			Name:        "mark_notification_unread",
+			Description: "Mark one of the current user's notifications as unread again, by its id.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Notification id"}},"required":["id"],"additionalProperties":false}`),
+		},
+		Scope:    "notifications",
+		Mutating: true,
+		Summarize: func(input json.RawMessage) string {
+			var in notificationInput
+			_ = json.Unmarshal(input, &in)
+			return fmt.Sprintf("Mark notification %q unread", strings.TrimSpace(in.ID))
+		},
+		Run: func(ctx context.Context, tc ToolContext, input json.RawMessage) (any, error) {
+			var in notificationInput
+			if err := json.Unmarshal(input, &in); err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(in.ID) == "" {
+				return nil, fmt.Errorf("id is required")
+			}
+			if err := store.MarkNotificationUnread(ctx, tc.UserID, strings.TrimSpace(in.ID)); err != nil {
 				return nil, err
 			}
 			return map[string]any{"ok": true}, nil

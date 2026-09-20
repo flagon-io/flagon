@@ -83,6 +83,7 @@ type IdentityStore interface {
 	ListNotifications(ctx context.Context, userID string, limit int) ([]db.Notification, error)
 	UnreadNotificationCount(ctx context.Context, userID string) (int, error)
 	MarkNotificationRead(ctx context.Context, userID, id string) error
+	MarkNotificationUnread(ctx context.Context, userID, id string) error
 	MarkAllNotificationsRead(ctx context.Context, userID string) error
 	CreateNotification(ctx context.Context, userID string, orgID *string, ntype, title, body, link string) error
 

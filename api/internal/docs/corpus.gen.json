@@ -1646,6 +1646,22 @@
       "body": "Everything in Flagon happens inside an **organization**, and an organization has\n**members**. Each member has a role that sets what they can do:\n\n- **Owner** - full control, including billing and deleting the organization.\n- **Admin** - manage members, tokens, and settings.\n- **Member** - create and manage projects.\n- **Viewer** - read-only access.\n\nOwners and admins manage the roster from **Settings -> Members**.\n\n## Adding people\n\nYou add people by email or username, and Flagon does the right thing for each:\n\n- If the person **already has a Flagon account**, they are added to the\n  organization straight away and see it the next time they load the app.\n- If the email **has no account yet**, Flagon sends them an **invitation**: an\n  email with a link to register and join in one step.\n\nYou can enter several people at once and give each their own role.\n\n## How invitations work\n\nA pending invitation is addressed to an email and carries the role you chose. It\nshows up under the **Pending invitations** tab until it is accepted, and an owner\nor admin can revoke it at any time. Invitations expire after seven days.\n\nWhen the invited person opens the link, they land on a page that already knows\nwhich organization invited them. If they do not have an account, they set a name,\nusername, and password and are dropped straight into the organization. If they\nare already signed in with the invited email, they just confirm.\n\nThe invitation link is proof that the person controls that mailbox, so accepting\nit **doubles as email verification** - there is no separate code to enter. The\nemail on the new account is fixed to the address that was invited.\n\n## Permissions\n\nInviting and revoking require the `write:org` scope (owners and admins). Listing\nmembers and pending invitations requires `read:org`. As everywhere in Flagon, the\nagent and API act with your identity, so they can only invite people if you\ncould, and tenant isolation is enforced in the database."
     },
     {
+      "slug": "platform/notifications",
+      "title": "Notifications",
+      "description": "Your personal feed of what happened across your organizations, and how Flagon reaches you.",
+      "section": "Platform",
+      "visibility": "public",
+      "order": 5,
+      "headings": [
+        "Notifications",
+        "Where they show up",
+        "Reading a notification",
+        "Delivery",
+        "With the AI and the API"
+      ],
+      "body": "# Notifications\n\nNotifications are your personal feed of activity across the organizations you\nbelong to - an invite you accepted, a member who joined, a role that changed.\nThey are **personal**: a notification belongs to you, not to an organization.\nThat makes them separate from the [audit log](/platform/audit-log), which is the\norganization's shared, immutable record of who did what.\n\n## Where they show up\n\n- The **bell** in the top bar shows a badge with your unread count and a short\n  feed. The feed is **unread first, then most recent**, so an item you haven't\n  read yet is never buried under newer ones you have - even if it's weeks old.\n- **Settings → Notifications** is the full feed, with **All** and **Unread**\n  filters, plus your delivery preferences. It's a personal surface (your account,\n  spanning every organization you belong to), also reachable from the bell's\n  **View all**.\n\n## Reading a notification\n\nSelecting a notification opens its detail rather than jumping you somewhere:\n\n- It **marks the notification read** (its `read_at` timestamp records when).\n- From the detail you can **mark it unread** again to bring it back to the top of\n  the feed, or **open** its linked page when it has one.\n- **Mark all as read** clears the whole unread count at once.\n\nOpening a notification never navigates on its own - you follow the link only when\nyou choose to, so a click is never a surprise jump.\n\n## Delivery\n\nToday notifications are delivered **in-product** (the bell and the feed). Email\ndelivery is planned.\n\n## With the AI and the API\n\nEverything above is available through the [API](/api) and to the\n[AI assistant](/ai) and [MCP](/mcp-hub): list your notifications, mark one read\nor unread, or mark them all read. As with every mutation, the in-product agent\nproposes the change and you confirm it."
+    },
+    {
       "slug": "platform/organizations",
       "title": "Organizations",
       "description": "Organizations own everything in Flagon: projects, members, tokens, and settings.",

@@ -1,0 +1,48 @@
+---
+title: Notifications
+description: Your personal feed of what happened across your organizations, and how Flagon reaches you.
+section: Platform
+order: 5
+---
+
+# Notifications
+
+Notifications are your personal feed of activity across the organizations you
+belong to - an invite you accepted, a member who joined, a role that changed.
+They are **personal**: a notification belongs to you, not to an organization.
+That makes them separate from the [audit log](/platform/audit-log), which is the
+organization's shared, immutable record of who did what.
+
+## Where they show up
+
+- The **bell** in the top bar shows a badge with your unread count and a short
+  feed. The feed is **unread first, then most recent**, so an item you haven't
+  read yet is never buried under newer ones you have - even if it's weeks old.
+- **Settings → Notifications** is the full feed, with **All** and **Unread**
+  filters, plus your delivery preferences. It's a personal surface (your account,
+  spanning every organization you belong to), also reachable from the bell's
+  **View all**.
+
+## Reading a notification
+
+Selecting a notification opens its detail rather than jumping you somewhere:
+
+- It **marks the notification read** (its `read_at` timestamp records when).
+- From the detail you can **mark it unread** again to bring it back to the top of
+  the feed, or **open** its linked page when it has one.
+- **Mark all as read** clears the whole unread count at once.
+
+Opening a notification never navigates on its own - you follow the link only when
+you choose to, so a click is never a surprise jump.
+
+## Delivery
+
+Today notifications are delivered **in-product** (the bell and the feed). Email
+delivery is planned.
+
+## With the AI and the API
+
+Everything above is available through the [API](/api) and to the
+[AI assistant](/ai) and [MCP](/mcp-hub): list your notifications, mark one read
+or unread, or mark them all read. As with every mutation, the in-product agent
+proposes the change and you confirm it.

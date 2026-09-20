@@ -1,5 +1,6 @@
 import {
   LayoutDashboard,
+  Inbox,
   Boxes,
   Settings2,
   SlidersHorizontal,
@@ -45,6 +46,7 @@ export function orgNav(slug: string): NavLink[][] {
     // stubbed until they ship.
     [
       { label: "Dashboard", href: base, icon: LayoutDashboard, exact: true },
+      { label: "Inbox", href: `${base}/inbox`, icon: Inbox, disabled: true },
       { label: "Projects", href: `${base}/projects`, icon: Boxes },
       { label: "Packages", href: `${base}/packages`, icon: Package, disabled: true },
       { label: "Insights", href: `${base}/insights`, icon: LineChart, disabled: true },

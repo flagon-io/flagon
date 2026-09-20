@@ -47,6 +47,23 @@ export function notificationMeta(type: string): NotificationMeta {
   return META[type] ?? { Icon: Bell, tone: "bg-secondary text-muted-foreground" };
 }
 
+// The link on a notification points at the thing it's about (an org's people
+// page, a project, a team). This labels the action button so it reads as "go to
+// that thing" rather than an ambiguous "Open". Unknown types fall back to "View".
+const ACTION_LABEL: Record<string, string> = {
+  "org.created": "View organization",
+  "org.member_added": "View organization",
+  "org.role_changed": "View organization",
+  "org.invite_accepted": "View people",
+  "team.member_added": "View team",
+  "project.access_granted": "View project",
+  "project.access_changed": "View project",
+};
+
+export function notificationActionLabel(type: string): string {
+  return ACTION_LABEL[type] ?? "View";
+}
+
 // timeAgo renders a compact relative time ("just now", "5m", "3h", "2d") and
 // falls back to a locale date past 30 days. Shared by the bell and the feed.
 export function timeAgo(iso: string): string {

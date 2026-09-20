@@ -44,6 +44,7 @@ func TestRegistryRoster(t *testing.T) {
 		// Notifications.
 		"list_notifications":          "notifications",
 		"mark_notification_read":      "notifications",
+		"mark_notification_unread":    "notifications",
 		"mark_all_notifications_read": "notifications",
 	}
 
@@ -70,7 +71,7 @@ func TestRegistryRoster(t *testing.T) {
 		"add_member", "set_member_role", "remove_member",
 		"set_org_security",
 		"invite_member", "revoke_invitation",
-		"mark_notification_read", "mark_all_notifications_read",
+		"mark_notification_read", "mark_notification_unread", "mark_all_notifications_read",
 	} {
 		if tool, ok := r.Get(name); ok && !tool.Mutating {
 			t.Errorf("tool %q writes data and must be marked Mutating", name)

@@ -66,6 +66,22 @@ func registerNotificationsAPI(api huma.API, store IdentityStore, internalToken s
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "unread-notification",
+		Method:      http.MethodPost,
+		Path:        "/notifications/{id}/unread",
+		Summary:     "Mark a notification unread",
+		Middlewares: huma.Middlewares{auth},
+	}, func(ctx context.Context, in *ReadNotificationInput) (*OKOutput, error) {
+		userID, _ := identity(ctx)
+		if err := store.MarkNotificationUnread(ctx, userID, in.ID); err != nil {
+			return nil, huma.Error500InternalServerError("could not update notification", err)
+		}
+		out := &OKOutput{}
+		out.Body.OK = true
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "read-all-notifications",
 		Method:      http.MethodPost,
 		Path:        "/notifications/read-all",

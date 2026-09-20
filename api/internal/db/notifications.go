@@ -19,8 +19,10 @@ type Notification struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
-// ListNotifications returns the caller's notifications, newest first (RLS-scoped
-// to the caller).
+// ListNotifications returns the caller's notifications, unread first and then by
+// recency (RLS-scoped to the caller). Unread-first means an old unread item is
+// never buried under newer read ones, so a short feed (e.g. the topbar bell)
+// always surfaces what still needs attention.
 func (d *DB) ListNotifications(ctx context.Context, userID string, limit int) ([]Notification, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 30
@@ -31,7 +33,7 @@ func (d *DB) ListNotifications(ctx context.Context, userID string, limit int) ([
 			SELECT id, org_id, type, title, body, link, read_at, created_at
 			FROM public.notifications
 			WHERE user_id = $1
-			ORDER BY created_at DESC
+			ORDER BY (read_at IS NULL) DESC, created_at DESC
 			LIMIT $2`, userID, limit)
 		if err != nil {
 			return err
@@ -67,6 +69,17 @@ func (d *DB) MarkNotificationRead(ctx context.Context, userID, id string) error 
 		_, err := tx.Exec(ctx,
 			`UPDATE public.notifications SET read_at = now()
 			 WHERE id = $1 AND user_id = $2 AND read_at IS NULL`, id, userID)
+		return err
+	})
+}
+
+// MarkNotificationUnread marks one of the caller's notifications unread again,
+// so it returns to the unread feed and the bell badge.
+func (d *DB) MarkNotificationUnread(ctx context.Context, userID, id string) error {
+	return d.inUserTx(ctx, userID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx,
+			`UPDATE public.notifications SET read_at = NULL
+			 WHERE id = $1 AND user_id = $2 AND read_at IS NOT NULL`, id, userID)
 		return err
 	})
 }

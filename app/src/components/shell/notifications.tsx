@@ -2,18 +2,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Bell, Check, CheckCheck } from "lucide-react";
 import { Button, Popover, PopoverContent, PopoverTrigger, Skeleton, buttonClasses, cn } from "@flagon-io/ui";
 import { type Notification, notificationMeta, timeAgo } from "@/lib/notifications";
+import { NotificationDialog } from "@/components/notifications/notification-dialog";
 
 export function Notifications() {
   const router = useRouter();
-  const pathname = usePathname();
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const loadCount = useCallback(async () => {
     const res = await fetch("/api/notifications/unread-count");
@@ -25,7 +26,7 @@ export function Notifications() {
 
   const loadList = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/notifications?limit=15");
+    const res = await fetch("/api/notifications?limit=10");
     if (res.ok) {
       const d = await res.json();
       setItems(d.notifications ?? []);
@@ -56,14 +57,32 @@ export function Notifications() {
     await fetch(`/api/notifications/${id}/read`, { method: "POST" });
   }, []);
 
-  async function openItem(n: Notification) {
-    if (!n.read_at) void markRead(n.id);
+  // markUnread returns one notification to the unread feed (optimistically).
+  const markUnread = useCallback(async (id: string) => {
+    setItems((prev) => prev.map((x) => (x.id === id && x.read_at ? { ...x, read_at: null } : x)));
+    setUnread((u) => u + 1);
+    await fetch(`/api/notifications/${id}/unread`, { method: "POST" });
+  }, []);
+
+  // Opening a notification shows its detail (never a surprise navigation) and
+  // marks it read, since reading it is exactly what just happened.
+  function openItem(n: Notification) {
+    setSelectedId(n.id);
     setOpen(false);
-    // Always go somewhere: the notification's target, or the full feed if it has
-    // no target (or already points at the page you're on), so a click never
-    // feels like a no-op.
-    router.push(n.link && n.link !== pathname ? n.link : "/settings/notifications");
+    if (!n.read_at) void markRead(n.id);
   }
+
+  function toggleRead(n: Notification) {
+    if (n.read_at) void markUnread(n.id);
+    else void markRead(n.id);
+  }
+
+  function navigate(n: Notification) {
+    setSelectedId(null);
+    if (n.link) router.push(n.link);
+  }
+
+  const selected = items.find((x) => x.id === selectedId) ?? null;
 
   async function markAll() {
     setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
@@ -72,14 +91,18 @@ export function Notifications() {
   }
 
   return (
+    <>
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
-        className={cn(buttonClasses({ variant: "ghost", size: "icon" }), "relative")}
+        className={cn(
+          buttonClasses({ variant: "outline", size: "sm", className: "aspect-square px-0" }),
+          "relative",
+        )}
         aria-label={unread > 0 ? `Notifications (${unread} unread)` : "Notifications"}
       >
         <Bell className="size-4.5" />
         {unread > 0 && (
-          <span className="absolute top-1.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white">
+          <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold leading-none text-white ring-2 ring-background">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
@@ -136,6 +159,17 @@ export function Notifications() {
         </Link>
       </PopoverContent>
     </Popover>
+
+      <NotificationDialog
+        n={selected}
+        open={selectedId !== null}
+        onOpenChange={(o) => {
+          if (!o) setSelectedId(null);
+        }}
+        onToggleRead={toggleRead}
+        onNavigate={navigate}
+      />
+    </>
   );
 }
 

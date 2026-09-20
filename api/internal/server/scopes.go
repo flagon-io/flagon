@@ -131,6 +131,7 @@ var operationScopes = map[string]Scope{
 	"list-notifications":         ScopeNotifications,
 	"notifications-unread-count": ScopeNotifications,
 	"read-notification":          ScopeNotifications,
+	"unread-notification":        ScopeNotifications,
 	"read-all-notifications":     ScopeNotifications,
 }
 

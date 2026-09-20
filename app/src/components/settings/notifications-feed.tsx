@@ -15,6 +15,7 @@ import {
   cn,
 } from "@flagon-io/ui";
 import { type Notification, notificationMeta, timeAgo } from "@/lib/notifications";
+import { NotificationDialog } from "@/components/notifications/notification-dialog";
 
 type Filter = "all" | "unread";
 
@@ -24,6 +25,7 @@ export function NotificationsFeed() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,10 +53,29 @@ export function NotificationsFeed() {
     await fetch(`/api/notifications/${id}/read`, { method: "POST" });
   }, []);
 
+  const markUnread = useCallback(async (id: string) => {
+    setItems((prev) => prev.map((x) => (x.id === id && x.read_at ? { ...x, read_at: null } : x)));
+    await fetch(`/api/notifications/${id}/unread`, { method: "POST" });
+  }, []);
+
+  // Opening a notification shows its detail and marks it read; the detail view
+  // is where the user follows the link or flips it back to unread.
   function openItem(n: Notification) {
+    setSelectedId(n.id);
     if (!n.read_at) void markRead(n.id);
+  }
+
+  function toggleRead(n: Notification) {
+    if (n.read_at) void markUnread(n.id);
+    else void markRead(n.id);
+  }
+
+  function navigate(n: Notification) {
+    setSelectedId(null);
     if (n.link) router.push(n.link);
   }
+
+  const selected = items.find((x) => x.id === selectedId) ?? null;
 
   async function markAll() {
     setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
@@ -118,6 +139,16 @@ export function NotificationsFeed() {
           </ul>
         </Card>
       )}
+
+      <NotificationDialog
+        n={selected}
+        open={selectedId !== null}
+        onOpenChange={(o) => {
+          if (!o) setSelectedId(null);
+        }}
+        onToggleRead={toggleRead}
+        onNavigate={navigate}
+      />
     </div>
   );
 }

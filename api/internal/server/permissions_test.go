@@ -39,6 +39,8 @@ func TestScopeAllows(t *testing.T) {
 		{"read:org cannot set security policy", []string{"read:org"}, "set-org-security", false},
 		{"write:org sets security policy", []string{"write:org"}, "set-org-security", true},
 		{"notifications reads and writes", []string{"notifications"}, "read-all-notifications", true},
+		{"notifications scope marks unread", []string{"notifications"}, "unread-notification", true},
+		{"read:org cannot mark notifications unread", []string{"read:org"}, "unread-notification", false},
 		{"unmapped operation is denied (fail closed)", []string{"admin:org", "admin:user"}, "delete-universe", false},
 		{"empty scope set grants nothing", []string{}, "get-me", false},
 	}
@@ -507,6 +509,7 @@ func (scopeFakeStore) ListNotifications(context.Context, string, int) ([]db.Noti
 }
 func (scopeFakeStore) UnreadNotificationCount(context.Context, string) (int, error) { return 0, nil }
 func (scopeFakeStore) MarkNotificationRead(context.Context, string, string) error   { return nil }
+func (scopeFakeStore) MarkNotificationUnread(context.Context, string, string) error { return nil }
 func (scopeFakeStore) MarkAllNotificationsRead(context.Context, string) error       { return nil }
 func (scopeFakeStore) CreateNotification(context.Context, string, *string, string, string, string, string) error {
 	return nil
