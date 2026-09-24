@@ -20,6 +20,7 @@
 // would produce - the app has no idea it was seeded.
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
+import { pgConfig } from "./pg-config.mjs";
 import { hashPassword } from "better-auth/crypto";
 
 const email = process.env.SEED_EMAIL ?? "demo@flagon.dev";
@@ -37,7 +38,7 @@ if (process.env.NODE_ENV === "production" && !process.env.SEED_ALLOW_PROD) {
 }
 
 async function main() {
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  const client = new Client(pgConfig());
   await client.connect();
 
   let userId;

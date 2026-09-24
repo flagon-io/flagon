@@ -7,6 +7,7 @@
 //
 // Read-only preview of who would be restored, add --dry-run.
 import { Client } from "pg";
+import { pgConfig } from "./pg-config.mjs";
 
 const login = process.argv.find((a) => !a.startsWith("-") && a.includes("@"))
   ?? process.argv[2]
@@ -18,7 +19,7 @@ if (!login) {
   process.exit(1);
 }
 
-const client = new Client({ connectionString: process.env.DATABASE_URL });
+const client = new Client(pgConfig());
 
 async function main() {
   await client.connect();

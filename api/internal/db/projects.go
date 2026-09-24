@@ -95,9 +95,9 @@ func (d *DB) ListProjects(ctx context.Context, actorID, orgSlug string, q pagina
 			return paginate.ErrBadCursor
 		}
 		args = append(args, limit+1)
-		// ARRAY[lower(name), id] is the keyset sort key the DB itself computes (same
+		// ARRAY[lower(name), id::text] is the keyset sort key the DB itself computes (same
 		// as the ORDER BY), returned so the cursor is never re-derived in Go.
-		sql := `SELECT ` + projectCols + `, ARRAY[lower(name), id] AS sort_key FROM public.projects
+		sql := `SELECT ` + projectCols + `, ARRAY[lower(name), id::text] AS sort_key FROM public.projects
 			WHERE ` + where + `
 			ORDER BY lower(name), id
 			LIMIT $` + strconv.Itoa(len(args))
@@ -162,7 +162,7 @@ func (d *DB) ListDeletedProjects(ctx context.Context, actorID, orgSlug string, q
 			return paginate.ErrBadCursor
 		}
 		args = append(args, limit+1)
-		sql := `SELECT ` + projectCols + `, deleted_at, ARRAY[lower(name), id] AS sort_key FROM public.projects
+		sql := `SELECT ` + projectCols + `, deleted_at, ARRAY[lower(name), id::text] AS sort_key FROM public.projects
 			WHERE ` + where + `
 			ORDER BY lower(name), id
 			LIMIT $` + strconv.Itoa(len(args))

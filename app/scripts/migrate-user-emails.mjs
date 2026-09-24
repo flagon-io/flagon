@@ -3,12 +3,13 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
+import { pgConfig } from "./pg-config.mjs";
 
 async function main() {
   const dir = join(import.meta.dirname, "..", "db", "migrations");
   const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
 
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  const client = new Client(pgConfig());
   await client.connect();
 
   try {

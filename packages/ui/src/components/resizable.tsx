@@ -29,7 +29,14 @@ export function ResizablePanelGroup({
   );
 }
 
-export const ResizablePanel = Panel;
+// v4's Panel defaults its content box to `overflow: auto`, which axe flags as a
+// scrollable region that must be keyboard-focusable. v2 clipped instead, so we
+// restore `overflow: hidden` as the default (callers can opt back into scrolling
+// with their own focusable container). v4 merges `style` after its own default,
+// so this override wins.
+export function ResizablePanel({ style, ...props }: ComponentProps<typeof Panel>) {
+  return <Panel data-slot="resizable-panel" style={{ overflow: "hidden", ...style }} {...props} />;
+}
 
 export function ResizableHandle({
   withHandle,

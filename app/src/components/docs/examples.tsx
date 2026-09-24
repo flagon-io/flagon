@@ -2409,15 +2409,22 @@ const [range, setRange] = useState<DateRange>();
     usage: `import { ScrollArea } from "@flagon-io/ui";`,
     examples: [
       {
-        code: `<ScrollArea className="h-48 w-64 rounded-lg border">...</ScrollArea>`,
+        code: `<ScrollArea className="h-48 w-64 rounded-lg border">
+  <div className="p-4">...</div>
+</ScrollArea>`,
         render: (
-          <ScrollArea className="h-48 w-64 rounded-lg border border-hairline p-4">
-            <p className="mb-2 text-sm font-medium text-foreground">Regions</p>
-            {Array.from({ length: 20 }).map((_, i) => (
-              <div key={i} className="border-b border-hairline py-2 text-sm text-muted-foreground last:border-0">
-                Region {i + 1}
-              </div>
-            ))}
+          <ScrollArea className="h-48 w-64 rounded-lg border border-hairline">
+            {/* Padding goes on the content inside the viewport, never on the
+             * ScrollArea root: root padding insets the viewport but not Radix's
+             * scrollbar track, which throws off the thumb's position. */}
+            <div className="p-4">
+              <p className="mb-2 text-sm font-medium text-foreground">Regions</p>
+              {Array.from({ length: 20 }).map((_, i) => (
+                <div key={i} className="border-b border-hairline py-2 text-sm text-muted-foreground last:border-0">
+                  Region {i + 1}
+                </div>
+              ))}
+            </div>
           </ScrollArea>
         ),
       },

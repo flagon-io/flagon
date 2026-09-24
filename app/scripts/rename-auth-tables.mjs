@@ -5,6 +5,7 @@
 // so it's a no-op on fresh databases (BetterAuth then creates plural tables from
 // the modelName config) and on already-migrated ones.
 import { Client } from "pg";
+import { pgConfig } from "./pg-config.mjs";
 
 // Tables first, then their indexes (RENAME TABLE doesn't rename indexes).
 const TABLE_RENAMES = [
@@ -37,7 +38,7 @@ async function exists(client, kind, name) {
 }
 
 async function main() {
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  const client = new Client(pgConfig());
   await client.connect();
   try {
     for (const [from, to] of TABLE_RENAMES) {
