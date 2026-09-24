@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # Better Auth derives its origin from this at build and start; without it the
+  # `next build` logs "[Better Auth] Base URL is not set". CI builds are never
+  # deployed (Vercel sets the real value in prod), so the local origin is the
+  # correct value for the lint/unit/e2e builds here.
+  BETTER_AUTH_URL: http://localhost:3000
+
 jobs:
   api:
     runs-on: ubuntu-latest

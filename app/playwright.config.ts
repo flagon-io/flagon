@@ -26,9 +26,5 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
-    // In CI there's no .env.local, so give Better Auth an explicit origin; without
-    // it the server warns that the base URL is unset and derives it per-request.
-    // Locally we leave env alone so .env.local governs the real dev values.
-    env: process.env.CI ? { BETTER_AUTH_URL: baseURL } : undefined,
   },
 });
