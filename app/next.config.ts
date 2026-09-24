@@ -1,8 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // standalone output keeps the Docker image small (see app/Dockerfile)
-  output: "standalone",
+  // standalone output keeps the self-host Docker image small (see app/Dockerfile,
+  // which sets NEXT_BUILD_STANDALONE and runs `node server.js`). It's gated to that
+  // build alone: Vercel doesn't consume it, and enabling it for a plain `next start`
+  // (our CI e2e server) warns "next start does not work with output: standalone".
+  output: process.env.NEXT_BUILD_STANDALONE === "1" ? "standalone" : undefined,
   // Compile the workspace design system from source (no separate build step).
   transpilePackages: ["@flagon-io/ui"],
   env: {

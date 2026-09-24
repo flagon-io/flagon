@@ -31,9 +31,9 @@ const CONTRAST_EXCLUDED = ["/ui/theming"];
 const CONTRAST_FLOOR = 4.0;
 
 type Node = { target: string; ratio?: number; fg?: string; bg?: string };
-type Finding = { page: string; mode: string; rule: string; impact: string; nodes: Node[] };
+type Violation = { rule: string; impact: string; nodes: Node[] };
 
-async function axeViolations(page: import("@playwright/test").Page): Promise<Omit<Finding, "page" | "mode">[]> {
+async function axeViolations(page: import("@playwright/test").Page): Promise<Violation[]> {
   await page.addScriptTag({ path: axePath });
   return page.evaluate(async () => {
     // @ts-expect-error injected global
@@ -68,50 +68,42 @@ async function axeViolations(page: import("@playwright/test").Page): Promise<Omi
   });
 }
 
-test("accessibility sweep (light + dark) across the component catalog", async ({ page }) => {
-  test.setTimeout(600000);
-  const findings: Finding[] = [];
+// One test per page. Playwright shards tests (not loop iterations) across workers,
+// so splitting the catalog turns what was a single serial marathon into a fan-out
+// that scales with `workers`, and a failure names the exact offending page.
+for (const path of pages) {
+  test(`a11y sweep (light + dark): ${path}`, async ({ page }) => {
+    const failures: string[] = [];
+    // Sub-AA-but-tolerated contrast (the documented `destructive` edge): recorded
+    // as a report annotation instead of console noise, so a clean run is silent.
+    const tolerated = new Set<string>();
 
-  for (const path of pages) {
     for (const mode of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: mode });
       await page.goto(path, { waitUntil: "networkidle" });
       // Let the pre-paint theme script + brand settle.
       await page.waitForTimeout(150);
-      for (const v of await axeViolations(page)) findings.push({ page: path, mode, ...v });
-    }
-  }
 
-  // Report grouped by rule, most instances first.
-  const byRule = new Map<string, { impact: string; nodes: number; where: Set<string> }>();
-  for (const f of findings) {
-    const g = byRule.get(f.rule) ?? { impact: f.impact, nodes: 0, where: new Set<string>() };
-    g.nodes += f.nodes.length;
-    g.where.add(`${f.page} (${f.mode})`);
-    byRule.set(f.rule, g);
-  }
-  const report = [...byRule.entries()]
-    .sort((a, b) => b[1].nodes - a[1].nodes)
-    .map(([rule, g]) => `\n[${g.impact}] ${rule}: ${g.nodes} node(s) across ${g.where.size} page/mode(s)`)
-    .join("");
-  console.log(`\n===== A11Y REPORT (${findings.length} finding-instances) =====${report}\n`);
-
-  // Gate. Non-contrast serious/critical issues always fail. Contrast fails below the
-  // AA floor, except on the user-editable Brand playground.
-  const failures: string[] = [];
-  for (const f of findings) {
-    if (f.impact !== "critical" && f.impact !== "serious") continue;
-    if (f.rule === "color-contrast") {
-      if (CONTRAST_EXCLUDED.includes(f.page)) continue;
-      for (const n of f.nodes) {
-        if ((n.ratio ?? 0) < CONTRAST_FLOOR) {
-          failures.push(`color-contrast ${n.ratio}:1 fg=${n.fg} bg=${n.bg} @ ${f.page} (${f.mode}) ${n.target}`);
+      for (const v of await axeViolations(page)) {
+        if (v.impact !== "critical" && v.impact !== "serious") continue;
+        if (v.rule === "color-contrast") {
+          if (CONTRAST_EXCLUDED.includes(path)) continue;
+          for (const n of v.nodes) {
+            if ((n.ratio ?? 0) < CONTRAST_FLOOR) {
+              failures.push(`color-contrast ${n.ratio}:1 fg=${n.fg} bg=${n.bg} @ ${path} (${mode}) ${n.target}`);
+            } else {
+              tolerated.add(`color-contrast ${n.ratio}:1 @ ${path} (${mode}) ${n.target}`);
+            }
+          }
+        } else {
+          failures.push(`${v.impact} ${v.rule} @ ${path} (${mode}) ${v.nodes[0]?.target ?? ""}`);
         }
       }
-    } else {
-      failures.push(`${f.impact} ${f.rule} @ ${f.page} (${f.mode}) ${f.nodes[0]?.target ?? ""}`);
     }
-  }
 
-  expect(failures, `accessibility gate failures:\n${[...new Set(failures)].join("\n")}`).toEqual([]);
-});
+    if (tolerated.size) {
+      test.info().annotations.push({ type: "a11y-tolerated-contrast", description: [...tolerated].join("; ") });
+    }
+    expect(failures, `accessibility gate failures:\n${[...new Set(failures)].join("\n")}`).toEqual([]);
+  });
+}

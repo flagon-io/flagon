@@ -11,7 +11,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Specs are read-only against the /ui docs, so they parallelize safely. The
+  // a11y sweep is split into one test per page (see tests/_a11y.spec.ts) so it
+  // fans out across these workers instead of running as one serial marathon.
+  workers: process.env.CI ? 4 : undefined,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL,
@@ -23,5 +26,9 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
+    // In CI there's no .env.local, so give Better Auth an explicit origin; without
+    // it the server warns that the base URL is unset and derives it per-request.
+    // Locally we leave env alone so .env.local governs the real dev values.
+    env: process.env.CI ? { BETTER_AUTH_URL: baseURL } : undefined,
   },
 });

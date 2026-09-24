@@ -13,6 +13,10 @@ FROM node:26-alpine AS build
 WORKDIR /src
 COPY --from=deps /src/node_modules ./node_modules
 COPY . .
+# Emit the standalone server this image runs (`node server.js` in the final stage).
+# next.config gates `output: standalone` on this flag so a plain `next start`
+# elsewhere (CI e2e) doesn't warn.
+ENV NEXT_BUILD_STANDALONE=1
 RUN npm run build
 
 # Default (final) target: the deployable artifact (Vercel builds from source

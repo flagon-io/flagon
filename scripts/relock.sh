@@ -30,7 +30,11 @@ docker run --rm -v "$PWD:/repo" -w /repo node:24 sh -c '
   cp app/package.json /work/app/package.json
   for d in packages/*/; do mkdir -p "/work/$d"; cp "${d}package.json" "/work/$d"; done
   cd /work
-  npm install --no-audit --no-fund >/dev/null 2>&1
+  # --ignore-scripts: we copy only the manifests, not the source, so a workspace
+  # lifecycle script (packages/ui runs `tsc` on prepare) would fail against the
+  # source-less copy and abort the resolve. We only need the lockfile, never a
+  # build. stdout is muted; stderr stays visible so a real resolve error surfaces.
+  npm install --ignore-scripts --no-audit --no-fund >/dev/null
   cp package-lock.json /repo/package-lock.json
 '
 

@@ -1,9 +1,72 @@
+# Dependabot config. Grouping goal: routine minor/patch churn batches into a few
+# predictable PRs; packages that must move in lockstep (React, Next, Tailwind,
+# Radix) travel together across every update type; risky majors that aren't part
+# of a coupled set arrive as isolated PRs we can evaluate (or close) on their own.
 version: 2
 updates:
+  # Node / npm. This is an npm WORKSPACES monorepo (root package.json declares
+  # `app` and `packages/*`) with a SINGLE lockfile at the repo root. Dependabot
+  # must run at "/" so it resolves the workspaces and updates both the affected
+  # workspace manifest AND the root package-lock.json together. Pointing it at a
+  # workspace subdir (e.g. /app) bumps that package.json but leaves the root lock
+  # stale, and CI's root `npm ci` then fails on the mismatch.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # Coupled sets: grouped across ALL update types (majors included) because a
+      # partial bump breaks them. Order matters - a dependency joins the first
+      # group it matches, so these specific groups precede the broad catch-alls
+      # (e.g. @types/react lands in `react`, not `dev-dependencies`).
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      next:
+        patterns:
+          - "next"
+          - "eslint-config-next"
+          - "@next/*"
+      tailwind:
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
+      radix:
+        patterns:
+          - "@radix-ui/*"
+      # Broad catch-alls: minor + patch only, so the day-to-day churn collapses
+      # into two PRs (one dev, one prod). Any OTHER major falls outside these and
+      # opens as its own PR - the review gate that let us catch eslint 10 before
+      # it broke the Next lint stack.
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+      production:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # eslint 10 is not yet supported by eslint-config-next's plugin set
+      # (eslint-plugin-import / -jsx-a11y / -react peer-cap eslint at ^9). A major
+      # bump produces a duplicate-eslint, split-brain install. Revisit and remove
+      # this once eslint-config-next ships eslint 10 support.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+
+  # Go API. Framework families that release in lockstep get their own group; the
+  # rest of the minor/patch traffic batches together.
   - package-ecosystem: "gomod"
     directory: "/api"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
     groups:
       huma:
         patterns:
@@ -16,41 +79,20 @@ updates:
           - "minor"
           - "patch"
 
-  - package-ecosystem: "npm"
-    directory: "/app"
-    schedule:
-      interval: "weekly"
-    groups:
-      react:
-        patterns:
-          - "react"
-          - "react-dom"
-          - "@types/react"
-          - "@types/react-dom"
-      next:
-        patterns:
-          - "next"
-          - "eslint-config-next"
-      eslint:
-        patterns:
-          - "eslint*"
-          - "@eslint/*"
-      tailwind:
-        patterns:
-          - "tailwindcss"
-          - "@tailwindcss/*"
-      npm-minor-patch:
-        update-types:
-          - "minor"
-          - "patch"
-
+  # Container base images for both deployables.
   - package-ecosystem: "docker"
     directories:
       - "/api"
       - "/app"
     schedule:
       interval: "weekly"
+    groups:
+      docker:
+        patterns:
+          - "*"
 
+  # GitHub Actions. One PR for the lot - action bumps are low-risk and reviewed
+  # together.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
