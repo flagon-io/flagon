@@ -739,18 +739,18 @@ function DataTableDemo() {
 
 function ResizableDemo() {
   return (
-    <ResizablePanelGroup direction="horizontal" className="h-52 max-w-2xl rounded-xl border border-hairline">
-      <ResizablePanel defaultSize={30} minSize={20}>
+    <ResizablePanelGroup orientation="horizontal" className="h-52 max-w-2xl rounded-xl border border-hairline">
+      <ResizablePanel defaultSize="30" minSize="20">
         <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">Sidebar</div>
       </ResizablePanel>
       <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={70}>
-        <ResizablePanelGroup direction="vertical">
-          <ResizablePanel defaultSize={60}>
+      <ResizablePanel defaultSize="70">
+        <ResizablePanelGroup orientation="vertical">
+          <ResizablePanel defaultSize="60">
             <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">Editor</div>
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={40}>
+          <ResizablePanel defaultSize="40">
             <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">Terminal</div>
           </ResizablePanel>
         </ResizablePanelGroup>

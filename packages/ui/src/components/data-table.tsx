@@ -1,20 +1,29 @@
 "use client";
 
 import {
+  columnFacetingFeature,
+  columnFilteringFeature,
+  columnVisibilityFeature,
+  createFacetedRowModel,
+  createFacetedUniqueValues,
+  createFilteredRowModel,
+  createPaginatedRowModel,
+  createSortedRowModel,
+  filterFns,
   flexRender,
-  getCoreRowModel,
-  getFacetedRowModel,
-  getFacetedUniqueValues,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-  type Column,
-  type ColumnDef,
+  rowPaginationFeature,
+  rowSelectionFeature,
+  rowSortingFeature,
+  sortFns,
+  tableFeatures,
+  useTable,
+  type Column as TanColumn,
+  type ColumnDef as TanColumnDef,
   type ColumnFiltersState,
+  type ColumnVisibilityState,
+  type ReactTable,
+  type RowData,
   type SortingState,
-  type Table as TanTable,
-  type VisibilityState,
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, Check, ChevronsUpDown, PlusCircle, SlidersHorizontal } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -28,10 +37,38 @@ import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Separator } from "./separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./table";
 
-export type { ColumnDef } from "@tanstack/react-table";
+// TanStack Table v9 registers capabilities explicitly. This static feature set
+// wires up sorting, filtering, faceting, pagination, selection, and column
+// visibility (the core row model is automatic). Each feature is listed before the
+// row-model/registry slot that depends on it. The full sortFns/filterFns registries
+// are included so any user column definition's `sortFn`/`filterFn` string (and the
+// default `"auto"`) resolves - this is a general-purpose table, not a fixed schema.
+const features = tableFeatures({
+  rowSortingFeature,
+  columnFilteringFeature,
+  columnFacetingFeature,
+  rowPaginationFeature,
+  rowSelectionFeature,
+  columnVisibilityFeature,
+  sortedRowModel: createSortedRowModel(),
+  filteredRowModel: createFilteredRowModel(),
+  facetedRowModel: createFacetedRowModel(),
+  facetedUniqueValues: createFacetedUniqueValues(),
+  paginatedRowModel: createPaginatedRowModel(),
+  sortFns,
+  filterFns,
+});
 
-export interface DataTableProps<TData, TValue> {
-  columns: ColumnDef<TData, TValue>[];
+type Features = typeof features;
+
+type Column<TData extends RowData, TValue = unknown> = TanColumn<Features, TData, TValue>;
+
+// A ColumnDef bound to our feature set so consumers keep writing `ColumnDef<Row>`
+// without threading v9's TFeatures generic themselves.
+export type ColumnDef<TData extends RowData, TValue = unknown> = TanColumnDef<Features, TData, TValue>;
+
+export interface DataTableProps<TData extends RowData> {
+  columns: ColumnDef<TData>[];
   data: TData[];
   /** Column id to expose a text search box for. Omit to hide the global filter. */
   filterColumn?: string;
@@ -47,11 +84,11 @@ export interface DataTableProps<TData, TValue> {
    * you can drop in `<DataTableFacetedFilter column={table.getColumn("status")} .../>`
    * and other column-level controls.
    */
-  toolbar?: ReactNode | ((table: TanTable<TData>) => ReactNode);
+  toolbar?: ReactNode | ((table: ReactTable<Features, TData>) => ReactNode);
 }
 
 /** A sortable, filterable, paginated table built on TanStack Table + Flagon's Table. */
-export function DataTable<TData, TValue>({
+export function DataTable<TData extends RowData>({
   columns,
   data,
   filterColumn,
@@ -61,13 +98,14 @@ export function DataTable<TData, TValue>({
   emptyText = "No results.",
   className,
   toolbar,
-}: DataTableProps<TData, TValue>) {
+}: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
 
-  const table = useReactTable({
+  const table = useTable({
+    features,
     data,
     columns,
     state: { sorting, columnFilters, columnVisibility, rowSelection },
@@ -76,14 +114,11 @@ export function DataTable<TData, TValue>({
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getFacetedRowModel: getFacetedRowModel(),
-    getFacetedUniqueValues: getFacetedUniqueValues(),
-    ...(pageSize
-      ? { getPaginationRowModel: getPaginationRowModel(), initialState: { pagination: { pageSize } } }
-      : {}),
+    // The pagination row model is always registered; when no pageSize is given we
+    // set a page large enough to hold every row, so getRowModel() returns them all
+    // and getPageCount() stays 1 (the pager stays hidden) - matching v8's behavior
+    // of omitting the pagination model entirely.
+    initialState: { pagination: { pageIndex: 0, pageSize: pageSize ?? Number.MAX_SAFE_INTEGER } },
   });
 
   const filterCol = filterColumn ? table.getColumn(filterColumn) : undefined;
@@ -191,7 +226,7 @@ export function DataTable<TData, TValue>({
   );
 }
 
-function DataTablePagination<TData>({ table }: { table: TanTable<TData> }) {
+function DataTablePagination<TData extends RowData>({ table }: { table: ReactTable<Features, TData> }) {
   const selected = table.getFilteredSelectedRowModel().rows.length;
   const total = table.getFilteredRowModel().rows.length;
   return (
@@ -199,7 +234,7 @@ function DataTablePagination<TData>({ table }: { table: TanTable<TData> }) {
       <p className="text-xs text-muted-foreground">
         {selected > 0
           ? `${selected} of ${total} row(s) selected`
-          : `Page ${table.getState().pagination.pageIndex + 1} of ${table.getPageCount()}`}
+          : `Page ${table.state.pagination.pageIndex + 1} of ${table.getPageCount()}`}
       </p>
       <div className="flex gap-2">
         <Button
@@ -218,7 +253,7 @@ function DataTablePagination<TData>({ table }: { table: TanTable<TData> }) {
   );
 }
 
-export interface DataTableFacetedFilterProps<TData, TValue> {
+export interface DataTableFacetedFilterProps<TData extends RowData, TValue> {
   column?: Column<TData, TValue>;
   title?: string;
   options: { label: string; value: string; icon?: React.ComponentType<{ className?: string }> }[];
@@ -229,7 +264,7 @@ export interface DataTableFacetedFilterProps<TData, TValue> {
  * facets on a real data table. Feed it a `table.getColumn("status")` and the set
  * of options; it drives that column's `arrIncludesSome`-style filter value.
  */
-export function DataTableFacetedFilter<TData, TValue>({
+export function DataTableFacetedFilter<TData extends RowData, TValue>({
   column,
   title,
   options,
