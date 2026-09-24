@@ -59,6 +59,12 @@ updates:
       # this once eslint-config-next ships eslint 10 support.
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
+      # TypeScript 7 (the native compiler) is outside typescript-eslint's peer
+      # range (typescript >=4.8.4 <6.1.0), so a major bump leaves the lint
+      # toolchain on an officially unsupported compiler. Revisit and remove once
+      # typescript-eslint (and Next) declare TS 7 support.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # Go API. Framework families that release in lockstep get their own group; the
   # rest of the minor/patch traffic batches together.
