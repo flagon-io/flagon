@@ -15,13 +15,13 @@ type Scope string
 const (
 	// Account.
 	ScopeReadUser  Scope = "read:user"  // read your profile
-	ScopeUser      Scope = "user"       // update your profile (implies read:user)
+	ScopeUser      Scope = "user"       // account writes; no operation needs it today (the profile mirror is internal-only). Implies read:user
 	ScopeAdminUser Scope = "admin:user" // full account control incl. deletion (implies user)
 
 	// Organization.
 	ScopeReadOrg  Scope = "read:org"  // read orgs and members
 	ScopeWriteOrg Scope = "write:org" // manage members and settings (implies read:org)
-	ScopeAdminOrg Scope = "admin:org" // create and leave orgs (implies write:org)
+	ScopeAdminOrg Scope = "admin:org" // create, leave, delete and restore orgs (implies write:org)
 
 	// Projects.
 	ScopeReadProject  Scope = "read:project"  // read projects, collaborators, teams and owners
@@ -66,9 +66,13 @@ var scopeImplies = map[Scope][]Scope{
 // Operations absent here are unreachable by a scoped token (fail-closed).
 // (Token-management ops use internalAuth, so tokens never reach them at all.)
 // Every new operation MUST be given a scope here - permissions by default.
+// guardrails_test.go enforces it: an operation that is neither scoped here nor
+// documented in its unscopedOps exemption list fails CI, as does a scoped
+// operation with no agent/MCP tool.
 var operationScopes = map[string]Scope{
-	"get-me":       ScopeReadUser,
-	"sync-profile": ScopeUser,
+	"get-me": ScopeReadUser,
+	// sync-profile is internal-only (the app gateway mirrors the auth layer's
+	// profile), so it is deliberately absent: no token scope reaches it.
 	// admin:user is reserved for destructive account operations (e.g. deleting
 	// your own account). That flow lives in the app today; when it becomes a
 	// token-reachable API operation it maps here to ScopeAdminUser.
@@ -86,12 +90,22 @@ var operationScopes = map[string]Scope{
 	"set-audit-config":  ScopeWriteOrg,
 	"get-org-security":  ScopeReadOrg,
 	"set-org-security":  ScopeWriteOrg,
-	"invite-member":     ScopeWriteOrg,
-	"revoke-invitation": ScopeWriteOrg,
+	// SSO provider configuration is part of the org security settings (the store
+	// also requires an owner/admin role); secrets are never returned on reads.
+	"list-sso-providers":  ScopeReadOrg,
+	"get-sso-provider":    ScopeReadOrg,
+	"create-sso-provider": ScopeWriteOrg,
+	"update-sso-provider": ScopeWriteOrg,
+	"delete-sso-provider": ScopeWriteOrg,
+	"invite-member":       ScopeWriteOrg,
+	"revoke-invitation":   ScopeWriteOrg,
 	// get-invitation is public (no auth) and accept-invitation is internal-only
 	// (the app triggers it post-registration), so neither is token-reachable.
 	"create-org":                 ScopeAdminOrg,
 	"leave-org":                  ScopeAdminOrg,
+	"delete-org":                 ScopeAdminOrg,
+	"list-deleted-orgs":          ScopeReadOrg,
+	"restore-org":                ScopeAdminOrg,
 	"list-projects":              ScopeReadProject,
 	"query-projects":             ScopeReadProject,
 	"list-deleted-projects":      ScopeReadProject,

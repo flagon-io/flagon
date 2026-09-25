@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/session";
+import { routeError } from "@/lib/route-error";
 import { setPrimaryUserEmail } from "@/lib/user-emails";
 
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
@@ -15,8 +15,7 @@ export async function POST(
   try {
     await setPrimaryUserEmail(session.user.id, id);
     return NextResponse.json({ status: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Something went wrong.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Something went wrong.");
   }
 }

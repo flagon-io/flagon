@@ -182,39 +182,43 @@ func (d *DB) InviteMember(ctx context.Context, actorID, slug, login, role string
 // email, ordered by email), but only when the caller is a member (the SECURITY
 // DEFINER helper gates on that). Returns the items plus the opaque next cursor.
 func (d *DB) ListInvitations(ctx context.Context, actorID, slug string, q paginate.Query) ([]Invitation, string, error) {
-	if d == nil || d.pool == nil {
-		return nil, "", ErrUnavailable
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	cur, err := cursorArg(q, 2)
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := d.pool.Query(ctx,
-		`SELECT id, email, role, status, inviter, expires_at, created_at, sort_key
-		 FROM flagon.org_invitations($1, $2, $3, $4, $5)`, actorID, slug, q.Q, q.Clamp()+1, cur)
+	var invites []Invitation
+	var next string
+	// Runs as the actor (RLS user bound): the definer window checks the caller
+	// against the transaction's bound user, not just the p_actor argument.
+	err = d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx,
+			`SELECT id, email, role, status, inviter, expires_at, created_at, sort_key
+			 FROM flagon.org_invitations($1, $2, $3, $4, $5)`, actorID, slug, q.Q, q.Clamp()+1, cur)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		invites = []Invitation{}
+		keys := [][]string{}
+		for rows.Next() {
+			var inv Invitation
+			var sk []string
+			if err := rows.Scan(&inv.ID, &inv.Email, &inv.Role, &inv.Status, &inv.Inviter, &inv.ExpiresAt, &inv.CreatedAt, &sk); err != nil {
+				return err
+			}
+			invites = append(invites, inv)
+			keys = append(keys, sk)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		invites, next = paginate.SliceKeyed(invites, keys, q.Clamp())
+		return nil
+	})
 	if err != nil {
 		return nil, "", err
 	}
-	defer rows.Close()
-
-	invites := []Invitation{}
-	keys := [][]string{}
-	for rows.Next() {
-		var inv Invitation
-		var sk []string
-		if err := rows.Scan(&inv.ID, &inv.Email, &inv.Role, &inv.Status, &inv.Inviter, &inv.ExpiresAt, &inv.CreatedAt, &sk); err != nil {
-			return nil, "", err
-		}
-		invites = append(invites, inv)
-		keys = append(keys, sk)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", err
-	}
-	invites, next := paginate.SliceKeyed(invites, keys, q.Clamp())
 	return invites, next, nil
 }
 
@@ -254,7 +258,7 @@ func (d *DB) InvitationByToken(ctx context.Context, token string) (*InviteLookup
 	if d == nil || d.pool == nil {
 		return nil, ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := withQueryTimeout(ctx)
 	defer cancel()
 
 	var l InviteLookup
@@ -273,25 +277,32 @@ func (d *DB) InvitationByToken(ctx context.Context, token string) (*InviteLookup
 
 // AcceptInvitation joins the given user to the org the token was issued for,
 // after checking the invite is pending, unexpired, and addressed to their email.
-// Idempotent on the membership. Runs through the SECURITY DEFINER helper (the
-// user is not yet a member and cannot see the org under RLS). Returns the org
-// slug + name so the caller can route/notify.
+// The acceptance itself runs through the SECURITY DEFINER helper (the user is not
+// yet a member and cannot see the org under RLS), but inside a transaction bound
+// to the accepting user: the helper verifies that binding, and once it has joined
+// the user the org is visible, so the audit entry commits atomically with the
+// membership. Returns the org slug + name so the caller can route/notify.
 func (d *DB) AcceptInvitation(ctx context.Context, userID, email, token string) (orgSlug, orgName, invitedBy string, err error) {
-	if d == nil || d.pool == nil {
-		return "", "", "", ErrUnavailable
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	var inviter *string
-	err = d.pool.QueryRow(ctx,
-		`SELECT org_slug, org_name, invited_by FROM flagon.accept_invitation($1, $2, $3)`,
-		userID, email, hashToken(token)).Scan(&orgSlug, &orgName, &inviter)
+	err = d.inUserTx(ctx, userID, func(ctx context.Context, tx pgx.Tx) error {
+		var inviter *string
+		if err := tx.QueryRow(ctx,
+			`SELECT org_slug, org_name, invited_by FROM flagon.accept_invitation($1, $2, $3)`,
+			userID, email, hashToken(token)).Scan(&orgSlug, &orgName, &inviter); err != nil {
+			return mapAcceptErr(err)
+		}
+		if inviter != nil {
+			invitedBy = *inviter
+		}
+		// The caller is a member now, so the org resolves under their RLS context.
+		orgID, _, err := resolveOrg(ctx, tx, orgSlug)
+		if err != nil {
+			return err
+		}
+		return recordAudit(ctx, tx, orgID, userID, audit.ActionInvitationAccepted, "member", userID,
+			email+" accepted an invitation and joined the organization")
+	})
 	if err != nil {
-		return "", "", "", mapAcceptErr(err)
-	}
-	if inviter != nil {
-		invitedBy = *inviter
+		return "", "", "", err
 	}
 	return orgSlug, orgName, invitedBy, nil
 }
@@ -310,6 +321,8 @@ func mapAcceptErr(err error) error {
 			return ErrInviteNotPending
 		case "42501": // insufficient_privilege (email mismatch)
 			return ErrInviteEmailMismatch
+		case "28000": // invalid_authorization_specification (caller is not the bound user)
+			return ErrForbidden
 		}
 	}
 	if errors.Is(err, pgx.ErrNoRows) {

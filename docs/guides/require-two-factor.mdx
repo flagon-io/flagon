@@ -1,0 +1,149 @@
+---
+title: Require two-factor authentication
+description: Turn on the organization-wide two-factor requirement, and understand what happens to members who haven't set it up.
+---
+
+**Two-factor authentication (2FA)** adds a second step at sign-in, a 6-digit code from an
+authenticator app, so a stolen password alone can't open an account. Each person turns on 2FA
+for their own account. An organization can then **require** it: members without 2FA can't use
+the organization, from the dashboard, the API, or the assistant, until they enable it.
+
+By the end of this guide your organization will require 2FA, and you will know what members
+without it experience and how to check who is affected.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** organization **owner** or **admin**.
+- **Your own 2FA:** enabled on your account first. Flagon won't let you turn the requirement on
+  otherwise (the dashboard disables the switch and the API answers `403`), so you can't lock
+  yourself out.
+- **API token scopes:** `read:org` to read the policy, `write:org` to change it.
+
+</Callout>
+
+## Steps
+
+<Steps>
+
+<Step title="Enable 2FA on your own account">
+
+Go to your personal **Settings > Password and authentication** (`/settings/security`), and
+under **Two-factor authentication** enable **Authenticator app (TOTP)**. Confirm your password,
+scan the QR code with an authenticator app, enter a code, and save your backup codes somewhere
+safe.
+
+</Step>
+
+<Step title="Turn on the requirement">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open organization **Settings > Authentication** (under **Security**).
+2. Turn on **Require two-factor authentication**.
+
+If the switch is disabled with a warning to enable 2FA on your own account first, finish the
+previous step. Turning the requirement off is always allowed.
+
+</Tab>
+
+<Tab title="API">
+
+The requirement is `enforce_two_factor` in the organization's security policy. `PUT` replaces
+the whole policy, so read it first and send every field back:
+
+```bash
+curl https://api.flagon.io/orgs/acme/security \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+# {"enforce_two_factor": false, "require_sso": false, "base_permission": "read"}
+
+curl -X PUT https://api.flagon.io/orgs/acme/security \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"enforce_two_factor": true, "require_sso": false, "base_permission": "read"}'
+```
+
+The API enforces the lockout check itself: if your own account has no 2FA, turning the
+requirement on returns `403` with
+`enable two-factor authentication on your own account before requiring it for the organization`.
+The check applies only when the requirement goes from off to on, and never to organization
+access tokens.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Require two-factor authentication for everyone in acme.
+
+The assistant proposes **Confirm: Update security policy for "acme"** and changes only
+`enforce_two_factor`.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="What members without 2FA see">
+
+The next time a member without 2FA opens any page in the organization, Flagon redirects them to
+a **Two-factor authentication required** page that names the organization. It offers:
+
+- **Set up two-factor**, which opens their personal security settings (outside the organization,
+  so the redirect can't loop);
+- **I've enabled it - continue**, which takes them back into the organization.
+
+They stay members, keep their roles, and can still use their personal settings and any other
+organizations that don't require 2FA. Nothing is deleted; they just can't use this organization
+until 2FA is on. Leaving the organization is still allowed.
+
+</Step>
+
+<Step title="Verify it worked">
+
+- `GET /orgs/acme/security` returns `"enforce_two_factor": true`, and every organization object
+  (for example in `GET /orgs`) carries the same flag.
+- The audit log records `organization.security_changed` with the summary
+  `enabled the two-factor authentication requirement`.
+- Sign in as a test member without 2FA and open the organization: you land on the
+  **Two-factor authentication required** page.
+
+</Step>
+
+</Steps>
+
+## Where the requirement applies
+
+The API enforces the requirement, not just the dashboard. It checks every operation under
+`/orgs/<slug>/...` (except leaving the organization), every assistant and MCP tool call that
+names the organization, and every assistant conversation in it. A member without 2FA gets
+`403` with
+`this organization requires two-factor authentication; enable it on your account to continue`,
+whether they call from a dashboard session or with a **personal access token**. The dashboard
+adds the redirect to the **Two-factor authentication required** page on top.
+
+<Callout type="note" title="Organization access tokens are exempt">
+
+An organization access token acts as a service identity that never signs in interactively, so
+the 2FA requirement does not apply to it. Owners and admins control those tokens' lifetimes and
+scopes; review and revoke them as part of your policy. See
+[Automate with access tokens](/docs/guides/automate-with-access-tokens).
+
+</Callout>
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `403` | `you don't have permission to do that` | Only owners and admins can read or change the policy. |
+| `403` | `enable two-factor authentication on your own account before requiring it for the organization` | Turn on 2FA for your own account, then try again. |
+| `403` | `this organization requires two-factor authentication; enable it on your account to continue` | The caller has no 2FA. Enable it in personal **Settings > Password and authentication**. |
+| `422` | `validation failed` | The `PUT` body is missing a field. Send `enforce_two_factor`, `require_sso`, and `base_permission` together. |
+
+## Related
+
+- [Two-factor authentication](/docs/platform/two-factor)
+- [Set up SSO with OIDC](/docs/guides/set-up-sso-oidc)
+- [Review the audit log](/docs/guides/review-the-audit-log)
+- [Account](/docs/platform/account)

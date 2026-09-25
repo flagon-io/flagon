@@ -1,0 +1,13 @@
+{
+  "title": "Troubleshooting",
+  "pages": [
+    "overview",
+    "---By symptom---",
+    "sign-in-and-sso",
+    "access-and-permissions",
+    "api-errors",
+    "assistant-and-mcp",
+    "---Self-hosted instances---",
+    "self-hosting-issues"
+  ]
+}

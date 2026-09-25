@@ -2,6 +2,7 @@
 
 import { Toaster as Sonner, toast } from "sonner";
 import type { ComponentProps, CSSProperties } from "react";
+import { cn } from "../lib/cn";
 
 /**
  * Transient, stacked notifications (Sonner). Mount `<Toaster />` once near the
@@ -12,7 +13,7 @@ import type { ComponentProps, CSSProperties } from "react";
 export function Toaster({ className, style, ...props }: ComponentProps<typeof Sonner>) {
   return (
     <Sonner
-      className="toaster group"
+      className={cn("toaster group", className)}
       style={
         {
           "--normal-bg": "var(--color-popover)",

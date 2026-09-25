@@ -1,14 +1,11 @@
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { ExternalLink } from "lucide-react";
-import { auth } from "@/lib/auth";
+import { getOrgContext } from "@/lib/org-context";
 import { Badge, Button } from "@flagon-io/ui";
 import { PageBody } from "@/components/shell/page-header";
 import { SettingsCard } from "@/components/settings/settings-card";
 
-export default async function BillingPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
+export default async function BillingPage({ params }: { params: Promise<{ org: string }> }) {
+  await getOrgContext((await params).org);
 
   return (
     <PageBody>

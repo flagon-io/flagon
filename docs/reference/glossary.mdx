@@ -1,0 +1,267 @@
+---
+title: Glossary
+description: Concise definitions of the terms used across Flagon's product, API, and documentation.
+---
+
+Short definitions of the terms Flagon uses, in alphabetical order. Each links to
+the page with the details.
+
+## A
+
+**Access token.** A secret starting with `flagon_` that authenticates API and
+MCP requests as a principal. Either a personal access token or an organization
+access token. Created and revoked only in the dashboard. See
+[Authentication and scopes](/docs/api/authentication).
+
+**Action key.** The stable, dotted name of an audit log entry, such as
+`project.deleted`. See [Audit actions](/docs/reference/audit-actions).
+
+**Admin (organization role).** Manages an organization's members, teams,
+security, SSO, tokens, and audit log, and is implicitly an owner of every
+project. Cannot delete the organization. See
+[Roles matrix](/docs/reference/roles-matrix).
+
+**Admin (project role).** The highest rung of the project role ladder: can
+manage the project's collaborators and team grants.
+
+**Assistant.** The AI agent built into the dashboard. It operates Flagon on your
+behalf with your permissions, runs reads freely, and proposes every change for
+you to confirm. See [Assistant](/docs/ai/assistant).
+
+**Audit log.** An organization's append-only record of every change to its
+state: who did what, to what, when, and from where. Readable by owners and
+admins. See [Audit log](/docs/platform/audit-log).
+
+## B
+
+**Base permission.** The organization-wide floor of project access every member
+gets on every project: `none`, `read` (the default), `triage`, `write`,
+`maintain`, or `admin`. Explicit grants can raise it for a person, never lower
+it.
+
+## C
+
+**Changelog.** The public list of shipped changes, one Markdown file per entry
+in the `changelog/` folder, served by the API at `GET /changelog`.
+
+**Collaborator.** An organization member with a direct role grant on one
+project.
+
+**Corpus.** The compiled, embedded form of a content tree (docs, roadmap, or
+changelog) that the API serves. Regenerated with `make docs`, `make roadmap`, and
+`make changelog`. See [Content corpora](/docs/architecture/content-corpora).
+
+**Cursor.** The opaque value in a list response's `Link` header that fetches the
+next page. See [Pagination and search](/docs/api/pagination).
+
+## D
+
+**Dashboard.** The Flagon web app at `app.flagon.io`. It holds your session and
+calls the API on your behalf.
+
+**Deleted archive.** Where soft-deleted resources wait to be restored for 30
+days: an organization's deleted projects (listed for owners and admins), and the
+organizations you owned that were deleted in the last 30 days.
+
+## E
+
+**Effective role.** A person's actual role on a project: the highest of their
+organization-derived role, their direct grant, and every grant from a team they
+belong to.
+
+**Expand.** The `expand[]` query parameter that inlines a related object in a
+response instead of only its id. See
+[Expanding responses](/docs/api/expanding-responses).
+
+## F
+
+**Full access.** A token created with no scope restrictions. It is still bounded
+by its principal's role.
+
+## G
+
+**Gateway.** The web app's role in front of the API: it verifies your session,
+then forwards the request to the API with the internal token and your identity.
+It never writes domain data itself.
+
+**Grant.** A role given to a user or a team on one project.
+
+## H
+
+**Human in the loop.** The rule that the assistant never changes anything on
+its own: it returns a proposal and the change runs only after you confirm it.
+
+## I
+
+**Internal token.** The shared secret (`FLAGON_INTERNAL_TOKEN`) the web app uses
+to call the API. Some operations, such as token management and the assistant,
+accept only this credential, never an access token.
+
+**Invitation.** An emailed link that lets someone without a Flagon account join
+an organization. Valid for 7 days.
+
+## M
+
+**Maintain.** The fourth project role, between `write` and `admin`. Today it
+adds renaming a project's slug; more project settings will attach to it.
+
+**Maintainer (team role).** Can edit a team and manage its members. A team's
+creator is its first maintainer.
+
+**MCP.** The Model Context Protocol. Flagon's MCP server lets external agents
+such as Claude Desktop and Cursor use the same tools as the assistant, at
+`mcp.flagon.io` or `/mcp`. See [MCP server](/docs/ai/mcp).
+
+**Member (organization role).** Works in an organization; their project access
+starts at the base permission.
+
+**Member (team role).** Belongs to a team and inherits its project grants and
+ownerships.
+
+**Metering.** Counting assistant calls per organization so the daily limit can
+be enforced. See [Limits](/docs/reference/limits).
+
+**Mock provider.** The offline AI provider the API uses when no model is
+configured. It keeps the assistant working with no keys.
+
+## N
+
+**Notification.** A personal message to one user, such as being added to a
+project. Separate from the audit log. See
+[Notifications](/docs/platform/notifications).
+
+## O
+
+**Operation.** One API endpoint, identified by its `operationId` (for example
+`create-project`). Every operation an access token can reach has a scope and
+(all but one) a matching tool.
+
+**Organization.** The tenant everything else lives in: members, teams,
+projects, tokens, security settings, and the audit log. Dashboard URLs start with
+its slug (`app.flagon.io/<org>`). See
+[Organizations](/docs/platform/organizations).
+
+**Organization access token.** A token that acts as a service principal inside
+one organization, with a role chosen at creation. Prefix `flagon_oat_`. Exempt
+from the organization's 2FA and SSO requirements, and refused (`403`) on
+account-level operations such as creating or leaving an organization.
+
+**Owner (organization role).** Full control of an organization, including
+deleting it. An organization always has at least one.
+
+**Owner (project tier).** A user or team above the project role ladder that can
+delete and restore the project and manage its owners. Every organization owner
+and admin is implicitly one.
+
+## P
+
+**Personal access token.** A token that acts as you in every organization you
+belong to. Prefix `flagon_pat_`.
+
+**Planned.** A docs page status for a feature that is not built yet. The page
+appears in navigation with a "not written yet" state.
+
+**Principal.** Whoever a request acts as: a person, or an organization access
+token's service principal.
+
+**Project.** The core unit of work in an organization: a deployable app or
+service with a name, slug, description, README, and repository URL. See
+[Projects](/docs/platform/projects).
+
+**Project role.** A rung on the ladder, lowest first: `read`, `triage`, `write`,
+`maintain`, `admin`.
+
+**Proposal.** A change the assistant has prepared but not run, shown for you to
+confirm or dismiss.
+
+**Public tool.** A tool the unauthenticated MCP server exposes. Today only the
+documentation tools, `search_docs` and `get_doc`.
+
+## Q
+
+**QUERY method.** An HTTP method for safe, read-only requests with a body. Every
+paginated list accepts it as an alternative to `GET`.
+
+## R
+
+**Rate limit.** A per-principal cap on API requests per second (default 50,
+bursts of 300). Over it, requests get `429` with a `Retry-After` header. See
+[Limits](/docs/reference/limits).
+
+**Read.** The lowest project role: see the project and who has access.
+
+**Request id.** The `X-Request-Id` header on every API response. Quote it when
+reporting a failure; server logs record it. See [Errors](/docs/api/errors).
+
+**Roadmap.** The public board of planned work, one Markdown file per item in the
+`roadmap/` folder, each at a stage of `concept`, `alpha`, or `beta`. Served at
+`GET /roadmap`.
+
+**Row-level security (RLS).** Postgres policies that restrict every query to the
+rows the acting user may see. The API's runtime database role cannot bypass
+them. See [Tenant isolation](/docs/security/tenant-isolation).
+
+## S
+
+**Scope.** A named permission on an access token, such as `read:project`.
+Parents imply children. See [Scopes](/docs/reference/scopes).
+
+**Service principal.** The non-human user an organization access token acts as.
+It is a member of one organization with the token's role, and appears in the
+audit log under the token's name.
+
+**Slug.** The URL-safe identifier of an organization, project, or team, such as
+`billing-api`. Derived from the name when you do not give one.
+
+**Soft delete.** Deleting by marking a resource deleted rather than erasing it,
+so it can be restored. Organizations and projects are soft-deleted.
+
+**SSO provider.** An organization's OIDC or SAML identity provider
+configuration, such as Okta or Microsoft Entra ID. See
+[Single sign-on](/docs/platform/sso).
+
+**SSO requirement.** An organization setting that requires members to sign in
+through one of the organization's SSO providers. The API enforces it on every
+organization operation; owners are exempt so they can always fix a broken
+provider. See [Roles matrix](/docs/reference/roles-matrix).
+
+## T
+
+**Team.** A named group of organization members that can be granted a project
+role or made a project owner as a unit. See [Teams](/docs/platform/teams).
+
+**Tool.** One entry in the shared tool registry. The same tool is available to
+the assistant and over MCP, with the same scope as its API operation. See
+[Tools](/docs/ai/tools).
+
+**Tool registry.** The single list of tools in `api/internal/ai` behind the
+assistant and the MCP server.
+
+**Triage.** The second project role, between `read` and `write`, reserved for
+future powers.
+
+**Two-factor requirement.** An organization setting that requires every member
+to have two-factor authentication enabled before they can open the organization
+or use it through the API, a personal access token, the assistant, or MCP. See
+[Two-factor authentication](/docs/platform/two-factor).
+
+## V
+
+**Viewer.** A legacy organization role, still accepted by the API and by
+organization access tokens, with read access to every project and no write
+access.
+
+**Visibility.** A docs page setting: `public` pages are served to everyone;
+`internal` pages are readable only through the in-product assistant and the
+authenticated MCP server. No page is internal today.
+
+## W
+
+**Write.** The third project role: edit a project's metadata.
+
+## Related
+
+- [Core concepts](/docs/get-started/core-concepts)
+- [Roles matrix](/docs/reference/roles-matrix)
+- [Scopes](/docs/reference/scopes)
+- [Using the API](/docs/api/using-the-api)

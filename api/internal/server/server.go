@@ -7,6 +7,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/flagon-io/flagon/api/internal/changelog"
 	"github.com/flagon-io/flagon/api/internal/docs"
 	"github.com/flagon-io/flagon/api/internal/roadmap"
+	"github.com/flagon-io/flagon/api/internal/service"
 )
 
 // Options configures optional server dependencies.
@@ -66,6 +68,22 @@ type Options struct {
 	// other path 404s, so the public MCP host never exposes the rest of the API.
 	// Empty (local dev, spec generation) leaves the /mcp path as the only mount.
 	MCPHost string
+
+	// Limits configures the request guards (body cap, per-principal rate limit,
+	// trusted client-IP header). The zero value caps bodies at
+	// DefaultMaxBodyBytes, trusts only the TCP peer address, and does not rate
+	// limit; cmd/flagon-server passes its flags through WithLimits.
+	Limits Limits
+
+	// ServiceOptions configure the service every handler runs through (e.g. the
+	// transactional mailer), so REST gets the same side effects as the agent/MCP
+	// tools built over a service with the same options.
+	ServiceOptions []service.Option
+
+	// onOperation, when set, observes every operation as it is registered with
+	// huma - including Hidden ones (the QUERY twins) that never reach the OpenAPI
+	// spec. Tests use it to enumerate the real, complete operation set.
+	onOperation func(huma.Operation)
 }
 
 // Option mutates Options.
@@ -121,6 +139,12 @@ func WithAudit(store *audit.Store) Option {
 	return func(o *Options) { o.Audit = store }
 }
 
+// WithServiceOptions passes options (e.g. service.WithMailer) to the service the
+// handlers run through.
+func WithServiceOptions(opts ...service.Option) Option {
+	return func(o *Options) { o.ServiceOptions = append(o.ServiceOptions, opts...) }
+}
+
 // WithMCPHost dedicates a hostname (e.g. "mcp.flagon.io") to the MCP endpoint:
 // on that host the endpoint is served at the root and all other paths 404. Empty
 // is a no-op (only the /mcp path is mounted). Requires WithMCP.
@@ -146,6 +170,18 @@ func New(opts ...Option) (chi.Router, huma.API) {
 
 	router := chi.NewMux()
 
+	// Request guards run first, ahead of every route (and the MCP host gate):
+	// a request id for correlating logs with error reports, the caller's
+	// resolved network address, the global body cap, then the rate limiter.
+	maxBody := options.Limits.MaxBodyBytes
+	if maxBody <= 0 {
+		maxBody = DefaultMaxBodyBytes
+	}
+	router.Use(withRequestID, withConnIP(options.Limits.ClientIPHeader), withBodyLimit(maxBody))
+	if options.Limits.RateLimit > 0 {
+		router.Use(withRateLimit(newRateLimiter(options.Limits.RateLimit, options.Limits.RateBurst), options.InternalToken))
+	}
+
 	// The MCP host gate is middleware, so it must be installed before any routes
 	// (chi requires this). On mcp.flagon.io it serves the MCP endpoint at the root
 	// and 404s everything else; on every other host it is a pass-through. Only
@@ -158,23 +194,47 @@ func New(opts ...Option) (chi.Router, huma.API) {
 	// The spec itself stays served (huma keeps /openapi.json, /openapi.yaml).
 	config := huma.DefaultConfig("Flagon API", "0.0.0")
 	config.DocsPath = ""
+	// Internal failure detail (raw error text in a 5xx problem's `errors`) is
+	// logged with the request id and stripped before it reaches the client.
+	config.Transformers = append(config.Transformers, redactServerErrors)
 	api := humachi.New(router, config)
 
+	// Registration goes through reg, which is api itself unless a test asked to
+	// observe every registered operation. The returned api is always the real one.
+	reg := api
+	if options.onOperation != nil {
+		reg = recordingAPI{API: api, record: options.onOperation}
+	}
+
+	// One service over the store backs every user-facing handler (and, via the
+	// registry built in main, every agent/MCP tool), so the front doors share one
+	// implementation of each operation.
+	// Both auth middlewares also enforce the org security policy (2FA + SSO
+	// requirements) on every /orgs/{slug} operation, once the caller is known.
+	svc := service.New(options.Identity, options.ServiceOptions...)
+	d := deps{
+		svc:      svc,
+		store:    options.Identity,
+		auth:     withOrgPolicy(api, svc, combinedAuth(api, options.Identity, options.InternalToken)),
+		internal: withOrgPolicy(api, svc, internalAuth(api, options.InternalToken)),
+	}
+
 	registerHealthChecks(router, options)
-	registerIndex(router, api)
-	registerIdentityAPI(api, options.Identity, options.InternalToken)
-	registerMembersAPI(api, options.Identity, options.InternalToken)
-	registerInvitationsAPI(api, options.Identity, options.InternalToken)
-	registerProjectsAPI(api, options.Identity, options.InternalToken)
-	registerProjectMembersAPI(api, options.Identity, options.InternalToken)
-	registerProjectTeamsAPI(api, options.Identity, options.InternalToken)
-	registerTeamsAPI(api, options.Identity, options.InternalToken)
-	registerAuditAPI(api, options.Identity, options.Audit, options.InternalToken)
-	registerOrgSecurityAPI(api, options.Identity, options.InternalToken)
-	registerSSOAPI(api, options.Identity, options.InternalToken)
-	registerTokensAPI(api, options.Identity, options.InternalToken)
-	registerNotificationsAPI(api, options.Identity, options.InternalToken)
-	registerAIAPI(api, options.AI, options.InternalToken)
+	registerIndex(router, reg)
+	registerIdentityAPI(reg, d)
+	registerMembersAPI(reg, d)
+	registerInvitationsAPI(reg, d)
+	registerProjectsAPI(reg, d)
+	registerProjectMembersAPI(reg, d)
+	registerProjectTeamsAPI(reg, d)
+	registerTeamsAPI(reg, d)
+	registerAuditAPI(reg, d, options.Audit)
+	registerOrgSecurityAPI(reg, d)
+	registerSSOAPI(reg, d)
+	registerSSOProvidersAPI(reg, d, options.InternalToken)
+	registerTokensAPI(reg, d)
+	registerNotificationsAPI(reg, d)
+	registerAIAPI(reg, d, options.AI)
 
 	// Docs content and MCP are served off the documented spec, on the chi router
 	// directly - like the health checks and the index. The OpenAPI spec stays the
@@ -205,7 +265,9 @@ func registerHealthChecks(router chi.Router, options Options) {
 			defer cancel()
 			if err := options.ReadyCheck(ctx); err != nil {
 				body["status"] = "degraded"
-				body["database"] = "unavailable: " + err.Error()
+				// The cause (hostnames, driver text) is logged, never served.
+				slog.WarnContext(r.Context(), "readiness check failed", "request_id", RequestID(r.Context()), "err", err)
+				body["database"] = "unavailable"
 				code = http.StatusServiceUnavailable
 			}
 		}
@@ -234,4 +296,25 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// recordingAPI is a huma.API whose adapter reports each operation as it is
+// registered, then registers it normally. See Options.onOperation.
+type recordingAPI struct {
+	huma.API
+	record func(huma.Operation)
+}
+
+func (r recordingAPI) Adapter() huma.Adapter {
+	return recordingAdapter{Adapter: r.API.Adapter(), record: r.record}
+}
+
+type recordingAdapter struct {
+	huma.Adapter
+	record func(huma.Operation)
+}
+
+func (r recordingAdapter) Handle(op *huma.Operation, handler func(huma.Context)) {
+	r.record(*op)
+	r.Adapter.Handle(op, handler)
 }

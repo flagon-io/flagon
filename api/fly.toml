@@ -11,6 +11,10 @@ primary_region = 'iad'
 # a missing/rotated key fails loud (a clear "no API key" error) instead of the
 # agent silently falling back to the offline mock.
 [env]
+# Belt and braces: Fly (FLY_APP_NAME) and the image's all-interfaces bind
+# (FLAGON_HOST=0.0.0.0) already classify this as production; pin it anyway so
+# the development fallbacks can never apply here.
+FLAGON_ENV = 'production'
 FLAGON_AI_PROVIDER = 'anthropic'
 ANTHROPIC_WORKSPACE_ID = 'wrkspc_01VHr6wAJDdVDeB2bjdU1Zhg'
 # The API and the public MCP server are one app on one set of Fly IPs. This host
@@ -18,6 +22,10 @@ ANTHROPIC_WORKSPACE_ID = 'wrkspc_01VHr6wAJDdVDeB2bjdU1Zhg'
 # other path 404s) so it never exposes the rest of the API surface. api.flagon.io
 # keeps every route, /mcp included.
 FLAGON_MCP_HOST = 'mcp.flagon.io'
+# Fly's edge sets Fly-Client-IP on every request (overwriting any client value),
+# so it is the trusted source of the caller's IP for rate limiting and the audit
+# log. Without it every caller would appear as Fly's proxy address.
+FLAGON_CLIENT_IP_HEADER = 'Fly-Client-IP'
 
 [build]
 

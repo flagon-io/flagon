@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { KeyRound, Plus, Trash2, Copy, Check } from "lucide-react";
+import { KeyRound, Plus, Trash2, Copy, Check, Pencil } from "lucide-react";
 import {
   Alert,
   Badge,
@@ -14,22 +14,23 @@ import {
   Input,
   Label,
   SelectField,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
   Textarea,
 } from "@flagon-io/ui";
-
-export interface SSOProvider {
-  id: string;
-  providerId: string;
-  issuer: string;
-  domain: string | null;
-  protocol: "oidc" | "saml";
-}
+import { errorMessage } from "@/lib/client-fetch";
+import { TableShell } from "@/components/shared/list-states";
+import type { SSOProtocol, SSOProvider } from "@/lib/api/sso-types";
 
 /**
- * Manage an org's SSO providers (OIDC + SAML). Registering one binds the org to an
- * IdP; after that, members sign in through it and are provisioned into the org. For
- * SAML, the panel surfaces the ACS + SP-metadata URLs to paste into the IdP (Okta,
- * Azure AD, ...).
+ * Manage an org's SSO providers (OIDC + SAML). The Flagon API owns this
+ * configuration (the same providers the agent and MCP can manage); secrets are
+ * write-only, so a saved provider only shows whether its secret is set. For SAML,
+ * the panel surfaces the ACS + SP-metadata URLs to paste into the IdP.
  */
 export function SSOProviders({
   slug,
@@ -41,14 +42,23 @@ export function SSOProviders({
   initial: SSOProvider[];
 }) {
   const [providers, setProviders] = useState(initial);
-  const [open, setOpen] = useState(false);
+  const [dialog, setDialog] = useState<{ mode: "new" } | { mode: "edit"; provider: SSOProvider } | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function remove(providerId: string) {
+    setRemoving(providerId);
+    setError(null);
     const res = await fetch(
       `/api/orgs/${encodeURIComponent(slug)}/sso?providerId=${encodeURIComponent(providerId)}`,
       { method: "DELETE" },
     );
-    if (res.ok) setProviders(((await res.json()) as { providers: SSOProvider[] }).providers);
+    setRemoving(null);
+    if (!res.ok) {
+      setError(await errorMessage(res, `Couldn't remove ${providerId}.`));
+      return;
+    }
+    setProviders(((await res.json()) as { providers: SSOProvider[] }).providers);
   }
 
   return (
@@ -60,11 +70,13 @@ export function SSOProviders({
             Connect your identity provider so members sign in with OIDC or SAML.
           </p>
         </div>
-        <Button size="sm" onClick={() => setOpen(true)}>
+        <Button size="sm" onClick={() => setDialog({ mode: "new" })}>
           <Plus className="size-4" />
           New provider
         </Button>
       </div>
+
+      {error && <Alert variant="destructive">{error}</Alert>}
 
       {providers.length === 0 ? (
         <Card className="flex flex-col items-center gap-2 px-6 py-10 text-center">
@@ -75,46 +87,90 @@ export function SSOProviders({
           <p className="text-sm text-muted-foreground">Add one to let members sign in through your IdP.</p>
         </Card>
       ) : (
-        <div className="divide-y divide-hairline rounded-xl border border-hairline">
-          {providers.map((p) => (
-            <div key={p.id} className="flex items-center gap-3 px-4 py-3">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/12 text-brand-bright">
-                <KeyRound className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="flex items-center gap-2 truncate text-sm font-medium text-foreground">
-                  {p.providerId}
-                  <Badge variant="outline" className="uppercase">
-                    {p.protocol}
-                  </Badge>
-                </p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {p.domain ? `${p.domain} · ` : ""}
-                  {p.issuer}
-                </p>
-              </div>
-              {p.protocol === "saml" && <SamlUrls origin={origin} providerId={p.providerId} />}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                aria-label={`Remove ${p.providerId}`}
-                onClick={() => remove(p.providerId)}
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            </div>
-          ))}
-        </div>
+        <TableShell>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="pl-4">Provider</TableHead>
+                <TableHead>Domain</TableHead>
+                <TableHead className="hidden md:table-cell">Service provider URLs</TableHead>
+                <TableHead className="w-20 pr-4 text-right">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {providers.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell className="pl-4">
+                    <div className="flex items-center gap-3">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/12 text-brand-bright">
+                        <KeyRound className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 font-medium text-foreground">
+                          {p.provider_id}
+                          <Badge variant="outline" className="uppercase">
+                            {p.type}
+                          </Badge>
+                          {p.type === "oidc" && !p.oidc?.client_secret_set && (
+                            <Badge variant="outline">No secret</Badge>
+                          )}
+                        </p>
+                        <p className="max-w-72 truncate text-xs text-muted-foreground" title={p.issuer}>
+                          {p.issuer}
+                        </p>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{p.domain || "-"}</TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    {p.type === "saml" ? (
+                      <SamlUrls origin={origin} providerId={p.provider_id} />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="pr-4 text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        aria-label={`Edit ${p.provider_id}`}
+                        disabled={removing !== null}
+                        onClick={() => setDialog({ mode: "edit", provider: p })}
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        aria-label={`Remove ${p.provider_id}`}
+                        disabled={removing !== null}
+                        onClick={() => remove(p.provider_id)}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableShell>
       )}
 
-      <NewProviderDialog
+      <ProviderDialog
+        key={dialog?.mode === "edit" ? dialog.provider.id : "new"}
         slug={slug}
-        open={open}
-        onOpenChange={setOpen}
-        onCreated={(list) => {
+        editing={dialog?.mode === "edit" ? dialog.provider : null}
+        open={dialog !== null}
+        onOpenChange={(open) => !open && setDialog(null)}
+        onSaved={(list) => {
           setProviders(list);
-          setOpen(false);
+          setDialog(null);
         }}
       />
     </div>
@@ -125,7 +181,7 @@ function SamlUrls({ origin, providerId }: { origin: string; providerId: string }
   const acs = `${origin}/api/auth/sso/saml2/sp/acs/${providerId}`;
   const metadata = `${origin}/api/auth/sso/saml2/sp/metadata?providerId=${providerId}`;
   return (
-    <div className="hidden shrink-0 flex-col items-end gap-1 md:flex">
+    <div className="flex flex-col items-start gap-1">
       <CopyField label="ACS URL" value={acs} />
       <CopyField label="Metadata" value={metadata} />
     </div>
@@ -151,18 +207,25 @@ function CopyField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function NewProviderDialog({
+/**
+ * Create a provider, or edit one. On edit the provider ID and protocol are fixed
+ * (the ID is in the IdP's callback URL), and a secret field left blank keeps the
+ * stored secret: secrets are write-only and never sent back to the browser.
+ */
+function ProviderDialog({
   slug,
+  editing,
   open,
   onOpenChange,
-  onCreated,
+  onSaved,
 }: {
   slug: string;
+  editing: SSOProvider | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: (providers: SSOProvider[]) => void;
+  onSaved: (providers: SSOProvider[]) => void;
 }) {
-  const [protocol, setProtocol] = useState<"oidc" | "saml">("oidc");
+  const [protocol, setProtocol] = useState<SSOProtocol>(editing?.type ?? "oidc");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -171,99 +234,122 @@ function NewProviderDialog({
     setBusy(true);
     setError(null);
     const f = new FormData(e.currentTarget);
-    const common = {
-      protocol,
-      providerId: String(f.get("providerId") ?? "").trim(),
-      issuer: String(f.get("issuer") ?? "").trim(),
-      domain: String(f.get("domain") ?? "").trim(),
-    };
-    const body =
-      protocol === "oidc"
-        ? {
+    const field = (name: string) => String(f.get(name) ?? "").trim();
+    const common = { domain: field("domain"), issuer: field("issuer") };
+    const clientSecret = field("clientSecret");
+    const oidc = { client_id: field("clientId"), ...(clientSecret ? { client_secret: clientSecret } : {}) };
+    const saml = { entry_point: field("entryPoint"), cert: field("cert") };
+
+    const base = `/api/orgs/${encodeURIComponent(slug)}/sso`;
+    const res = editing
+      ? await fetch(`${base}?providerId=${encodeURIComponent(editing.provider_id)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(editing.type === "oidc" ? { ...common, oidc } : { ...common, saml }),
+        })
+      : await fetch(base, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            provider_id: field("providerId"),
+            type: protocol,
             ...common,
-            clientId: String(f.get("clientId") ?? "").trim(),
-            clientSecret: String(f.get("clientSecret") ?? "").trim(),
-          }
-        : {
-            ...common,
-            entryPoint: String(f.get("entryPoint") ?? "").trim(),
-            cert: String(f.get("cert") ?? "").trim(),
-          };
-    const res = await fetch(`/api/orgs/${encodeURIComponent(slug)}/sso`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+            ...(protocol === "oidc" ? { oidc: { ...oidc, client_secret: clientSecret } } : { saml }),
+          }),
+        });
     setBusy(false);
     if (!res.ok) {
-      const b = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(b.error ?? "Could not register the provider.");
+      setError(await errorMessage(res, editing ? "Could not save the provider." : "Could not add the provider."));
       return;
     }
-    onCreated(((await res.json()) as { providers: SSOProvider[] }).providers);
+    onSaved(((await res.json()) as { providers: SSOProvider[] }).providers);
   }
 
+  const type = editing?.type ?? protocol;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg p-6">
-        <DialogTitle>New SSO provider</DialogTitle>
+        <DialogTitle>{editing ? `Edit ${editing.provider_id}` : "New SSO provider"}</DialogTitle>
         <DialogDescription className="mt-1">
-          Connect your identity provider. You&rsquo;ll paste Flagon&rsquo;s URLs into the IdP after.
+          {editing
+            ? "Changes apply at the next sign-in through this provider."
+            : "Connect your identity provider. You’ll paste Flagon’s URLs into the IdP after."}
         </DialogDescription>
         <form onSubmit={submit} className="mt-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="protocol">Protocol</Label>
-              <SelectField
-                value={protocol}
-                onValueChange={(v) => setProtocol(v as "oidc" | "saml")}
-                options={[
-                  { value: "oidc", label: "OIDC / OpenID Connect" },
-                  { value: "saml", label: "SAML 2.0" },
-                ]}
-              />
+          {!editing && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="protocol">Protocol</Label>
+                <SelectField
+                  value={protocol}
+                  onValueChange={(v) => setProtocol(v as SSOProtocol)}
+                  options={[
+                    { value: "oidc", label: "OIDC / OpenID Connect" },
+                    { value: "saml", label: "SAML 2.0" },
+                  ]}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="providerId">Provider ID</Label>
+                <Input id="providerId" name="providerId" placeholder="acme-okta" required />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="providerId">Provider ID</Label>
-              <Input id="providerId" name="providerId" placeholder="acme-okta" required />
-            </div>
-          </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="domain">Email domain</Label>
-            <Input id="domain" name="domain" placeholder="acme.com" />
+            <Input id="domain" name="domain" placeholder="acme.com" defaultValue={editing?.domain ?? ""} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="issuer">
-              {protocol === "oidc" ? "Issuer URL" : "SP entity ID"}
-            </Label>
+            <Label htmlFor="issuer">{type === "oidc" ? "Issuer URL" : "SP entity ID"}</Label>
             <Input
               id="issuer"
               name="issuer"
-              placeholder={protocol === "oidc" ? "https://acme.okta.com" : "https://app.flagon.io/saml/acme"}
+              placeholder={type === "oidc" ? "https://acme.okta.com" : "https://app.flagon.io/saml/acme"}
+              defaultValue={editing?.issuer ?? ""}
               required
             />
           </div>
 
-          {protocol === "oidc" ? (
+          {type === "oidc" ? (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="clientId">Client ID</Label>
-                <Input id="clientId" name="clientId" required />
+                <Input id="clientId" name="clientId" defaultValue={editing?.oidc?.client_id ?? ""} required />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="clientSecret">Client secret</Label>
-                <Input id="clientSecret" name="clientSecret" type="password" required />
+                <Input
+                  id="clientSecret"
+                  name="clientSecret"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={editing?.oidc?.client_secret_set ? "Leave blank to keep the current secret" : undefined}
+                  required={!editing}
+                />
               </div>
             </div>
           ) : (
             <>
               <div className="space-y-1.5">
                 <Label htmlFor="entryPoint">IdP SSO URL (entry point)</Label>
-                <Input id="entryPoint" name="entryPoint" placeholder="https://acme.okta.com/app/.../sso/saml" required />
+                <Input
+                  id="entryPoint"
+                  name="entryPoint"
+                  placeholder="https://acme.okta.com/app/.../sso/saml"
+                  defaultValue={editing?.saml?.entry_point ?? ""}
+                  required
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="cert">IdP signing certificate (PEM)</Label>
-                <Textarea id="cert" name="cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" required />
+                <Textarea
+                  id="cert"
+                  name="cert"
+                  rows={4}
+                  placeholder="-----BEGIN CERTIFICATE-----"
+                  defaultValue={editing?.saml?.cert ?? ""}
+                  required
+                />
               </div>
             </>
           )}
@@ -275,7 +361,7 @@ function NewProviderDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={busy}>
-              {busy ? "Registering…" : "Register provider"}
+              {editing ? (busy ? "Saving…" : "Save changes") : busy ? "Registering…" : "Register provider"}
             </Button>
           </div>
         </form>

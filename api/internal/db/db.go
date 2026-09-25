@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/flagon-io/flagon/api/internal/secrets"
 )
 
 // ErrUnavailable means Postgres is not reachable or not configured. It is a
@@ -37,6 +39,9 @@ type Config struct {
 	// AppURL (FLAGON_APP_DATABASE_URL) is the RLS-enforced runtime role. Its
 	// user + password also drive app-role provisioning at boot, so the
 	// credential lives in exactly one place: this connection string.
+	// Open never falls back to MigratorURL when this is empty: that would run
+	// every request as the schema owner, which BYPASSES row-level security.
+	// Development gets a local app-role default from the server config instead.
 	AppURL string
 }
 
@@ -45,6 +50,9 @@ type Config struct {
 // is configured and reachable.
 type DB struct {
 	pool *pgxpool.Pool
+	// keys seals stored credentials at rest (see sealing.go); nil falls back to
+	// the development keyring.
+	keys *secrets.Keyring
 }
 
 // Open builds the runtime pool from the app (RLS) role. It never dials here -
@@ -53,13 +61,12 @@ type DB struct {
 // preventing the server from starting.
 func Open(ctx context.Context, cfg Config) *DB {
 	url := cfg.AppURL
-	if url == "" {
-		// No RLS role configured. Fall back to the migrator URL so local dev
-		// still works, but make the loss of isolation impossible to miss.
-		if cfg.MigratorURL != "" {
-			slog.Warn("FLAGON_APP_DATABASE_URL not set; runtime queries will use the migrator role, which BYPASSES tenant isolation - set it before production")
-		}
-		url = cfg.MigratorURL
+	if url == "" && cfg.MigratorURL != "" {
+		// Fail closed: never run runtime queries as the migrator (the server
+		// also refuses to start in production without an app URL, and fills a
+		// local app-role URL in development).
+		slog.Error("FLAGON_APP_DATABASE_URL not set; refusing to run runtime queries as the migrator role (it bypasses tenant isolation); starting in degraded mode")
+		return &DB{}
 	}
 	if url == "" {
 		slog.Warn("no database configured (DATABASE_URL / FLAGON_APP_DATABASE_URL); starting in degraded mode")
@@ -95,6 +102,16 @@ func (d *DB) Ping(ctx context.Context) error {
 		return errors.Join(ErrUnavailable, err)
 	}
 	return nil
+}
+
+// queryTimeout bounds every runtime database round-trip (a user transaction or a
+// single definer-window read). It is deliberately one constant so the budget is
+// tuned in one place rather than drifting across call sites.
+const queryTimeout = 5 * time.Second
+
+// withQueryTimeout derives the standard per-query deadline from ctx.
+func withQueryTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, queryTimeout)
 }
 
 // Close releases the pool. Safe to call on a degraded (nil-pool) handle.

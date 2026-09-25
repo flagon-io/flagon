@@ -6,6 +6,7 @@ import { cn } from "../lib/cn";
 export function Spinner({ className, ...props }: ComponentProps<typeof Loader2>) {
   return (
     <Loader2
+      data-slot="spinner"
       role="status"
       aria-label="Loading"
       className={cn("size-4 animate-spin text-muted-foreground", className)}

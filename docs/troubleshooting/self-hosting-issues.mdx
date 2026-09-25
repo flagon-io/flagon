@@ -1,0 +1,288 @@
+---
+title: Self-hosting issues
+description: Diagnose a self-hosted Flagon instance - the API log, startup refusals in production mode, migration failures, database role and RLS errors, the app failing to reach the API, internal token mismatches, email, and build problems.
+---
+
+A self-hosted instance has three moving parts that must agree with each other:
+the API and its two database roles, the app and its database, and the shared
+internal token between the app and the API. Almost every self-hosting problem is
+one of those disagreeing. Start with the API's log and health routes, then find
+your symptom below.
+
+## Reading the API log
+
+The API writes one JSON object per line to stdout. At boot it reports each step,
+so the first few lines usually name the problem. Messages worth knowing:
+
+| Message (`msg`) | Level | Meaning |
+| --- | --- | --- |
+| `database setup complete` | info | `flagon-server migrate` finished. |
+| `api listening` | info | The server is up, with the `addr` it bound. |
+| `database unavailable; starting DEGRADED without migrations, /readyz will report it` | warn | Postgres did not answer after 6 attempts. The API serves, but `/readyz` returns `503`. |
+| `FLAGON_APP_DATABASE_URL not set; skipping app-role provisioning and grants (the runtime never falls back to the migrator role, so serving requires it)` | warn | `flagon-server migrate` ran without the app-role URL, so it did not provision the role. `serve` refuses to start without it in production. |
+| `FLAGON_INTERNAL_TOKEN is not set; using the PUBLIC development token. Never expose this server to a network` | warn | Development mode with no internal token. Expected locally only. |
+| `FLAGON_SECRETS_KEY is not set; stored credentials are encrypted with the PUBLIC development key, which is NOT secret. Set FLAGON_SECRETS_KEY before storing real SSO credentials` | warn | Development mode with no secrets key. Expected locally only. |
+| `secrets encryption key loaded` | info | The secrets keyring is ready; `key_id` names the current key and `retired_key_ids` any keys from `FLAGON_SECRETS_KEYS_RETIRED`. |
+| `encrypted stored credentials at rest under the current key` | info | The API sealed SSO secrets that were still plaintext or under a retired key; `rows` says how many. |
+| `stored credentials: nothing left to re-seal under the current key` | info | Every stored SSO secret it could open is under the current key. After a rotation, and with no `could not open` warning, you can remove `FLAGON_SECRETS_KEYS_RETIRED`. |
+| `could not open stored SSO secrets; leaving the row as is` | warn | An SSO secret was sealed with a key other than the current `FLAGON_SECRETS_KEY` or a retired one. Add the old key to `FLAGON_SECRETS_KEYS_RETIRED`, or enter that provider's secret again. |
+| `mail provider is the LOG mailer in production: invitation emails are NOT delivered; set RESEND_API_KEY` | warn | Production without an email key. Invitations are created but not emailed. |
+| `could not provision app role; runtime database access may fail` | warn | Creating or altering the app role failed. See [database role errors](#database-role-and-rls-errors). |
+| `app role is managed by the database; leaving its password/attributes to the platform` | info | Your Postgres manages roles itself. Expected on some managed providers. |
+| `could not grant runtime privileges to app role` | warn | The grants step failed; queries may fail with permission errors. |
+| `AI agent enabled` | info | Which AI `provider` and `model` the assistant uses, and the `daily_limit`. |
+| `AI provider is the offline MOCK (no model configured); set ANTHROPIC_API_KEY or an OpenAI-compatible endpoint (FLAGON_AI_BASE_URL) for real responses` | warn | No model is configured. See [Assistant and MCP](/docs/troubleshooting/assistant-and-mcp#the-assistant-answers-in-mock-mode). |
+| `could not load docs corpus; documentation tools/endpoints disabled` | warn | The embedded docs failed to load; everything else serves. |
+| `flagon exited with error` | error | A fatal error; the `err` field says which. |
+| `internal error` | error | A request failed with a `5xx`. The `request_id` matches the response's `X-Request-Id` header, and `causes` holds the underlying error text that the response leaves out. |
+
+## The API won't start
+
+### "... is required in production"
+
+The API decides at startup whether it runs in development or production mode. If
+`FLAGON_ENV` is unset, it is production whenever it runs on Fly.io or binds
+anything other than a loopback address (such as `FLAGON_HOST=0.0.0.0`, which the
+API container image sets). Off Fly, the default `FLAGON_HOST` is `127.0.0.1`,
+which is development. In production it refuses to start rather than fall back to
+a public development value. The process exits with `flagon exited with error` and
+one of these in `err`:
+
+| `err` | Fix |
+| --- | --- |
+| `DATABASE_URL is required in production (set FLAGON_ENV=development for local development)` | Set `DATABASE_URL`, or, on your own machine, put the API in development mode. |
+| `FLAGON_APP_DATABASE_URL is required in production: runtime queries must use the NOBYPASSRLS app role, never the migrator (set FLAGON_ENV=development for local development)` | Set `FLAGON_APP_DATABASE_URL` to the app role. |
+| `FLAGON_INTERNAL_TOKEN is required in production: set a long random secret shared with the app (set FLAGON_ENV=development for local development)` | Set `FLAGON_INTERNAL_TOKEN` to the same random value on the API and the app. |
+| `FLAGON_INTERNAL_TOKEN is set to the public development value; set a real secret in production` | Replace `dev-internal-token` with a real secret on both sides. |
+| `FLAGON_SECRETS_KEY is required in production: set a base64-encoded 32-byte key (openssl rand -base64 32)` | Generate a key with `openssl rand -base64 32` and set it. |
+| `invalid FLAGON_SECRETS_KEY: ...` | The value is not base64 or not 32 bytes. Generate a new one the same way. |
+| `ai provider: FLAGON_AI_PROVIDER=anthropic requires ANTHROPIC_API_KEY ...`, `ai provider: FLAGON_AI_PROVIDER=openai requires ...`, or `ai provider: unknown FLAGON_AI_PROVIDER ...` | Set the pinned provider's key, fix the provider name, or unset `FLAGON_AI_PROVIDER` to fall back automatically. |
+| `mail provider: FLAGON_MAIL_PROVIDER=resend requires RESEND_API_KEY` or `mail provider: unknown FLAGON_MAIL_PROVIDER ...` | Set the API's `RESEND_API_KEY`, or use `auto` or `log`. |
+
+**Running locally and seeing the first one?** The API is in production mode
+because it binds all interfaces, usually from a `FLAGON_HOST=0.0.0.0` in
+`api/.env` or your shell. Remove it (the default is loopback), or set
+`FLAGON_ENV=development`, and start it again. In containers, set
+`FLAGON_ENV=development` for local stacks only, as the repository's compose file
+does. Never set it on a server others can reach.
+
+### Migration errors
+
+If the database is reachable but migrating fails, the API exits with
+`flagon exited with error` and an `err` that starts with
+`database migration failed; refusing to start against a broken schema`. It
+refuses on purpose: serving against a half-known schema is worse than not
+serving. Nothing from the failed run is applied, because the run is one
+transaction.
+
+| `err` contains | Cause | Fix |
+| --- | --- | --- |
+| `was modified after being applied` ... `migrations are immutable once shipped` | A migration file that already ran against this database has changed (its checksum no longer matches `public.schema_migrations`). Usually a locally edited migration, or a build from a branch that rewrote one. | Restore the original file. Never edit an applied migration; add a new one. |
+| `apply migration <name>` | That migration's SQL failed, followed by the Postgres error. | Read the Postgres error. Common causes are a migrator role that does not own the schema, or objects created by hand that conflict with the migration. |
+| `acquire migration lock` | The migrator could not take the advisory lock. | Check that the migrator connection works and is not being cut by a proxy. |
+
+To see the error without starting the server, run `flagon-server migrate`: it
+performs the same setup and exits non-zero on failure.
+
+### "database unavailable" and a 503 from /readyz
+
+The API started degraded because it could not connect with `DATABASE_URL`.
+`/readyz` answers `{"database":"unavailable","status":"degraded"}`; the reason is
+in the API's log (`readiness check failed`, with the error). Check:
+
+- The host and port are reachable **from where the API runs**. In a container,
+  `localhost` is the container itself, not your machine.
+- The credentials and database name. The API's `DATABASE_URL` points at
+  `flagon_api`, not the app's `flagon_app`.
+- The `sslmode` your server requires.
+
+The API does not retry setup after boot. Once the database is back, restart the
+API so it migrates.
+
+## Database role and RLS errors
+
+### The app role can't be provisioned
+
+`could not provision app role` means the migrator could not create or alter the
+role named in `FLAGON_APP_DATABASE_URL`. The migrator needs permission to create
+and alter roles (the compose file's `flagon` user and a standard Postgres
+superuser can). If your provider does not allow that, create the role yourself:
+
+```sql
+CREATE ROLE flagon_app LOGIN PASSWORD '<password>'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+```
+
+Then restart the API; it grants the privileges on boot. If the grants step also
+fails (`could not grant runtime privileges to app role`), grant `USAGE` on the
+schemas and `SELECT, INSERT, UPDATE, DELETE` on the `flagon_api` tables and
+sequences through your provider. See [Database](/docs/self-hosting/database#how-the-api-provisions-the-app-role).
+
+A warning that the role name is not a valid Postgres identifier, or that the URL
+has no user or no password, means `FLAGON_APP_DATABASE_URL` itself is malformed:
+the role must be a plain identifier (letters, digits, underscores) and the URL
+must include a password.
+
+### Password authentication fails for the app role
+
+The runtime pool connects as the app role. If Postgres rejects its password,
+provisioning did not run or did not apply (check the log for the warnings
+above), or your platform manages the role and its password differs from the one
+in the URL. Make the URL match the role's real password.
+
+### `/internal/rls-check` returns 503 or `"enforced":false`
+
+The runtime role can see rows outside the organization bound to its transaction.
+Tenant isolation is not in effect. The usual causes:
+
+- `FLAGON_APP_DATABASE_URL` names a superuser or a role with `BYPASSRLS`, often
+  the same user as `DATABASE_URL`. Use a separate, dedicated role.
+
+A `503` whose body includes a `detail` field (`database unavailable`, or
+`self-check query failed; see the server log`) means the check itself could not
+run; it is not a verdict on isolation. The server log line `RLS self-check query
+failed` carries the underlying error. Fix the
+database connection and check again.
+
+Fix the role and restart before letting users in.
+
+## The app can't reach the API
+
+**Symptom.** Pages show "We couldn't reach Flagon to load this page.", actions
+fail with "The Flagon API is unreachable right now. Try again shortly.", and the
+app's server log shows lines like `[flagon-api] GET /me unreachable`.
+
+**What it means.** The app's server could not open a connection to
+`FLAGON_API_URL` at all.
+
+**How to fix.**
+
+1. Check `FLAGON_API_URL` from the app's point of view. It is used server-side
+   only, so it must resolve from the machine or container running the app. The
+   default is `http://localhost:8080`.
+2. Check that the API is listening (`api listening` in its log, and
+   `curl <FLAGON_API_URL>/healthz` from the app's host).
+3. Off Fly, the API binds `127.0.0.1` by default and only accepts connections
+   from the same machine. Set `FLAGON_HOST=0.0.0.0` (as the API image does) when
+   the app runs elsewhere or in another container, and set the production
+   secrets, or `FLAGON_ENV=development` for a local stack.
+
+## Internal token mismatch
+
+**Symptom.** You can sign in, but every page that loads data fails, and the
+API's answer is `401` with `invalid internal token`.
+
+**What it means.** The app authenticates to the API with `FLAGON_INTERNAL_TOKEN`,
+and the two values differ. In development both sides fall back to
+`dev-internal-token` when it is unset, so a mismatch there means one side has an
+explicit value the other does not.
+
+**How to fix.** Set the same value on both, or unset it on both in development.
+In production, generate a long random value and set it on both processes.
+Restart both.
+
+A production app (`NODE_ENV=production`) with no token fails every API call with
+`FLAGON_INTERNAL_TOKEN is required in production (it must match the API's FLAGON_INTERNAL_TOKEN).`
+in its server log, and the seed script, when run with `NODE_ENV=production` and
+no token, prints `Skipped demo org: FLAGON_INTERNAL_TOKEN is not set.`
+
+If the API answers `503` with `identity API is not configured`, the API itself has
+no internal token. A current API cannot start in production that way, so check
+which binary and configuration you are running.
+
+## Emails are not delivered
+
+Two processes send email. The app sends verification codes and password resets;
+the API sends invitations.
+
+- **Locally**, without `RESEND_API_KEY`, the app does not send email: it prints
+  each message (including verification codes) to its console as
+  `[email] to <address> - <subject>`. Copy the code from there. The API likewise
+  logs invitation emails as `[email] not sent (log mailer)`, with the text
+  (including the accept link) in the `text` field. Those invitations report
+  `email_sent: false`, and the dashboard's invite dialog shows the link to copy.
+- **Invitations never arrive in production.** The API needs its own
+  `RESEND_API_KEY` (and `FLAGON_MAIL_FROM` on a verified domain); the app's key is
+  not shared with it. At boot the API warns
+  `mail provider is the LOG mailer in production: invitation emails are NOT delivered; set RESEND_API_KEY`.
+  If the links in invitation emails point at the wrong host, set `FLAGON_APP_URL`
+  to your app's public URL.
+- **In production**, a missing key is an error:
+  `RESEND_API_KEY is not set: refusing to drop a transactional email in production.`
+  Set the key.
+- `Resend send failed (<status>): ...` means Resend rejected the message. The
+  most common cause is a `RESEND_FROM` address on a domain you have not verified
+  with Resend.
+
+## The app's database
+
+- The app connects to `flagon_app` with its own `DATABASE_URL`. If that variable
+  holds the API's URL by mistake, sign-in fails because the auth tables are not
+  there.
+- Unless the URL says `sslmode=disable`, the app verifies the database's TLS
+  certificate fully. A self-signed certificate fails until Node trusts it.
+- A build that prints
+  `WARNING: DATABASE_URL is not set; skipping migrations. Auth will not work until it is configured.`
+  skipped the auth migrations. Set `DATABASE_URL` and run
+  `npm run db:migrate --workspace app`.
+
+## Build and install problems
+
+### `npm ci` fails on Linux with a missing native module
+
+An error such as `Cannot find module '../lightningcss.linux-x64-gnu.node'` means
+`package-lock.json` is missing the entries for that platform's native binaries.
+npm records them based on the platform that resolved the lockfile, and `npm ci`
+installs only what the lockfile lists. Regenerate a complete, cross-platform
+lockfile (requires Docker) and commit it:
+
+```bash
+scripts/relock.sh
+```
+
+### The app's Docker image fails to build
+
+If `docker build` on `app/Dockerfile` fails with `"/package-lock.json": not found`,
+the build context is wrong. The app is an npm workspace whose lockfile lives at
+the repository root, so build from the root:
+
+```bash
+docker build -f app/Dockerfile .
+```
+
+The compose file already uses the root as the app's build context. See
+[Installation](/docs/self-hosting/installation#run-the-app-with-docker).
+
+### Port already in use locally
+
+`compose.override.yml` publishes the compose API on `8080` and the compose app
+on `4000`. If you run the API or app natively, comment out that service's
+`ports` in your `compose.override.yml` so the native server can bind the port.
+
+### A Windows Firewall prompt every time the API starts
+
+The API binds loopback (`127.0.0.1`) by default, which the firewall does not
+prompt for. If you still get the prompt, remove any `FLAGON_HOST=0.0.0.0` (or
+empty `FLAGON_HOST`) override from `api/.env` or your shell.
+
+### A `429` during local scripts or tests
+
+The API rate limits each principal (50 requests per second, bursts of 300, by
+default) and answers `429` with `rate limit exceeded; retry after <n>s` beyond
+that. For bulk local work, raise `FLAGON_RATE_LIMIT` and `FLAGON_RATE_BURST`, or
+set `FLAGON_RATE_LIMIT=0` to turn the limiter off on your machine.
+
+### Starting over locally
+
+`docker compose down -v` deletes the Postgres volume, and with it both
+databases, including every local account. Afterwards run `docker compose up -d postgres`,
+start the API (it migrates on boot), then `npm run db:migrate --workspace app`
+and `npm run db:seed --workspace app`.
+
+## Related
+
+- [Installation](/docs/self-hosting/installation)
+- [Database](/docs/self-hosting/database)
+- [Production](/docs/self-hosting/production)
+- [Configuration](/docs/self-hosting/configuration)
+- [API errors](/docs/troubleshooting/api-errors)

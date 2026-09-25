@@ -1,9 +1,7 @@
 import type { ReactNode } from "react";
-import { headers } from "next/headers";
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import { Boxes, ChevronDown, Code2, ExternalLink, GitBranch } from "lucide-react";
-import { auth } from "@/lib/auth";
-import { getMe, getProject } from "@/lib/flagon-api";
+import { getProject, projectCan } from "@/lib/flagon-api";
 import { cn } from "@flagon-io/ui";
 import { ProjectTabs } from "@/components/projects/project-tabs";
 
@@ -18,14 +16,12 @@ export default async function ProjectLayout({
 }) {
   const { org: slug, project: projectSlug } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
-
-  const project = await getProject(slug, projectSlug).catch(() => null);
+  // A project the caller cannot view reads as not found (the API hides it).
+  const project = await getProject(slug, projectSlug);
   if (!project) notFound();
 
-  const me = await getMe().catch(() => null);
-  const canManage = (me?.orgs.find((o) => o.slug === slug)?.role ?? "viewer") !== "viewer";
+  // Settings is for people who can edit the project (effective write+ or owner).
+  const canManage = projectCan(project, "project:write");
   const base = `/${slug}/projects/${project.slug}`;
 
   return (

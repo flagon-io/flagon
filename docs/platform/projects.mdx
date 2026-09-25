@@ -1,69 +1,187 @@
 ---
 title: Projects
-description: A project is the core deployable unit in Flagon, scoped to an organization.
+description: A project is the core unit in Flagon, a deployable app that belongs to an organization, with a README, access controls, and soft delete.
 visibility: public
-order: 1
 ---
 
-A **project** is the core unit in Flagon: a deployable app. There is no separate
-"app" layer above it, following the Vercel model. Every project belongs to an
-**organization**, and its URLs are org-scoped: `app.flagon.io/<org>/<project>`.
+A **project** is the core unit in Flagon: one deployable app or service. There is
+no separate "app" layer above it. Every project belongs to exactly one
+[organization](/docs/platform/organizations), and its URL lives under that org:
+`app.flagon.io/<org>/projects/<project>`.
+
+Today a project holds its identity (name, slug, description), a Markdown README,
+a repository URL, and its access controls. Deployments and environments attach
+to projects as they land (see [Environments](/docs/platform/environments)).
+
+## Project fields
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Display name, for example `Checkout Service`. |
+| `slug` | The URL segment, unique among the org's live projects. Derived from the name when omitted. Changing it renames the project and changes its URL. |
+| `description` | A one-line summary shown under the project name. |
+| `readme` | Markdown rendered on the project's **Overview** tab. |
+| `repository_url` | The source repository. Shown as a **Repository** link on the project page. |
 
 ## Creating a project
 
-You can create a project three ways, and they all go through the same API
-operation:
+A project created by the assistant is identical to one created by hand, because
+every path calls the same permission-checked API operation.
 
-- In the UI, from the organization's dashboard.
-- By asking the in-product assistant ("create a project called billing-api").
-- Directly against the API, or through an external agent over MCP.
+<Tabs>
 
-Because every path calls the same permission-checked API operation, a project
-created by the agent is identical to one created by hand.
+<Tab title="Dashboard">
+
+On **Projects**, choose **New project**. Enter a project name (the slug is
+derived from it unless you change it) and optionally a description and
+repository URL. Add the README from the project's **Overview** tab once the
+project exists.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Billing API", "description": "Invoices and payments"}'
+```
+
+Returns `201 Created` with the project. A taken slug returns `409 Conflict`.
+Requires `write:project` and an organization role of member or higher (the
+legacy read-only `viewer` role can't create projects).
+
+</Tab>
+
+<Tab title="Assistant">
+
+Ask: "Create a project called billing-api." The assistant proposes
+`create_project` and creates it when you confirm.
+
+</Tab>
+
+</Tabs>
+
+Creating a project does not make you its owner; org owners and admins hold owner
+authority on every project, and anyone else can be added as an owner afterward.
+A member who creates a project is automatically granted an explicit `admin` role
+on it (audited as `project.access_granted`), so they can manage it even when the
+organization's base permission is `read` or `none`.
+See [Create a project](/docs/guides/create-a-project) for a walkthrough.
 
 ## The project page
 
-A project reads like a repository. Its **Overview** tab renders the README as a
-document, with an inline editor (Edit and Preview) for members. The **Settings**
-tab holds the project's name, slug, description, and repository URL, plus the
-delete action. Later, linking a real repository will sync the README automatically
-instead of editing it in place.
+A project reads like a repository. The **Overview** tab renders the README, and
+people with write access can edit it (with Edit and Preview) in place.
+**Settings** has two sections: **General** (name, slug, description, repository
+URL, and the Danger zone with delete) and **Access** (collaborators, teams, and
+owners).
 
 ## Editing a project
 
-You can change a project's name, slug, description, and repository URL from the
-Settings tab, and its README from the Overview tab, by asking the assistant, or
-over the API. Edits are partial: only the fields you change are touched. Renaming
-the slug changes the project's URL. Editing requires write access (members and
-above; viewers are read-only).
+Change a project's name, slug, description, or repository URL from
+**Settings > General**, and its README from the Overview tab, by asking the
+assistant (`update_project`), or with `PATCH /orgs/{slug}/projects/{project}`.
+Edits are partial: only the fields you send change. Editing the name,
+description, README, or repository URL requires an effective project role of
+`write` or higher. Renaming the slug changes the project's URL and breaks
+outside references to it, so it requires `maintain` or higher. A project you
+can't see returns `404`; one you can see but not edit returns `403` (see
+[Project access](/docs/platform/project-access)).
+
+```bash
+curl -X PATCH https://api.flagon.io/orgs/acme/projects/billing-api \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"repository_url": "https://example.com/acme/billing-api"}'
+```
+
+`GET /orgs/{slug}/projects/{project}` includes a `viewer` object with your own
+effective `role`, whether you are an `owner`, and your `permissions` on the
+project; the dashboard uses it to show only the controls you can use.
+
+To fetch a project with its organization inlined, use
+`GET /orgs/{slug}/projects/{project}?expand[]=organization` (see
+[Expanding responses](/docs/api/expanding-responses)).
 
 ## Deleting and restoring
 
-Deleting a project is a **soft delete**: the project is hidden and stops counting,
-but it can be restored. Deleting **frees the slug immediately**, so you can create
-a new project with the same name right away.
+Deleting a project is a **soft delete**: the project disappears from every list
+and URL, but it can be restored for **30 days**, the same window as a deleted
+organization. Deleting **frees the slug immediately**, so you can create a new
+project with the same name right away.
 
-Restoring brings the project back, but only if its slug is still free. If a new
-project has since taken that name, restore is refused until you free the slug (for
-example by renaming the new project). Because they are destructive, **delete and
-restore are an owner-tier action**: a project owner (an individual or a team) or an
-org owner/admin, who always have owner authority. A plain project admin can manage
-access but cannot delete the project. Like everything else, all three actions go
-through the same permission-checked API operation whether you use the UI, the
-assistant, or MCP.
+Delete and restore are **owner-tier** actions: a project owner (a user or a
+team) or an org owner or admin. A project `admin` who is not an owner can manage
+access but cannot delete the project.
 
-Deleted projects are listed under **Settings > Archive > Deleted projects**, with
-the time each was deleted and a one-click restore. The same list is available to
-the assistant and MCP for reading, so you can ask which projects were recently
-deleted and restore one by name.
+<Tabs>
 
-## Ownership and access
+<Tab title="Dashboard">
 
-Projects inherit their organization's membership and roles, and can layer
-repository-style **collaborator roles** on top for finer control on a single
-project. See [Project access](/docs/platform/project-access) for the roles and how
-they combine.
+Delete from **Settings > General > Danger zone**, confirming by typing the
+project's slug. Deleted projects are listed under the org's
+**Settings > Deleted projects** (org owners and admins), each with the days left
+to restore it and a **Restore** button. If the old slug has been taken, a dialog
+asks for a new one.
 
-Access is permission-scoped from day one: a token or agent can only act on a
-project if its scope allows it, and tenant isolation is enforced in the database
-with row-level security, so one organization can never see another's projects.
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X DELETE https://api.flagon.io/orgs/acme/projects/billing-api \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+
+curl -X POST https://api.flagon.io/orgs/acme/projects/billing-api/restore \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+Both require `admin:project`. The restore body is optional; send
+`{"slug": "new-slug"}` only to restore under a new slug.
+`GET /orgs/{slug}/deleted-projects` lists projects deleted in the last 30 days,
+each with `deleted_at` and `purge_at` (org owners and admins only; anyone else
+gets `403`).
+
+</Tab>
+
+<Tab title="Assistant">
+
+Ask: "Which projects were deleted recently? Restore billing-api." The assistant
+reads the archive with `list_deleted_projects` and proposes `restore_project`,
+with a `new_slug` if the old one has been taken.
+
+</Tab>
+
+</Tabs>
+
+Restore brings back the most recently deleted project with that slug that is
+still inside the 30-day window. If a live project has taken the slug since,
+restore returns `409 Conflict` (`that project slug is now taken; restore it under a new slug`) unless you pass a new `slug`. After `purge_at` the project
+can no longer be restored and restore returns `404 Not Found` (`no restorable project with that slug`). The job that permanently erases expired projects from
+the database is not built yet. See
+[Delete and restore](/docs/guides/delete-and-restore).
+
+## Operations
+
+| Operation | API | Tool | Scope |
+| --- | --- | --- | --- |
+| List projects | `GET /orgs/{slug}/projects` | `list_projects` | `read:project` |
+| Read a project | `GET /orgs/{slug}/projects/{project}` | `get_project` | `read:project` |
+| Create a project | `POST /orgs/{slug}/projects` | `create_project` | `write:project` |
+| Edit a project | `PATCH /orgs/{slug}/projects/{project}` | `update_project` | `write:project` |
+| Delete a project | `DELETE /orgs/{slug}/projects/{project}` | `delete_project` | `admin:project` |
+| List deleted projects | `GET /orgs/{slug}/deleted-projects` | `list_deleted_projects` | `read:project` |
+| Restore a project | `POST /orgs/{slug}/projects/{project}/restore` | `restore_project` | `admin:project` |
+
+The list operations support search (`q`) and cursor pagination; see
+[Pagination](/docs/api/pagination). Project changes are audited as
+`project.created`, `project.updated`, `project.deleted`, and `project.restored`.
+
+## Related
+
+- [Project access](/docs/platform/project-access)
+- [Create a project](/docs/guides/create-a-project)
+- [Delete and restore](/docs/guides/delete-and-restore)
+- [Roles & permissions](/docs/platform/roles)

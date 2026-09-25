@@ -2,9 +2,11 @@
 
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import type { AgentMessage, AgentProposal } from "@/lib/api/types";
 
-export type AgentMsg = { role: "user" | "assistant"; content: string };
-export type AgentProposal = { tool: string; input: unknown; summary: string };
+export type { AgentProposal };
+/** One chat turn; the API's AgentMessage shape. */
+export type AgentMsg = AgentMessage;
 export type AgentMode = "ask" | "auto";
 
 /** A request the user aborted (via stop). Swallowed, not surfaced as an error. */

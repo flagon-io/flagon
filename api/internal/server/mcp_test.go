@@ -2,16 +2,15 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/flagon-io/flagon/api/internal/ai"
 	"github.com/flagon-io/flagon/api/internal/db"
-	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // testMCPRouter wires the public MCP endpoint over the controlled corpus. The
@@ -27,7 +26,7 @@ func testMCPRouter(t *testing.T) http.Handler {
 func rpc(t *testing.T, h http.Handler, payload string) (int, map[string]any) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(payload))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	h.ServeHTTP(rec, req)
 	var body map[string]any
@@ -124,7 +123,7 @@ func testMCPHostRouter(t *testing.T) http.Handler {
 func do(t *testing.T, h http.Handler, method, host, path, payload string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(method, path, bytes.NewBufferString(payload))
+	req := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewBufferString(payload))
 	req.Host = host
 	if payload != "" {
 		req.Header.Set("Content-Type", "application/json")
@@ -186,152 +185,19 @@ func TestMCP_Host_OtherHostsUnaffected(t *testing.T) {
 
 // --- Authenticated MCP -------------------------------------------------------
 
-// fakeAIStore is a minimal ai.Store so authenticated user-acting tools can run
-// in tests without a database. It returns benign values keyed on the caller.
-type fakeAIStore struct{}
-
-func (fakeAIStore) Me(_ context.Context, userID, email string) (db.User, []db.Org, error) {
-	return db.User{ID: userID, Email: email}, []db.Org{{Slug: "acme"}}, nil
-}
-func (fakeAIStore) ListOrgs(context.Context, string) ([]db.Org, error) {
-	return []db.Org{{Slug: "acme"}}, nil
-}
-func (fakeAIStore) CreateOrg(_ context.Context, _, _, name, slug string) (db.Org, error) {
-	return db.Org{Name: name, Slug: slug}, nil
-}
-func (fakeAIStore) ListProjects(_ context.Context, _, orgSlug string, _ paginate.Query) ([]db.Project, string, error) {
-	return []db.Project{{Slug: "web", OrgID: orgSlug}}, "", nil
-}
-func (fakeAIStore) GetProject(_ context.Context, _, _, projectSlug string) (db.Project, error) {
-	return db.Project{Slug: projectSlug}, nil
-}
-func (fakeAIStore) ListDeletedProjects(context.Context, string, string, paginate.Query) ([]db.Project, string, error) {
-	return []db.Project{{Slug: "old-web"}}, "", nil
-}
-func (fakeAIStore) CreateProject(_ context.Context, _, _ string, in db.ProjectInput) (db.Project, error) {
-	return db.Project{Name: in.Name, Slug: in.Slug}, nil
-}
-func (fakeAIStore) UpdateProject(_ context.Context, _, _, projectSlug string, _ db.ProjectUpdate) (db.Project, error) {
-	return db.Project{Slug: projectSlug}, nil
-}
-func (fakeAIStore) SetProjectDeleted(_ context.Context, _, _, projectSlug string, _ bool) (db.Project, error) {
-	return db.Project{Slug: projectSlug}, nil
-}
-func (fakeAIStore) ListProjectMembers(context.Context, string, string, string, paginate.Query) ([]db.ProjectMember, string, error) {
-	return []db.ProjectMember{{UserID: "u1", Email: "u@example.com", Role: "admin"}}, "", nil
-}
-func (fakeAIStore) AddProjectMember(context.Context, string, string, string, string, string) (string, error) {
-	return "u2", nil
-}
-func (fakeAIStore) SetProjectMemberRole(context.Context, string, string, string, string, string) error {
-	return nil
-}
-func (fakeAIStore) RemoveProjectMember(context.Context, string, string, string, string) error {
-	return nil
-}
-func (fakeAIStore) ListTeams(context.Context, string, string, paginate.Query) ([]db.Team, string, error) {
-	return []db.Team{{ID: "t1", Name: "Platform", Slug: "platform"}}, "", nil
-}
-func (fakeAIStore) GetTeam(_ context.Context, _, _, teamSlug string) (db.Team, error) {
-	return db.Team{Slug: teamSlug}, nil
-}
-func (fakeAIStore) CreateTeam(_ context.Context, _, _ string, in db.TeamInput) (db.Team, error) {
-	return db.Team{Name: in.Name, Slug: in.Slug}, nil
-}
-func (fakeAIStore) UpdateTeam(_ context.Context, _, _, teamSlug string, _ db.TeamUpdate) (db.Team, error) {
-	return db.Team{Slug: teamSlug}, nil
-}
-func (fakeAIStore) DeleteTeam(context.Context, string, string, string) error { return nil }
-func (fakeAIStore) ListTeamMembers(context.Context, string, string, string, paginate.Query) ([]db.TeamMember, string, error) {
-	return []db.TeamMember{{UserID: "u1", Email: "u@example.com", Role: "maintainer"}}, "", nil
-}
-func (fakeAIStore) ListTeamProjects(context.Context, string, string, string, paginate.Query) ([]db.TeamProject, string, error) {
-	return []db.TeamProject{{ProjectID: "p1", Slug: "web", Role: "write"}}, "", nil
-}
-func (fakeAIStore) AddTeamMember(context.Context, string, string, string, string, string) (string, error) {
-	return "u2", nil
-}
-func (fakeAIStore) SetTeamMemberRole(context.Context, string, string, string, string, string) error {
-	return nil
-}
-func (fakeAIStore) RemoveTeamMember(context.Context, string, string, string, string) error {
-	return nil
-}
-func (fakeAIStore) ListProjectTeams(context.Context, string, string, string, paginate.Query) ([]db.ProjectTeam, string, error) {
-	return []db.ProjectTeam{{TeamID: "t1", Slug: "platform", Role: "write"}}, "", nil
-}
-func (fakeAIStore) AddProjectTeam(context.Context, string, string, string, string, string) error {
-	return nil
-}
-func (fakeAIStore) SetProjectTeamRole(context.Context, string, string, string, string, string) error {
-	return nil
-}
-func (fakeAIStore) RemoveProjectTeam(context.Context, string, string, string, string) error {
-	return nil
-}
-func (fakeAIStore) ListProjectOwners(context.Context, string, string, string, paginate.Query) ([]db.ProjectOwner, string, error) {
-	return []db.ProjectOwner{{OwnerType: "user", PrincipalID: "u1"}}, "", nil
-}
-func (fakeAIStore) AddProjectOwner(context.Context, string, string, string, string, string) (string, error) {
-	return "u2", nil
-}
-func (fakeAIStore) RemoveProjectOwner(context.Context, string, string, string, string, string) error {
-	return nil
-}
-func (fakeAIStore) ListMembers(context.Context, string, string, paginate.Query) ([]db.Member, string, error) {
-	return []db.Member{{UserID: "u1", Email: "u@example.com", Role: "owner"}}, "", nil
-}
-func (fakeAIStore) AddMember(context.Context, string, string, string, string) (string, string, error) {
-	return "u2", "Acme", nil
-}
-func (fakeAIStore) SetMemberRole(context.Context, string, string, string, string) error { return nil }
-func (fakeAIStore) RemoveMember(context.Context, string, string, string) error          { return nil }
-func (fakeAIStore) GetOrgSecurity(context.Context, string, string) (db.OrgSecurity, error) {
-	return db.OrgSecurity{BasePermission: "read"}, nil
-}
-func (fakeAIStore) SetOrgSecurity(context.Context, string, string, db.OrgSecurity) error {
-	return nil
-}
-func (fakeAIStore) ListInvitations(context.Context, string, string, paginate.Query) ([]db.Invitation, string, error) {
-	return nil, "", nil
-}
-func (fakeAIStore) InviteMember(_ context.Context, _, _, login, _ string) (db.InviteResult, error) {
-	return db.InviteResult{Status: "invited", Email: login, OrgName: "Acme"}, nil
-}
-func (fakeAIStore) RevokeInvitation(context.Context, string, string, string) error { return nil }
-func (fakeAIStore) ListNotifications(context.Context, string, int) ([]db.Notification, error) {
-	return []db.Notification{{ID: "n1", Type: "test", Title: "Hi"}}, nil
-}
-func (fakeAIStore) MarkNotificationRead(context.Context, string, string) error   { return nil }
-func (fakeAIStore) MarkNotificationUnread(context.Context, string, string) error { return nil }
-func (fakeAIStore) MarkAllNotificationsRead(context.Context, string) error       { return nil }
-func (fakeAIStore) ListAuditLog(context.Context, string, string, int) ([]db.AuditEvent, error) {
-	return []db.AuditEvent{{ID: "a1", Action: "project.created", Summary: "created project Web"}}, nil
-}
-
-// mcpErrStore is an IdentityStore whose ResolveToken always fails, for the
-// invalid-token path. It embeds scopeFakeStore to satisfy the rest of the
-// interface.
-type mcpErrStore struct{ scopeFakeStore }
-
-func (mcpErrStore) ResolveToken(context.Context, string) (db.TokenPrincipal, error) {
-	return db.TokenPrincipal{}, errors.New("invalid or expired token")
-}
-
-// testMCPAuthedRouter wires the MCP endpoint with a real ai.Store (so tools run)
-// and an IdentityStore whose tokens resolve to a principal holding scopes.
+// testMCPAuthedRouter wires the real server (MCP included) over the fake store,
+// whose tokens resolve to a principal holding scopes, so user-acting tools run
+// through the shared service layer.
 func testMCPAuthedRouter(t *testing.T, scopes []string) http.Handler {
 	t.Helper()
-	registry := ai.NewRegistry(fakeAIStore{}, testDocsIndex())
-	router, _ := New(WithMCP(registry), WithIdentity(scopeFakeStore{scopes: scopes}, "internal-token"))
-	return router
+	return newTestServer(t, newFakeStore(scopes)).handler
 }
 
 // rpcAs issues a JSON-RPC request bearing the given token (empty = anonymous).
 func rpcAs(t *testing.T, h http.Handler, token, payload string) map[string]any {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(payload))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -405,8 +271,9 @@ func TestMCP_Authed_FullAccessToken(t *testing.T) {
 }
 
 func TestMCP_InvalidToken(t *testing.T) {
-	registry := ai.NewRegistry(fakeAIStore{}, testDocsIndex())
-	router, _ := New(WithMCP(registry), WithIdentity(mcpErrStore{}, "internal-token"))
+	store := newFakeStore(nil)
+	store.resolveErr = db.ErrInvalidToken
+	router := newTestServer(t, store).handler
 	body := rpcAs(t, router, "flagon_bad", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	if errCode(body) != -32001 {
 		t.Fatalf("an unresolvable token should return -32001, got %v", body)
@@ -442,5 +309,85 @@ func TestMCP_Anonymous_UserToolHidden(t *testing.T) {
 	body := rpcAs(t, h, "", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whoami","arguments":{}}}`)
 	if errCode(body) != -32602 {
 		t.Fatalf("anonymous whoami should be -32602 unknown tool, got %v", body)
+	}
+}
+
+// toolErrorText extracts the text of a failed tools/call result.
+func toolErrorText(t *testing.T, body map[string]any) string {
+	t.Helper()
+	result, _ := body["result"].(map[string]any)
+	if result == nil || result["isError"] != true {
+		t.Fatalf("expected a failed tool result, got %v", body)
+	}
+	content, _ := result["content"].([]any)
+	return content[0].(map[string]any)["text"].(string)
+}
+
+func TestMCP_ToolError_ClassifiedMessage(t *testing.T) {
+	// A domain failure reaches the MCP client as the same safe message the REST
+	// API would give, not the raw error string.
+	store := newFakeStore(nil)
+	store.err = db.ErrProjectNotFound
+	h := newTestServer(t, store).handler
+	body := rpcAs(t, h, "flagon_pat", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_project","arguments":{"org":"acme","project":"nope"}}}`)
+	if got := toolErrorText(t, body); got != "project not found" {
+		t.Fatalf("classified tool error = %q, want %q", got, "project not found")
+	}
+}
+
+func TestMCP_ToolError_InternalDetailNotLeaked(t *testing.T) {
+	// An unclassified (internal) failure must not echo its detail to the client.
+	store := newFakeStore(nil)
+	store.err = errors.New(`pq: connection to "db.internal:5432" refused`)
+	h := newTestServer(t, store).handler
+	body := rpcAs(t, h, "flagon_pat", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":{"org":"acme"}}}`)
+	got := toolErrorText(t, body)
+	if strings.Contains(got, "db.internal") || strings.Contains(got, "pq:") {
+		t.Fatalf("internal error detail leaked over MCP: %q", got)
+	}
+}
+
+func TestMCP_ToolValidationMessage(t *testing.T) {
+	// Missing required arguments come back as a clear, caller-safe message.
+	h := testMCPAuthedRouter(t, nil)
+	body := rpcAs(t, h, "flagon_pat", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_project","arguments":{"org":"acme"}}}`)
+	if got := toolErrorText(t, body); got != "project is required" {
+		t.Fatalf("validation message = %q, want %q", got, "project is required")
+	}
+}
+
+// A presented token that fails to resolve is only "invalid" when the store says
+// so; any other lookup failure (the database is down) is a 503 that doesn't leak
+// the cause, so a valid caller isn't told to throw its credential away.
+func TestMCP_TokenResolveFailureIsNotInvalidToken(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantCode int
+		wantRPC  bool
+	}{
+		{"unknown, expired or revoked token", db.ErrInvalidToken, http.StatusOK, true},
+		{"database error", errors.New("dial tcp 10.9.8.7:5432: connection refused"), http.StatusServiceUnavailable, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore(nil)
+			store.resolveErr = tc.err
+			h := mcpHandler(ai.NewRegistry(nil, testDocsIndex()), store)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp",
+				bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+			req.Header.Set("Authorization", "Bearer flagon_pat_x")
+			h.ServeHTTP(rec, req)
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			body := rec.Body.String()
+			if got := strings.Contains(body, "invalid or expired token"); got != tc.wantRPC {
+				t.Fatalf("invalid-token error present = %v, want %v (body: %s)", got, tc.wantRPC, body)
+			}
+			if strings.Contains(body, "10.9.8.7") || strings.Contains(body, "connection refused") {
+				t.Fatalf("the resolve error leaked to the client: %s", body)
+			}
+		})
 	}
 }

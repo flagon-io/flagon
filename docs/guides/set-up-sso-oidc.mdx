@@ -1,0 +1,210 @@
+---
+title: Set up SSO with OIDC
+description: Connect an OpenID Connect identity provider such as Okta, Microsoft Entra ID, or Google Workspace so members sign in with their work account, then optionally require it.
+---
+
+**Single sign-on (SSO)** lets members sign in to Flagon through your company's **identity
+provider (IdP)**, the system that already holds their work accounts, such as Okta, Microsoft
+Entra ID, or Google Workspace. **OIDC** (OpenID Connect) is the OAuth-based SSO protocol most
+modern IdPs support. SSO is configured per organization, so each organization connects its own
+IdP.
+
+The Flagon API is the source of truth for SSO configuration: it stores each provider, validates
+it, restricts it to owners and admins, and audits every change. That is why you can manage a
+provider from the dashboard, the API, or the assistant with the same result.
+
+By the end of this guide members with an email on your domain can choose **Sign in with SSO**,
+authenticate at your IdP, and land in your organization as members.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** organization **owner** or **admin**.
+- **IdP access:** permission to create an OIDC (OAuth) application in your IdP.
+- **API token scopes:** `read:org` to read providers, `write:org` to add, change, or remove them.
+
+</Callout>
+
+## Steps
+
+<Steps>
+
+<Step title="Choose a provider ID">
+
+The **provider ID** identifies this connection and is part of the callback URL, for example
+`acme-okta`. It must be 2 to 63 lowercase letters, digits, or hyphens, starting with a letter or
+digit, and unique across Flagon. It can't be changed later.
+
+</Step>
+
+<Step title="Create the OIDC app in your IdP">
+
+Create a web OIDC application and set its **redirect (callback) URI** to:
+
+```text
+https://app.flagon.io/api/auth/sso/callback/acme-okta
+```
+
+Replace `acme-okta` with your provider ID. Assign the users or groups who should have access,
+then copy the app's **client ID**, **client secret**, and your IdP's **issuer URL** (for Okta,
+something like `https://acme.okta.com`).
+
+</Step>
+
+<Step title="Register the provider in Flagon">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open organization **Settings > Authentication**.
+2. Under **SSO providers**, select **New provider**.
+3. Set **Protocol** to **OIDC / OpenID Connect** and fill in:
+   - **Provider ID**: the ID from step 1.
+   - **Email domain**: your users' email domain, such as `acme.com`.
+   - **Issuer URL**: the IdP issuer, an `https` URL.
+   - **Client ID** and **Client secret** from the IdP app.
+4. Select **Register provider**.
+
+The providers table then lists it with its domain and issuer.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/sso/providers \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider_id": "acme-okta",
+    "type": "oidc",
+    "domain": "acme.com",
+    "issuer": "https://acme.okta.com",
+    "oidc": {
+      "client_id": "0oa1b2c3d4",
+      "client_secret": "REPLACE_ME"
+    }
+  }'
+```
+
+Optional OIDC fields: `discovery_endpoint` (defaults to
+`<issuer>/.well-known/openid-configuration`), `scopes` (defaults to `openid`, `email`,
+`profile`), and `pkce` (defaults to `true`). The response never includes the secret; it reports
+`"client_secret_set": true` instead.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Add an OIDC SSO provider to acme with provider ID acme-okta, domain acme.com, and issuer
+> https://acme.okta.com.
+
+The assistant asks for anything missing and proposes
+**Confirm: Add OIDC single sign-on provider "acme-okta" to "acme"**.
+
+<Callout type="warn" title="Keep secrets out of the chat">
+
+Anything you type in the assistant, including a client secret, is sent to the AI model as part
+of the conversation. Register the provider with the secret from the dashboard or the API, and
+use the assistant to review or adjust non-secret settings.
+
+</Callout>
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Sign in through SSO">
+
+On the Flagon login page, choose **Sign in with SSO** and enter a work email. Flagon matches the
+email's domain to a provider (`acme.com` also matches subdomains such as `eng.acme.com`) and
+redirects to your IdP. On return:
+
+- a person with no Flagon account gets one and is added to the organization as a `member`;
+- an existing member is signed in, and Flagon makes sure they are still a member on every SSO sign-in (it never changes an existing role);
+- someone who is already signed in to Flagon has this organization's SSO identity linked to
+  their current account.
+
+</Step>
+
+<Step title="Require SSO (optional)">
+
+Once a provider works, you can require it on the same **Settings > Authentication** page with
+**Require single sign-on**. You can only turn it on when a provider exists **and** you have
+signed in through it yourself. The API enforces this too: otherwise it answers `403` with
+`sign in through one of the organization's SSO providers before requiring single sign-on`.
+From the API or assistant, the flag is `require_sso` in `PUT /orgs/{slug}/security` (send all
+three policy fields; see [Require two-factor authentication](/docs/guides/require-two-factor)).
+
+When it is on, the API enforces it on every operation under `/orgs/<slug>/...` (except leaving
+the organization), on every assistant and MCP tool call that names the organization, and on
+assistant conversations in it:
+
+| Caller | Allowed when |
+| --- | --- |
+| Dashboard session (and the in-product assistant) | The current session was established through one of the organization's SSO providers. |
+| Personal access token | The token's user has signed in through one of the organization's SSO providers at least once. |
+| Organization owner | Always. **Owners are exempt**, so an owner can always reach settings to fix or turn off a broken configuration. |
+| Organization access token | Always. It is a service identity that never signs in interactively. |
+
+Anyone else gets `403` with
+`this organization requires single sign-on; sign in through the organization's identity provider to continue`
+(a personal access token gets a variant asking its user to sign in through the provider at
+least once). In the dashboard, members and admins whose session did not come from SSO are
+redirected to a **Single sign-on required** page with a **Continue with SSO** button.
+
+</Step>
+
+<Step title="Verify it worked">
+
+- `GET /orgs/acme/sso/providers` returns the provider with `"client_secret_set": true`.
+- A test user completes **Sign in with SSO** and appears on **People** as a member.
+- The audit log records `sso_provider.created`, `member.added` with the summary
+  `joined via single sign-on` for each new SSO member, and `organization.security_changed` if
+  you required SSO.
+
+</Step>
+
+</Steps>
+
+## Change or rotate settings
+
+Updates are partial: fields you leave out, including the secret, stay as they are. Changes apply
+at the next sign-in through the provider.
+
+```bash
+curl -X PATCH https://api.flagon.io/orgs/acme/sso/providers/acme-okta \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"oidc": {"client_secret": "NEW_SECRET"}}'
+```
+
+In the dashboard, edit the provider from its row; leave **Client secret** blank to keep the
+current one. The provider ID and protocol can't change; remove the provider and add a new one
+instead (`DELETE /orgs/acme/sso/providers/acme-okta`).
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `409` | `that provider ID is already in use; choose another` | Provider IDs are unique across Flagon. |
+| `409` | `another SSO provider already uses that email domain` | A domain can belong to only one provider. |
+| `422` | `provider_id must be 2-63 lowercase letters, digits or hyphens, starting with a letter or digit` | Fix the ID. |
+| `422` | `issuer must be the identity provider's https URL` | Use the full `https://` issuer. |
+| `422` | `client_id is required for an OIDC provider` / `client_secret is required for an OIDC provider` | Send both on create. |
+| `422` | `client_secret cannot be empty; omit it to keep the current secret` | On update, omit the field instead of sending an empty string. |
+| `422` | `domain must be a bare email domain such as acme.com` | Drop any `@`, scheme, or path. |
+| `403` | `you don't have permission to do that` | Only owners and admins can read or change SSO configuration, whatever the token's scopes. |
+| `403` | `sign in through one of the organization's SSO providers before requiring single sign-on` | Sign in through the provider yourself, then turn the requirement on. |
+
+If the IdP redirects back with an error, check that its redirect URI exactly matches the one
+above, including your provider ID.
+
+## Related
+
+- [Single sign-on (SSO)](/docs/platform/sso)
+- [Set up SSO with SAML](/docs/guides/set-up-sso-saml)
+- [Require two-factor authentication](/docs/guides/require-two-factor)
+- [Troubleshooting sign-in and SSO](/docs/troubleshooting/sign-in-and-sso)

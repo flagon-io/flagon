@@ -1,0 +1,179 @@
+---
+title: Tenant isolation
+description: How Flagon keeps each organization's data walled off - two database roles, row-level security bound to the acting user, audited definer functions, and a live self-test.
+---
+
+Every organization in Flagon shares one API and one database with every other
+organization. **Tenant isolation** is what makes that safe: a request acting for
+someone in organization A can never read or change organization B's data, even if
+the application code that builds the query has a bug.
+
+Flagon enforces this in Postgres, not only in Go. Application checks decide what
+a person may do; the database decides what rows a transaction can see at all. This
+page explains how the database half works, so you can reason about it and verify
+it on your own deployment. The architecture view is on
+[Multi-tenancy](/docs/architecture/multi-tenancy).
+
+```text
+ API request, acting as user u_123
+        │
+        ▼
+ ┌──────────────────────────────────────────────────────────────┐
+ │ BEGIN                    as the app role (NOBYPASSRLS)       │
+ │ SELECT set_config('flagon.user_id', 'u_123', true)  tx-local │
+ │ SELECT ... FROM public.projects WHERE org_id = $1            │
+ │   policy: a membership row exists for (org_id, u_123)        │
+ │ COMMIT                                                       │
+ └──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+ Rows from u_123's organizations only. Anything else: no rows, so 404.
+```
+
+## Two database roles
+
+The API connects to Postgres with two different roles, and only one of them ever
+serves requests (`api/internal/db/db.go`):
+
+| Role | Setting | Used for | Row-level security |
+| --- | --- | --- | --- |
+| Migrator | `DATABASE_URL` | Boot only: provisioning the app role and running migrations | Owns the tables, so it is exempt |
+| App | `FLAGON_APP_DATABASE_URL` | Every runtime query | Bound by every policy |
+
+At boot the migrator creates or updates the app role and pins its attributes:
+`LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`
+(`api/internal/db/setup.go`). `NOBYPASSRLS` is the property that matters: the app
+role cannot switch row-level security off, and it does not own the tables, so the
+policies always apply to it. It gets ordinary `SELECT`, `INSERT`, `UPDATE`, and
+`DELETE` grants; the policies decide which rows those grants reach.
+
+<Callout type="info" title="Production never runs requests as the migrator">
+In production the server refuses to start when `FLAGON_APP_DATABASE_URL` is empty:
+"FLAGON_APP_DATABASE_URL is required in production: runtime queries must use the
+NOBYPASSRLS app role, never the migrator". The migrator owns the tables, so
+row-level security would not bind it. Only development mode may fall back, and in
+development an unset value defaults to the local compose app role
+(`postgres://flagon_app:flagon_app@localhost:5432/flagon_api`). See
+[Self-hosting in production](/docs/self-hosting/production).
+</Callout>
+
+## Every transaction is bound to a user
+
+Domain queries run inside `inUserTx` (`api/internal/db/identity.go`). It opens a
+transaction, runs `set_config('flagon.user_id', <user id>, true)`, then runs the
+work. The third argument makes the setting local to the transaction, so it
+disappears at commit and never leaks to the next request on a pooled connection.
+
+Policies read the setting through `flagon.current_user_id()`, which returns
+`NULL` when nothing is set. Every policy compares against it, so a query that runs
+without a bound user matches **no rows**. Forgetting the binding fails closed.
+
+## What the policies say
+
+Row-level security is enabled on every tenant table. A few representative
+policies from `api/internal/db/migrations`:
+
+| Table | Rule for the app role |
+| --- | --- |
+| `orgs` | Select a live org only if you have a membership in it. |
+| `memberships` | See your own memberships; owners and admins manage their org's. |
+| `projects` | Insert in orgs you belong to. Select only projects you can view (an effective project role of `read` or higher, or ownership). Update only with `write` or higher. |
+| `access_tokens` | Personal tokens: only your own. Organization tokens: owners and admins of that org. |
+| `audit_logs` | Select only as an owner or admin. No insert, update, or delete policy at all. |
+| `notifications` | Select and update only your own. |
+| `sso_providers` | Owners and admins of the org only, for reads and writes. |
+| `ai_usage` | Only orgs you belong to (row-level security is also forced on this table). |
+
+Organization deletion is enforced at the root of these rules. Migration
+`0031_org_soft_delete.sql` makes the membership checks treat a deleted
+organization's memberships as nonexistent, so the moment an org is soft-deleted
+its projects, members, teams, invitations, tokens, and audit log all read as not
+found, and its organization access tokens stop resolving. Soft-deleted projects
+are different: the select policy still lets someone who could view the project
+read it (restore needs it), and the queries that list and fetch live projects
+filter them out.
+
+Project visibility is enforced here too, not only in Go. Migration
+`0034_project_access_enforcement.sql` defines `flagon.project_effective_role` and
+`flagon.project_permits`, which compute the caller's effective role on a project:
+the highest of the organization floor (owners and admins get `admin`, members get
+the organization's base permission, where `none` gives no floor), a direct grant,
+and a team grant. The `projects` policies call them, so a member with no role on a
+project cannot read its row even if a query forgets to check.
+
+The consequence you see from the outside: an organization you are not a member of
+does not exist for your transaction. The API answers `404` "organization not
+found" rather than `403`, which also means Flagon never confirms that another
+organization's slug exists.
+
+Tenant tables use `ENABLE ROW LEVEL SECURITY`, not `FORCE`. That exempts only the
+table owner, which is the migrator, and the migrator is never used to serve
+requests. The two tables where the owner must be bound too, `ai_usage` and the
+self-test fixture, use `FORCE`.
+
+## Definer functions, and how they are kept honest
+
+Some reads legitimately cross the policies. Listing an org's members needs other
+people's names and emails, which the `users` policy hides. Resolving an access
+token happens before anyone is authenticated. For these, Flagon uses Postgres
+functions marked `SECURITY DEFINER`, which run as the table owner and therefore
+past row-level security. Each one re-implements the access check in SQL:
+
+- `flagon.org_members`, `flagon.teams`, and similar list functions return rows
+  only if the caller is a member of the org. The project lists
+  (`flagon.project_members`, `flagon.project_teams`, `flagon.project_owners`)
+  also require that the caller can view the project.
+- `flagon.org_audit` returns rows only to an owner or admin of the org.
+- `flagon.record_audit` and `flagon.create_notification` only insert.
+- `flagon.resolve_access_token` looks up a token by its hash and returns only live
+  tokens.
+
+A definer function that trusts a user id passed as an argument is only as safe as
+the caller. Migration `0030_definer_actor_binding.sql` tightened this for the
+member list, the invitation list, and invitation acceptance: the argument must
+also equal the user bound to the transaction, so a Go bug that passed the wrong id
+would see nothing. Migration `0034` applied the same binding to the project
+access lists, and `0036_audit_read_hardening.sql` applied it to the audit log
+read, `flagon.org_audit`. Migration `0037_team_definer_actor_binding.sql` bound
+the team list functions (`flagon.teams`, `flagon.team_members`) the same way.
+
+## Verify it yourself
+
+The API serves a self-test at `GET /internal/rls-check`. It runs three
+transactions as the app role against a fixture table seeded with one row for each
+of two sentinel organizations: bound to org A, bound to org B, and bound to
+nothing. Isolation holds only if the first sees exactly A's row, the second
+exactly B's, and the third nothing.
+
+```bash
+curl -s https://api.flagon.io/internal/rls-check
+```
+
+```json
+{ "enforced": true, "org_a": ["org-a"], "org_b": ["org-b"], "no_org": null }
+```
+
+It answers `200` when isolation holds and `503` when it does not, which makes it
+suitable for a deployment health check. It needs no credentials and returns only
+the fixture's tags. If the check cannot run at all, the `503` carries a generic
+`detail` (`database unavailable`, or `self-check query failed; see the server
+log`); the underlying error is logged on the server, never returned.
+
+## Two databases, two owners
+
+Account data and domain data live in separate databases. The app's database holds
+BetterAuth's users, sessions, linked accounts, two-factor secrets, and email
+addresses; only the app connects to it. The API's database holds organizations,
+projects, tokens, and everything else on this page; only the API connects to it.
+The API keeps a mirror of each user's id, email, and public profile so it can join
+names into lists, but it never sees passwords or sessions. See
+[Data ownership](/docs/architecture/data-ownership).
+
+## Related
+
+<Cards>
+  <Card title="Multi-tenancy" href="/docs/architecture/multi-tenancy" description="The architecture view of organizations, roles, and RLS." />
+  <Card title="Permissions model" href="/docs/architecture/permissions-model" description="The role checks that run on top of isolation." />
+  <Card title="Database" href="/docs/self-hosting/database" description="Setting up the two roles when you run Flagon yourself." />
+  <Card title="Security overview" href="/docs/security/overview" description="The whole model on one page." />
+</Cards>

@@ -13,7 +13,7 @@ func TestHandlerServesRuntimeMetrics(t *testing.T) {
 	m := New(nil) // nil pool (degraded) must not panic; pool metrics just absent
 
 	rec := httptest.NewRecorder()
-	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	m.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("metrics status = %d, want 200", rec.Code)
@@ -35,11 +35,11 @@ func TestInstrumentHTTPRecordsRoutePattern(t *testing.T) {
 	// Two different ids must collapse to one route label, not two.
 	for _, id := range []string{"1", "2"} {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/things/"+id, nil))
+		handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/things/"+id, nil))
 	}
 
 	scrape := httptest.NewRecorder()
-	m.Handler().ServeHTTP(scrape, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	m.Handler().ServeHTTP(scrape, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
 	body := scrape.Body.String()
 
 	want := `flagon_http_request_duration_seconds_count{method="GET",route="/things/{id}",status="200"} 2`

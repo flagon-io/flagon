@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"log/slog"
 	"time"
 )
 
@@ -35,21 +36,29 @@ func (d *DB) CheckRLS(ctx context.Context) (any, bool) {
 
 	a, err := d.rlsVisibleTags(ctx, rlsSentinelOrgA)
 	if err != nil {
-		return RLSReport{Detail: err.Error()}, false
+		return rlsCheckFailed(ctx, "org_a", err), false
 	}
 	b, err := d.rlsVisibleTags(ctx, rlsSentinelOrgB)
 	if err != nil {
-		return RLSReport{Detail: err.Error()}, false
+		return rlsCheckFailed(ctx, "org_b", err), false
 	}
 	none, err := d.rlsVisibleTags(ctx, "")
 	if err != nil {
-		return RLSReport{Detail: err.Error()}, false
+		return rlsCheckFailed(ctx, "no_org", err), false
 	}
 
 	enforced := len(a) == 1 && a[0] == "org-a" &&
 		len(b) == 1 && b[0] == "org-b" &&
 		len(none) == 0
 	return RLSReport{Enforced: enforced, OrgA: a, OrgB: b, NoOrg: none}, enforced
+}
+
+// rlsCheckFailed logs a self-check query failure server-side and returns a
+// report with a generic detail. The report backs an UNAUTHENTICATED endpoint, so
+// the raw error (SQL, hostnames, role names) must never reach the response.
+func rlsCheckFailed(ctx context.Context, stage string, err error) RLSReport {
+	slog.ErrorContext(ctx, "RLS self-check query failed", "stage", stage, "err", err)
+	return RLSReport{Detail: "self-check query failed; see the server log"}
 }
 
 // rlsVisibleTags returns the tags the app role can see with org bound to the
@@ -64,7 +73,7 @@ func (d *DB) rlsVisibleTags(ctx context.Context, org string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }() // no-op (ErrTxClosed) after Commit
 
 	if org != "" {
 		if _, err := tx.Exec(ctx, "SELECT set_config('flagon.org_id', $1, true)", org); err != nil {

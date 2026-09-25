@@ -44,9 +44,19 @@ Three deployables, one repo (npm workspaces + a Go module):
   identity headers (`X-Flagon-User-Id`, `X-Flagon-User-Email`). Auth (BetterAuth)
   and the user account live in `app`; the domain lives in `api`.
 - **`api` is the source of truth and the single writer of domain data.** It
-  enforces tenant isolation with forced Postgres Row-Level Security and two DB
-  roles (a migrator role for schema, a `NOBYPASSRLS` app role for every runtime
-  query). Org SSO/2FA gating is enforced here as well as at the app gate.
+  enforces tenant isolation with Postgres Row-Level Security and two DB roles: a
+  migrator role that owns the schema, and a `NOBYPASSRLS`, non-owner app role for
+  every runtime query. Tenant tables `ENABLE` RLS (only a self-check fixture
+  `FORCE`s it), so isolation relies on runtime queries never running as the
+  owner: in production the server refuses to start without
+  `FLAGON_APP_DATABASE_URL` rather than fall back to the migrator.
+- **The API enforces org security policy.** An org's 2FA requirement and SSO
+  requirement are checked in the API on every org-scoped operation (REST
+  `/orgs/{slug}/...`, the agent, MCP tools), for gateway sessions and personal
+  access tokens alike; org access tokens (service principals) are exempt. The app
+  mirrors each user's 2FA state and linked SSO identities to the API and asserts,
+  per request, which SSO provider the current session came through. The app's
+  `[org]` gate is only the redirect UX on top.
 
 ## The three non-negotiable principles
 
@@ -154,9 +164,10 @@ which the API embeds. From that one corpus:
   holds no copy.
 
 Each page has frontmatter with a `visibility` of `public` or `internal`. Internal
-pages (e.g. parts of the handbook) are readable by the in-product agent for
-authenticated users but never leave the org: they are excluded from the public
-`/docs*` routes and the public MCP.
+pages (none today: the product docs and the handbook are public) are readable by
+the in-product agent for an authenticated user and by authenticated MCP callers
+(a valid token), with no configuration. They are always excluded from the public
+`/docs*` routes and the anonymous MCP.
 
 ## Roadmap
 
@@ -202,8 +213,16 @@ client that talks to the API as the authenticated user; it is a baseline skeleto
 today (commands return "not implemented"), not yet shipped.
 
 - `api/.env` (gitignored) is loaded by godotenv at startup - put local secrets
-  (Anthropic key, etc.) there. Config is urfave/cli flags with env sources +
-  sane local defaults, so `go run ./cmd/flagon-server serve` needs no setup for the DB.
+  (Anthropic key, etc.) there. Config is urfave/cli flags with env sources.
+  Development defaults (local compose DB URLs, the public `dev-internal-token`,
+  the public secrets key) apply ONLY in development: `FLAGON_ENV=development`, or,
+  when unset, a server off Fly bound to loopback (the default: `FLAGON_HOST` unset
+  binds `127.0.0.1` off Fly, so a fresh clone runs with zero config). Anything
+  else (Fly, or a routable bind such as the image's `FLAGON_HOST=0.0.0.0`) is
+  production and fails closed. Runtime queries never fall back to the migrator.
+- **Production must set** `FLAGON_INTERNAL_TOKEN` (shared with the app, which also
+  requires it in production), `DATABASE_URL`, `FLAGON_APP_DATABASE_URL`, and
+  `FLAGON_SECRETS_KEY`.
 - `npm run db:seed` makes a static-password demo user (`demo@flagon.dev` /
   `demo` / `password12345`) and a baseline org (`/demo`) the user owns
   (created via the API's `POST /orgs`, so it needs the API running); the login
@@ -306,6 +325,8 @@ today (commands return "not implemented"), not yet shipped.
 
 ## Deploy
 
-Push to `main` auto-deploys both services via CI: `app` to Vercel, `api` to
-Fly. Migrations run on API boot (and at Vercel build for `app`'s auth tables).
-Never tell someone to run `fly deploy` by hand.
+Push to `main` auto-deploys both services through each host's Git integration:
+`app` to Vercel, `api` to Fly. There is no deploy workflow in this repo;
+`.github/workflows/ci.yml` only builds and tests. Migrations run on API boot (and
+at Vercel build for `app`'s auth tables). Never tell someone to run `fly deploy`
+by hand.

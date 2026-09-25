@@ -1,41 +1,140 @@
 ---
-title: Self-hosting Flagon
-description: Run the whole platform yourself. Flagon is open source and self-hostable end to end.
-order: 0
+title: Self-hosting overview
+description: What you run when you host Flagon yourself - the app, the API, two Postgres databases, and an optional AI provider - and how they connect.
 ---
 
-Flagon is open source and runs entirely on your own infrastructure. Nothing about
-the platform requires the hosted service.
+Flagon is open source and runs entirely on your own infrastructure. A self-hosted
+instance is the same code the hosted service runs: nothing about the platform
+requires Flagon's own servers.
 
-## What you run
+You run two processes and one or two Postgres servers. This page explains what
+each piece does and how they talk to each other, so the installation and
+production pages make sense before you start.
 
-Flagon is a few services around one Postgres database:
+## The pieces
 
-- **`app`** the web UI and gateway.
-- **`api`** the source of truth: it owns all data and logic and hosts the
-  assistant and the MCP server.
-- **`packages/ui`** the shared design system.
-
-The API enforces tenant isolation in Postgres itself, so your data stays
-separated even if application code forgets to scope a query.
-
-## Running locally
-
-One Postgres instance in Docker, with the services run directly:
-
-```sh
-docker compose up -d postgres
-cd api && go run ./cmd/flagon serve
-cd app && npm install && npm run dev
+```text
+                  Browser                         CLI, CI, MCP clients
+                     │ HTTPS                      (Bearer flagon_ tokens)
+                     ▼                                       │
+        ┌─────────────────────────┐                          │
+        │ app  (Next.js)          │                          │
+        │ UI, sign-in, sessions   │                          │
+        └────┬───────────────┬────┘                          │
+             │               │ internal token +              │
+             │               │ X-Flagon-User-* headers       │
+             │               ▼                               ▼
+             │  ┌───────────────────────────────────────────────────┐
+             │  │ api  (flagon-server serve)                        │
+             │  │ domain logic, permissions, agent, MCP, docs       │
+             │  │ :8080 public HTTP        :9091 private /metrics   │
+             │  └─────────────┬───────────────────────┬─────────────┘
+             ▼                ▼                       ▼
+     ┌──────────────┐  ┌──────────────┐     ┌────────────────────┐
+     │ Postgres     │  │ Postgres     │     │ AI provider        │
+     │ flagon_app   │  │ flagon_api   │     │ (optional)         │
+     │ auth, users  │  │ domain + RLS │     │ Anthropic, OpenAI- │
+     └──────────────┘  └──────────────┘     │ compatible, mock   │
+                                            └────────────────────┘
 ```
 
-That is enough to bring the platform up with sane local defaults. The assistant
-works locally with no keys against an offline mock, and points at a real model
-once you configure one.
+### app
 
-## Going further
+The **app** is the Next.js web UI and gateway (the `app/` directory). It renders
+the dashboard, owns sign-in (email and password, two-factor, social sign-in, and
+org SSO through BetterAuth), and holds the user's session. It never reads or
+writes domain data itself: every request for organizations, projects, tokens, and
+the rest is forwarded server-side to the API, authenticated with a shared
+**internal token** plus the verified user's identity in `X-Flagon-User-Id` and
+`X-Flagon-User-Email` headers. That single request path lives in
+`app/src/lib/api/client.ts`.
 
-Full deployment guidance (managed Postgres, secrets, running the services in
-production) is being written. For now, the source and its setup live in the
-[repository](https://github.com/flagon-io/flagon); see
-[Contributing](/docs/open-source/contributing) to get oriented.
+The app also sends its own transactional email (verification codes and password
+resets) through Resend when `RESEND_API_KEY` is set on the app. Invitation emails
+come from the API instead, described below.
+
+### api
+
+The **API** is a single Go binary, `flagon-server` (`api/cmd/flagon-server`). It
+is the source of truth and the only writer of domain data. It serves:
+
+- the REST API and its generated OpenAPI spec (`/openapi.json`, `/openapi.yaml`);
+- the MCP endpoint (`/mcp`), from the same tool registry the assistant uses;
+- the in-product assistant (`/ai/messages`), which calls your configured model;
+- the embedded docs, roadmap, and changelog (`/docs`, `/roadmap`, `/changelog`);
+- health checks (`/healthz`, `/readyz`) and, on a separate private port,
+  Prometheus metrics.
+
+It also sends invitation emails itself, so an invitation made from the dashboard,
+the REST API, the assistant, or MCP is delivered the same way. With
+`RESEND_API_KEY` set on the API it sends through Resend; without it, it writes the
+email to its log, which is fine for local development but means nobody receives
+invitations in production.
+
+The API decides at startup whether it runs in **development** or **production**
+mode. Production refuses to start without the settings a real deployment needs
+(the internal token, both database URLs, and the secrets key), rather than
+falling back to the public development values. See
+[Configuration](/docs/self-hosting/configuration).
+
+The API applies its own schema migrations every time it boots, so there is no
+separate release step. See [Database](/docs/self-hosting/database).
+
+### The two databases
+
+Flagon keeps two separate Postgres databases:
+
+| Database | Owned by | Holds |
+| --- | --- | --- |
+| `flagon_api` | the API | Organizations, members, teams, projects, tokens, SSO configuration, audit log, notifications, AI usage. Protected by row-level security. |
+| `flagon_app` | the app | BetterAuth's tables: users, sessions, accounts, verifications, two-factor secrets, rate-limit counters, and a cache of SSO provider settings. |
+
+Locally, one Postgres instance holds both databases to keep resource use low. In
+production you can run them in one instance or two; they are never joined, so
+the boundary is the same either way.
+
+The API connects to `flagon_api` with **two roles**: a migrator role that owns
+the schema, and a least-privilege app role that cannot bypass row-level security
+and is used for every request. That split is what makes tenant isolation hold
+even if application code forgets to scope a query. See
+[Database](/docs/self-hosting/database) for how the API provisions it.
+
+### The AI provider (optional)
+
+The assistant needs a model to do real work, but Flagon runs fine without one.
+The API picks a provider from configuration: Anthropic, any OpenAI-compatible
+endpoint (including a model you host yourself with Ollama or vLLM), or an
+offline **mock** that matches keywords and needs no key. With nothing configured,
+the API uses the mock, so the assistant panel works on a fresh install. Every
+other part of Flagon works the same with or without a model.
+
+## What is not included
+
+A self-hosted instance runs exactly what is built today. Features that are still
+on the roadmap are not available on any instance:
+
+<Callout type="warn" title="Not available yet">
+
+Deployments, logs and observability, packages, SCIM provisioning, and the
+`flagon` CLI (a skeleton whose commands exit with code 3) are not built yet.
+Billing beyond the one-free-organization limit is not built either: on the free
+plan, creating or restoring a second organization you own returns
+`402 Payment Required`.
+
+</Callout>
+
+## Where to go next
+
+<Cards>
+  <Card title="Installation" href="/docs/self-hosting/installation" description="Bring up Postgres, the API, and the app, and sign in as the demo user." />
+  <Card title="Configuration" href="/docs/self-hosting/configuration" description="The handful of settings every instance needs." />
+  <Card title="Production" href="/docs/self-hosting/production" description="Secrets, TLS, health checks, and running the app and API on separate hosts." />
+</Cards>
+
+## Related
+
+- [Installation](/docs/self-hosting/installation)
+- [Database](/docs/self-hosting/database)
+- [Production](/docs/self-hosting/production)
+- [Configuration reference](/docs/reference/configuration)
+- [Self-hosting issues](/docs/troubleshooting/self-hosting-issues)

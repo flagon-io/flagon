@@ -6,7 +6,9 @@ import { cn } from "../lib/cn";
 
 /** A preview card shown on hover/focus. Compose Root > Trigger + Content. */
 export const HoverCard = HoverCardPrimitive.Root;
-export const HoverCardTrigger = HoverCardPrimitive.Trigger;
+export function HoverCardTrigger(props: ComponentProps<typeof HoverCardPrimitive.Trigger>) {
+  return <HoverCardPrimitive.Trigger data-slot="hover-card-trigger" {...props} />;
+}
 
 export function HoverCardContent({
   className,

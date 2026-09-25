@@ -1,0 +1,111 @@
+# golangci-lint v2 configuration for the Go API.
+# Run from api/: `golangci-lint run` (or `make lint-go` from the repo root).
+# CI pins the same golangci-lint version (see .github/workflows/ci.yml).
+version: "2"
+
+run:
+  # Lint tests too; they carry the RLS/permission guarantees and deserve the
+  # same care (a few noisy checks are relaxed for them under exclusions below).
+  tests: true
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - bodyclose # an unclosed HTTP response body leaks a connection
+    - copyloopvar # redundant per-iteration copies since Go 1.22
+    - errorlint # wrapped errors must be compared with errors.Is/As
+    - gocritic # default checks only: common bug and style diagnostics
+    - gosec # security smells (exclusions justified in settings below)
+    - misspell # typos in comments, strings, and identifiers
+    - nilerr # returning nil when an error was just checked
+    - noctx # outbound requests and queries must carry a context
+    - revive # restrained rule set below, no doc-comment requirements
+    - rowserrcheck # rows.Err() must be checked after iteration
+    - sqlclosecheck # sql rows/statements must be closed
+    - unconvert # needless type conversions
+    - unparam # parameters or results that are always the same
+    - usestdlibvars # http.MethodGet over "GET", http.StatusOK over 200
+
+  settings:
+    errcheck:
+      # Checking fmt.Fprint* to a response writer or buffer adds noise, not safety.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+    gosec:
+      excludes:
+        # G104 (unhandled errors) duplicates errcheck, which is configured above.
+        - G104
+
+    misspell:
+      locale: US
+
+    revive:
+      # Only the listed rules run. Notably absent: `exported` and
+      # `package-comments` (doc comments are encouraged, not required) and
+      # `unused-parameter` (handler and interface signatures are fixed).
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+          # Test helpers conventionally take t first, then ctx.
+          arguments:
+            - allowTypesBefore: "*testing.T"
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unreachable-code
+        - name: var-declaration
+
+  exclusions:
+    # Generated code is not hand-maintained, so findings there are not actionable.
+    generated: lax
+    presets:
+      # Standard, widely accepted exclusions for errcheck on Close/Rollback-style
+      # calls are NOT enabled: we want to see those and decide case by case.
+      - common-false-positives
+    paths:
+      # Embedded corpora compiled by cmd/gen*; not Go source written by hand.
+      - '.*\.gen\..*'
+    rules:
+      # Tests build fixtures with fixed inputs and throwaway credentials; gosec's
+      # secret and weak-randomness heuristics are pure noise there.
+      - path: _test\.go
+        linters:
+          - gosec
+      # The corpus/spec generators write files that are committed to git and read
+      # by other tools, so conventional 0644/0755 permissions are correct there.
+      - path: cmd/gen
+        linters:
+          - gosec
+        text: "G30[16]"
+      # Test helpers often take a parameter that is always the same value (t, a
+      # fixed org), which is intentional for readability.
+      - path: _test\.go
+        linters:
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      # Group this module's imports after third-party ones.
+      local-prefixes:
+        - github.com/flagon-io/flagon/api
+  exclusions:
+    generated: lax

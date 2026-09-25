@@ -55,7 +55,7 @@ export function InputOTPSlot({
       className={cn(
         "relative flex h-12 w-11 items-center justify-center border-y border-r border-input text-lg font-semibold text-foreground shadow-sm transition-all outline-none",
         "first:rounded-l-lg first:border-l last:rounded-r-lg",
-        "data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:ring-2 data-[active=true]:ring-ring/40",
+        "data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:outline-2 data-[active=true]:outline-solid data-[active=true]:-outline-offset-1 data-[active=true]:outline-ring",
         className,
       )}
       {...props}

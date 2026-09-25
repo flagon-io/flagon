@@ -1,0 +1,169 @@
+---
+title: Security overview
+description: Flagon's security model on one page - the trust boundaries, what each layer enforces, the defaults that fail closed, current limitations, and how to report a vulnerability.
+---
+
+Flagon holds the map of your engineering system: who is in your organization,
+which projects exist, who can change them, and how people sign in. This page is
+the security model in one place. Each section links to a page that goes deeper.
+
+The short version: the **API is the only writer** of your organization's data, it
+decides every request as a specific person, and the database underneath it
+refuses to show one organization's rows to another even if the API asks. The
+assistant and the MCP server go through the same checks as everything else, with
+no extra powers.
+
+```text
+   Browser                    Scripts, CI, MCP clients
+      │ session cookie            │ Authorization: Bearer flagon_...
+      ▼                           │
+ ┌──────────────────────────┐     │
+ │ app (Next.js)            │     │
+ │ sign-in, 2FA, SSO        │     │
+ │ auth rate limits         │     │
+ └────────────┬─────────────┘     │
+              │ internal token + verified user id
+              ▼                   ▼
+ ┌──────────────────────────────────────────────────────┐
+ │ API (Go)                                             │
+ │ body size cap, per-principal rate limit              │
+ │ token scopes -> org 2FA/SSO policy -> org role       │
+ │   -> project role                                    │
+ │ every org change audited in the same transaction     │
+ └──────────────────────────┬───────────────────────────┘
+                            │ NOBYPASSRLS role, user bound per transaction
+                            ▼
+ ┌──────────────────────────────────────────────────────┐
+ │ Postgres: row-level security on every tenant table   │
+ └──────────────────────────────────────────────────────┘
+```
+
+## The trust boundaries
+
+**The app** (`app/`, the dashboard at `app.flagon.io`) owns sign-in. It runs
+BetterAuth with email and password, email verification, optional Google and
+GitHub sign-in, TOTP two-factor authentication, and per-organization SSO (OIDC and
+SAML). It keeps the session and forwards each request to the API as the verified
+user. See [Authentication](/docs/security/authentication).
+
+**The API** (`api/`, `api.flagon.io`) owns the domain: organizations, members,
+teams, projects, tokens, SSO configuration, the audit log, notifications, and AI
+usage. It trusts exactly two credentials: the app's internal token (with the user
+id the app vouches for) and Flagon access tokens. Every operation checks a token's
+scopes, then the organization's security policy (its two-factor and SSO
+requirements), then the caller's organization and project roles. See
+[Permissions model](/docs/architecture/permissions-model).
+
+**The database** enforces tenant isolation on its own. The API's runtime database
+role cannot bypass row-level security, and every transaction is bound to the
+acting user, so a query that forgets to filter by organization still cannot see
+another organization's rows. See [Tenant isolation](/docs/security/tenant-isolation).
+
+## What fails closed
+
+These defaults deny access when something is missing or misconfigured, rather
+than allow it:
+
+- **Unmapped operations.** A scoped token can reach only operations that have a
+  scope in `operationScopes`. An operation with no scope is denied to every scoped
+  token, and a CI test fails if a new operation has neither a scope nor a written
+  exemption.
+- **Unbound transactions.** Row-level security reads the user from a
+  transaction-local setting. If it is not set, the policies match no rows.
+- **Tokens never manage tokens.** Creating, listing, and revoking access tokens
+  accept only the app's internal token, so a leaked token cannot mint a stronger
+  one.
+- **Unknown MCP tools.** An anonymous MCP caller sees only public tools; asking for
+  any other tool reports it as unknown.
+- **AI usage recording.** If the assistant cannot record a turn's usage, the turn
+  fails rather than going unmetered.
+- **Audit recording.** If an audit entry cannot be written, the change it
+  describes rolls back.
+- **Production configuration.** In production the API refuses to start without
+  `FLAGON_INTERNAL_TOKEN` (or with the public development value
+  `dev-internal-token`), `DATABASE_URL`, `FLAGON_APP_DATABASE_URL`, or
+  `FLAGON_SECRETS_KEY`. The development fallbacks (the compose database URLs,
+  the public internal token, and the public encryption key) exist only when the
+  server runs in development mode, and runtime queries never run as the migrator
+  role in any mode. See [Production](/docs/self-hosting/production).
+- **Internal token missing at request time.** If the API somehow has no internal
+  token configured, the endpoints that need it answer `503` instead of running.
+- **Organization security policy.** When an organization requires two-factor
+  authentication or SSO, the API checks it on every `/orgs/{slug}/...` operation,
+  every assistant and MCP tool call that names the organization, and the
+  assistant's own endpoints. A member who does not meet the policy gets `403`,
+  whether they come through the dashboard or with a personal access token.
+- **Internal documentation.** Pages marked `internal` (none today) are served
+  only through the assistant and the authenticated MCP, never on the public
+  `/docs` routes or to anonymous MCP callers.
+- **Error details.** A `5xx` response never carries raw internal error text (SQL,
+  hostnames, provider responses). The detail is logged on the server with the
+  request id, and every response carries an `X-Request-Id` header to quote.
+
+## Credentials at a glance
+
+| Credential | Held by | Stored as | Details |
+| --- | --- | --- | --- |
+| Session cookie | Browser | BetterAuth session in the app's database | [Authentication](/docs/security/authentication) |
+| Personal or organization access token | Scripts, CI, MCP clients | SHA-256 hash in the API database | [Tokens and scopes](/docs/security/tokens-and-scopes) |
+| Internal token | The app | Environment variable on both services | [Secrets](/docs/security/secrets) |
+| SSO client secret or SAML key | The API, cached by the app | Encrypted with AES-256-GCM in the API database; plaintext in the app's SSO cache; never returned to users | [Secrets](/docs/security/secrets) |
+| Invitation link | The invitee's email | SHA-256 hash, expires after 7 days | [Tokens and scopes](/docs/security/tokens-and-scopes) |
+
+## The AI surfaces
+
+The assistant and the MCP server call the same service layer as the REST API and
+act as the requesting user, so they can never exceed that user's role, and over
+MCP never exceed the token's scopes. The organization's 2FA and SSO requirements
+apply to both. In the dashboard, anything that changes data is proposed and waits
+for you to confirm it, unless you switch the conversation to "Automatically edit",
+and a conversation can act only inside the organization it was started in.
+Assistant usage, including confirmed actions, is capped per organization per day.
+See [AI safety](/docs/security/ai-safety).
+
+## Current limitations
+
+Flagon is early, and some controls are narrower than they will be. We would rather
+you know:
+
+- **SSO email domains are not verified.** A provider can name an email domain for
+  "sign in with SSO" routing. Flagon allows each domain on at most one live
+  provider, but it does not check that the organization controls the domain.
+- **The app's SSO cache holds secrets in plaintext.** The API encrypts SSO client
+  secrets and SAML signing keys at rest, but the app's BetterAuth SSO plugin keeps
+  its own copy of the provider configuration, secrets included, in plaintext in
+  the app database, because the sign-in flow needs them. See
+  [Secrets](/docs/security/secrets).
+- **Rate limiting is per instance.** The API's request rate limiter keeps its
+  counters in memory on each machine, so with several API machines a caller's
+  effective ceiling is that many times the configured rate. The assistant's daily
+  quota is stored in the database and holds across machines.
+- **"Automatically edit" skips confirmation.** A user can switch an assistant
+  conversation to apply changes without asking. The permission ceiling still
+  applies; the human check does not. MCP has no confirmation step of its own
+  either; that is up to the MCP client.
+- **Some principals are exempt from the organization policy by design.**
+  Organization owners are exempt from the SSO requirement (so an owner can always
+  reach settings to fix a broken provider), and organization access tokens are
+  exempt from both the 2FA and SSO requirements because no person signs in with
+  them. A personal access token passes an SSO requirement once its owner has
+  signed in through one of the organization's providers at least once.
+- **SCIM provisioning is designed but not built.** See [SCIM](/docs/platform/scim).
+
+## Reporting a vulnerability
+
+If you find a security issue in Flagon, email **hey@flagon.io** with what you
+found and how to reproduce it. Please do not open a public issue for it. We will
+acknowledge your report, work on the fix, and credit you if you would like. The
+repository's [SECURITY.md](https://github.com/flagon-io/flagon/blob/main/SECURITY.md)
+is the full policy: what to include in a report, what to expect from us, and
+which versions receive fixes (`main`, the latest).
+
+## Related
+
+<Cards>
+  <Card title="Tenant isolation" href="/docs/security/tenant-isolation" description="Two database roles and row-level security under every request." />
+  <Card title="Authentication" href="/docs/security/authentication" description="Sessions, 2FA, SSO, and the app-to-API trust boundary." />
+  <Card title="Tokens and scopes" href="/docs/security/tokens-and-scopes" description="Token formats, hashing, expiry, revocation, and least privilege." />
+  <Card title="AI safety" href="/docs/security/ai-safety" description="How the assistant and MCP stay inside your permissions." />
+</Cards>

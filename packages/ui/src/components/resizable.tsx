@@ -4,6 +4,7 @@ import { GripVertical } from "lucide-react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { createContext, useContext, type ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/control";
 
 // react-resizable-panels v4 renamed the primitives (PanelGroup/PanelResizeHandle ->
 // Group/Separator), swapped `direction` for `orientation`, and no longer exposes the
@@ -49,7 +50,7 @@ export function ResizableHandle({
       data-slot="resizable-handle"
       className={cn(
         "relative flex items-center justify-center bg-hairline outline-none transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1",
+        focusRing,
         vertical
           ? "h-px w-full after:absolute after:inset-x-0 after:left-0 after:top-1/2 after:h-1 after:w-full after:-translate-y-1/2 hover:after:bg-brand/40"
           : "w-px after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 hover:after:bg-brand/40",

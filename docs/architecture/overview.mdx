@@ -1,0 +1,217 @@
+---
+title: Architecture overview
+description: A one-screen map of Flagon - the app gateway, the Go API with its request guards, the shared tool registry and service layer, the two Postgres databases, and the embedded content corpora - and how the layout enforces API-first and AI-first.
+---
+
+Flagon is one repository that ships three deployables: a Next.js web app, a Go API,
+and a React design system. Only one of them, the API, owns your data. Everything
+else is a way to reach it. This page is the map; each section links to the page
+that zooms in on one part.
+
+Here is the whole system on one screen:
+
+```text
+  Browser                  Scripts and CI          MCP clients
+  (dashboard, assistant)   (Bearer flagon_...)     (Claude Desktop, Cursor)
+        │                          │                       │
+ ┌──────▼──────────────┐           │                       │
+ │ app  (Next.js)      │           │                       │
+ │ BetterAuth session  │           │                       │
+ │ gateway: app/api/** │           │                       │
+ └──────┬──────────────┘           │                       │
+        │ internal token           │                       │
+        │ + X-Flagon-User-*        │                       │
+ ┌──────▼──────────────────────────▼───────────────────────▼──────┐
+ │ api  (Go: chi + huma)                                          │
+ │  guards: request id, body cap, per-principal rate limit        │
+ │  ┌────────────────────┐   ┌─────────────────────────────────┐  │
+ │  │ REST operations    │   │ tool registry (internal/ai)     │  │
+ │  │ internal/server    │   │ assistant /ai/*  +  MCP /mcp    │  │
+ │  └─────────┬──────────┘   └────────────────┬────────────────┘  │
+ │            └─────────────┬─────────────────┘                   │
+ │               ┌──────────▼───────────┐   ┌──────────────────┐  │
+ │               │ internal/service     ├──►│ internal/mail    │  │
+ │               │ one implementation,  │   │ invitation email │  │
+ │               │ org access policy    │   └──────────────────┘  │
+ │               └──────────┬───────────┘                         │
+ │               ┌──────────▼───────────┐   ┌──────────────────┐  │
+ │               │ internal/db          ├──►│ internal/secrets │  │
+ │               │ RLS user bound to tx │   │ SSO secrets      │  │
+ │               └──────────┬───────────┘   │ sealed at rest   │  │
+ │                          │               └──────────────────┘  │
+ │  docs, roadmap, changelog corpora embedded in the binary       │
+ └──────────────────────────┼─────────────────────────────────────┘
+                            │ NOBYPASSRLS app role
+ ┌────────────────────┐  ┌─▼─────────────────────────────────┐
+ │ Auth DB (app only) │  │ Domain DB (api only)              │
+ │ BetterAuth users,  │  │ Postgres with row-level security  │
+ │ sessions, 2FA,     │  │ orgs, projects, teams, tokens,    │
+ │ SSO cache          │  │ audit, notifications, AI usage    │
+ └────────────────────┘  └───────────────────────────────────┘
+```
+
+## The three deployables
+
+| Path | Deploys as | Stack | Job |
+| --- | --- | --- | --- |
+| `app/` | `app.flagon.io` on Vercel | Next.js 16, React 19 | Renders the UI, owns sign-in and the session, forwards every domain call to the API |
+| `api/` | `api.flagon.io` and `mcp.flagon.io` on Fly.io | Go, chi, huma | Owns all domain data and logic, hosts the assistant and the MCP server, sends invitation email |
+| `packages/ui/` | `@flagon-io/ui`, an npm workspace built into the app | React, Radix | The design system; its catalog is served at `/ui` in the app |
+
+`mcp.flagon.io` is not a fourth deployable. It is the same Fly app as the API,
+with a host gate that turns that hostname into an MCP-only front door. See
+[Deployment topology](/docs/architecture/deployment-topology).
+
+## The app: a gateway, not a backend
+
+The **app** (`app/`) renders pages and holds the user's session through
+[BetterAuth](https://www.better-auth.com), which stores users, sessions, linked
+accounts, two-factor secrets, and a cache of SSO providers in the app's own **auth
+database**. It never reads or writes domain data. Every organization, project, team,
+or token the dashboard shows comes from the API.
+
+Browser code calls the app's route handlers under `app/src/app/api/**`. Those
+handlers call one server-only client, `app/src/lib/api/client.ts`, which adds the
+shared **internal token**, the verified user's identity (`X-Flagon-User-Id`,
+`X-Flagon-User-Email`), the end user's IP, country, and user agent for the audit
+log, and, when the session was established through SSO, the provider it came from
+(`X-Flagon-Auth-Sso-Provider`). That single path is the trust boundary between the
+two services.
+
+Read more: [Request lifecycle](/docs/architecture/request-lifecycle) and
+[Identity and authentication](/docs/architecture/identity-and-auth).
+
+## The API: the source of truth
+
+The **API** (`api/`) is a Go server built from `cmd/flagon-server`. Its router is
+chi, and every user-facing operation is registered with huma's `huma.Register`, so
+the OpenAPI document at `/openapi.json` and `/openapi.yaml` is generated from the
+code rather than written by hand. Every operation registers whether or not its
+dependencies are wired (a missing one answers `503` at request time), so the spec
+that `server.Spec()` and `cmd/genspec` produce is the complete contract.
+
+Every request first passes the **request guards** installed in
+`api/internal/server/server.go`: a request id (echoed as `X-Request-Id` on every
+response), the caller's resolved network address, a global body cap (`413`), and a
+per-principal rate limiter (`429`). Registered operations then run behind one of
+the auth middlewares in `api/internal/server/identity.go`: `combinedAuth`, which
+accepts either the app's internal token or a `flagon_` bearer token checked against
+the operation's scope, and `internalAuth`, which accepts only the app. Both are
+wrapped by an **org policy check** that enforces an organization's 2FA and SSO
+requirements on every `/orgs/{slug}/...` operation. Scopes live in
+`api/internal/server/scopes.go` and fail closed: an operation with no scope is
+unreachable by a scoped token.
+
+The server also fails closed at startup. Unless it runs in development mode
+(`FLAGON_ENV`, or bound to a loopback address off Fly, which is the default there), it refuses to start without
+a real internal token, both database URLs, and a secrets key.
+
+Read more: [Request lifecycle](/docs/architecture/request-lifecycle) and
+[Permissions model](/docs/architecture/permissions-model).
+
+## Three front doors, one tool registry
+
+A user can reach every capability three ways, and all three land on the same code:
+
+- **REST API.** The huma handlers in `api/internal/server`, called by the dashboard
+  (through the gateway) and by scripts holding an access token.
+- **In-product assistant.** `POST /ai/messages` runs the agent for the signed-in
+  user, confined to the conversation's organization. Reads run immediately;
+  mutations come back as proposed actions that the user confirms, which then run
+  through `POST /ai/actions/execute`.
+- **MCP server.** `POST /mcp` speaks the Model Context Protocol. Anonymous callers
+  see only the public documentation tools; a caller with a `flagon_` token sees the
+  tools its scopes allow.
+
+The assistant and MCP share one **tool registry** (`api/internal/ai`, one
+`tools_*.go` file per resource). Each tool records the REST operation it fronts and
+carries the same scope, so a guardrail test can prove every user-facing operation
+has a tool with a matching scope.
+
+Read more: [Tool registry](/docs/architecture/tool-registry) and
+[AI runtime](/docs/architecture/ai-runtime).
+
+## The service layer
+
+`api/internal/service` is the single implementation of every user-facing operation.
+REST handlers and tools are both thin adapters over it. The service validates input,
+derives slugs (one `Slugify` for orgs, projects, and teams), calls the store,
+classifies errors through one table in `service/errors.go`, emits notifications,
+and sends invitation email through `api/internal/mail` (Resend, or the server log
+in development). It also owns the checks that only ever narrow access: the org
+access policy (`CheckOrgAccess`, 2FA and SSO requirements) and the refusal of
+account-level operations to organization access tokens. Role and row authorization
+stays in the database layer, acting as the caller.
+
+Because there is one implementation, the same failure reads the same way on every
+surface. A slug collision is a `409` over REST, a `409` from
+`ai-execute-action`, and the same sentence in the assistant and over MCP.
+
+## The database layer and tenant isolation
+
+`api/internal/db` owns every query. It connects with two Postgres roles: a
+**migrator** role (`DATABASE_URL`) that owns the schema and is used only at boot,
+and a **`NOBYPASSRLS` app role** (`FLAGON_APP_DATABASE_URL`) that runs every
+request. Each request's queries run inside `inUserTx`, which binds the caller's user
+id to the transaction so Postgres row-level security (RLS) policies see who is
+asking. A mutation writes its audit entry inside that same transaction. Stored SSO
+credentials are sealed with AES-256-GCM through `api/internal/secrets` before they
+are written.
+
+Read more: [Multi-tenancy](/docs/architecture/multi-tenancy),
+[Data ownership](/docs/architecture/data-ownership), and
+[Auditing and notifications](/docs/architecture/auditing-and-notifications).
+
+## Two databases, two owners
+
+| Database | Owned by | Holds |
+| --- | --- | --- |
+| Auth DB | `app` (BetterAuth) | Accounts, sessions, linked sign-in methods, 2FA, email addresses, SSO provider cache |
+| Domain DB | `api` | Orgs, memberships, projects, teams, tokens, invitations, audit log, notifications, SSO provider configuration, AI usage, the user mirror (public profile, 2FA state, linked SSO identities) |
+
+The split keeps credentials and sessions out of the database the API serves tenant
+data from, and it keeps the API free of password handling. Locally both live in one
+Postgres instance as two separate databases (`flagon_api`, `flagon_app`); in
+production they are separate instances.
+
+## Content corpora
+
+Docs (`docs/`), the roadmap (`roadmap/`), and the changelog (`changelog/`) are
+Markdown in the repo. Generators in `api/cmd` compile each into a JSON corpus that
+the API embeds with `//go:embed`, so content ships atomically with the binary. The
+API serves them on plain routes (`/docs`, `/docs/nav`, `/docs/search`, `/docs/page`,
+`/roadmap`, `/changelog`) that are deliberately left out of the OpenAPI spec, and
+the tool registry exposes the docs through `search_docs` and `get_doc`.
+
+Read more: [Content corpora](/docs/architecture/content-corpora).
+
+## How the architecture enforces the three principles
+
+Flagon's contributor guide sets three rules. Each one is backed by structure, not
+only by convention.
+
+**API-first.** An operation exists only once it is registered with huma, and the
+OpenAPI spec is generated from that registration. The app has no domain database
+connection, so it cannot reach around the API even by accident.
+
+**AI-first.** Every tool calls the same service method as its REST operation, and
+`api/internal/server/guardrails_test.go` fails CI when a registered operation has
+neither a scope nor a documented exemption, or when a scoped operation has no tool
+and is not on its short, documented exempt list. A capability that ships without a
+tool breaks the build.
+
+**AI, MCP, and API stay in lockstep.** The assistant and MCP read one registry, the
+registry and REST share one service, and tools carry the scope of the operation
+they front. MCP checks that scope with the same `scopeSatisfies` function the REST
+middleware uses, and the tool runner applies the same org access policy the REST
+middleware does, so a token reaches the same set of capabilities through either
+door.
+
+## Related
+
+<Cards>
+  <Card title="Request lifecycle" href="/docs/architecture/request-lifecycle" description="Follow one request from the browser through the gateway, guards, auth, service, and database." />
+  <Card title="Multi-tenancy" href="/docs/architecture/multi-tenancy" description="How row-level security and two database roles isolate every organization." />
+  <Card title="Data ownership" href="/docs/architecture/data-ownership" description="What lives in which database and who is allowed to write it." />
+  <Card title="Deployment topology" href="/docs/architecture/deployment-topology" description="Where each piece runs in production and locally." />
+</Cards>

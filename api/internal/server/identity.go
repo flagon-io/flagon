@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -12,81 +13,20 @@ import (
 
 	"github.com/flagon-io/flagon/api/internal/audit"
 	"github.com/flagon-io/flagon/api/internal/db"
-	"github.com/flagon-io/flagon/api/internal/paginate"
+	"github.com/flagon-io/flagon/api/internal/service"
 )
 
-// IdentityStore is the data layer the identity endpoints need. *db.DB satisfies
-// it; tests can substitute a fake.
-type IdentityStore interface {
-	Me(ctx context.Context, userID, email string) (db.User, []db.Org, error)
-	CreateOrg(ctx context.Context, userID, email, name, slug string) (db.Org, error)
-	UpdateOrg(ctx context.Context, actorID, slug, name string) (db.Org, error)
-	ListOrgs(ctx context.Context, userID string) ([]db.Org, error)
+// ProfileStore mirrors the app-owned user profile and serves the public view.
+type ProfileStore interface {
 	UpsertUserProfile(ctx context.Context, userID, email string, p db.ProfileInput) error
 	SetUserDeleted(ctx context.Context, userID string, deleted bool) error
 	PublicUserProfile(ctx context.Context, username string) (*db.PublicProfile, error)
-	LeaveOrg(ctx context.Context, userID, slug string) error
+	SetUserAuthState(ctx context.Context, userID, email string, twoFactor *bool, ssoProviderIDs []string) error
+}
 
-	ListProjects(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]db.Project, string, error)
-	ListDeletedProjects(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]db.Project, string, error)
-	CreateProject(ctx context.Context, actorID, orgSlug string, in db.ProjectInput) (db.Project, error)
-	GetProject(ctx context.Context, actorID, orgSlug, projectSlug string) (db.Project, error)
-	UpdateProject(ctx context.Context, actorID, orgSlug, projectSlug string, in db.ProjectUpdate) (db.Project, error)
-	SetProjectDeleted(ctx context.Context, actorID, orgSlug, projectSlug string, deleted bool) (db.Project, error)
-
-	ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]db.ProjectMember, string, error)
-	AddProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, login, role string) (targetID string, err error)
-	SetProjectMemberRole(ctx context.Context, actorID, orgSlug, projectSlug, targetID, role string) error
-	RemoveProjectMember(ctx context.Context, actorID, orgSlug, projectSlug, targetID string) error
-
-	ListTeams(ctx context.Context, actorID, orgSlug string, q paginate.Query) ([]db.Team, string, error)
-	GetTeam(ctx context.Context, actorID, orgSlug, teamSlug string) (db.Team, error)
-	CreateTeam(ctx context.Context, actorID, orgSlug string, in db.TeamInput) (db.Team, error)
-	UpdateTeam(ctx context.Context, actorID, orgSlug, teamSlug string, in db.TeamUpdate) (db.Team, error)
-	DeleteTeam(ctx context.Context, actorID, orgSlug, teamSlug string) error
-	ListTeamMembers(ctx context.Context, actorID, orgSlug, teamSlug string, q paginate.Query) ([]db.TeamMember, string, error)
-	ListTeamProjects(ctx context.Context, actorID, orgSlug, teamSlug string, q paginate.Query) ([]db.TeamProject, string, error)
-	AddTeamMember(ctx context.Context, actorID, orgSlug, teamSlug, login, role string) (targetID string, err error)
-	SetTeamMemberRole(ctx context.Context, actorID, orgSlug, teamSlug, targetID, role string) error
-	RemoveTeamMember(ctx context.Context, actorID, orgSlug, teamSlug, targetID string) error
-
-	ListProjectTeams(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]db.ProjectTeam, string, error)
-	AddProjectTeam(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug, role string) error
-	SetProjectTeamRole(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug, role string) error
-	RemoveProjectTeam(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug string) error
-
-	ListProjectOwners(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]db.ProjectOwner, string, error)
-	AddProjectOwner(ctx context.Context, actorID, orgSlug, projectSlug, ownerType, login string) (principalID string, err error)
-	RemoveProjectOwner(ctx context.Context, actorID, orgSlug, projectSlug, ownerType, principalID string) error
-
-	GetOrg(ctx context.Context, actorID, orgSlug string) (db.Org, error)
-
-	GetAuditConfig(ctx context.Context, actorID, orgSlug string) (ipDisclosure bool, err error)
-	SetAuditConfig(ctx context.Context, actorID, orgSlug string, ipDisclosure bool) error
-
-	GetOrgSecurity(ctx context.Context, actorID, orgSlug string) (db.OrgSecurity, error)
-	SetOrgSecurity(ctx context.Context, actorID, orgSlug string, s db.OrgSecurity) error
-
-	ProvisionSSOMember(ctx context.Context, orgID, userID, email, role string) error
-
-	ListMembers(ctx context.Context, actorID, slug string, q paginate.Query) ([]db.Member, string, error)
-	AddMember(ctx context.Context, actorID, slug, login, role string) (targetID, orgName string, err error)
-	SetMemberRole(ctx context.Context, actorID, slug, targetID, newRole string) error
-	RemoveMember(ctx context.Context, actorID, slug, targetID string) error
-
-	InviteMember(ctx context.Context, actorID, slug, login, role string) (db.InviteResult, error)
-	ListInvitations(ctx context.Context, actorID, slug string, q paginate.Query) ([]db.Invitation, string, error)
-	RevokeInvitation(ctx context.Context, actorID, slug, id string) error
-	InvitationByToken(ctx context.Context, token string) (*db.InviteLookup, error)
-	AcceptInvitation(ctx context.Context, userID, email, token string) (slug, name, invitedBy string, err error)
-
-	ListNotifications(ctx context.Context, userID string, limit int) ([]db.Notification, error)
-	UnreadNotificationCount(ctx context.Context, userID string) (int, error)
-	MarkNotificationRead(ctx context.Context, userID, id string) error
-	MarkNotificationUnread(ctx context.Context, userID, id string) error
-	MarkAllNotificationsRead(ctx context.Context, userID string) error
-	CreateNotification(ctx context.Context, userID string, orgID *string, ntype, title, body, link string) error
-
+// TokenStore manages access tokens and resolves a presented token to its
+// principal (the auth middleware's half).
+type TokenStore interface {
 	CreatePAT(ctx context.Context, userID, name string, scopes []string, expiresAt *time.Time) (string, db.AccessToken, error)
 	CreateOAT(ctx context.Context, actorID, slug, name, role string, scopes []string, expiresAt *time.Time) (string, string, error)
 	ListPATs(ctx context.Context, userID string) ([]db.AccessToken, error)
@@ -96,32 +36,69 @@ type IdentityStore interface {
 	ResolveToken(ctx context.Context, secret string) (db.TokenPrincipal, error)
 }
 
+// SSOStore covers the app-only SSO paths: provisioning SSO-authenticated users
+// into their org, and the auth layer's full-configuration read + one-time import
+// of providers that predate API ownership (internal).
+type SSOStore interface {
+	ProvisionSSOMember(ctx context.Context, orgID, userID, email, role string) error
+	RecordSSOSignIn(ctx context.Context, userID, email, providerID string) error
+	SSOProviderConfigs(ctx context.Context, f db.SSOConfigFilter) ([]db.SSOProviderConfig, error)
+	ImportSSOProvider(ctx context.Context, orgID, createdBy string, in db.SSOProviderInput) (string, error)
+}
+
+// IdentityStore is the whole data layer the HTTP API needs: the per-resource
+// stores the shared service runs over, plus the transport-only concerns (profile
+// mirroring, tokens, SSO provisioning) that have no agent/MCP surface. *db.DB
+// satisfies it; tests substitute a fake.
+type IdentityStore interface {
+	service.Store
+	ProfileStore
+	TokenStore
+	SSOStore
+}
+
+var _ IdentityStore = (*db.DB)(nil)
+
+// deps is what every register*API function needs: the shared service (the one
+// implementation of each operation), the raw store for transport-only concerns,
+// and the two auth middlewares.
+type deps struct {
+	svc   *service.Service
+	store IdentityStore
+	// auth accepts a Flagon access token (scope-checked) or the internal token.
+	auth func(huma.Context, func(huma.Context))
+	// internal accepts ONLY the internal app<->API token (never a user token).
+	internal func(huma.Context, func(huma.Context))
+}
+
 type ctxKey string
 
 const (
 	userIDKey    ctxKey = "flagon.user_id"
 	userEmailKey ctxKey = "flagon.user_email"
+	// authViaKey records how the request authenticated (service.ViaSession,
+	// ViaPAT or ViaOAT); ssoProviderKey the SSO provider the app asserts the
+	// current session was established through. Both feed the org policy check.
+	authViaKey     ctxKey = "flagon.auth_via"
+	ssoProviderKey ctxKey = "flagon.sso_provider"
 )
 
-// registerIdentityAPI wires /me, POST /orgs, and GET /orgs. Every operation is
-// gated by the internal-token middleware: only the app (which holds the token
-// and has already verified the user's session) may call the API on a user's
-// behalf, and it forwards the verified user via headers. The store may be nil
-// during spec generation, when handlers never run.
-func registerIdentityAPI(api huma.API, store IdentityStore, internalToken string) {
-	auth := combinedAuth(api, store, internalToken)
-
+// registerIdentityAPI wires /me, the org endpoints, the profile mirror, and the
+// public profile. Operations are gated by combinedAuth (a user token or the
+// app's internal token + forwarded user); the mirror endpoints are internal-only
+// and the public profile needs no auth. The store may be nil during spec
+// generation, when handlers never run.
+func registerIdentityAPI(api huma.API, d deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-me",
 		Method:      http.MethodGet,
 		Path:        "/me",
 		Summary:     "Current user and their orgs",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, _ *struct{}) (*MeOutput, error) {
-		userID, email := identity(ctx)
-		user, orgs, err := store.Me(ctx, userID, email)
+		user, orgs, err := d.svc.Me(ctx, actor(ctx))
 		if err != nil {
-			return nil, huma.Error500InternalServerError("could not load profile", err)
+			return nil, apiErr(err, "could not load profile")
 		}
 		out := &MeOutput{}
 		out.Body.User = user
@@ -135,30 +112,12 @@ func registerIdentityAPI(api huma.API, store IdentityStore, internalToken string
 		Path:          "/orgs",
 		Summary:       "Create an organization",
 		DefaultStatus: http.StatusCreated,
-		Middlewares:   huma.Middlewares{auth},
+		Middlewares:   huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *CreateOrgInput) (*OrgOutput, error) {
-		userID, email := identity(ctx)
-		name := strings.TrimSpace(in.Body.Name)
-		slug := slugify(in.Body.Slug)
-		if slug == "" {
-			slug = slugify(name)
+		org, err := d.svc.CreateOrg(ctx, actor(ctx), in.Body.Name, in.Body.Slug)
+		if err != nil {
+			return nil, apiErr(err, "could not create org")
 		}
-		if name == "" || slug == "" {
-			return nil, huma.Error422UnprocessableEntity("name is required and must contain a letter or digit")
-		}
-		org, err := store.CreateOrg(ctx, userID, email, name, slug)
-		switch {
-		case errors.Is(err, db.ErrOrgSlugTaken):
-			return nil, huma.Error409Conflict("that org slug is already taken")
-		case errors.Is(err, db.ErrOrgLimitReached):
-			return nil, huma.NewError(http.StatusPaymentRequired,
-				"the free plan includes one organization; add a payment method to create more")
-		case err != nil:
-			return nil, huma.Error500InternalServerError("could not create org", err)
-		}
-		// Emit a welcome notification (best-effort; never fail creation over it).
-		_ = store.CreateNotification(ctx, userID, &org.ID, "org.created",
-			"Welcome to "+org.Name, "Your organization is ready. Invite teammates to get started.", "/"+org.Slug)
 		out := &OrgOutput{}
 		out.Body = org
 		return out, nil
@@ -169,12 +128,11 @@ func registerIdentityAPI(api huma.API, store IdentityStore, internalToken string
 		Method:      http.MethodGet,
 		Path:        "/orgs",
 		Summary:     "List the caller's orgs",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, _ *struct{}) (*OrgsOutput, error) {
-		userID, _ := identity(ctx)
-		orgs, err := store.ListOrgs(ctx, userID)
+		orgs, err := d.svc.ListOrgs(ctx, actor(ctx))
 		if err != nil {
-			return nil, huma.Error500InternalServerError("could not list orgs", err)
+			return nil, apiErr(err, "could not list orgs")
 		}
 		out := &OrgsOutput{}
 		out.Body.Orgs = orgs
@@ -186,21 +144,11 @@ func registerIdentityAPI(api huma.API, store IdentityStore, internalToken string
 		Method:      http.MethodPatch,
 		Path:        "/orgs/{slug}",
 		Summary:     "Update an organization's settings",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *UpdateOrgInput) (*OrgOutput, error) {
-		userID, _ := identity(ctx)
-		name := strings.TrimSpace(in.Body.Name)
-		if name == "" {
-			return nil, huma.Error422UnprocessableEntity("name is required")
-		}
-		org, err := store.UpdateOrg(ctx, userID, in.Slug, name)
-		switch {
-		case errors.Is(err, db.ErrForbidden):
-			return nil, huma.Error403Forbidden("you don't have permission to do that")
-		case errors.Is(err, db.ErrNotMember):
-			return nil, huma.Error404NotFound("organization not found")
-		case err != nil:
-			return nil, huma.Error500InternalServerError("could not update org", err)
+		org, err := d.svc.UpdateOrg(ctx, actor(ctx), in.Slug, in.Body.Name)
+		if err != nil {
+			return nil, apiErr(err, "could not update org")
 		}
 		out := &OrgOutput{}
 		out.Body = org
@@ -213,35 +161,34 @@ func registerIdentityAPI(api huma.API, store IdentityStore, internalToken string
 		Method:      http.MethodPost,
 		Path:        "/orgs/{slug}/leave",
 		Summary:     "Leave an organization",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *LeaveOrgInput) (*LeaveOrgOutput, error) {
-		userID, _ := identity(ctx)
-		err := store.LeaveOrg(ctx, userID, in.Slug)
-		switch {
-		case errors.Is(err, db.ErrNotMember):
-			return nil, huma.Error404NotFound("you are not a member of that organization")
-		case errors.Is(err, db.ErrSoleOwner):
-			return nil, huma.Error409Conflict(
-				"you're the only owner; transfer ownership or delete the organization first")
-		case err != nil:
-			return nil, huma.Error500InternalServerError("could not leave org", err)
+		if err := d.svc.LeaveOrg(ctx, actor(ctx), in.Slug); err != nil {
+			return nil, apiErr(err, "could not leave org")
 		}
 		out := &LeaveOrgOutput{}
 		out.Body.OK = true
 		return out, nil
 	})
 
-	// Internal: the app mirrors the caller's public profile here whenever it
-	// changes (the app/BetterAuth is the writer; this keeps the API's copy fresh).
+	// Soft delete, the recently deleted archive, and restore (org_delete.go).
+	registerOrgDeleteAPI(api, d)
+
+	// Internal-only: the app mirrors the caller's public profile here whenever
+	// it changes. The profile (username included) and the auth-state fields (2FA,
+	// linked SSO identities, which feed the org security policy) are owned by the
+	// app's auth layer, so only the app gateway may write the mirror; no access
+	// token reaches it, whatever its scopes.
 	huma.Register(api, huma.Operation{
 		OperationID: "sync-profile",
 		Method:      http.MethodPut,
 		Path:        "/me/profile",
 		Summary:     "Mirror the caller's public profile (internal)",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.internal},
 	}, func(ctx context.Context, in *SyncProfileInput) (*SyncProfileOutput, error) {
 		userID, email := identity(ctx)
-		err := store.UpsertUserProfile(ctx, userID, email, db.ProfileInput{
+		authState := in.Body.TwoFactorEnabled != nil || in.Body.SSOProviderIDs != nil
+		err := d.store.UpsertUserProfile(ctx, userID, email, db.ProfileInput{
 			Username:    strings.TrimSpace(in.Body.Username),
 			Name:        in.Body.Name,
 			Bio:         in.Body.Bio,
@@ -253,11 +200,20 @@ func registerIdentityAPI(api huma.API, store IdentityStore, internalToken string
 			PublicEmail: in.Body.PublicEmail,
 			AvatarURL:   in.Body.AvatarURL,
 		})
-		switch {
-		case errors.Is(err, db.ErrUsernameTaken):
-			return nil, huma.Error409Conflict("that username is already taken")
-		case err != nil:
-			return nil, huma.Error500InternalServerError("could not sync profile", err)
+		if err != nil {
+			return nil, apiErr(err, "could not sync profile")
+		}
+		if authState {
+			var ids []string
+			if in.Body.SSOProviderIDs != nil {
+				ids = *in.Body.SSOProviderIDs
+				if ids == nil {
+					ids = []string{}
+				}
+			}
+			if err := d.store.SetUserAuthState(ctx, userID, email, in.Body.TwoFactorEnabled, ids); err != nil {
+				return nil, apiErr(err, "could not sync profile")
+			}
 		}
 		out := &SyncProfileOutput{}
 		out.Body.OK = true
@@ -271,18 +227,18 @@ func registerIdentityAPI(api huma.API, store IdentityStore, internalToken string
 		Method:      http.MethodPut,
 		Path:        "/me/deleted",
 		Summary:     "Mirror the account's soft-delete state (internal)",
-		Middlewares: huma.Middlewares{internalAuth(api, internalToken)},
+		Middlewares: huma.Middlewares{d.internal},
 	}, func(ctx context.Context, in *SetDeletedInput) (*SyncProfileOutput, error) {
 		userID, _ := identity(ctx)
-		if err := store.SetUserDeleted(ctx, userID, in.Body.Deleted); err != nil {
-			return nil, huma.Error500InternalServerError("could not update account state", err)
+		if err := d.store.SetUserDeleted(ctx, userID, in.Body.Deleted); err != nil {
+			return nil, apiErr(err, "could not update account state")
 		}
 		out := &SyncProfileOutput{}
 		out.Body.OK = true
 		return out, nil
 	})
 
-	// Public (no auth): GitHub-style user profile, e.g. GET /users/{username}.
+	// Public (no auth): a user's public profile, e.g. GET /users/{username}.
 	// Reads through the SECURITY DEFINER window, so only public fields are exposed.
 	huma.Register(api, huma.Operation{
 		OperationID: "get-user",
@@ -290,9 +246,9 @@ func registerIdentityAPI(api huma.API, store IdentityStore, internalToken string
 		Path:        "/users/{username}",
 		Summary:     "Public user profile",
 	}, func(ctx context.Context, in *GetUserInput) (*PublicUserOutput, error) {
-		p, err := store.PublicUserProfile(ctx, in.Username)
+		p, err := d.store.PublicUserProfile(ctx, in.Username)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("could not load user", err)
+			return nil, apiErr(err, "could not load user")
 		}
 		if p == nil {
 			return nil, huma.Error404NotFound("user not found")
@@ -317,6 +273,9 @@ type SyncProfileInput struct {
 		SocialLinks []string `json:"socialLinks,omitempty"`
 		PublicEmail string   `json:"publicEmail,omitempty"`
 		AvatarURL   string   `json:"avatarUrl,omitempty"`
+		// Auth-state mirror. Omitted = unchanged.
+		TwoFactorEnabled *bool     `json:"twoFactorEnabled,omitempty" doc:"Whether the account has two-factor authentication enabled (mirrored by the app)."`
+		SSOProviderIDs   *[]string `json:"ssoProviderIds,omitempty" doc:"Every SSO provider id the account has a linked identity with; replaces the mirrored set (mirrored by the app)."`
 	}
 }
 
@@ -413,7 +372,8 @@ func internalAuth(api huma.API, token string) func(huma.Context, func(huma.Conte
 		}
 		ctx = huma.WithValue(ctx, userIDKey, userID)
 		ctx = huma.WithValue(ctx, userEmailKey, strings.TrimSpace(ctx.Header("X-Flagon-User-Email")))
-		next(ctx)
+		ctx = withGatewaySession(ctx)
+		next(withAuditMeta(ctx, true))
 	}
 }
 
@@ -432,8 +392,22 @@ func combinedAuth(api huma.API, store IdentityStore, internalToken string) func(
 				return
 			}
 			principal, err := store.ResolveToken(ctx.Context(), presented)
-			if err != nil {
+			if errors.Is(err, db.ErrInvalidToken) {
 				_ = huma.WriteErr(api, ctx, http.StatusUnauthorized, "invalid or expired token")
+				return
+			}
+			if err != nil {
+				// Not a verdict on the token (e.g. the database is down): a 401
+				// would tell a valid caller to throw its credential away. Log the
+				// cause with the request id; the client gets a redacted 503.
+				op := ""
+				if o := ctx.Operation(); o != nil {
+					op = o.OperationID
+				}
+				slog.ErrorContext(ctx.Context(), "could not resolve access token",
+					"request_id", RequestID(ctx.Context()), "operation", op, "err", err)
+				_ = huma.WriteErr(api, ctx, http.StatusServiceUnavailable,
+					"authentication is temporarily unavailable; try again shortly")
 				return
 			}
 			// Scoped tokens (non-nil scopes) can reach only operations whose scope
@@ -445,7 +419,8 @@ func combinedAuth(api huma.API, store IdentityStore, internalToken string) func(
 			}
 			ctx = huma.WithValue(ctx, userIDKey, principal.UserID)
 			ctx = huma.WithValue(ctx, userEmailKey, principal.Email)
-			next(withAuditMeta(ctx))
+			ctx = huma.WithValue(ctx, authViaKey, tokenVia(principal.Kind))
+			next(withAuditMeta(ctx, false))
 			return
 		}
 
@@ -464,41 +439,48 @@ func combinedAuth(api huma.API, store IdentityStore, internalToken string) func(
 		}
 		ctx = huma.WithValue(ctx, userIDKey, userID)
 		ctx = huma.WithValue(ctx, userEmailKey, strings.TrimSpace(ctx.Header("X-Flagon-User-Email")))
-		next(withAuditMeta(ctx))
+		ctx = withGatewaySession(ctx)
+		next(withAuditMeta(ctx, true))
 	}
 }
 
 // withAuditMeta records the request's "where" (client IP, country, user-agent)
 // onto the context so recordAudit can stamp it onto any audit entry the request
-// writes. The app gateway forwards the end user's values as X-Flagon-Client-*;
-// a direct API/MCP call falls back to the connection's own proxy headers.
-func withAuditMeta(ctx huma.Context) huma.Context {
-	country := strings.TrimSpace(ctx.Header("X-Flagon-Client-Country"))
-	ua := strings.TrimSpace(ctx.Header("X-Flagon-Client-Ua"))
+// writes - including entries written by tools the request runs (the in-product
+// agent's confirmed actions), since the same context flows into them.
+//
+// gateway must be true ONLY for requests authenticated with the internal token:
+// the app gateway is the one caller trusted to forward the END user's values as
+// X-Flagon-Client-*. For everyone else (access tokens) those headers are ignored
+// and the connection's own address is used (see withConnIP, which honors a proxy
+// header only when one is explicitly configured), so a token holder cannot
+// forge the IP or location their audit entries record.
+func withAuditMeta(ctx huma.Context, gateway bool) huma.Context {
+	ip, country, ua := "", "", ""
+	if gateway {
+		ip = firstHop(ctx.Header("X-Flagon-Client-Ip"))
+		country = strings.TrimSpace(ctx.Header("X-Flagon-Client-Country"))
+		ua = strings.TrimSpace(ctx.Header("X-Flagon-Client-Ua"))
+	}
+	if ip == "" {
+		ip = requestConnIP(ctx)
+	}
 	if ua == "" {
 		ua = strings.TrimSpace(ctx.Header("User-Agent"))
 	}
-	ctx = huma.WithValue(ctx, audit.CtxIP, clientIP(ctx))
+	ctx = huma.WithValue(ctx, audit.CtxIP, ip)
 	ctx = huma.WithValue(ctx, audit.CtxCountry, country)
 	ctx = huma.WithValue(ctx, audit.CtxUA, ua)
 	return ctx
 }
 
-// clientIP resolves the caller's IP from the first present proxy header. The
-// gateway-forwarded end-user IP wins; then Fly's edge header; then the standard
-// forwarded-for chain (first hop is the client).
-func clientIP(ctx huma.Context) string {
-	for _, h := range []string{"X-Flagon-Client-Ip", "Fly-Client-Ip", "X-Forwarded-For", "X-Real-Ip"} {
-		v := strings.TrimSpace(ctx.Header(h))
-		if v == "" {
-			continue
-		}
-		if i := strings.IndexByte(v, ','); i >= 0 {
-			v = strings.TrimSpace(v[:i])
-		}
-		return v
+// requestConnIP is the caller's network address as resolved by withConnIP, with
+// the raw peer address as a fallback.
+func requestConnIP(ctx huma.Context) string {
+	if ip := connIP(ctx.Context()); ip != "" {
+		return ip
 	}
-	return ""
+	return peerIP(ctx.RemoteAddr())
 }
 
 func identity(ctx context.Context) (userID, email string) {
@@ -507,22 +489,32 @@ func identity(ctx context.Context) (userID, email string) {
 	return userID, email
 }
 
-// slugify lowercases s and turns runs of non-alphanumeric characters into a
-// single hyphen, trimming hyphens from the ends. "Acme Corp." -> "acme-corp".
-func slugify(s string) string {
-	var b strings.Builder
-	pendingHyphen := false
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
-			if pendingHyphen && b.Len() > 0 {
-				b.WriteByte('-')
-			}
-			pendingHyphen = false
-			b.WriteRune(r)
-		default:
-			pendingHyphen = true
-		}
+// actor is the service principal for the request's authenticated user.
+func actor(ctx context.Context) service.Actor {
+	userID, email := identity(ctx)
+	via, _ := ctx.Value(authViaKey).(string)
+	sso, _ := ctx.Value(ssoProviderKey).(string)
+	return service.Actor{UserID: userID, Email: email, Via: via, SSOProviderID: sso}
+}
+
+// SSOProviderHeader is how the app asserts, per request, which SSO provider the
+// signed-in user's CURRENT session was established through (absent or empty when
+// it wasn't an SSO sign-in). It is trusted only alongside the internal token.
+const SSOProviderHeader = "X-Flagon-Auth-Sso-Provider"
+
+// withGatewaySession marks an internal-token request as a gateway session and
+// binds the app's SSO assertion for it. Only the internal-token paths call it,
+// so a token caller can never claim an SSO session by sending the header.
+func withGatewaySession(ctx huma.Context) huma.Context {
+	ctx = huma.WithValue(ctx, authViaKey, service.ViaSession)
+	return huma.WithValue(ctx, ssoProviderKey, strings.TrimSpace(ctx.Header(SSOProviderHeader)))
+}
+
+// tokenVia maps a resolved token's kind to Actor.Via. Anything that is not
+// recognizably an org token is treated as a personal one (never exempt).
+func tokenVia(kind string) string {
+	if kind == "oat" {
+		return service.ViaOAT
 	}
-	return b.String()
+	return service.ViaPAT
 }

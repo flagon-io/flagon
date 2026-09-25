@@ -100,6 +100,7 @@ export function Carousel({
       value={{ carouselRef, api, orientation, scrollPrev, scrollNext, canScrollPrev, canScrollNext }}
     >
       <div
+        data-slot="carousel"
         onKeyDownCapture={onKeyDown}
         className={cn("relative", className)}
         role="region"
@@ -115,7 +116,7 @@ export function Carousel({
 export function CarouselContent({ className, ...props }: ComponentProps<"div">) {
   const { carouselRef, orientation } = useCarousel();
   return (
-    <div ref={carouselRef} className="overflow-hidden">
+    <div data-slot="carousel-content" ref={carouselRef} className="overflow-hidden">
       <div
         className={cn("flex", orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col", className)}
         {...props}
@@ -128,6 +129,7 @@ export function CarouselItem({ className, ...props }: ComponentProps<"div">) {
   const { orientation } = useCarousel();
   return (
     <div
+      data-slot="carousel-item"
       role="group"
       aria-roledescription="slide"
       className={cn(
@@ -144,6 +146,7 @@ export function CarouselPrevious({ className, variant = "outline", size = "icon"
   const { orientation, scrollPrev, canScrollPrev } = useCarousel();
   return (
     <Button
+      data-slot="carousel-previous"
       variant={variant}
       size={size}
       disabled={!canScrollPrev}
@@ -167,6 +170,7 @@ export function CarouselNext({ className, variant = "outline", size = "icon", ..
   const { orientation, scrollNext, canScrollNext } = useCarousel();
   return (
     <Button
+      data-slot="carousel-next"
       variant={variant}
       size={size}
       disabled={!canScrollNext}

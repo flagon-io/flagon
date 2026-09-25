@@ -10,17 +10,18 @@ export function Table({ className, ...props }: ComponentProps<"table">) {
   );
 }
 export function TableHeader({ className, ...props }: ComponentProps<"thead">) {
-  return <thead className={cn("[&_tr]:border-b [&_tr]:border-hairline", className)} {...props} />;
+  return <thead data-slot="table-header" className={cn("[&_tr]:border-b [&_tr]:border-hairline", className)} {...props} />;
 }
 export function TableBody({ className, ...props }: ComponentProps<"tbody">) {
-  return <tbody className={cn("[&_tr:last-child]:border-0", className)} {...props} />;
+  return <tbody data-slot="table-body" className={cn("[&_tr:last-child]:border-0", className)} {...props} />;
 }
 export function TableFooter({ className, ...props }: ComponentProps<"tfoot">) {
-  return <tfoot className={cn("border-t border-hairline bg-muted/40 font-medium", className)} {...props} />;
+  return <tfoot data-slot="table-footer" className={cn("border-t border-hairline bg-muted/40 font-medium", className)} {...props} />;
 }
 export function TableRow({ className, ...props }: ComponentProps<"tr">) {
   return (
     <tr
+      data-slot="table-row"
       className={cn("border-b border-hairline transition-colors hover:bg-panel/50 data-[state=selected]:bg-panel", className)}
       {...props}
     />
@@ -28,12 +29,12 @@ export function TableRow({ className, ...props }: ComponentProps<"tr">) {
 }
 export function TableHead({ className, ...props }: ComponentProps<"th">) {
   return (
-    <th className={cn("h-10 px-3 text-left align-middle text-xs font-medium text-muted-foreground", className)} {...props} />
+    <th data-slot="table-head" className={cn("h-10 px-3 text-left align-middle text-xs font-medium text-muted-foreground", className)} {...props} />
   );
 }
 export function TableCell({ className, ...props }: ComponentProps<"td">) {
-  return <td className={cn("px-3 py-2.5 align-middle text-foreground", className)} {...props} />;
+  return <td data-slot="table-cell" className={cn("px-3 py-2.5 align-middle text-foreground", className)} {...props} />;
 }
 export function TableCaption({ className, ...props }: ComponentProps<"caption">) {
-  return <caption className={cn("mt-4 text-sm text-muted-foreground", className)} {...props} />;
+  return <caption data-slot="table-caption" className={cn("mt-4 text-sm text-muted-foreground", className)} {...props} />;
 }

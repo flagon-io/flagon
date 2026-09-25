@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError } from "@/lib/route-error";
 import { deleteTeam, getTeam, updateTeam } from "@/lib/flagon-api";
 
 export async function GET(
@@ -10,9 +11,8 @@ export async function GET(
     const found = await getTeam(slug, team);
     if (!found) return NextResponse.json({ error: "Team not found." }, { status: 404 });
     return NextResponse.json(found);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not load team.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not load team.");
   }
 }
 
@@ -29,9 +29,8 @@ export async function PATCH(
       description: typeof body.description === "string" ? body.description : undefined,
     });
     return NextResponse.json(updated);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not update team.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not update team.");
   }
 }
 
@@ -43,8 +42,7 @@ export async function DELETE(
   try {
     await deleteTeam(slug, team);
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not delete team.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not delete team.");
   }
 }

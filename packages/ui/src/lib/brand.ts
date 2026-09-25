@@ -28,11 +28,23 @@ export type BrandColors = {
   accent: string;
   accentForeground: string;
   destructive: string;
+  /** Text/icons on a solid destructive fill (the destructive Button). */
+  destructiveForeground: string;
+  /** Status: success (Badge/Alert "success"); readable as text and as a fill. */
+  success: string;
+  successForeground: string;
+  /** Status: warning (Badge/Alert "warning"); readable as text and as a fill. */
+  warning: string;
+  warningForeground: string;
+  /** Modal backdrop color (usually translucent), behind every dialog/sheet/drawer. */
+  overlay: string;
   border: string;
   input: string;
   ring: string;
   brand: string;
   brandBright: string;
+  /** Text/icons on a solid brand fill (e.g. the notification count badge). */
+  brandForeground: string;
   link: string;
   subtle: string;
   hairline: string;
@@ -99,11 +111,18 @@ const COLOR_VARS: Record<Exclude<keyof BrandColors, "chart">, string> = {
   accent: "--accent",
   accentForeground: "--accent-foreground",
   destructive: "--destructive",
+  destructiveForeground: "--destructive-foreground",
+  success: "--success",
+  successForeground: "--success-foreground",
+  warning: "--warning",
+  warningForeground: "--warning-foreground",
+  overlay: "--overlay",
   border: "--border",
   input: "--input",
   ring: "--ring",
   brand: "--brand",
   brandBright: "--brand-bright",
+  brandForeground: "--brand-foreground",
   link: "--link",
   subtle: "--subtle",
   hairline: "--hairline",

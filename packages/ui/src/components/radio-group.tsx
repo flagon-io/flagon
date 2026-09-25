@@ -4,6 +4,7 @@ import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 import { Circle } from "lucide-react";
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/control";
 
 /** A set of mutually exclusive options. Compose Root + Item, one Item per choice. */
 export function RadioGroup({ className, ...props }: ComponentProps<typeof RadioGroupPrimitive.Root>) {
@@ -18,7 +19,7 @@ export function RadioGroupItem({ className, ...props }: ComponentProps<typeof Ra
       data-slot="radio-group-item"
       className={cn(
         "aspect-square size-4 shrink-0 rounded-full border border-input text-primary outline-none transition",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        focusRing,
         "disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary",
         className,
       )}

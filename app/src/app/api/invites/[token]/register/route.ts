@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { pool } from "@/lib/db";
 import { syncPrimaryUserEmail } from "@/lib/user-emails";
 import { getInvitation, acceptInvitationAs } from "@/lib/flagon-api";
+import { badRequest, routeError } from "@/lib/route-error";
 
 const USERNAME_RE = /^[a-zA-Z0-9_-]{3,30}$/;
 
@@ -20,20 +21,23 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
   const password = typeof body.password === "string" ? body.password : "";
 
   // The invite must still be usable, and it decides the email.
-  const invite = await getInvitation(token).catch(() => null);
+  // A real API failure is reported as such, not as a dead invite.
+  let invite: Awaited<ReturnType<typeof getInvitation>>;
+  try {
+    invite = await getInvitation(token);
+  } catch (e) {
+    return routeError(e, "Could not load the invitation.");
+  }
   if (!invite || invite.status !== "pending" || invite.expired) {
     return NextResponse.json({ error: "This invitation is no longer valid." }, { status: 410 });
   }
   const email = invite.email;
 
   if (!USERNAME_RE.test(username)) {
-    return NextResponse.json(
-      { error: "Username must be 3-30 characters: letters, numbers, hyphens, or underscores." },
-      { status: 400 },
-    );
+    return badRequest("Username must be 3-30 characters: letters, numbers, hyphens, or underscores.");
   }
   if (password.length < 8) {
-    return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
+    return badRequest("Password must be at least 8 characters.");
   }
 
   // 1. Create the account (this mirrors the profile + seeds the primary email).
@@ -64,9 +68,8 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
   try {
     const joined = await acceptInvitationAs({ id: userId, email }, token);
     orgSlug = joined.org_slug;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not join the organization.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not join the organization.");
   }
 
   // 4. Sign them in and forward the session cookie on our JSON response, so the

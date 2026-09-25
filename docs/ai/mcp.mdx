@@ -1,41 +1,145 @@
 ---
 title: MCP server
-description: Point an external agent at mcp.flagon.io to operate Flagon and read its documentation.
-order: 1
+description: Connect an external agent to mcp.flagon.io to read Flagon's docs anonymously, or to operate your organizations with an access token.
 ---
 
-Flagon exposes a **Model Context Protocol** server at
-[mcp.flagon.io](https://mcp.flagon.io), so an external agent (for example, an
-assistant in your editor) can work with Flagon directly.
+Flagon runs a **Model Context Protocol** (MCP) server, so an external agent (an
+assistant in your editor, Claude Desktop, Cursor, or your own agent) can work
+with Flagon directly. It exposes the same [tool registry](/docs/ai/tools) as the
+in-product [assistant](/docs/ai/assistant), and every tool calls the same
+permission-checked operation as the [API](/docs/api/using-the-api): one registry,
+three front doors.
 
-## One registry, three front doors
+## Endpoint and transport
 
-The MCP server, the in-product [assistant](/docs/ai/assistant), and the HTTP API
-all draw from the same set of operations. Add a capability once and it is
-available everywhere. Nothing the agent can do reaches around the
-permission-checked API.
+| Setting | Value |
+| --- | --- |
+| URL | `https://mcp.flagon.io` (the root and `/mcp` both work) |
+| Also served at | `https://api.flagon.io/mcp` |
+| Transport | Streamable HTTP, `POST` only. Each request is one JSON-RPC 2.0 message and gets one JSON response; there is no server-sent event stream, and `GET` returns `405 Method Not Allowed`. |
+| Protocol version | `2024-11-05` |
+| Methods | `initialize`, `ping`, `tools/list`, `tools/call`. Notifications (messages without an `id`) are accepted with `202 Accepted`. Anything else returns error `-32601`. |
 
-## What it exposes today
+On the `mcp.flagon.io` host the MCP endpoint is the whole site: every other path
+returns `404`, so the public hostname never exposes the rest of the API. A
+self-hosted instance chooses its MCP hostname with `FLAGON_MCP_HOST`; without it,
+only the `/mcp` path is served.
 
-- **Documentation tools.** Any agent can search Flagon's docs and read pages, so
-  it can learn how Flagon works before acting. These are read-only and safe to
-  use without authentication.
-- **Operational tools.** Acting on your organization's data over MCP requires
-  authentication, so the agent operates as you, with your scopes.
+## Anonymous and authenticated access
 
-## Connecting
+What an MCP client can see depends on whether it presents an
+[access token](/docs/platform/access-tokens).
 
-Point your MCP-capable client at `https://mcp.flagon.io` to get started. With no
-credentials, the server exposes only the read-only documentation tools.
+| | Anonymous (no token) | Authenticated (`Authorization: Bearer flagon_...`) |
+| --- | --- | --- |
+| Tools listed | `search_docs` and `get_doc` only | The docs tools, plus every tool the token's scopes allow |
+| Docs reachable | Public pages only | Public and internal pages (no page is internal today) |
+| Acts as | Nobody | The token's principal: you for a personal token, the org's service principal for an organization token |
 
-To reach the operational tools, present a Flagon access token as a bearer token:
+Anonymous callers never learn that other tools exist: calling one returns
+`unknown tool`. With a token, `tools/list` shows exactly the tools that token can
+run. A full-access token sees every tool; a scoped token sees only the tools whose
+scope it holds (parent scopes imply their children, as in the API). Your role
+still applies on top, so a tool can be listed and still fail with a permission
+error when you run it.
 
+Organization security policies apply too. When a tool names an organization
+that requires two-factor authentication, a personal token whose user has not
+enabled it gets a tool error (`this organization requires two-factor authentication; ...`). When the organization requires single sign-on, a
+personal token works only if its user has signed in through one of the
+organization's identity providers at least once; organization owners are exempt
+from the SSO requirement. Organization access tokens are exempt from both. See
+[Two-factor authentication](/docs/platform/two-factor) and
+[Single sign-on](/docs/platform/sso).
+
+Unlike the in-product assistant, MCP has no conversation organization: a token
+acts in every organization its principal can reach, and `restore_organization`
+is available (to personal tokens; organization tokens can't restore
+organizations).
+
+A token that is present but invalid, revoked, or expired is **rejected**, not
+silently treated as anonymous, so a rotated token shows up as an error instead of
+a mysteriously shorter tool list.
+
+## Connecting a client
+
+Configure your client with the URL `https://mcp.flagon.io` and, for operational
+tools, an `Authorization` header carrying your token. Client configuration
+formats differ; see [Connect an MCP client](/docs/guides/connect-an-mcp-client)
+for specific clients.
+
+To check the connection by hand:
+
+```bash
+curl -X POST https://mcp.flagon.io \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
 ```
-Authorization: Bearer flagon_xxx
+
+And to call a tool:
+
+```bash
+curl -X POST https://mcp.flagon.io \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+       "params": {"name": "list_projects", "arguments": {"org": "acme"}}}'
 ```
 
-The token acts as you: the server resolves it to your identity and the tools you
-can use are exactly the ones your token's scopes allow (a token with no scopes
-has full access, still bounded by your role). A tool your token cannot reach is
-simply not listed. This is the same permission model as the REST API - the token
-is the ceiling, and tenant isolation always applies.
+A tool result is one text content block holding the JSON result. A failed tool
+returns `isError: true` with a caller-safe message (internal details are logged on
+the server, never returned).
+
+## Mutating tools run immediately
+
+<Callout type="warn" title="No confirmation step over MCP">
+
+Over MCP, a mutating tool such as `delete_project` **executes as soon as it is
+called**. Flagon does not hold it for confirmation the way the in-product
+assistant does. Confirming actions is your MCP client's job: turn on its tool
+approval setting if it has one, and give the token only the scopes the agent
+needs.
+
+</Callout>
+
+The [Tool reference](/docs/ai/tools) marks which tools change data. A read-only
+token (for example `read:org` and `read:project`) cannot reach any mutating tool,
+which is the simplest way to let an agent look without touching.
+
+## Errors
+
+MCP errors come back as JSON-RPC errors with HTTP status `200`, except for a
+few HTTP-level refusals that happen before the JSON-RPC message is read: `405`
+on a non-`POST` request, `413` when the body is larger than the API's request
+cap (`FLAGON_MAX_BODY_BYTES`, 4 MiB by default), and `429` with a `Retry-After`
+header when the token (or, without a token, your IP address) exceeds the API's
+per-principal rate limit.
+
+| Code | Message | Meaning |
+| --- | --- | --- |
+| `-32700` | `parse error` | The body is not valid JSON-RPC. |
+| `-32601` | `method not found: ...` | The method is not one of the four supported. |
+| `-32602` | `unknown tool: ...` | No such tool, or an anonymous caller asked for an authenticated one. Also `invalid params` when the `params` object itself can't be decoded. |
+| `-32001` | `invalid or expired token` | The bearer token is unknown, expired, or revoked. If Flagon can't check the token at all (for example its database is unavailable), you get an HTTP `503` problem response instead, so a valid token is never reported as bad. |
+| `-32003` | `this token is missing the scope required for ...` | The token is valid but lacks the tool's scope. |
+
+A tool that runs and fails (bad arguments, a missing project, a permission or
+policy refusal) is not a JSON-RPC error: it is a normal result with
+`isError: true` and the caller-safe message as its text.
+
+## Usage and limits
+
+MCP calls run no model on Flagon's side, so they do not count toward the
+organization's [AI usage limit](/docs/platform/usage). They are ordinary
+permission-checked operations, and every change an MCP tool makes is recorded in
+the organization's [audit log](/docs/platform/audit-log), with the connection's
+IP address and your client's user agent.
+
+## Related
+
+- [Tool reference](/docs/ai/tools)
+- [Connect an MCP client](/docs/guides/connect-an-mcp-client)
+- [Access tokens](/docs/platform/access-tokens)
+- [Tool registry](/docs/architecture/tool-registry)
+- [Assistant and MCP troubleshooting](/docs/troubleshooting/assistant-and-mcp)

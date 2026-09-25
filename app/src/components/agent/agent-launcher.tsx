@@ -54,7 +54,7 @@ export function AgentLauncher({ name }: { name?: string | null }) {
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask Flagon to do something, or search..."
           autoComplete="off"
-          className="h-14 w-full rounded-2xl border border-hairline bg-card py-4 pr-14 pl-11 text-[15px] text-foreground shadow-sm outline-none transition focus-visible:border-brand/50 focus-visible:ring-4 focus-visible:ring-brand/10"
+          className="h-14 w-full rounded-2xl border border-hairline bg-card py-4 pr-14 pl-11 text-base text-foreground shadow-sm outline-none transition focus-visible:border-brand/50 focus-visible:ring-4 focus-visible:ring-brand/10"
         />
         <Button
           type="submit"

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError } from "@/lib/route-error";
 import { listNotifications } from "@/lib/flagon-api";
 
 export async function GET(request: Request) {
@@ -6,7 +7,7 @@ export async function GET(request: Request) {
   try {
     const notifications = await listNotifications(limit);
     return NextResponse.json({ notifications });
-  } catch {
-    return NextResponse.json({ notifications: [] });
+  } catch (e) {
+    return routeError(e);
   }
 }

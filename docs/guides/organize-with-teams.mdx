@@ -1,0 +1,199 @@
+---
+title: Organize with teams
+description: Group organization members into teams, choose who maintains each team, and grant a whole team a role on a project.
+---
+
+A **team** is a named group of organization members, such as `platform` or `payments`. Teams
+exist so you can grant access once and have it follow people: give the `platform` team `write`
+on a project, and everyone on the team gets `write`; add someone to the team later and they
+inherit it automatically. Removing them from the team removes the access that came from it.
+
+By the end of this guide you will have a team with members and a maintainer, and that team will
+hold a role on at least one project.
+
+<Callout type="info" title="Before you start">
+
+- **Create or delete a team:** organization **owner** or **admin**.
+- **Edit a team or manage its members:** organization owner or admin, or a **maintainer** of
+  that team.
+- **Grant a team a role on a project:** effective **admin** on that project (organization
+  owners and admins always qualify). See [Manage project access](/docs/guides/manage-project-access).
+- **API token scopes:** `write:team` to create teams and manage members, `admin:team` to delete
+  teams, `admin:project` to grant a team project access.
+
+</Callout>
+
+## Team roles
+
+A team has its own two roles, separate from organization roles and project roles:
+
+| Team role | Can do |
+| --- | --- |
+| `maintainer` | Edit the team's name, slug, and description, and add, remove, or change the role of its members. |
+| `member` | Belongs to the team and receives every project grant the team holds. |
+
+Whoever creates a team becomes its first maintainer, so every team starts with someone who can
+manage it. A maintainer cannot delete the team; only organization owners and admins can.
+
+## Steps
+
+<Steps>
+
+<Step title="Create the team">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open **Teams** in the sidebar and select **New team**.
+2. Enter a **Team name**, and optionally a **Slug** and **Description**.
+3. Select **Create team**. Flagon opens the team's page with **Members**, **Projects**, and **Settings** tabs.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/teams \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Platform", "description": "Runs shared infrastructure"}'
+```
+
+The slug is derived from the name when omitted (`platform`). A `201` returns the team.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Create a team called Platform in acme.
+
+The assistant proposes **Confirm: Create team "Platform" in "acme"**.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Add members">
+
+Team members must already be members of the organization. [Invite them](/docs/guides/invite-your-team)
+first if they aren't.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+On the team's **Members** tab, add a member by **Email or username** and pick a **Role**
+(`maintainer` or `member`). Change a role or remove someone from the same table.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/teams/platform/members \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"login": "dana@example.com", "role": "member"}'
+```
+
+`role` is required. Change it later with
+`PUT /orgs/acme/teams/platform/members/{userId}/role` and a body of `{"role": "maintainer"}`,
+or remove the person with `DELETE /orgs/acme/teams/platform/members/{userId}`. Get `userId`
+from `GET /orgs/acme/teams/platform/members`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Add dana@example.com to the platform team as a maintainer.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Give the team a project role">
+
+A team grant uses the project role ladder: `read`, `triage`, `write`, `maintain`, `admin`.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Either open the project and go to **Settings > Access**, then **Add team** in the teams section;
+or open the team's **Projects** tab and add a project there. Choose the **Team** (or
+**Project**) and a **Role**.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects/checkout/teams \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"team": "platform", "role": "write"}'
+```
+
+Change the role with `PUT /orgs/acme/projects/checkout/teams/platform/role`, or revoke it with
+`DELETE /orgs/acme/projects/checkout/teams/platform`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Give the platform team write access to the checkout project.
+
+The assistant proposes **Confirm: Grant team "platform" write on project "checkout" in
+"acme"**.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Verify it worked">
+
+- The team's **Projects** tab lists the project and the role.
+- `GET /orgs/acme/teams/platform/projects` returns `{"projects": [...]}` with the granted role.
+- `GET /orgs/acme/projects/checkout/teams` returns the team in `{"teams": [...]}`.
+- The audit log records `team.created`, `team.member_added`, and
+  `project.team_access_granted`.
+
+A member's access to the project is now at least the team's role. If they also have an
+organization base permission or a direct grant, the highest one wins.
+
+</Step>
+
+</Steps>
+
+## Deleting a team
+
+Deleting a team (organization owners and admins, `admin:team`) frees its slug and removes every
+project grant and project ownership the team held, so members lose any access that came only
+from the team. From the dashboard use the team's **Settings** tab; from the API,
+`DELETE /orgs/acme/teams/platform`.
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `409` | `a team with that slug already exists` | Choose another name or slug. |
+| `409` | `that user must be an organization member first` | Invite the person to the organization, then add them to the team. |
+| `409` | `that user is already on this team` | Change their role instead. |
+| `409` | `that team already has a role on this project` | Change the team's role instead of adding it again. |
+| `404` | `team not found` | Check the team slug. Deleted teams are not found. |
+| `404` | `no user with that email or username` | Check the login; the person needs a Flagon account and organization membership. |
+| `403` | `you don't have permission to do that` | You are not an owner, admin, or maintainer of this team, or not an admin on the project. |
+
+## Related
+
+- [Teams](/docs/platform/teams)
+- [Manage project access](/docs/guides/manage-project-access)
+- [Project access](/docs/platform/project-access)
+- [Invite your team](/docs/guides/invite-your-team)

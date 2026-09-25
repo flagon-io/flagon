@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { Button, FlagonMark } from "@flagon-io/ui";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/session";
 
 /**
  * The global 404. Deliberately generic: it says the same thing whether the page
@@ -10,9 +9,10 @@ import { auth } from "@/lib/auth";
  * only its call to action to whether the viewer is signed in - never leaking more.
  */
 export default async function NotFound() {
-  const session = await auth.api
-    .getSession({ headers: await headers() })
-    .catch(() => null);
+  // The one place a failed session lookup is swallowed: a 404 page must never
+  // itself crash, and the only thing the session decides here is which CTA to
+  // show (sign in vs dashboard), so "unknown" safely falls back to "Sign in".
+  const session = await getSession().catch(() => null);
   const authed = Boolean(session);
 
   return (

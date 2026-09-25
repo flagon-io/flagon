@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError, badRequest, listOptionsFrom } from "@/lib/route-error";
 import { addProjectMember, listProjectMembers } from "@/lib/flagon-api";
 
 export async function GET(
@@ -6,17 +7,11 @@ export async function GET(
   ctx: { params: Promise<{ slug: string; project: string }> },
 ) {
   const { slug, project } = await ctx.params;
-  const url = new URL(request.url);
-  const limitParam = url.searchParams.get("limit");
   try {
-    const page = await listProjectMembers(slug, project, {
-      q: url.searchParams.get("q") ?? undefined,
-      cursor: url.searchParams.get("cursor") ?? undefined,
-      limit: limitParam ? Number(limitParam) : undefined,
-    });
+    const page = await listProjectMembers(slug, project, listOptionsFrom(request));
     return NextResponse.json({ items: page.items, next: page.next });
-  } catch {
-    return NextResponse.json({ items: [], next: null });
+  } catch (e) {
+    return routeError(e);
   }
 }
 
@@ -29,16 +24,15 @@ export async function POST(
   const login = typeof body.login === "string" ? body.login.trim() : "";
   const role = typeof body.role === "string" ? body.role : "";
   if (!login) {
-    return NextResponse.json({ error: "An email or username is required." }, { status: 400 });
+    return badRequest("An email or username is required.");
   }
   if (!role) {
-    return NextResponse.json({ error: "A role is required." }, { status: 400 });
+    return badRequest("A role is required.");
   }
   try {
     await addProjectMember(slug, project, login, role);
     return NextResponse.json({ ok: true }, { status: 201 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not add collaborator.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not add collaborator.");
   }
 }

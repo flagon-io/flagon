@@ -1,0 +1,184 @@
+---
+title: Set up SSO with SAML
+description: Connect a SAML 2.0 identity provider such as Okta or Microsoft Entra ID, exchange the ACS and metadata URLs, and let members sign in with their work account.
+---
+
+**SAML 2.0** is the XML-based SSO protocol many enterprise identity providers (IdPs) use. In a
+SAML setup, Flagon is the **service provider (SP)**: your IdP authenticates the person and sends
+Flagon a signed **assertion** saying who they are. Flagon checks the signature with your IdP's
+certificate and signs the person in. SSO is configured per organization, and the Flagon API
+stores and validates the configuration, so the dashboard, the API, and the assistant all manage
+the same provider.
+
+By the end of this guide members with an email on your domain can choose **Sign in with SSO**,
+authenticate at your IdP, and land in your organization.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** organization **owner** or **admin**.
+- **IdP access:** permission to create a SAML application, and to copy its SSO URL and signing
+  certificate.
+- **API token scopes:** `read:org` to read providers, `write:org` to add, change, or remove them.
+
+</Callout>
+
+## Steps
+
+<Steps>
+
+<Step title="Collect what Flagon needs from your IdP">
+
+Create a SAML 2.0 application in your IdP and note:
+
+- the IdP **SSO URL** (also called the entry point or sign-on URL), an `https` URL;
+- the IdP **signing certificate**, in PEM form (`-----BEGIN CERTIFICATE-----`).
+
+You finish the IdP side after Flagon gives you its URLs in step 3.
+
+</Step>
+
+<Step title="Register the provider in Flagon">
+
+Pick a **provider ID** (2 to 63 lowercase letters, digits, or hyphens, unique across Flagon,
+fixed once created), such as `acme-saml`, and an **SP entity ID**, an identifier for this
+connection that your IdP will use as the audience, such as `https://app.flagon.io/saml/acme`.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open organization **Settings > Authentication**.
+2. Under **SSO providers**, select **New provider**.
+3. Set **Protocol** to **SAML 2.0** and fill in **Provider ID**, **Email domain**,
+   **SP entity ID**, **IdP SSO URL (entry point)**, and **IdP signing certificate (PEM)**.
+4. Select **Register provider**.
+
+</Tab>
+
+<Tab title="API">
+
+For SAML, `issuer` is the SP entity ID:
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/sso/providers \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider_id": "acme-saml",
+    "type": "saml",
+    "domain": "acme.com",
+    "issuer": "https://app.flagon.io/saml/acme",
+    "saml": {
+      "entry_point": "https://acme.okta.com/app/abc123/sso/saml",
+      "cert": "-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----",
+      "want_assertions_signed": true
+    }
+  }'
+```
+
+The API also accepts `audience` (when your IdP sets one), `want_assertions_signed`, and
+`authn_requests_signed` with a service-provider `private_key` (PEM) for signing requests. The
+private key is write-only: reads report only `"private_key_set": true`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Add a SAML SSO provider to acme: provider ID acme-saml, domain acme.com, SP entity ID
+> https://app.flagon.io/saml/acme, entry point https://acme.okta.com/app/abc123/sso/saml.
+
+Include the certificate in your message (or add it when the assistant asks for it). The assistant proposes
+**Confirm: Add SAML single sign-on provider "acme-saml" to "acme"**. The certificate is public,
+but don't paste a private key into the chat: it is sent to the AI model as conversation
+content. Set `private_key` from the API instead.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Give your IdP Flagon's URLs">
+
+After you register the provider, the **SSO providers** table shows two **Service provider
+URLs** for it, each with a copy button (the column is hidden on narrow screens):
+
+| Flagon URL | Paste it into the IdP as |
+| --- | --- |
+| ACS URL: `https://app.flagon.io/api/auth/sso/saml2/sp/acs/acme-saml` | The Assertion Consumer Service URL (Okta calls it "Single sign-on URL"). |
+| Metadata: `https://app.flagon.io/api/auth/sso/saml2/sp/metadata?providerId=acme-saml` | The SP metadata URL, if your IdP can import one. |
+
+Set the IdP's **audience** or **SP entity ID** to the SP entity ID you entered in Flagon, make
+sure the assertion includes the user's **email address**, and assign the users or groups who
+should have access.
+
+</Step>
+
+<Step title="Sign in through SSO">
+
+On the Flagon login page, choose **Sign in with SSO** and enter a work email. Flagon matches the
+email's domain (subdomains included) to your provider and sends the person to your IdP. On
+return, a new person gets a Flagon account and joins the organization as a `member`; an existing
+member keeps their role.
+
+</Step>
+
+<Step title="Require SSO (optional)">
+
+On **Settings > Authentication**, turn on **Require single sign-on**. It works exactly as for
+OIDC: you must have signed in through the provider yourself first, and the API then enforces
+the requirement for dashboard sessions, personal access tokens, the assistant, and MCP. Owners
+and organization access tokens are exempt. Members and admins whose current session did not come
+from SSO are sent to a **Single sign-on required** page. See
+[Set up SSO with OIDC](/docs/guides/set-up-sso-oidc) for exactly who is allowed through.
+
+</Step>
+
+<Step title="Verify it worked">
+
+- `GET /orgs/acme/sso/providers` lists `acme-saml` with `"type": "saml"`.
+- A test user completes **Sign in with SSO** and appears on **People**.
+- The audit log records `sso_provider.created` and, for each new SSO member, `member.added`
+  with the summary `joined via single sign-on`.
+
+</Step>
+
+</Steps>
+
+## Rotate the IdP certificate
+
+When your IdP rotates its signing certificate, update it in Flagon. Updates are partial and take
+effect at the next sign-in:
+
+```bash
+curl -X PATCH https://api.flagon.io/orgs/acme/sso/providers/acme-saml \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"saml": {"cert": "-----BEGIN CERTIFICATE-----\nMIIE...\n-----END CERTIFICATE-----"}}'
+```
+
+In the dashboard, edit the provider from its row. Sending `"private_key": ""` removes a signing
+key; omitting it keeps the current one.
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `422` | `entry_point must be the identity provider's https single sign-on URL` | Use the IdP's full `https://` SSO URL. |
+| `422` | `cert must be the identity provider's signing certificate (PEM or base64)` | Paste the whole certificate, including the `BEGIN` and `END` lines. |
+| `422` | `private_key is required when authn_requests_signed is on` | Send a `private_key`, or turn `authn_requests_signed` off. |
+| `422` | `issuer is required` | Send the SP entity ID as `issuer`. |
+| `422` | `this is a SAML provider; OIDC fields do not apply` | Send `saml` settings, not `oidc`, when updating a SAML provider. |
+| `409` | `that provider ID is already in use; choose another` | Pick another provider ID. |
+| `409` | `another SSO provider already uses that email domain` | A domain can belong to only one provider. |
+| `403` | `you don't have permission to do that` | Only owners and admins can manage SSO. |
+
+If sign-in fails at the IdP or on return, compare the ACS URL and audience in the IdP with the
+values above character for character.
+
+## Related
+
+- [Single sign-on (SSO)](/docs/platform/sso)
+- [Set up SSO with OIDC](/docs/guides/set-up-sso-oidc)
+- [Review the audit log](/docs/guides/review-the-audit-log)
+- [Troubleshooting sign-in and SSO](/docs/troubleshooting/sign-in-and-sso)

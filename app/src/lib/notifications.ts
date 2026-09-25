@@ -7,21 +7,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-// Notification is the client-side shape returned by the /api/notifications*
-// gateway routes (mirrors db.Notification). Kept standalone so client components
-// never import the server-only flagon-api module.
-export type Notification = {
-  id: string;
-  type: string;
-  title: string;
-  body: string | null;
-  link: string | null;
-  read_at: string | null;
-  created_at: string;
-};
+// Notification is the shape returned by the /api/notifications* gateway routes,
+// re-exported from the client-safe API types (never the server-only flagon-api).
+export type { Notification } from "@/lib/api/types";
 
 // notificationMeta maps a notification type to an icon and a tone, so the feed
-// reads at a glance the way GitHub's does. Unknown types fall back to a bell.
+// reads at a glance. Unknown types fall back to a bell.
 type NotificationMeta = { Icon: LucideIcon; tone: string };
 
 // Tones reuse the same palette classes as the design system's Badge variants

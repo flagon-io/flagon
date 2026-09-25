@@ -2,29 +2,25 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/flagon-io/flagon/api/internal/db"
 	"github.com/flagon-io/flagon/api/internal/paginate"
+	"github.com/flagon-io/flagon/api/internal/service"
 )
 
 // registerTeamsAPI wires org-scoped teams (named groups of members that hold
 // access to projects). Org owners/admins create and disband teams; a team's
 // maintainers manage its membership. The store enforces RLS + the role rules.
-func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
-	auth := combinedAuth(api, store, internalToken)
-
+func registerTeamsAPI(api huma.API, d deps) {
 	// list-teams is paginated: a documented GET plus a Hidden QUERY twin sharing
 	// one fetch. See listing.go.
 	listTeams := func(ctx context.Context, slug string, q paginate.Query) (*TeamsOutput, error) {
-		actorID, _ := identity(ctx)
-		teams, next, err := store.ListTeams(ctx, actorID, slug, q)
+		teams, next, err := d.svc.ListTeams(ctx, actor(ctx), slug, q)
 		if err != nil {
-			return nil, teamErr(err, "could not list teams")
+			return nil, apiErr(err, "could not list teams")
 		}
 		out := &TeamsOutput{}
 		out.Body.Teams = teams
@@ -36,11 +32,11 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Method:      http.MethodGet,
 		Path:        "/orgs/{slug}/teams",
 		Summary:     "List an organization's teams",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *TeamsListInput) (*TeamsOutput, error) {
 		return listTeams(ctx, in.Slug, in.ListQuery())
 	})
-	registerQueryList(api, auth, "query-teams", "/orgs/{slug}/teams",
+	registerQueryList(api, d.auth, "query-teams", "/orgs/{slug}/teams",
 		"List an organization's teams (QUERY)",
 		func(ctx context.Context, in *TeamsQueryInput) (*TeamsOutput, error) {
 			return listTeams(ctx, in.Slug, in.Body.ListQuery())
@@ -52,24 +48,15 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Path:          "/orgs/{slug}/teams",
 		Summary:       "Create a team",
 		DefaultStatus: http.StatusCreated,
-		Middlewares:   huma.Middlewares{auth},
+		Middlewares:   huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *CreateTeamInput) (*TeamOutput, error) {
-		actorID, _ := identity(ctx)
-		name := strings.TrimSpace(in.Body.Name)
-		slug := slugify(in.Body.Slug)
-		if slug == "" {
-			slug = slugify(name)
-		}
-		if name == "" || slug == "" {
-			return nil, huma.Error422UnprocessableEntity("name is required and must contain a letter or digit")
-		}
-		team, err := store.CreateTeam(ctx, actorID, in.Slug, db.TeamInput{
-			Name:        name,
-			Slug:        slug,
-			Description: strings.TrimSpace(in.Body.Description),
+		team, err := d.svc.CreateTeam(ctx, actor(ctx), in.Slug, service.CreateTeamInput{
+			Name:        in.Body.Name,
+			Slug:        in.Body.Slug,
+			Description: in.Body.Description,
 		})
 		if err != nil {
-			return nil, teamErr(err, "could not create team")
+			return nil, apiErr(err, "could not create team")
 		}
 		out := &TeamOutput{}
 		out.Body = team
@@ -81,12 +68,11 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Method:      http.MethodGet,
 		Path:        "/orgs/{slug}/teams/{team}",
 		Summary:     "Get a team",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *TeamInput) (*TeamOutput, error) {
-		actorID, _ := identity(ctx)
-		team, err := store.GetTeam(ctx, actorID, in.Slug, in.Team)
+		team, err := d.svc.GetTeam(ctx, actor(ctx), in.Slug, in.Team)
 		if err != nil {
-			return nil, teamErr(err, "could not load team")
+			return nil, apiErr(err, "could not load team")
 		}
 		out := &TeamOutput{}
 		out.Body = team
@@ -98,27 +84,15 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Method:      http.MethodPatch,
 		Path:        "/orgs/{slug}/teams/{team}",
 		Summary:     "Update a team",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *UpdateTeamInput) (*TeamOutput, error) {
-		actorID, _ := identity(ctx)
-		update := db.TeamUpdate{Description: in.Body.Description}
-		if in.Body.Name != nil {
-			name := strings.TrimSpace(*in.Body.Name)
-			if name == "" {
-				return nil, huma.Error422UnprocessableEntity("name cannot be empty")
-			}
-			update.Name = &name
-		}
-		if in.Body.Slug != nil {
-			slug := slugify(*in.Body.Slug)
-			if slug == "" {
-				return nil, huma.Error422UnprocessableEntity("slug must contain a letter or digit")
-			}
-			update.Slug = &slug
-		}
-		team, err := store.UpdateTeam(ctx, actorID, in.Slug, in.Team, update)
+		team, err := d.svc.UpdateTeam(ctx, actor(ctx), in.Slug, in.Team, service.UpdateTeamInput{
+			Name:        in.Body.Name,
+			Slug:        in.Body.Slug,
+			Description: in.Body.Description,
+		})
 		if err != nil {
-			return nil, teamErr(err, "could not update team")
+			return nil, apiErr(err, "could not update team")
 		}
 		out := &TeamOutput{}
 		out.Body = team
@@ -130,24 +104,20 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Method:      http.MethodDelete,
 		Path:        "/orgs/{slug}/teams/{team}",
 		Summary:     "Delete a team",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *TeamInput) (*OKOutput, error) {
-		actorID, _ := identity(ctx)
-		if err := store.DeleteTeam(ctx, actorID, in.Slug, in.Team); err != nil {
-			return nil, teamErr(err, "could not delete team")
+		if err := d.svc.DeleteTeam(ctx, actor(ctx), in.Slug, in.Team); err != nil {
+			return nil, apiErr(err, "could not delete team")
 		}
-		out := &OKOutput{}
-		out.Body.OK = true
-		return out, nil
+		return okOutput(), nil
 	})
 
 	// list-team-members is paginated: a documented GET plus a Hidden QUERY twin
 	// sharing one fetch. See listing.go.
 	listTeamMembers := func(ctx context.Context, slug, team string, q paginate.Query) (*TeamMembersOutput, error) {
-		actorID, _ := identity(ctx)
-		members, next, err := store.ListTeamMembers(ctx, actorID, slug, team, q)
+		members, next, err := d.svc.ListTeamMembers(ctx, actor(ctx), slug, team, q)
 		if err != nil {
-			return nil, teamErr(err, "could not list team members")
+			return nil, apiErr(err, "could not list team members")
 		}
 		out := &TeamMembersOutput{}
 		out.Body.Members = members
@@ -159,11 +129,11 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Method:      http.MethodGet,
 		Path:        "/orgs/{slug}/teams/{team}/members",
 		Summary:     "List a team's members",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *TeamMembersListInput) (*TeamMembersOutput, error) {
 		return listTeamMembers(ctx, in.Slug, in.Team, in.ListQuery())
 	})
-	registerQueryList(api, auth, "query-team-members", "/orgs/{slug}/teams/{team}/members",
+	registerQueryList(api, d.auth, "query-team-members", "/orgs/{slug}/teams/{team}/members",
 		"List a team's members (QUERY)",
 		func(ctx context.Context, in *TeamMembersQueryInput) (*TeamMembersOutput, error) {
 			return listTeamMembers(ctx, in.Slug, in.Team, in.Body.ListQuery())
@@ -172,10 +142,9 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 	// list-team-projects is paginated: a documented GET plus a Hidden QUERY twin
 	// sharing one fetch. See listing.go.
 	listTeamProjects := func(ctx context.Context, slug, team string, q paginate.Query) (*TeamProjectsOutput, error) {
-		actorID, _ := identity(ctx)
-		projects, next, err := store.ListTeamProjects(ctx, actorID, slug, team, q)
+		projects, next, err := d.svc.ListTeamProjects(ctx, actor(ctx), slug, team, q)
 		if err != nil {
-			return nil, teamErr(err, "could not list team projects")
+			return nil, apiErr(err, "could not list team projects")
 		}
 		out := &TeamProjectsOutput{}
 		out.Body.Projects = projects
@@ -187,11 +156,11 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Method:      http.MethodGet,
 		Path:        "/orgs/{slug}/teams/{team}/projects",
 		Summary:     "List the projects a team has access to",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *TeamProjectsListInput) (*TeamProjectsOutput, error) {
 		return listTeamProjects(ctx, in.Slug, in.Team, in.ListQuery())
 	})
-	registerQueryList(api, auth, "query-team-projects", "/orgs/{slug}/teams/{team}/projects",
+	registerQueryList(api, d.auth, "query-team-projects", "/orgs/{slug}/teams/{team}/projects",
 		"List the projects a team has access to (QUERY)",
 		func(ctx context.Context, in *TeamProjectsQueryInput) (*TeamProjectsOutput, error) {
 			return listTeamProjects(ctx, in.Slug, in.Team, in.Body.ListQuery())
@@ -203,21 +172,12 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Path:          "/orgs/{slug}/teams/{team}/members",
 		Summary:       "Add an org member to a team",
 		DefaultStatus: http.StatusCreated,
-		Middlewares:   huma.Middlewares{auth},
+		Middlewares:   huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *AddTeamMemberInput) (*OKOutput, error) {
-		actorID, _ := identity(ctx)
-		targetID, err := store.AddTeamMember(ctx, actorID, in.Slug, in.Team,
-			strings.TrimSpace(in.Body.Login), in.Body.Role)
-		if err != nil {
-			return nil, teamErr(err, "could not add team member")
+		if _, err := d.svc.AddTeamMember(ctx, actor(ctx), in.Slug, in.Team, in.Body.Login, in.Body.Role); err != nil {
+			return nil, apiErr(err, "could not add team member")
 		}
-		_ = store.CreateNotification(ctx, targetID, nil, "team.member_added",
-			"You were added to a team",
-			"You are now a "+in.Body.Role+" of the "+in.Team+" team.",
-			"/"+in.Slug+"/teams/"+in.Team)
-		out := &OKOutput{}
-		out.Body.OK = true
-		return out, nil
+		return okOutput(), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -225,15 +185,12 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Method:      http.MethodPut,
 		Path:        "/orgs/{slug}/teams/{team}/members/{userId}/role",
 		Summary:     "Change a team member's role",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *SetTeamMemberRoleInput) (*OKOutput, error) {
-		actorID, _ := identity(ctx)
-		if err := store.SetTeamMemberRole(ctx, actorID, in.Slug, in.Team, in.UserID, in.Body.Role); err != nil {
-			return nil, teamErr(err, "could not change team member role")
+		if err := d.svc.SetTeamMemberRole(ctx, actor(ctx), in.Slug, in.Team, in.UserID, in.Body.Role); err != nil {
+			return nil, apiErr(err, "could not change team member role")
 		}
-		out := &OKOutput{}
-		out.Body.OK = true
-		return out, nil
+		return okOutput(), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -241,45 +198,13 @@ func registerTeamsAPI(api huma.API, store IdentityStore, internalToken string) {
 		Method:      http.MethodDelete,
 		Path:        "/orgs/{slug}/teams/{team}/members/{userId}",
 		Summary:     "Remove a member from a team",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *RemoveTeamMemberInput) (*OKOutput, error) {
-		actorID, _ := identity(ctx)
-		if err := store.RemoveTeamMember(ctx, actorID, in.Slug, in.Team, in.UserID); err != nil {
-			return nil, teamErr(err, "could not remove team member")
+		if err := d.svc.RemoveTeamMember(ctx, actor(ctx), in.Slug, in.Team, in.UserID); err != nil {
+			return nil, apiErr(err, "could not remove team member")
 		}
-		out := &OKOutput{}
-		out.Body.OK = true
-		return out, nil
+		return okOutput(), nil
 	})
-}
-
-// teamErr maps team store errors to HTTP statuses.
-func teamErr(err error, fallback string) error {
-	if e := cursorHTTPErr(err); e != nil {
-		return e
-	}
-	switch {
-	case errors.Is(err, db.ErrNotMember):
-		return huma.Error404NotFound("organization not found")
-	case errors.Is(err, db.ErrTeamNotFound):
-		return huma.Error404NotFound("team not found")
-	case errors.Is(err, db.ErrForbidden):
-		return huma.Error403Forbidden("you don't have permission to do that")
-	case errors.Is(err, db.ErrTeamSlugTaken):
-		return huma.Error409Conflict("a team with that slug already exists")
-	case errors.Is(err, db.ErrUserNotFound):
-		return huma.Error404NotFound("no user with that email or username")
-	case errors.Is(err, db.ErrTargetNotMember):
-		return huma.Error409Conflict("that user must be an organization member first")
-	case errors.Is(err, db.ErrAlreadyTeamMember):
-		return huma.Error409Conflict("that user is already on this team")
-	case errors.Is(err, db.ErrNotTeamMember):
-		return huma.Error404NotFound("that user is not on this team")
-	case errors.Is(err, db.ErrInvalidRole):
-		return huma.Error422UnprocessableEntity("invalid role")
-	default:
-		return huma.Error500InternalServerError(fallback, err)
-	}
 }
 
 // TeamsListInput lists an org's teams (GET; search + keyset via ListParams).

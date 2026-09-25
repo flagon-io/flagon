@@ -1,49 +1,197 @@
 ---
 title: Quickstart
-description: Create your organization and first project, and meet the assistant, in a few minutes.
-order: 1
+description: Sign up, create an organization and a project, invite a teammate, ask the assistant, and make your first API call.
 ---
 
-Get from nothing to a working project in a few minutes. Every step below can be
-done in the dashboard, by asking the assistant, or against the API. Pick whichever
-fits how you like to work.
+This quickstart takes you from a new account to a working project that you can manage from the
+dashboard, the assistant, and the REST API. It uses the hosted service at
+[app.flagon.io](https://app.flagon.io); if you run Flagon yourself, follow the
+[Self-hosting overview](/docs/self-hosting/overview) first and substitute your own URLs.
 
-## 1. Get an account
+You need an email address you can receive mail at, and `curl` for the last step.
 
-Use Flagon hosted at [app.flagon.io](https://app.flagon.io/signup), or run it
-yourself. If you would rather self-host, jump to
-[Self-hosting Flagon](/docs/self-hosting/overview) and come back here.
+<Steps>
 
-## 2. Create an organization
+<Step title="Create an account">
 
-Everything in Flagon lives inside an **organization**: your projects, your
-members, and your settings. Create one and you land at `app.flagon.io/<org>`.
+Go to [app.flagon.io/signup](https://app.flagon.io/signup) and fill in **Name**, **Username**,
+**Email**, **Password**, and **Confirm password**, then select **Sign up**. Flagon emails you a
+verification code; enter it (or open the link in the email) to verify your address.
 
-## 3. Create your first project
+Your account is personal. Everything else you create lives inside an organization.
 
-A **project** is a deployable app. Create one from your organization's
-dashboard, or just ask the assistant:
+</Step>
 
-> Create a project called `billing-api`.
+<Step title="Create your organization">
 
-Read operations run immediately; anything that changes data (like creating a
-project) is proposed for you to confirm first, so you stay in control.
+After you verify, Flagon sends you to **Create your organization** because you do not belong to
+one yet. Enter an **Organization name**. Flagon derives the URL slug from it and previews the
+address, for example `app.flagon.io/acme`. Select **Create organization**.
 
-## 4. Drive it from the API
+You become the organization's **owner** and land on its dashboard at `app.flagon.io/<org>`. Every
+page for this organization lives under that path; only your personal settings at `/settings` sit
+outside it.
 
-Everything you just did is an API operation. Mint a token with the scopes you
-need, then call the API:
+<Callout type="note" title="One owned organization on the free plan">
+
+The free plan includes one organization that you own. Past that limit the dashboard shows
+"You've reached the free plan limit", and `POST /orgs` returns HTTP `402 Payment Required`.
+Being invited into other organizations is not limited.
+
+</Callout>
+
+</Step>
+
+<Step title="Create your first project">
+
+A **project** is a deployable app, the core unit you work on in Flagon.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Select **Projects** in the sidebar, then **New project**. Fill in **Project name** (for example
+`Checkout Service`); the **Slug**, **Description**, and **Repository URL** are optional and you can
+change them later. Select **Create project** and Flagon opens the new project at
+`app.flagon.io/<org>/projects/<slug>`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+Select **Ask AI** in the top bar and type:
+
+> Create a project called Checkout Service.
+
+The assistant does not create it straight away. It shows a card that starts with **Confirm:** and
+summarizes the change. Select **Confirm** to run it.
+
+</Tab>
+
+</Tabs>
+
+Any org member can create projects. If you are not an org owner or admin, Flagon grants you
+`admin` on the project you create. The creation is recorded in the organization's audit log as
+`project.created`.
+
+</Step>
+
+<Step title="Invite a teammate">
+
+Select **People** in the sidebar, then **Invite people**. Enter an **Email or username**, pick a
+**Role** (Member or Admin), and select **Send invites**. Invitations cannot grant the Owner
+role; promote someone to owner from the member list after they join.
+
+An existing Flagon user joins right away. Anyone else receives an email, sent by the Flagon API,
+with a single-use link to register and join. Pending invitations are listed on the **Pending invitations** tab, where you can revoke
+them. Only owners and admins can invite people.
+
+A new member's project role starts at the organization's **base permission** (read by
+default). See [Invite your team](/docs/guides/invite-your-team) and
+[Set base permissions](/docs/guides/set-base-permissions).
+
+</Step>
+
+<Step title="Ask the assistant to do something">
+
+The assistant operates Flagon as you. Open **Ask AI** (or type into the box on your organization's
+dashboard) and try a read, then a change:
+
+> Which projects are in this organization?
+
+> Give my teammate write access to Checkout Service.
+
+Reads run immediately and the assistant answers from real data. For the change, it proposes the
+action and waits for you to select **Confirm**. It can only do what your own role allows, and it
+declines requests that are not about operating Flagon. AI usage is metered per organization; when
+the daily limit is reached the API returns `429` with "AI usage limit reached for this
+organization".
+
+See [Work with the assistant](/docs/guides/work-with-the-assistant).
+
+</Step>
+
+<Step title="Create an access token">
+
+Open the account menu (your avatar), select **Account settings**, then **Personal access tokens** (at
+`app.flagon.io/settings/tokens`), and select **Generate new token**.
+
+1. Enter a **Token name**, such as `quickstart`.
+2. Pick an **Expiration**.
+3. Under **Permissions**, check `read:project`. Check `write:project` as well if you want to create
+   projects from the API.
+4. Select **Generate token**.
+
+Copy the token now: it starts with `flagon_pat_` and is shown only once. A personal access token
+acts as you, limited to the scopes you picked, and it can never do more than your role allows.
+Tokens cannot create or manage other tokens.
+
+</Step>
+
+<Step title="Make your first API call">
+
+Export the token and list your organization's projects. Replace `acme` with your organization's
+slug.
 
 ```bash
-curl https://api.flagon.io/orgs/<org>/projects \
+export FLAGON_TOKEN="flagon_pat_..."
+
+curl https://api.flagon.io/orgs/acme/projects \
   -H "Authorization: Bearer $FLAGON_TOKEN"
 ```
 
-See [Authentication and scopes](/docs/api/authentication) for how tokens and
-scopes work, and [Using the API](/docs/api/using-the-api) for the full reference.
+The response is the first page of projects (up to 30; a `Link` header points to the next page):
+
+```json
+{
+  "$schema": "https://api.flagon.io/schemas/ProjectsOutputBody.json",
+  "projects": [
+    {
+      "id": "7c0e5b3a-2f8d-4d8e-9a51-0b6f1d2c9e44",
+      "org_id": "b1d3c2a0-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "name": "Checkout Service",
+      "slug": "checkout-service",
+      "description": "",
+      "readme": "",
+      "repository_url": "",
+      "created_by": "user_123",
+      "created_at": "2026-09-25T16:04:12Z",
+      "updated_at": "2026-09-25T16:04:12Z"
+    }
+  ]
+}
+```
+
+With `write:project` on the token, create a project the same way the dashboard does:
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Billing API", "description": "Invoices and payments"}'
+```
+
+The API answers `201 Created` with the new project. A token without the required scope gets
+`403 Forbidden`. See [Authentication](/docs/api/authentication) and [Errors](/docs/api/errors).
+
+</Step>
+
+</Steps>
 
 ## Next steps
 
-- **[Core concepts](/docs/get-started/core-concepts)** for the model behind it all.
-- **[Projects](/docs/platform/projects)** for the unit you build on.
-- **[The assistant](/docs/ai/assistant)** to do more of this by asking.
+You now have an organization, a project, a teammate, and a token. From here:
+
+- Learn the model behind roles, teams, and tokens in [Core concepts](/docs/get-started/core-concepts).
+- Organize access with [teams](/docs/guides/organize-with-teams) and
+  [project roles](/docs/guides/manage-project-access).
+- Secure the organization with [required two-factor](/docs/guides/require-two-factor) or
+  [SSO](/docs/guides/set-up-sso-oidc).
+- Point an editor or agent at Flagon with [Connect an MCP client](/docs/guides/connect-an-mcp-client).
+
+## Related
+
+- [Introduction](/docs/get-started/introduction)
+- [Using the API](/docs/api/using-the-api)
+- [The assistant](/docs/ai/assistant)
+- [Access tokens](/docs/platform/access-tokens)

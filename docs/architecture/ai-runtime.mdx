@@ -1,0 +1,222 @@
+---
+title: AI runtime
+description: How the in-product assistant runs inside the Go API, from provider selection and the system prompt through org confinement, the tool loop, proposals, and per-organization metering.
+---
+
+The assistant in the dashboard is not a separate service. It runs inside the Go
+API (`api/internal/ai`), next to the operations it calls, and it uses the same
+[tool registry](/docs/architecture/tool-registry) the MCP server does. This page
+covers the runtime around that registry: which model answers, what instructions it
+gets, how a turn executes, how changes wait for your confirmation, and how usage
+is counted and capped per organization.
+
+Two ideas shape the design. The **model is the brain and the tools are the
+hands**: the model only has to pick a tool and fill in its arguments, and the
+tool does the work through the permission-checked service layer. And the model is
+**configuration, not code**: you can swap providers, including a model you host
+yourself, without rebuilding Flagon.
+
+```text
+   Ask AI panel                                  Provider (from config)
+        │ messages + org_id                   ┌────────────────────────┐
+        ▼                                     │ anthropic              │
+ ┌─────────────────────────────────────┐      │ openai-compatible      │
+ │ POST /ai/messages   (internal auth) │      │ mock (offline)         │
+ └──────────────────┬──────────────────┘      └────────────▲───────────┘
+                    ▼                                      │
+ ┌─────────────────────────────────────┐                   │
+ │ 1. Caller is a member of org_id? 404│                   │
+ │ 2. Org 2FA and SSO policy met?   403│                   │
+ │ 3. Org under its daily limit?    429│                   │
+ └──────────────────┬──────────────────┘                   │
+                    ▼                                      │
+ ┌─────────────────────────────────────┐    Complete()     │
+ │ 4. Agent loop, up to 6 model calls  ├───────────────────┘
+ │    other org named -> refused       │
+ │    read tool       -> run, feed back│
+ │    mutating tool   -> proposal      │
+ └──────────────────┬──────────────────┘
+                    ▼
+ ┌─────────────────────────────────────┐
+ │ 5. Record usage in ai_usage      503│
+ └──────────────────┬──────────────────┘
+                    ▼
+   reply + proposals  ->  you confirm  ->  POST /ai/actions/execute
+```
+
+## Providers
+
+A **provider** is the adapter to a language model. The interface in
+`api/internal/ai/provider.go` has two methods: `Complete`, which sends a system
+prompt, the conversation, and the tool definitions and returns content blocks,
+a stop reason, and token usage; and `DefaultModel`. The block model (text,
+`tool_use`, `tool_result`) is shared by every backend, so the agent loop never
+knows which one is running.
+
+| Backend | File | Default model | Notes |
+| --- | --- | --- | --- |
+| Anthropic | `anthropic.go` | `claude-haiku-4-5` | Messages API over plain HTTP, 60 second timeout. |
+| OpenAI-compatible | `openai.go` | `gpt-4o-mini` | Chat Completions with function calling, 120 second timeout. Base URL defaults to `https://api.openai.com/v1`; point it at OpenRouter, Together, Groq, vLLM, or Ollama. The API key may be empty for keyless local servers. |
+| Mock | `mock.go` | `mock` | Offline and deterministic. Matches keywords such as "create" or "list" to tools, so the assistant works with no keys and no network. |
+
+### Selecting a provider
+
+`buildProvider` in `api/cmd/flagon-server/main.go` passes the settings to
+`ai.SelectProvider` (`api/internal/ai/select.go`), which reads `FLAGON_AI_PROVIDER`:
+
+- `auto` (the default, also used when unset): Anthropic if `ANTHROPIC_API_KEY` is
+  set, otherwise the OpenAI-compatible backend if `FLAGON_AI_API_KEY` or
+  `FLAGON_AI_BASE_URL` is set, otherwise the mock. `auto` never fails.
+- `anthropic`, `openai`, or `mock` pin that backend. A pinned backend without its
+  credentials is a startup error: `anthropic` needs `ANTHROPIC_API_KEY`, and
+  `openai` needs an API key or a base URL (a keyless local server). The server
+  refuses to boot rather than fail on every turn.
+- Any other value is a startup error too.
+
+If the chosen backend turns out to have no usable key at request time, or the
+provider answers `401` or `403`, the turn fails with `503` ("the AI agent is not
+configured") rather than an opaque `500`.
+
+`FLAGON_AI_MODEL` overrides the model for whichever backend is chosen.
+`OPENAI_API_KEY` and `OPENAI_BASE_URL` are accepted as fallbacks for the
+OpenAI-compatible settings. The server logs the chosen provider and model at
+startup, and logs a warning when it is running on the mock. The full list of
+settings is on [Configuration](/docs/reference/configuration).
+
+## The system prompt is a swappable skill file
+
+The instructions the model receives live in `DefaultSystemPrompt` in
+`api/internal/ai/agent.go`. In short, they tell the model that it only helps with
+Flagon and should decline anything else, that tools run as the current user, that
+questions about how Flagon works should be answered from `search_docs` and
+`get_doc` rather than memory, and that changes are proposed and must never be
+described as done.
+
+Set `FLAGON_AI_SYSTEM_PROMPT_FILE` to a path and the server loads that file
+instead, at startup. An unreadable file logs a warning and keeps the built-in
+prompt; an empty file is ignored the same way. This is the cheapest lever for
+tuning behavior, especially on small or self-hosted models that lean heavily on
+clear instructions, and it needs a restart, not a rebuild.
+
+## A turn, step by step
+
+The dashboard's Ask AI panel posts to the app route `/api/ai/messages`, and the
+app forwards to the API's `POST /ai/messages` with its internal token and the
+verified user id. Access tokens cannot call this endpoint; it is app-only. The
+request body carries the organization id and the conversation so far as plain
+text messages. The API stores no conversation history of its own.
+
+1. **Membership.** The handler (`api/internal/server/ai.go`) confirms the caller
+   belongs to `org_id` and resolves its slug, or the request fails with `404`. The
+   check exists because `org_id` decides which organization is metered: without
+   it, a caller could name a foreign org, pass the quota check (row-level security
+   would count zero calls), and get an unrecorded turn.
+2. **Org policy.** `service.CheckOrgAccess` applies the org's 2FA and SSO
+   requirements to the conversation, exactly as for any `/orgs/{slug}` request, or
+   the request fails with `403`.
+3. **Quota.** The meter counts the org's rows in `ai_usage` from the last 24 hours
+   and rejects the turn with `429` if the count has reached the limit.
+4. **The loop.** The agent calls the provider with the system prompt, every tool
+   definition in the registry, and the messages, allowing up to 1024 output tokens
+   per call. If the model stops to call tools, each call is handled in turn:
+   - an unknown tool name returns an error result to the model;
+   - a call that would act outside the conversation's org (an `org` argument
+     naming another org, or a `CrossOrg` tool such as `restore_organization`) is
+     refused with an error result, before it is run or proposed;
+   - a **read** tool runs immediately as the user, and its JSON result goes back
+     to the model;
+   - a **mutating** tool is not run. It becomes a proposal, and the model is told
+     the action is waiting for confirmation.
+
+   The loop repeats until the model stops asking for tools or it has made six
+   model calls. Internal documentation is readable in this conversation, because
+   it always acts for a signed-in user.
+5. **Record.** The turn's total input and output tokens are written to `ai_usage`
+   as one row. If that write fails, the whole turn fails with `503` ("AI usage
+   could not be recorded"). This is deliberate: an unrecorded turn would not count
+   against the quota, and unmetered AI is exactly what the quota exists to prevent.
+
+The response contains the model's final text, the list of proposals, and the token
+totals.
+
+Tool errors are sanitized before the model sees them. A classified error (for
+example "you don't have permission to do that") passes through; anything else is
+logged and replaced with a generic message, so internal details never enter the
+conversation.
+
+## Proposals and confirmation
+
+A **proposal** is a mutating tool call held for a person to approve. It carries
+the tool name, the exact input the model chose, and a summary sentence produced by
+the tool's `Summarize` function, such as `Delete project "billing" in "acme"`. The
+summary is generated by code from the input, not written by the model.
+
+Confirming a proposal posts the tool name and input to `POST /ai/actions/execute`
+(also app-only). The API checks membership of `org_id` and the org's access policy
+again. `Execute` then runs the tool only if it exists and is marked `Mutating`
+(anything else is `400`), only if it stays inside the conversation's org (`403`
+otherwise), and only if the org still has quota (`429` otherwise). The tool runs as
+the signed-in user through the service layer, so the store's role checks,
+row-level security, and audit recording all apply exactly as if you had clicked
+the button in the UI, and the audit entry records the end user's IP, country, and
+user agent forwarded by the app. Errors come back with the same status the
+matching REST operation would return (`403`, `404`, `409`, `422`).
+
+The confirmation step lives in the dashboard. The Ask AI panel has two modes:
+**Ask before editing** (the default) shows each proposal with a confirm button,
+and **Automatically edit** makes the browser post every proposal to
+`/ai/actions/execute` as soon as the turn returns, for the rest of that
+conversation. The mode is held in the page's memory and resets to Ask when the
+page reloads. The API cannot tell the two apart: in both cases the change runs
+only because the browser asked for it, as the signed-in user.
+
+A successful action writes an `ai_usage` row with model `action:<tool>` and zero
+tokens. A failure to write that row is logged but does not fail the response,
+because the change has already committed and reporting it as failed would invite
+a duplicate retry.
+
+## Metering
+
+Usage lives in the `public.ai_usage` table (migration `0004_ai_usage.sql`):
+organization, user, model, input and output tokens, and a timestamp. Row-level
+security is forced on it, so a user can read and write usage only for
+organizations they belong to.
+
+The meter (`api/internal/ai/meter.go`) caps **calls per organization per rolling
+24 hours**, where one call is one row: an assistant turn (however many model calls
+it made) or one confirmed action. The cap is `FLAGON_AI_DAILY_LIMIT`, default
+`100`. `0` disables the cap and should never be used in production. The same
+limit applies to every organization today; per-plan limits are not built yet, and
+the dashboard's Usage page is a "Coming soon" preview that does not read this
+table. See [Usage](/docs/platform/usage).
+
+Two things are worth knowing:
+
+- The limit is checked before a turn starts and again before a confirmed action
+  runs, so an org at its limit cannot confirm proposals it already has until the
+  window rolls forward.
+- `org_id` scopes reach as well as metering. The conversation is confined to that
+  organization: a tool call naming another org is refused, so usage is always
+  metered against the org the work happens in. To work in another org, switch to
+  it in the dashboard.
+
+MCP calls are not metered here: no model runs on Flagon's side for them, since the
+external client brings its own.
+
+## Staying on topic
+
+The assistant is scoped to Flagon by two things: it is given only Flagon tools,
+and the system prompt instructs it to decline anything unrelated. There is no
+separate classifier, so how strictly off-topic requests are refused depends on the
+model following its instructions. What does not depend on the model is the
+ceiling: every tool acts as the user, so the assistant cannot read or change
+anything the user could not. See [AI safety](/docs/security/ai-safety).
+
+## Related
+
+<Cards>
+  <Card title="Tool registry" href="/docs/architecture/tool-registry" description="The one registry behind the assistant, MCP, and the REST API." />
+  <Card title="Assistant" href="/docs/ai/assistant" description="Using the assistant from the dashboard." />
+  <Card title="AI safety" href="/docs/security/ai-safety" description="Permissions, confirmation, quota, and prompt injection." />
+  <Card title="Configuration" href="/docs/reference/configuration" description="Every AI environment variable and flag." />
+</Cards>

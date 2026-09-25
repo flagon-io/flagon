@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError, badRequest } from "@/lib/route-error";
 import { setProjectMemberRole } from "@/lib/flagon-api";
 
 export async function PUT(
@@ -9,13 +10,12 @@ export async function PUT(
   const body = await request.json().catch(() => ({}));
   const role = typeof body.role === "string" ? body.role : "";
   if (!role) {
-    return NextResponse.json({ error: "A role is required." }, { status: 400 });
+    return badRequest("A role is required.");
   }
   try {
     await setProjectMemberRole(slug, project, userId, role);
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not change role.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not change role.");
   }
 }

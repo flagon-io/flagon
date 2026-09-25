@@ -1,24 +1,22 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ComponentProps } from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cn } from "../lib/cn";
-import { controlHeight } from "../lib/control";
+import { controlHeight, focusRing } from "../lib/control";
 
 export type ButtonVariant = "default" | "secondary" | "ghost" | "outline" | "destructive" | "link";
 export type ButtonSize = "sm" | "md" | "lg" | "icon";
 
-// `--elevation` is a Brand-supplied box-shadow (empty by default = flat). When a
-// Brand sets it, buttons get a chunky, pressable look; active nudges down.
-// box-shadow carries the Brand's elevation (chunky/pressable look), so the focus
-// indicator uses `outline` instead of a ring - otherwise the two would fight over
-// box-shadow. Elevation is empty by default (flat).
 // The chunky elevation is built HERE from the Brand's geometry (--el-ring / --el-x
 // / --el-y, all 0 by default = flat) and each variant's own --btn-shade color, so
 // a primary button gets a dark-primary edge and a neutral button a dark edge - the
 // two-tone "3D block" look. On :active the offset shrinks to --el-xp/yp and the
-// button nudges down, so it sinks into its shadow. Focus uses outline, leaving
-// box-shadow free for the elevation.
-const base =
-  "group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium outline-none transition [box-shadow:0_0_0_var(--el-ring,0px)_var(--btn-shade,transparent),var(--el-x,0px)_var(--el-y,0px)_0_0_var(--btn-shade,transparent)] active:[box-shadow:0_0_0_var(--el-ring,0px)_var(--btn-shade,transparent),var(--el-xp,0px)_var(--el-yp,0px)_0_0_var(--btn-shade,transparent)] active:translate-x-px active:translate-y-px focus-visible:[outline:2px_solid_var(--color-brand)] focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50";
+// button nudges down, so it sinks into its shadow. Because box-shadow carries the
+// elevation, focus is the shared OUTLINE treatment (`focusRing`), never a
+// shadow-based ring that would fight it.
+const base = cn(
+  "group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium transition [box-shadow:0_0_0_var(--el-ring,0px)_var(--btn-shade,transparent),var(--el-x,0px)_var(--el-y,0px)_0_0_var(--btn-shade,transparent)] active:[box-shadow:0_0_0_var(--el-ring,0px)_var(--btn-shade,transparent),var(--el-xp,0px)_var(--el-yp,0px)_0_0_var(--btn-shade,transparent)] active:translate-x-px active:translate-y-px disabled:pointer-events-none disabled:opacity-50",
+  focusRing,
+);
 
 // --btn-shade is the color the elevation ring + offset use: a darker shade of the
 // button's own fill for colored variants, the border token for neutral ones.
@@ -32,7 +30,7 @@ const variants: Record<ButtonVariant, string> = {
   outline:
     "border border-input bg-transparent text-foreground hover:bg-panel [--btn-shade:var(--border)]",
   destructive:
-    "bg-destructive text-white hover:bg-destructive/90 [--btn-shade:color-mix(in_oklab,var(--destructive),#000_28%)]",
+    "bg-destructive text-destructive-foreground hover:bg-destructive/90 [--btn-shade:color-mix(in_oklab,var(--destructive),#000_28%)]",
   // A text action styled as a link (no fill or elevation). For an inline link
   // inside prose or a table cell, pair with size="sm" and className="h-auto px-0".
   link: "text-link underline-offset-4 hover:underline [box-shadow:none]",
@@ -43,7 +41,7 @@ const variants: Record<ButtonVariant, string> = {
 const sizes: Record<ButtonSize, string> = {
   sm: `${controlHeight.sm} px-3 text-sm`,
   md: `${controlHeight.md} px-4 text-sm`,
-  lg: `${controlHeight.lg} px-6 text-[15px]`,
+  lg: `${controlHeight.lg} px-6 text-base`,
   // A square on the same scale as md, so a default icon button is exactly as tall
   // as a default text button/input and scales with the Brand's density. Callers
   // wanting a smaller square (calendar nav, etc.) override with size-7/size-9.
@@ -60,14 +58,26 @@ export function buttonClasses(opts?: {
   return cn(base, variants[variant], sizes[size], className);
 }
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+export type ButtonProps = ComponentProps<"button"> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
   /** Render as the child element (e.g. a Next <Link>) instead of a <button>. */
   asChild?: boolean;
 };
 
-export function Button({ variant, size, className, asChild, ...props }: ButtonProps) {
-  const Comp = asChild ? Slot : "button";
-  return <Comp className={buttonClasses({ variant, size, className })} {...props} />;
+export function Button({ variant, size, className, asChild, type, ...props }: ButtonProps) {
+  if (asChild) {
+    return <Slot data-slot="button" className={buttonClasses({ variant, size, className })} {...props} />;
+  }
+  // A bare <button> inside a <form> submits it by default, which is almost never
+  // what an action button means. Default to type="button"; pass type="submit"
+  // explicitly for the form's submit.
+  return (
+    <button
+      data-slot="button"
+      type={type ?? "button"}
+      className={buttonClasses({ variant, size, className })}
+      {...props}
+    />
+  );
 }

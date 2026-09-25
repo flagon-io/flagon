@@ -1,0 +1,95 @@
+---
+title: Troubleshooting
+description: How to diagnose a problem in Flagon - read the status code and message, check the API's health routes and log - and where to find the fix for each kind of symptom.
+---
+
+When something goes wrong in Flagon, the answer is almost always already in the
+response: a status code that names the category of problem and a message that
+names the specific cause. This page shows where to find those, then points you to
+the page for your symptom.
+
+<Callout type="tip" title="Read the status first, then the message">
+
+The HTTP status tells you what kind of problem it is (`401` who you are, `403`
+what you may do, `404` what you can see, `409` a conflict with current state,
+`413` a body that is too large, `422` invalid input, `429` too many requests,
+`503` something not configured or not reachable). The message tells you which
+rule you hit. Most problems are solved by those two lines alone.
+
+</Callout>
+
+## Match your symptom
+
+| Symptom | Go to |
+| --- | --- |
+| You can't sign in, you're sent to a "Two-factor authentication required" or "Single sign-on required" page, or you see "Too many requests" | [Sign-in and SSO](/docs/troubleshooting/sign-in-and-sso) |
+| An organization or project shows a 404, an action says you don't have permission, or a request says "this organization requires two-factor authentication" or "requires single sign-on" | [Access and permissions](/docs/troubleshooting/access-and-permissions) |
+| An API call returns an error status (including `429` "rate limit exceeded" or `413`) and you want to know the cause and fix | [API errors](/docs/troubleshooting/api-errors) |
+| The assistant stops answering, answers with "mock mode", or an MCP client can't see or call a tool | [Assistant and MCP](/docs/troubleshooting/assistant-and-mcp) |
+| You run your own instance and it exits at startup ("... is required in production"), can't reach its database, or the app can't reach the API | [Self-hosting issues](/docs/troubleshooting/self-hosting-issues) |
+
+## Where the information lives
+
+### In the dashboard
+
+Failed actions show the API's message inline (on a form or in a dialog). The app
+passes the API's real status through its own route handlers, so a `403` from the
+API is still a `403` in your browser's network tab, not a generic failure.
+
+If a whole page fails to load, you see "We couldn't reach Flagon to load this
+page." That means the app could not get an answer from the API; see
+[the app can't reach the API](/docs/troubleshooting/self-hosting-issues#the-app-cant-reach-the-api)
+if you run your own instance.
+
+### In API responses
+
+Every REST error is a problem-details object (`application/problem+json`):
+
+```json
+{
+  "title": "Forbidden",
+  "status": 403,
+  "detail": "this token is missing the scope required for this operation"
+}
+```
+
+`detail` is the sentence to read, and it is always safe to show to a user.
+Validation failures add an `errors` list naming each field. A `5xx` never
+carries the internal cause: its `detail` is a short summary such as "could not
+load profile", and the cause is in the API's log under the response's
+`X-Request-Id`. The full shape is in
+[Errors](/docs/api/errors), and each status with its causes is in
+[API errors](/docs/troubleshooting/api-errors).
+
+The MCP endpoint speaks JSON-RPC instead, so its failures come back as a JSON-RPC
+`error` with a code and message, or as a tool result with `isError: true`. See
+[Assistant and MCP](/docs/troubleshooting/assistant-and-mcp).
+
+### On a self-hosted instance
+
+Three routes on the API tell you its state, and none of them needs credentials:
+
+```bash
+curl -i https://api.example.com/healthz          # 200: the process is up
+curl https://api.example.com/readyz              # 200 ok, or 503 "degraded" (cause in the log)
+curl https://api.example.com/internal/rls-check  # 200 when tenant isolation is enforced
+```
+
+The API's log (JSON on stdout) records what it did at boot: whether it migrated,
+which AI provider it picked, and any configuration it had to fall back from. See
+[reading the API log](/docs/troubleshooting/self-hosting-issues#reading-the-api-log).
+
+## Still stuck
+
+Collect the request you made, the status and `detail` you got back, the
+`X-Request-Id` response header, and (on your own instance) the API's boot log and
+the log lines carrying that `request_id`, then open an issue on the
+[flagon-io/flagon](https://github.com/flagon-io/flagon) repository. Leave out
+tokens, passwords, and connection strings.
+
+## Related
+
+- [API errors](/docs/troubleshooting/api-errors)
+- [Errors](/docs/api/errors)
+- [Self-hosting issues](/docs/troubleshooting/self-hosting-issues)
+- [Access and permissions](/docs/troubleshooting/access-and-permissions)

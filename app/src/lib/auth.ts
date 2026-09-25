@@ -8,6 +8,7 @@ import { createPrimaryUserEmail, syncPrimaryUserEmail } from "@/lib/user-emails"
 import { mirrorUserProfile, mirrorUserById } from "@/lib/user-profile";
 import { isUserSoftDeleted } from "@/lib/user-account";
 import { provisionSSOMembership } from "@/lib/sso-provision";
+import { SSO_MANAGEMENT_PATHS, ssoBeforeHook } from "@/lib/sso-hook";
 import { sendOtpEmail, sendResetPasswordEmail } from "@/lib/mailer";
 
 const googleConfigured = Boolean(
@@ -16,6 +17,21 @@ const googleConfigured = Boolean(
 const githubConfigured = Boolean(
   process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET,
 );
+
+// The SSO endpoints that create a session once an IdP assertion has verified:
+// the OIDC callback and the SAML assertion consumer service, both keyed by the
+// provider id in the path.
+const SSO_SESSION_PATHS = ["/sso/callback/", "/sso/saml2/sp/acs/"];
+
+/** The SSO provider a session being created right now signs in through, or "". */
+function ssoProviderForSession(
+  ctx: { path?: string; params?: Record<string, unknown> } | null | undefined,
+): string {
+  const path = ctx?.path ?? "";
+  if (!SSO_SESSION_PATHS.some((p) => path.startsWith(p))) return "";
+  const id = ctx?.params?.providerId;
+  return typeof id === "string" ? id.trim() : "";
+}
 
 export const auth = betterAuth({
   database: pool,
@@ -34,6 +50,13 @@ export const auth = betterAuth({
         ? { sameSite: "none", secure: true }
         : { sameSite: "lax" },
   },
+
+  // SSO providers are owned by the Flagon API (the single writer). The plugin's
+  // own provider-management endpoints are switched off, and every SSO request
+  // first re-syncs the provider it will use from the API (lib/sso-hook.ts), so
+  // the plugin's provider table is only ever a cache of the API's configuration.
+  disabledPaths: SSO_MANAGEMENT_PATHS,
+  hooks: { before: ssoBeforeHook },
 
   emailAndPassword: {
     enabled: true,
@@ -74,7 +97,16 @@ export const auth = betterAuth({
   // Plural table names (users, sessions, ...) to match our DB naming convention.
   // The rename-auth-tables migration step renames existing singular tables so
   // data is preserved. Columns keep BetterAuth's camelCase.
-  session: { modelName: "sessions" },
+  session: {
+    modelName: "sessions",
+    additionalFields: {
+      // The SSO provider this session was established through (null for any
+      // other sign-in). Server-managed (input:false), stamped at creation by the
+      // session hook below. The gateway forwards it to the API, which enforces an
+      // org's require-SSO policy from it.
+      ssoProviderId: { type: "string", required: false, input: false },
+    },
+  },
   // Account linking is how one Flagon account carries several org SSO identities
   // (GitHub's model). allowDifferentEmails: the SSO identity an org's IdP asserts
   // often won't match your account's primary email - linking must still attach it.
@@ -114,12 +146,17 @@ export const auth = betterAuth({
       create: {
         // Block sign-in for soft-deleted accounts (every sign-in path creates a
         // session, so this is the single choke point). Restoring clears deletedAt.
-        before: async (session) => {
+        before: async (session, ctx) => {
           if (await isUserSoftDeleted(session.userId)) {
             throw new APIError("FORBIDDEN", {
               message: "This account has been deleted. Contact support to restore it.",
             });
           }
+          // Record how this session authenticated: a session created by an SSO
+          // callback/ACS (which only runs after the provider's assertion
+          // verified) carries that provider's id.
+          const ssoProviderId = ssoProviderForSession(ctx);
+          if (ssoProviderId) return { data: { ...session, ssoProviderId } };
         },
         // Re-mirror the user's public profile to the API on every sign-in, so the
         // API knows every account from its first login - not only after a profile
@@ -190,14 +227,19 @@ export const auth = betterAuth({
         await sendOtpEmail(email, otp, type, verifyUrl);
       },
     }),
-    // Enterprise SSO (OIDC + SAML). Providers are registered PER ORGANIZATION
-    // (each carries its Flagon organizationId), so org A can use Okta and org B
-    // Azure AD. Flagon orgs live in the Go API, not BetterAuth's org plugin, so we
-    // DON'T use organizationProvisioning; instead provisionUser hands the verified
-    // user to the Go API to ensure their membership. Plural table name to match
-    // our convention.
+    // Enterprise SSO (OIDC + SAML). Providers belong to an ORGANIZATION and are
+    // configured through the Flagon API (UI, REST, agent or MCP); this plugin runs
+    // the protocol flow from its provider table, which lib/sso-sync.ts keeps as a
+    // cache of the API's configuration. Each carries its Flagon organizationId,
+    // so org A can use Okta and org B Azure AD. Flagon orgs live in the Go API,
+    // not BetterAuth's org plugin, so we DON'T use organizationProvisioning;
+    // instead provisionUser hands the verified user to the Go API to ensure their
+    // membership. Plural table name to match our convention.
     sso({
       schema: { ssoProvider: { modelName: "sso_providers" } },
+      // Registration through the plugin is off (and its endpoint disabled above):
+      // providers come from the API via lib/sso-sync.ts.
+      providersLimit: 0,
       // GitHub's model: if you're ALREADY signed in when you go through an org's
       // SSO, link that org's SSO identity to your CURRENT account - whatever email
       // the IdP asserts - instead of resolving a separate identity by email. So one
@@ -212,6 +254,7 @@ export const auth = betterAuth({
           userId: user.id,
           email: user.email,
           organizationId: provider.organizationId,
+          providerId: provider.providerId,
         });
       },
       // Re-run on every login so upstream membership stays in sync (idempotent).

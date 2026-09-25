@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
+import { routeError } from "@/lib/route-error";
 import { getAuditConfig, setAuditConfig } from "@/lib/flagon-api";
 
 export async function GET(_request: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
-  const config = await getAuditConfig(slug).catch(() => ({ ip_disclosure: false }));
-  return NextResponse.json(config);
+  try {
+    const config = await getAuditConfig(slug);
+    return NextResponse.json(config);
+  } catch (e) {
+    return routeError(e);
+  }
 }
 
 export async function PUT(request: Request, ctx: { params: Promise<{ slug: string }> }) {
@@ -14,9 +19,6 @@ export async function PUT(request: Request, ctx: { params: Promise<{ slug: strin
     const config = await setAuditConfig(slug, Boolean(body.ip_disclosure));
     return NextResponse.json(config);
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Could not update the setting." },
-      { status: 400 },
-    );
+    return routeError(e, "Could not update the setting.");
   }
 }

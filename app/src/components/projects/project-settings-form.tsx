@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Alert,
-  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -13,7 +13,8 @@ import {
   Input,
   Label,
 } from "@flagon-io/ui";
-import type { Project } from "@/lib/flagon-api";
+import { errorMessage } from "@/lib/client-fetch";
+import type { Project } from "@/lib/api/types";
 
 function slugify(s: string): string {
   return s
@@ -24,7 +25,19 @@ function slugify(s: string): string {
     .slice(0, 60);
 }
 
-export function ProjectSettingsForm({ orgSlug, project }: { orgSlug: string; project: Project }) {
+export function ProjectSettingsForm({
+  orgSlug,
+  project,
+  canRename,
+  canDelete,
+}: {
+  orgSlug: string;
+  project: Project;
+  /** Whether the caller may change the slug (maintain+ on the project). */
+  canRename: boolean;
+  /** Whether the caller may delete the project (the owner tier). */
+  canDelete: boolean;
+}) {
   const router = useRouter();
   const [name, setName] = useState(project.name);
   const [slug, setSlug] = useState(project.slug);
@@ -53,7 +66,8 @@ export function ProjectSettingsForm({ orgSlug, project }: { orgSlug: string; pro
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          slug,
+          // Send the slug only when it changed: an unchanged slug is not a rename.
+          ...(slug !== project.slug ? { slug } : {}),
           description: description.trim(),
           repository_url: repositoryUrl.trim(),
         }),
@@ -61,8 +75,7 @@ export function ProjectSettingsForm({ orgSlug, project }: { orgSlug: string; pro
     );
     if (!res.ok) {
       setSaving(false);
-      const d = await res.json().catch(() => ({}));
-      setError(d.error ?? "Couldn't save your changes.");
+      setError(await errorMessage(res, "Couldn't save your changes."));
       return;
     }
     const updated: Project = await res.json();
@@ -88,6 +101,7 @@ export function ProjectSettingsForm({ orgSlug, project }: { orgSlug: string; pro
           <Input
             id="p-slug"
             value={slug}
+            disabled={!canRename}
             onChange={(e) => {
               setSlug(slugify(e.target.value));
               setSaved(false);
@@ -95,7 +109,10 @@ export function ProjectSettingsForm({ orgSlug, project }: { orgSlug: string; pro
           />
           <p className="text-xs text-muted-foreground">
             Used in URLs: <span className="font-mono">/{orgSlug}/projects/{slug || "..."}</span>.
-            Renaming changes the project&rsquo;s URL.
+            {" "}
+            {canRename
+              ? "Renaming changes the project’s URL."
+              : "Renaming needs the maintain role or higher on this project."}
           </p>
         </div>
 
@@ -133,30 +150,27 @@ export function ProjectSettingsForm({ orgSlug, project }: { orgSlug: string; pro
         </div>
       </form>
 
-      {/* Project-level access control (collaborators + teams) is how RBAC will
-          work around a project - placeholder until it ships. */}
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-foreground">Collaborators and teams</h2>
         <div className="flex items-center justify-between gap-4 rounded-lg border border-hairline bg-panel/40 px-4 py-4">
           <div>
-            <p className="flex items-center gap-2 text-sm font-medium text-foreground">
-              Manage project access
-              <Badge variant="secondary" className="normal-case tracking-normal">
-                Soon
-              </Badge>
-            </p>
+            <p className="text-sm font-medium text-foreground">Manage project access</p>
             <p className="mt-0.5 text-sm text-muted-foreground">
               Grant people and teams roles on this project, on top of the organization&rsquo;s
-              membership. Fine-grained project RBAC is coming.
+              membership.
             </p>
           </div>
-          <Button variant="outline" disabled>
-            Add people
+          <Button asChild variant="outline">
+            <Link
+              href={`/${encodeURIComponent(orgSlug)}/projects/${encodeURIComponent(project.slug)}/settings/access`}
+            >
+              Manage access
+            </Link>
           </Button>
         </div>
       </section>
 
-      <DangerZone orgSlug={orgSlug} project={project} />
+      {canDelete && <DangerZone orgSlug={orgSlug} project={project} />}
     </div>
   );
 }
@@ -179,8 +193,7 @@ function DangerZone({ orgSlug, project }: { orgSlug: string; project: Project })
     );
     if (!res.ok) {
       setBusy(false);
-      const d = await res.json().catch(() => ({}));
-      setError(d.error ?? "Couldn't delete the project.");
+      setError(await errorMessage(res, "Couldn't delete the project."));
       return;
     }
     router.push(`/${orgSlug}/projects`);

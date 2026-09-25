@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError } from "@/lib/route-error";
 import { revokeOAT } from "@/lib/flagon-api";
 
 export async function DELETE(
@@ -9,8 +10,7 @@ export async function DELETE(
   try {
     await revokeOAT(slug, id);
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not revoke token.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not revoke token.");
   }
 }

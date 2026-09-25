@@ -1,0 +1,203 @@
+---
+title: Running in production
+description: Secrets, TLS, email, health checks, metrics, the dedicated MCP host, and running the app and API on separate hosts.
+---
+
+Flagon does not assume a particular host. The API is one Go binary (or the image
+built from `api/Dockerfile`) backed by Postgres, and the app is a standard
+Next.js application. Flagon's own instance runs the API on Fly.io and the app on
+Vercel, but nothing in the code depends on either. This page covers what every
+production deployment needs, wherever it runs.
+
+## Checklist
+
+- [ ] Both processes run behind HTTPS.
+- [ ] The API runs in production mode: set `FLAGON_ENV=production` (never `development`). Unset also works in the container image or on Fly, but a binary bound to loopback behind a same-host proxy would otherwise run in development mode.
+- [ ] `FLAGON_INTERNAL_TOKEN` is a long random value, identical on the app and the API.
+- [ ] `DATABASE_URL` and `FLAGON_APP_DATABASE_URL` are set, and the app role has its own real password.
+- [ ] `FLAGON_SECRETS_KEY` is a random 32-byte key and backed up (rotate it with `FLAGON_SECRETS_KEYS_RETIRED`).
+- [ ] `BETTER_AUTH_SECRET` is random, stable, and backed up.
+- [ ] `BETTER_AUTH_URL` is the app's public HTTPS URL, and the API's `FLAGON_APP_URL` matches it.
+- [ ] `RESEND_API_KEY` is set on the app (verification and reset emails) and on the API (invitation emails), with `RESEND_FROM` and `FLAGON_MAIL_FROM` on a verified domain.
+- [ ] If a proxy sits in front of the API, `FLAGON_CLIENT_IP_HEADER` names the header it overwrites with the client IP.
+- [ ] Health checks point at `/healthz`, and readiness at `/readyz`.
+- [ ] The metrics port is not reachable from the internet.
+- [ ] `GET /internal/rls-check` returns `"enforced":true`.
+- [ ] Both databases are backed up.
+
+## Secrets
+
+| Secret | Where | Notes |
+| --- | --- | --- |
+| `FLAGON_INTERNAL_TOKEN` | app and API | The app authenticates every server-side call to the API with it, and names the acting user in headers. Anyone who knows the value and can reach the API could act as any user. A production API refuses to start without it or with the public development value `dev-internal-token`, and a production app throws on its first API call without it. The API compares it in constant time. |
+| `FLAGON_SECRETS_KEY` | API | Encrypts stored SSO client secrets and SAML keys (AES-256-GCM). Required in production. Generate with `openssl rand -base64 32` and back it up. To change it, keep the old value in `FLAGON_SECRETS_KEYS_RETIRED` until the boot re-seal finishes; see [Rotating the encryption key](/docs/security/secrets#rotating-the-encryption-key). |
+| `DATABASE_URL` (API) | API | The migrator role. It can change the schema, so only the API should hold it. |
+| `FLAGON_APP_DATABASE_URL` | API | The runtime role. The API sets this role's password from the URL on every boot. |
+| `BETTER_AUTH_SECRET` | app | Signs sessions and encrypts two-factor secrets. Changing it breaks existing sessions and enrolled authenticators. |
+| `DATABASE_URL` (app) | app | The app's own `flagon_app` database. |
+| `RESEND_API_KEY` | app and API | Email delivery: the app sends verification and reset emails, the API sends invitation emails. Each process needs its own copy. |
+| `ANTHROPIC_API_KEY` or `FLAGON_AI_API_KEY` | API | Only if you use a hosted model. |
+
+The API is the only process that talks to the domain database, and the app never
+needs the API's database credentials. Keep each secret on the process that uses
+it.
+
+## TLS and cookies
+
+Terminate TLS wherever your platform does: a load balancer, a reverse proxy, or
+the platform's edge. Neither process terminates TLS itself.
+
+HTTPS is **required** for the app in production. When `NODE_ENV=production`, the
+app issues its session cookie with `SameSite=None; Secure`, so browsers drop it
+over plain HTTP. The `SameSite=None` part is what lets a SAML identity provider's
+cross-site POST back to the app carry the session, which org SSO needs. Set
+`BETTER_AUTH_URL` to the exact public HTTPS origin the browser uses.
+
+## Running the app and API on separate hosts
+
+The app and the API deploy independently. The app needs two settings to find the
+API:
+
+```bash
+FLAGON_API_URL=https://api.example.com     # read server-side only
+FLAGON_INTERNAL_TOKEN=<same value as the API>
+```
+
+The browser never calls the API directly: every request goes to the app, and
+the app's server calls the API. That gives you two options:
+
+- **Private API.** Put the API on a private network that only the app can reach.
+  Users get the full product through the app. The REST API, MCP endpoint, and
+  access tokens are then unavailable to anything outside that network.
+- **Public API.** Expose the API as well, so people can call it with
+  [access tokens](/docs/api/authentication), connect MCP clients, and fetch the
+  docs. Apart from public content (public user profiles, the docs, roadmap and
+  changelog, the spec, and health checks), every operation requires a valid
+  credential, and the internal path is only as strong as
+  `FLAGON_INTERNAL_TOKEN`. Every route also has a request body cap
+  (`FLAGON_MAX_BODY_BYTES`, 4 MiB by default, `413` beyond it) and a
+  per-principal rate limit (`FLAGON_RATE_LIMIT`, 50 requests per second with a
+  burst of `FLAGON_RATE_BURST`, 300, and `429` with `Retry-After` beyond it).
+  `/healthz` and `/readyz` are exempt from the rate limit.
+
+Scaling out is safe on both sides. Several API instances can boot at once
+(migrations serialize on an advisory lock), and the app's sign-in rate limits
+are stored in `flagon_app`, so they are shared across app instances rather than
+held in one instance's memory. The API's request rate limiter is the exception:
+it counts in memory on each API machine, so with several machines a caller can
+make up to that many times the configured rate. The assistant's daily quota is
+stored in the database and is shared.
+
+## Client IP behind a proxy
+
+The API records the caller's IP address in the audit log and uses it to rate
+limit anonymous callers. For requests from the app, it uses the browser's address
+that the app forwards (trusted only alongside the internal token). For everyone
+else, it uses the TCP peer address by default, which behind a load balancer or
+edge proxy is the proxy's address.
+
+Set `FLAGON_CLIENT_IP_HEADER` to the header your proxy puts the real client IP in,
+for example `Fly-Client-IP` on Fly.io. Set it **only** if every request reaches
+the API through that proxy and the proxy overwrites the header; otherwise a caller
+could send the header themselves and choose the IP their audit entries show. The
+API never reads `X-Forwarded-For` or the app's `X-Flagon-Client-*` headers from
+token callers.
+
+## A dedicated MCP host
+
+The MCP endpoint is always served at `POST /mcp` on the API. If you want a
+separate public host name for it, such as `mcp.example.com`, point that name at
+the API and set:
+
+```bash
+FLAGON_MCP_HOST=mcp.example.com
+```
+
+Requests whose `Host` header matches (compared without the port, ignoring case)
+are handled by a gate in front of every other route: the MCP endpoint answers at
+both `/` and `/mcp`, and every other path returns `404`. That host never exposes
+the index, the OpenAPI spec, the docs routes, or any REST operation. All other
+host names are unaffected and keep every route, `/mcp` included. Flagon's hosted
+instance uses this for `mcp.flagon.io`.
+
+## Health checks and readiness
+
+| Route | Port | Returns | Use it for |
+| --- | --- | --- | --- |
+| `GET /healthz` | `PORT` | `200` whenever the process is up, regardless of the database. | Liveness. Answers `GET` only, so configure checks to use `GET`, not `HEAD`. |
+| `GET /readyz` | `PORT` | `200` with `{"database":"ok","status":"ok"}`, or `503` with `{"database":"unavailable","status":"degraded"}`. The database error goes to the log, not the response. | Readiness: whether the instance can serve real traffic. |
+| `GET /internal/rls-check` | `PORT` | `200` when tenant isolation is enforced for the runtime role, `503` otherwise. | A post-deploy check, not a frequent probe. |
+
+Liveness deliberately ignores the database, so a database outage does not make
+your platform restart or refuse to start the API; readiness is where the outage
+shows. The Docker image's `HEALTHCHECK` calls `/healthz` every 30 seconds.
+
+These routes are registered outside the OpenAPI spec and need no credentials.
+
+## Metrics
+
+The API serves Prometheus metrics at `/metrics` on a **separate** listener,
+`METRICS_PORT` (default `9091`). It includes HTTP request latency
+(`flagon_http_request_duration_seconds`), connection-pool statistics, and the
+standard Go runtime and process metrics. The listener binds the same interface
+as the API (`FLAGON_HOST`), so keep the port closed to the internet and let only
+your scraper reach it. If the metrics listener fails, the API keeps serving.
+
+## Logs
+
+The API writes structured JSON logs to stdout. Collect stdout from the process
+or container. The lines to watch at boot are listed in
+[Self-hosting issues](/docs/troubleshooting/self-hosting-issues#reading-the-api-log).
+
+Every API response carries an `X-Request-Id` header. When a request fails with a
+`5xx`, the response carries only a short summary, and the full cause is logged
+with a `request_id` field, so ask users for the header value and search the log
+for it. The app can pass its own id in `X-Request-Id` (8 to 128 letters, digits,
+dots, underscores, or hyphens) to correlate a request across both services.
+
+## Email
+
+Two processes send email, both through Resend:
+
+- **The app** sends verification codes and password resets. In production, a
+  missing `RESEND_API_KEY` is an error, not a silent skip: the app throws
+  `RESEND_API_KEY is not set: refusing to drop a transactional email in production.`
+  rather than letting sign-ups wait for a code that never arrives. Set
+  `RESEND_FROM` to an address on a domain you have verified with Resend.
+- **The API** sends invitation emails, for invitations made from the dashboard,
+  the REST API, the assistant, or MCP. Set `RESEND_API_KEY` and
+  `FLAGON_MAIL_FROM` (or `RESEND_FROM`) on the API, and set `FLAGON_APP_URL` to the
+  app's public URL so the accept link points at your instance (in production it
+  otherwise defaults to `https://app.flagon.io`). Without a key the API uses its
+  log sender and warns at boot:
+  `mail provider is the LOG mailer in production: invitation emails are NOT delivered; set RESEND_API_KEY`. The invitation is
+  still created and the REST response reports `email_sent: false` alongside the
+  invitation `token`; the accept link is `<FLAGON_APP_URL>/invite/<token>`. The
+  dashboard's invite dialog shows that link with a copy button when the email was
+  not sent, so an inviter can deliver it by hand, but fix email delivery rather
+  than relying on it.
+
+## AI in production
+
+Pin the provider instead of relying on `auto`:
+
+```bash
+FLAGON_AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=<key>
+FLAGON_AI_DAILY_LIMIT=100
+```
+
+With `auto`, a missing or removed key falls back to the offline mock, with only
+a warning in the log. With the provider pinned, a missing key stops the API at
+startup (for example `FLAGON_AI_PROVIDER=anthropic requires ANTHROPIC_API_KEY`),
+so you notice. A key the provider rejects (a `401` or `403` upstream) makes
+assistant turns answer `503` "the AI agent is not configured". Keep a daily limit on any instance shared by people you
+do not control; `0` disables the limit. See [Usage and AI limits](/docs/platform/usage).
+
+## Related
+
+- [Configuration](/docs/self-hosting/configuration)
+- [Database](/docs/self-hosting/database)
+- [Upgrading](/docs/self-hosting/upgrading)
+- [Deployment topology](/docs/architecture/deployment-topology)
+- [Secrets](/docs/security/secrets)

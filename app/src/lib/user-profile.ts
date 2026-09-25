@@ -4,10 +4,15 @@
 // API knows a user from their first sign-in, not only after a profile edit.
 // Best-effort: a failure here must never break the auth flow, so it's wrapped and
 // time-boxed - the next login or profile save re-syncs.
+//
+// It also mirrors the account's AUTH STATE the API enforces org security policy
+// from: whether 2FA is enabled (every user update, so enabling or disabling 2FA
+// re-syncs at once) and which SSO providers the account has a linked identity
+// with (on every sign-in, via mirrorUserById).
 import { pool } from "@/lib/db";
+import { internalToken } from "@/lib/internal-token";
 
 const API_URL = process.env.FLAGON_API_URL ?? "http://localhost:8080";
-const INTERNAL_TOKEN = process.env.FLAGON_INTERNAL_TOKEN ?? "";
 
 type MirrorUser = {
   id: string;
@@ -23,10 +28,11 @@ type MirrorUser = {
   location?: string | null;
   socialLinks?: string | null;
   publicEmail?: string | null;
+  twoFactorEnabled?: boolean | null;
 };
 
-export async function mirrorUserProfile(user: MirrorUser): Promise<void> {
-  if (!INTERNAL_TOKEN || !user?.id) return;
+export async function mirrorUserProfile(user: MirrorUser, ssoProviderIds?: string[]): Promise<void> {
+  if (!user?.id) return;
 
   let social: string[] = [];
   try {
@@ -47,6 +53,9 @@ export async function mirrorUserProfile(user: MirrorUser): Promise<void> {
     socialLinks: social,
     publicEmail: user.publicEmail ?? "",
     avatarUrl: user.image ?? "",
+    // Only when known: a partial user object must not reset the API's copy.
+    ...(typeof user.twoFactorEnabled === "boolean" ? { twoFactorEnabled: user.twoFactorEnabled } : {}),
+    ...(ssoProviderIds ? { ssoProviderIds } : {}),
   };
 
   const controller = new AbortController();
@@ -56,7 +65,7 @@ export async function mirrorUserProfile(user: MirrorUser): Promise<void> {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${INTERNAL_TOKEN}`,
+        Authorization: `Bearer ${internalToken()}`,
         "X-Flagon-User-Id": user.id,
         "X-Flagon-User-Email": user.email,
       },
@@ -80,18 +89,30 @@ export async function mirrorUserProfile(user: MirrorUser): Promise<void> {
 // Best-effort and self-contained: any failure is logged and swallowed so it can
 // never block sign-in.
 export async function mirrorUserById(userId: string): Promise<void> {
-  if (!INTERNAL_TOKEN || !userId) return;
+  if (!userId) return;
   try {
     const { rows } = await pool.query(
       `select id, email, name, image, username, "displayUsername",
               bio, pronouns, "websiteUrl", company, location,
-              "socialLinks", "publicEmail"
+              "socialLinks", "publicEmail", "twoFactorEnabled"
          from users where id = $1`,
       [userId],
     );
     const user = rows[0];
     if (!user) return;
-    await mirrorUserProfile(user);
+    // Linked SSO identities: accounts whose provider is an SSO provider (the
+    // auth layer's provider cache), not a password or social login.
+    const sso = await pool.query(
+      `select distinct a."providerId" as id
+         from accounts a
+        where a."userId" = $1
+          and exists (select 1 from sso_providers s where s."providerId" = a."providerId")`,
+      [userId],
+    );
+    await mirrorUserProfile(
+      { ...user, twoFactorEnabled: Boolean(user.twoFactorEnabled) },
+      sso.rows.map((r: { id: string }) => r.id),
+    );
   } catch (err) {
     console.error("mirrorUserById failed", err);
   }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError, badRequest } from "@/lib/route-error";
 import { removeProjectOwner } from "@/lib/flagon-api";
 
 export async function DELETE(
@@ -7,13 +8,12 @@ export async function DELETE(
 ) {
   const { slug, project, type, principalId } = await ctx.params;
   if (type !== "user" && type !== "team") {
-    return NextResponse.json({ error: "Invalid owner type." }, { status: 400 });
+    return badRequest("Invalid owner type.");
   }
   try {
     await removeProjectOwner(slug, project, type, principalId);
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not remove owner.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not remove owner.");
   }
 }

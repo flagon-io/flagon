@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError } from "@/lib/route-error";
 import { deleteProject, getProject, updateProject, type UpdateProjectBody } from "@/lib/flagon-api";
 
 export async function GET(
@@ -10,8 +11,8 @@ export async function GET(
     const found = await getProject(slug, project);
     if (!found) return NextResponse.json({ error: "Project not found." }, { status: 404 });
     return NextResponse.json(found);
-  } catch {
-    return NextResponse.json({ error: "Could not load the project." }, { status: 500 });
+  } catch (e) {
+    return routeError(e, "Could not load the project.");
   }
 }
 
@@ -25,10 +26,7 @@ export async function PATCH(
     const updated = await updateProject(slug, project, body);
     return NextResponse.json(updated);
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Could not update the project." },
-      { status: 400 },
-    );
+    return routeError(e, "Could not update the project.");
   }
 }
 
@@ -41,9 +39,6 @@ export async function DELETE(
     await deleteProject(slug, project);
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Could not delete the project." },
-      { status: 400 },
-    );
+    return routeError(e, "Could not delete the project.");
   }
 }

@@ -1,0 +1,141 @@
+---
+title: Work with the assistant
+description: Ask the in-product assistant to answer questions and make changes in your organization, review and confirm what it proposes, and know its limits.
+---
+
+The **assistant** is the AI panel built into the Flagon dashboard. You describe what you want in
+plain language ("give the platform team write on checkout", "what changed this week?") and it
+works through the same operations the dashboard and API use. It is optional: everything it does
+has a dashboard page and an API operation, and Flagon is fully usable without it.
+
+By the end of this guide you will know how to ask it for information, how to review and confirm
+the changes it proposes, and what to do when it says no.
+
+<Callout type="info" title="Before you start">
+
+- **Membership** in the organization you have open. The conversation, and its usage, belong to
+  that organization, and the assistant works only inside it: a tool call that names another
+  organization is refused with `403`. To work in another organization, switch to it first.
+- **The organization's security policy.** If the organization requires two-factor
+  authentication or SSO and you don't meet it, the assistant refuses with `403`, the same as
+  every other request.
+- **Permissions:** the assistant acts as **you**. It can only do what your role allows; if you
+  couldn't do something in the dashboard, it can't either.
+
+</Callout>
+
+## What it can and can't do
+
+| It can | It can't |
+| --- | --- |
+| Read and summarize projects, members, teams, invitations, access grants, the audit log, and your notifications. | Create, list, or revoke access tokens. That stays in the dashboard. |
+| Create and edit projects and teams, and manage members, invitations, project access, and ownership. | Change your personal account: profile, password, email, or 2FA. |
+| Delete and restore projects, and delete the organization you have open (with the usual permission checks). | Restore a deleted organization. Use your personal **Settings > Organizations** instead, or an MCP client. |
+| Create a new organization for you. | Work with deployments, logs, or packages. Those features are not built yet. |
+| Change security settings, SSO providers, and audit settings, if you're an owner or admin. | Help with anything unrelated to Flagon. It declines and steers back. |
+| Answer questions from the Flagon documentation. Pages marked internal (none today) are included too. | Reach any organization other than the one you have open. |
+
+The [tool reference](/docs/ai/tools) lists every operation it can use.
+
+## Steps
+
+<Steps>
+
+<Step title="Open the assistant">
+
+Select **Ask AI** in the top bar of any organization page. The organization dashboard also leads
+with a prompt box (**Ask Flagon to do something, or search...**) that opens the same panel. Start
+a fresh conversation with **New conversation**.
+
+</Step>
+
+<Step title="Ask a question">
+
+Questions run straight away, because reading never changes anything:
+
+> Who has access to the checkout project, and why?
+
+The assistant calls read-only tools (listing collaborators, teams, owners, and the base
+permission) and answers from the results.
+
+</Step>
+
+<Step title="Review a proposed change">
+
+When you ask for a change, the assistant does **not** make it. It proposes it:
+
+> Give dana@example.com maintain on checkout.
+
+A card appears under its reply:
+
+**Confirm: Grant "dana@example.com" maintain on project "checkout" in "acme"**
+
+Read the summary. It names the exact operation and inputs the assistant will use. Select
+**Confirm** to run it; on success you see **Done:** followed by the same summary. If the summary
+isn't what you meant, don't confirm; reply with a correction and it proposes again.
+
+A confirmed action runs with your identity and your permissions, and the result is the same as
+doing it in the dashboard: the same checks, the same audit log entry, the same notifications.
+If it fails, you see the same error the API would return, such as
+`you don't have permission to do that`.
+
+</Step>
+
+<Step title="Choose Ask or Auto mode">
+
+The mode picker at the bottom of the panel has two settings:
+
+| Mode | Behavior |
+| --- | --- |
+| **Ask** (default): Ask before editing | Every change waits for you to select **Confirm**. |
+| **Auto**: Automatically edit | Proposed changes run without the confirmation card, for the rest of this conversation. |
+
+Auto mode is a convenience in the dashboard only; the server still treats each change as a
+confirmed action run as you, with every permission check. Switch back to **Ask** before
+anything destructive, such as deletes.
+
+</Step>
+
+<Step title="Verify what it did">
+
+Anything the assistant changed shows up where you'd expect: on the relevant page, and in the
+organization's [audit log](/docs/guides/review-the-audit-log) with you as the actor. You can
+also ask it: "show me the last five audit events".
+
+</Step>
+
+</Steps>
+
+## Limits
+
+The assistant is metered per organization. By default an organization can make **100 assistant
+calls per rolling 24 hours**; each message you send and each confirmed action counts as one. When
+the limit is reached, requests fail with `429` and the panel shows
+`AI usage limit reached for this organization`. Wait for older calls to age out of the 24-hour
+window, or on a self-hosted instance raise `FLAGON_AI_DAILY_LIMIT`. See
+[Usage and AI limits](/docs/platform/usage).
+
+Other errors you may see:
+
+| Status | Message | Meaning |
+| --- | --- | --- |
+| `503` | `the AI agent is not configured` | The server has no assistant configured. |
+| `503` | `AI usage could not be recorded; please try again` | Flagon couldn't meter the turn, so it refused to run it. Retry. |
+| `404` | `organization not found` | You're not a member of the organization the panel is scoped to. |
+| `403` | `this organization requires two-factor authentication; enable it on your account to continue` | The organization requires 2FA and your account has none. |
+| `403` | `this organization requires single sign-on; sign in through the organization's identity provider to continue` | The organization requires SSO and your current session didn't come from it. |
+| tool error | `this conversation is scoped to the "acme" organization and can't act in "other"; switch to that organization in Flagon to work there` | The request named another organization. Switch organizations and ask again. |
+
+## Using it from outside the dashboard
+
+The assistant's endpoints are only reachable from the dashboard. To drive Flagon from your own
+AI tools, connect them to the MCP server, which exposes the same tools; see
+[Connect an MCP client](/docs/guides/connect-an-mcp-client). Over MCP, Flagon does not add its
+own confirmation step: your MCP client's approval prompt is the confirmation.
+
+## Related
+
+- [Assistant](/docs/ai/assistant)
+- [Tool reference](/docs/ai/tools)
+- [Usage and AI limits](/docs/platform/usage)
+- [Connect an MCP client](/docs/guides/connect-an-mcp-client)

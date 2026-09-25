@@ -86,7 +86,7 @@ export function ThemeToggle() {
         <DropdownMenu.Content
           align="end"
           sideOffset={8}
-          className="z-40 min-w-[168px] rounded-xl border border-hairline bg-popover p-1.5 shadow-xl shadow-black/10"
+          className="z-40 min-w-44 rounded-xl border border-hairline bg-popover p-1.5 shadow-xl shadow-black/10"
         >
           {OPTIONS.map(({ value, label, icon: Icon }) => (
             <DropdownMenu.Item

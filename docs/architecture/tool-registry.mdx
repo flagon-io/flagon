@@ -1,0 +1,233 @@
+---
+title: Tool registry
+description: How one registry of tools, built over the same service layer as the REST handlers, gives the API, the MCP server, and the in-product assistant identical capabilities.
+---
+
+Flagon has three front doors: the REST API for scripts and apps, the MCP server
+for external AI clients, and the assistant inside the dashboard. A capability that
+exists behind one door but not the others is a bug, so all three are wired to the
+same code. The **tool registry** is the piece that makes that true for the two AI
+doors, and the **service layer** is the piece that makes it true for all three.
+
+A **tool** is one capability described to a language model: a name, a
+description, a JSON Schema for its input, and a function that runs it. The
+registry is the list of those tools, and it lives in `api/internal/ai`.
+
+```text
+   REST client           MCP client             Dashboard assistant
+   (curl, CI)            (Claude Desktop,       (Ask AI panel)
+        │                 Cursor, ...)                 │
+        ▼                     ▼                        ▼
+ ┌──────────────┐     ┌────────────────┐     ┌───────────────────┐
+ │ huma handler │     │ POST /mcp      │     │ POST /ai/messages │
+ │ server/*.go  │     │ server/mcp.go  │     │ ai/agent.go       │
+ └──────┬───────┘     └───────┬────────┘     └─────────┬─────────┘
+        │                     └───────────┬────────────┘
+        │                                 ▼
+        │                     ┌──────────────────────┐
+        │                     │ Tool registry        │
+        │                     │ ai/registry.go       │
+        │                     │ ai/tools_*.go        │
+        │                     └───────────┬──────────┘
+        └──────────────┬──────────────────┘
+                       ▼
+            ┌──────────────────────┐
+            │ Service layer        │
+            │ internal/service     │
+            └──────────┬───────────┘
+                       ▼
+            ┌──────────────────────┐
+            │ Store: internal/db   │
+            │ roles, RLS, audit    │
+            └──────────────────────┘
+```
+
+## The registry
+
+`api/internal/ai/registry.go` defines the `Tool` type and `NewRegistry`, which
+registers every tool at startup. Tools are grouped by resource in files named
+`tools_*.go` (`tools_projects.go`, `tools_members.go`, `tools_sso.go`, and so on).
+Each tool carries:
+
+| Field | Meaning |
+| --- | --- |
+| `Def` | Name, description, and input JSON Schema shown to the model. |
+| `Scope` | The token scope a caller needs, in the same vocabulary as the REST API (`read:project`, `write:org`). |
+| `Operation` | The REST operation ID this tool fronts, such as `list-projects`. |
+| `Mutating` | True when the tool writes. The assistant proposes these instead of running them. |
+| `Summarize` | Renders a one-line description of a proposed call for the confirmation prompt. |
+| `Public` | True only for tools that are safe with no authentication. |
+| `CrossOrg` | True for a tool that addresses an organization some way other than an `org` slug argument (today `restore_organization`, which takes an org id). The assistant refuses these; MCP is unaffected. |
+| `Run` | Executes the tool as the acting user. |
+
+The registry holds 60 tools today. Two of them, `search_docs` and `get_doc`, are
+`Public`; the rest act as a user. Registering two tools with the same name panics
+at startup, so a name collision can never ship.
+
+Registration also wraps every tool's `Run` in the **org policy gate**
+(`api/internal/ai/policy.go`). Before a tool runs for an authenticated user, if its
+input names an `org`, the gate calls `service.CheckOrgAccess` for that org, the
+same 2FA and SSO check the REST middleware applies to `/orgs/{slug}` operations.
+Because the gate lives in the registry, it holds on every door that runs tools,
+and a new tool gets it without doing anything. See
+[Identity and authentication](/docs/architecture/identity-and-auth).
+
+`api/internal/ai/bind.go` removes boilerplate from every tool body. `bind` decodes
+the JSON arguments into a typed struct, trims every string field, and rejects any
+field tagged `tool:"required"` that arrived empty, with a message like "org and
+project are required". Validation failures are `service.Invalid` errors, so they
+render the same way on every front door.
+
+## One service layer under every door
+
+The REST handlers in `api/internal/server` and the tools in `api/internal/ai` do
+not talk to the database themselves. Both call the same method on
+`service.Service` (`api/internal/service`): the `create-project` handler and the
+`create_project` tool both call `svc.CreateProject`. That method owns input
+validation, slug derivation, the store call, error classification, and side
+effects such as notifications.
+
+The reason is drift. If the REST handler trimmed a name and the tool did not, or
+the handler sent a notification and the tool forgot, the same request would
+behave differently depending on who asked. Putting the logic in one place means
+there is nothing to keep in sync. Errors follow the same path: the service returns
+a `service.Error` with a status and a caller-safe message, and each door renders
+it in its own shape (an HTTP status for REST, an error result for MCP, a tool
+error the model reads for the assistant). An unclassified error is logged and
+replaced with a generic message, so SQL or hostnames never reach a caller.
+
+The service is not an authorization layer. Permission checks stay in the store,
+acting as the caller, and row-level security sits under them. See
+[Permissions model](/docs/architecture/permissions-model).
+
+## Door 1: the REST API
+
+Every operation is registered with `huma.Register`, which also generates the
+OpenAPI spec. After the router's request guards (request id, body cap, rate
+limit), handlers run behind `combinedAuth`, which resolves a session or an access
+token and checks the token's scope against `operationScopes`, and then behind
+`withOrgPolicy`, which applies the org's 2FA and SSO requirements to operations
+under `/orgs/{slug}`. The handler then calls the service method. See
+[Request lifecycle](/docs/architecture/request-lifecycle) and
+[Using the API](/docs/api/using-the-api).
+
+## Door 2: the MCP server
+
+`api/internal/server/mcp.go` speaks the Model Context Protocol over JSON-RPC 2.0
+on `POST /mcp` (and at the root of the dedicated MCP host when `FLAGON_MCP_HOST`
+is set). It answers `initialize`, `ping`, `tools/list`, and `tools/call`.
+
+- **Anonymous callers** see and call only `Public` tools. A non-public tool name
+  is reported as unknown, so the public surface does not reveal what exists behind
+  authentication.
+- **Token callers** send `Authorization: Bearer flagon_...`. The token resolves to
+  its principal, and `tools/list` returns the public tools plus every tool whose
+  `Scope` the token holds (a full-access token sees them all). A non-public tool
+  with an empty `Scope` is unreachable, which keeps the rule fail-closed.
+- An invalid or expired token is rejected with a JSON-RPC error rather than
+  silently downgraded to anonymous.
+- A token caller's tools pass the registry's org policy gate, so a personal access
+  token cannot reach an org whose 2FA or SSO requirement its owner does not meet.
+  An MCP call is not confined to one org: a token acts wherever its principal can.
+- Audit entries written by an authenticated tool call record the connection's IP
+  address and the client's user agent, the same "where" a REST call with that token
+  records.
+- Internal documentation is served to any authenticated caller; the anonymous
+  MCP never sees it. See [Content corpora](/docs/architecture/content-corpora).
+- The request passes the same guards as REST: the body cap (`413`) and the
+  per-principal rate limit (`429`, one bucket per token).
+
+MCP runs tools directly, including mutating ones. There is no proposal step on
+this door: the MCP client (for example Claude Desktop) is responsible for asking
+its user before it calls a tool, and the token's scopes are what bound it. Hand an
+MCP client a token with only the scopes it needs. See
+[MCP](/docs/ai/mcp).
+
+## Door 3: the in-product assistant
+
+The assistant sends every registry tool to the model. A conversation is scoped
+to one organization: a tool call whose `org` argument names a different org, or a
+`CrossOrg` tool, is refused with `403` before it is run or proposed. When the model
+calls a read tool, the agent runs it and feeds the JSON result back. When it calls
+a `Mutating` tool, the agent does not run it: it records a **proposal** (tool name,
+input, and the `Summarize` sentence) and tells the model the action is awaiting
+confirmation. The dashboard shows each proposal with a confirm button (or, if you
+switch the panel to "Automatically edit", confirms them for you), and confirming
+calls `POST /ai/actions/execute`, which runs the tool only if it exists and is
+marked `Mutating`, stays inside the conversation's org, and the org still has AI
+quota left. Both steps act as the signed-in user. The loop itself is described on
+[AI runtime](/docs/architecture/ai-runtime).
+
+## Scope parity, enforced by tests
+
+The rules above only hold if every tool carries the right scope and read or write
+nature. `api/internal/server/guardrails_test.go` checks this against the real,
+fully registered server in CI:
+
+- **Every operation is scoped or exempt.** Each registered operation must appear
+  in `operationScopes` or in a short `unscopedOps` list with a written reason
+  (public by design, or app-only behind `internalAuth`).
+- **Exemptions are real.** Every non-public exempt operation must reject a user
+  access token with `401`.
+- **Every scoped operation has a tool.** A scoped operation with no tool naming it
+  in `Operation` fails the build, unless it is listed in `toolExemptOps` with a
+  reason. Today there are none: the app's profile mirror (`sync-profile`) is
+  internal-only, so it is unscoped rather than tool-exempt.
+- **Tools match their operations.** A tool's `Scope` must equal its operation's
+  scope, `Mutating` must be true exactly when the operation is not a `GET` or
+  `QUERY`, and every mutating tool must have a `Summarize`.
+
+`api/internal/ai/registry_test.go` adds unit checks on the registry itself.
+
+## Adding a capability
+
+The golden path, in the order the code expects it:
+
+<Steps>
+
+<Step title="Implement the service method">
+
+Add the method to `api/internal/service` over the store in `api/internal/db`. Put
+the permission check and the audit record inside the store's transaction. If the
+operation is org-scoped, give it an `/orgs/{slug}/...` path and give its tool an
+`org` argument, so the org policy applies on every door.
+
+</Step>
+
+<Step title="Register the operation and its scope">
+
+Register a huma operation in `api/internal/server` that calls the service method,
+and add its ID to `operationScopes` in `scopes.go`. The operation appears in the
+OpenAPI spec automatically.
+
+</Step>
+
+<Step title="Add the tool">
+
+Add a `Tool` in the matching `api/internal/ai/tools_*.go` file with the same
+`Scope`, `Operation` set to the operation ID, `Mutating` for writes, and a
+`Summarize` for the confirmation prompt. Its `Run` calls the same service method.
+
+</Step>
+
+<Step title="Document it">
+
+Update the page under `docs/` in the same change and run `make docs`. CI fails if
+the corpus is stale. The dashboard UI can follow.
+
+</Step>
+
+</Steps>
+
+If you skip step 3, `guardrails_test.go` fails with a message naming the
+operation. That is deliberate: a capability the assistant and MCP cannot see is
+unfinished.
+
+## Related
+
+<Cards>
+  <Card title="AI runtime" href="/docs/architecture/ai-runtime" description="The agent loop, providers, proposals, and metering." />
+  <Card title="Permissions model" href="/docs/architecture/permissions-model" description="How scopes and roles decide what a tool call may do." />
+  <Card title="Tools reference" href="/docs/ai/tools" description="Every tool the assistant and MCP expose." />
+  <Card title="AI safety" href="/docs/security/ai-safety" description="The controls that keep the AI doors inside the user's permissions." />
+</Cards>

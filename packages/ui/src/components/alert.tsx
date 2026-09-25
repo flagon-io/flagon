@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../lib/cn";
 
 export type AlertVariant =
@@ -13,8 +13,8 @@ const surfaces: Record<AlertVariant, string> = {
   default: "border-hairline bg-card",
   info: "border-hairline bg-panel",
   brand: "border-brand/30 bg-brand/8",
-  success: "border-emerald-500/30 bg-emerald-500/10",
-  warning: "border-amber-500/30 bg-amber-500/10",
+  success: "border-success/30 bg-success/10",
+  warning: "border-warning/30 bg-warning/10",
   destructive: "border-destructive/30 bg-destructive/10",
 };
 
@@ -22,12 +22,12 @@ const iconTint: Record<AlertVariant, string> = {
   default: "text-muted-foreground",
   info: "text-muted-foreground",
   brand: "text-brand-bright",
-  success: "text-emerald-600 dark:text-emerald-400",
-  warning: "text-amber-600 dark:text-amber-400",
+  success: "text-success",
+  warning: "text-warning",
   destructive: "text-destructive",
 };
 
-type AlertProps = HTMLAttributes<HTMLDivElement> & {
+export type AlertProps = ComponentProps<"div"> & {
   variant?: AlertVariant;
   /** Optional leading icon (e.g. a lucide icon element); rendered decoratively. */
   icon?: ReactNode;
@@ -71,7 +71,7 @@ export function Alert({
   );
 }
 
-export function AlertTitle({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {
+export function AlertTitle({ className, ...props }: ComponentProps<"p">) {
   return (
     <p
       data-slot="alert-title"
@@ -84,7 +84,7 @@ export function AlertTitle({ className, ...props }: HTMLAttributes<HTMLParagraph
 export function AlertDescription({
   className,
   ...props
-}: HTMLAttributes<HTMLParagraphElement>) {
+}: ComponentProps<"p">) {
   return (
     <p
       data-slot="alert-description"

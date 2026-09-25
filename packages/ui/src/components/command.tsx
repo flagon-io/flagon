@@ -4,6 +4,7 @@ import { Command as CommandPrimitive } from "cmdk";
 import { Search } from "lucide-react";
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { controlHeight } from "../lib/control";
 import { Dialog, DialogPanel, DialogOverlay, DialogPortal, DialogTitle, DialogDescription } from "./dialog";
 
 /** A command palette with fuzzy search. Compose Command > Input + List > Item. */
@@ -25,14 +26,24 @@ export function CommandDialog({
   title = "Command palette",
   description = "Search for a command to run.",
   className,
+  overlayClassName,
   children,
   ...props
-}: ComponentProps<typeof Dialog> & { title?: string; description?: string; className?: string }) {
+}: ComponentProps<typeof Dialog> & {
+  title?: string;
+  description?: string;
+  className?: string;
+  /** Extra classes for the backdrop (merged over the shared overlay). */
+  overlayClassName?: string;
+}) {
   return (
     <Dialog {...props}>
       <DialogPortal>
-        <DialogOverlay className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-[12vh] backdrop-blur-[1px]">
+        {/* The shared overlay, laid out as a flex column so the panel anchors
+            near the top (a palette reads better high on the screen). */}
+        <DialogOverlay className={cn("flex items-start justify-center p-4 pt-[12vh]", overlayClassName)}>
           <DialogPanel
+            data-slot="command-dialog"
             className={cn(
               "w-[min(40rem,92vw)] overflow-hidden rounded-xl border border-hairline bg-popover shadow-2xl outline-none",
               className,
@@ -52,11 +63,17 @@ export function CommandDialog({
 
 export function CommandInput({ className, ...props }: ComponentProps<typeof CommandPrimitive.Input>) {
   return (
-    <div className="flex items-center gap-2 border-b border-hairline px-3" cmdk-input-wrapper="">
+    <div
+      data-slot="command-input-wrapper"
+      className="flex items-center gap-2 border-b border-hairline px-3"
+      cmdk-input-wrapper=""
+    >
       <Search className="size-4 shrink-0 text-muted-foreground" />
       <CommandPrimitive.Input
+        data-slot="command-input"
         className={cn(
-          "flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+          controlHeight.lg,
+          "flex w-full rounded-md bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
         {...props}
@@ -68,19 +85,27 @@ export function CommandInput({ className, ...props }: ComponentProps<typeof Comm
 export function CommandList({ className, ...props }: ComponentProps<typeof CommandPrimitive.List>) {
   return (
     <CommandPrimitive.List
+      data-slot="command-list"
       className={cn("max-h-80 overflow-x-hidden overflow-y-auto p-1", className)}
       {...props}
     />
   );
 }
 
-export function CommandEmpty(props: ComponentProps<typeof CommandPrimitive.Empty>) {
-  return <CommandPrimitive.Empty className="py-6 text-center text-sm text-muted-foreground" {...props} />;
+export function CommandEmpty({ className, ...props }: ComponentProps<typeof CommandPrimitive.Empty>) {
+  return (
+    <CommandPrimitive.Empty
+      data-slot="command-empty"
+      className={cn("py-6 text-center text-sm text-muted-foreground", className)}
+      {...props}
+    />
+  );
 }
 
 export function CommandGroup({ className, ...props }: ComponentProps<typeof CommandPrimitive.Group>) {
   return (
     <CommandPrimitive.Group
+      data-slot="command-group"
       className={cn(
         "overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground",
         className,
@@ -91,12 +116,19 @@ export function CommandGroup({ className, ...props }: ComponentProps<typeof Comm
 }
 
 export function CommandSeparator({ className, ...props }: ComponentProps<typeof CommandPrimitive.Separator>) {
-  return <CommandPrimitive.Separator className={cn("-mx-1 my-1 h-px bg-hairline", className)} {...props} />;
+  return (
+    <CommandPrimitive.Separator
+      data-slot="command-separator"
+      className={cn("-mx-1 my-1 h-px bg-hairline", className)}
+      {...props}
+    />
+  );
 }
 
 export function CommandItem({ className, ...props }: ComponentProps<typeof CommandPrimitive.Item>) {
   return (
     <CommandPrimitive.Item
+      data-slot="command-item"
       className={cn(
         "relative flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm text-foreground outline-none select-none",
         "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
@@ -110,5 +142,11 @@ export function CommandItem({ className, ...props }: ComponentProps<typeof Comma
 }
 
 export function CommandShortcut({ className, ...props }: ComponentProps<"span">) {
-  return <span className={cn("ml-auto text-xs tracking-widest text-muted-foreground", className)} {...props} />;
+  return (
+    <span
+      data-slot="command-shortcut"
+      className={cn("ml-auto text-xs tracking-widest text-muted-foreground", className)}
+      {...props}
+    />
+  );
 }

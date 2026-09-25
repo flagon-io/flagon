@@ -244,7 +244,7 @@ func (d *DB) ResolveToken(ctx context.Context, secret string) (TokenPrincipal, e
 	if d == nil || d.pool == nil {
 		return TokenPrincipal{}, ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := withQueryTimeout(ctx)
 	defer cancel()
 
 	var p TokenPrincipal

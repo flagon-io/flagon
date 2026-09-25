@@ -1,0 +1,21 @@
+# Keep every editor on the repo's conventions. Line endings matter most:
+# .gitattributes normalizes to LF on commit, and this stops editors on Windows
+# from writing CRLF into the working copy in the first place.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.go]
+indent_style = tab
+
+[Makefile]
+indent_style = tab
+
+[*.{md,mdx}]
+trim_trailing_whitespace = false

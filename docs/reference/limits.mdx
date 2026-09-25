@@ -1,0 +1,99 @@
+---
+title: Limits
+description: Every quota, page size, retention window, expiry, size cap, and timeout Flagon enforces, with the value and where it is set.
+---
+
+This page collects every limit the API and app enforce, with the exact value and
+whether you can change it. Values marked **Configurable** come from a setting in
+the [configuration reference](/docs/reference/configuration); everything else
+is a constant in the code.
+
+## Plans and quotas
+
+| Limit | Value | What happens at the limit |
+| --- | --- | --- |
+| Organizations you **own** on the free plan | 1 | Creating another organization, or restoring a deleted one you owned, fails with `402 Payment Required`. Being a member of other organizations is unlimited. |
+| Assistant calls per organization | 100 per rolling 24 hours. **Configurable** with `FLAGON_AI_DAILY_LIMIT` (`0` means unlimited). | The next message to the assistant, or the next confirmation of a proposed change, fails with `429 Too Many Requests` (`AI usage limit reached for this organization`, no `Retry-After` header) until older calls age out of the 24-hour window. |
+| API requests per principal | 50 per second sustained, bursts of up to 300. **Configurable** with `FLAGON_RATE_LIMIT` (`0` disables) and `FLAGON_RATE_BURST`. | The request fails with `429 Too Many Requests` and a `Retry-After` header giving the seconds to wait. See the rate limits section below. |
+
+How assistant calls are counted: each message you send to the assistant counts
+as one call, however many tool steps it takes, and each proposed change you
+confirm counts as one more. The count is shared by everyone in the organization.
+The limit is checked before a message runs and again before a confirmed change
+runs, so once the organization is at its limit, confirming a proposal made
+earlier also fails with `429`. MCP tool calls are not metered. See
+[Usage and AI limits](/docs/platform/usage).
+
+## Rate limits
+
+Every API request draws from a token bucket that belongs to its **principal**:
+
+- a signed-in dashboard user (each user has their own bucket);
+- an access token (each token has its own bucket, whether or not it turns out
+  to be valid);
+- the client IP, for requests with no credential.
+
+The bucket refills at `FLAGON_RATE_LIMIT` requests per second (default `50`) and
+holds up to `FLAGON_RATE_BURST` requests (default `300`). An empty bucket
+answers `429 Too Many Requests` with a `Retry-After` header in whole seconds;
+wait that long, then retry. `GET /healthz` and `GET /readyz` are never limited.
+
+The limiter lives in memory on each API instance, so with several instances a
+principal's effective ceiling is up to that many times the configured rate. It
+is an abuse guard, not a quota: assistant usage has its own per-organization
+meter, above.
+
+## Lists and pages
+
+| Limit | Value |
+| --- | --- |
+| Paginated lists (`limit`) | Default 30, maximum 100. Larger values are clamped to 100. |
+| Audit log (`limit`) | Default 30, maximum 100. `0` or a negative value means 30; larger values are clamped to 100. |
+| Notifications (`limit`) | Default 30, maximum 100. `0` or a negative value means 30; larger values are clamped to 100. |
+| Docs search (`GET /docs/search`, `search_docs` tool) | Default 5 results. |
+| Assistant and MCP list tools | Up to 100 items per tool call. `list_projects` takes a search and a cursor to page further; the other list tools return the first 100. `list_notifications` and `list_audit_events` take a `limit` instead (default 30, maximum 100). |
+
+## Retention and expiry
+
+| Item | Window |
+| --- | --- |
+| A deleted organization | Restorable by an owner for 30 days after deletion. After that it no longer appears in **Settings > Organizations** and cannot be restored. |
+| A deleted project | Restorable by a project owner (or an organization owner or admin) for 30 days after deletion, the same window as organizations. The deleted-projects list shows each project's `purge_at`; after it, the project no longer appears and restoring it answers `404`. |
+| An invitation | Valid for 7 days. Accepting after that fails with `410 Gone`. |
+| Personal and organization access tokens | You choose at creation: 7, 30 (default), or 90 days, a custom future date, or no expiration. |
+| The audit log | Append-only. Entries are not deleted. |
+
+## Requests
+
+| Limit | Value |
+| --- | --- |
+| Request body size | 1 MiB for API operations. A global cap on every route, including the MCP endpoint, of 4 MiB by default (**Configurable** with `FLAGON_MAX_BODY_BYTES`). Larger bodies are rejected with `413`. |
+| Reading a request body | 5 seconds. |
+| Sending request headers | 10 seconds (the server's `ReadHeaderTimeout`), on both the API and metrics listeners. Response time is not capped, because an assistant turn can legitimately run long. |
+| Each database query | 5 seconds. |
+| `/readyz` database check | 3 seconds. |
+| `/internal/rls-check` self-test | 5 seconds. |
+| Migrations at startup | 2 minutes. |
+
+## Assistant
+
+| Limit | Value |
+| --- | --- |
+| Model steps per message | 6. Each step is one model call; read tools run between steps, and proposed changes wait for your confirmation. |
+| Output tokens per model call | 1,024. |
+| Timeout per model call | 60 seconds for Anthropic, 120 seconds for an OpenAI-compatible endpoint. |
+
+## Names and identifiers
+
+| Item | Rule |
+| --- | --- |
+| Organization, project, and team slugs | Lowercase letters and digits, with single hyphens between runs. Anything else in the input collapses to one hyphen. A slug is derived from the name when you omit it, and a name must contain at least one letter or digit. |
+| Slug uniqueness | Organization slugs are unique among live organizations; project and team slugs are unique within their organization. Deleting a project or team frees its slug immediately. |
+| SSO provider id | 2 to 63 characters: lowercase letters, digits, and hyphens, starting with a letter or digit. |
+
+## Related
+
+- [Configuration](/docs/reference/configuration)
+- [Usage and AI limits](/docs/platform/usage)
+- [Pagination and search](/docs/api/pagination)
+- [Errors](/docs/api/errors)

@@ -74,6 +74,9 @@ func (d Doc) Meta() Meta {
 // Corpus is the serialized set of docs (the shape of corpus.gen.json).
 type Corpus struct {
 	Docs []Doc `json:"docs"`
+	// Nav is the compiled public navigation (groups -> sections -> items), built
+	// from the meta.json files. Nil for a corpus built without one.
+	Nav *Nav `json:"nav,omitempty"`
 }
 
 //go:embed corpus.gen.json
@@ -102,8 +105,9 @@ const (
 // concurrent use after construction.
 type Index struct {
 	bySlug map[string]Doc
-	order  []string                      // slugs, stable (section, order, title)
+	order  []string                      // slugs: nav order, then (section, order, title)
 	terms  map[string]map[string]float64 // slug -> term -> accumulated weight
+	nav    Nav
 }
 
 // NewIndex precomputes per-doc term weights so queries are cheap.
@@ -128,8 +132,29 @@ func NewIndex(c Corpus) *Index {
 		addTerms(tw, d.Body, weightBody)
 		idx.terms[d.Slug] = tw
 	}
+	// Pages in the nav sort in reading order (landing page, then group, section,
+	// and page order); everything else (the handbook, internal pages) follows,
+	// by section, order, and title.
+	rank := map[string]int{}
+	if c.Nav != nil {
+		idx.nav = *c.Nav
+		for i, slug := range c.Nav.Slugs() {
+			rank[slug] = i
+		}
+	}
+	if idx.nav.Groups == nil {
+		idx.nav.Groups = []NavGroup{}
+	}
 	sort.SliceStable(idx.order, func(i, j int) bool {
 		a, b := idx.bySlug[idx.order[i]], idx.bySlug[idx.order[j]]
+		ra, aok := rank[a.Slug]
+		rb, bok := rank[b.Slug]
+		if aok != bok {
+			return aok
+		}
+		if aok {
+			return ra < rb
+		}
 		if a.Section != b.Section {
 			return a.Section < b.Section
 		}
@@ -154,8 +179,11 @@ func (idx *Index) Get(slug string, includeInternal bool) (Doc, bool) {
 	return d, true
 }
 
-// List returns doc metadata in stable (section, order, title) order, filtered by
-// visibility.
+// Nav returns the compiled public navigation. It never includes internal pages.
+func (idx *Index) Nav() Nav { return idx.nav }
+
+// List returns doc metadata in reading order (nav order first, then the rest by
+// section, order, and title), filtered by visibility.
 func (idx *Index) List(includeInternal bool) []Meta {
 	out := make([]Meta, 0, len(idx.order))
 	for _, slug := range idx.order {
@@ -225,7 +253,8 @@ func addTerms(tw map[string]float64, text string, weight float64) {
 // single-character tokens (noise).
 func tokenize(s string) []string {
 	fields := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+		alnum := r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
+		return !alnum
 	})
 	out := fields[:0]
 	for _, f := range fields {

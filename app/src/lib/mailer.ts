@@ -1,9 +1,10 @@
-// Transactional email. Uses Resend when RESEND_API_KEY is set; otherwise logs
-// to the console so local development needs no provider. Templates live in
-// src/emails - build one there and send it through sendEmail().
+// Transactional email for the auth flows the app owns (OTP, password reset).
+// Uses Resend when RESEND_API_KEY is set; otherwise logs to the console so local
+// development needs no provider. Templates live in src/emails. Org invitation
+// emails are sent by the API (api/internal/mail), not here, so every front door
+// sends the same one.
 import { otpEmail, type Email } from "@/emails/otp";
 import { resetPasswordEmail } from "@/emails/reset-password";
-import { inviteEmail } from "@/emails/invite";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
@@ -56,11 +57,4 @@ export async function sendOtpEmail(
 
 export async function sendResetPasswordEmail(email: string, url: string) {
   await sendEmail(email, resetPasswordEmail({ url }));
-}
-
-export async function sendInviteEmail(
-  email: string,
-  opts: { url: string; orgName: string; inviter?: string; role: string },
-) {
-  await sendEmail(email, inviteEmail(opts));
 }

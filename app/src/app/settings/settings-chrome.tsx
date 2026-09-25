@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Avatar, AvatarImage, AvatarFallback, cn } from "@flagon-io/ui";
 import { Logo } from "@/components/logo";
 import { Topbar } from "@/components/shell/topbar";
+import { initials } from "@/lib/initials";
 import type { ShellUser } from "@/components/shell/types";
 import { settingsNav, settingsActive } from "./settings-nav";
 
@@ -110,13 +111,4 @@ export function SettingsChrome({
       </main>
     </div>
   );
-}
-
-function initials(a: SettingsAccount): string {
-  const base = (a.name || a.username || a.email || "").trim();
-  const parts = base.split(/\s+/);
-  if (parts.length >= 2 && parts[0] && parts[1]) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  }
-  return base.slice(0, 2).toUpperCase() || "?";
 }

@@ -1,37 +1,103 @@
 ---
 title: Two-factor authentication
-description: Add a second sign-in step for your account, and require it for everyone in an organization.
-section: Platform
-order: 31
+description: Add an authenticator-app second step to your sign-in, and require it for everyone in an organization.
 ---
 
-# Two-factor authentication (2FA)
+**Two-factor authentication** (2FA) adds a second step at sign-in, so a leaked
+password alone cannot open your account. Flagon's second factor is a time-based
+one-time password (TOTP) from an authenticator app, with backup codes for when
+you lose your device. You turn it on for your own account; an organization can
+additionally require it of every member.
 
-Two-factor authentication adds a second step at sign-in, so a leaked password alone
-can't access an account.
+## Turn on 2FA for your account
 
-## For your account
-
-Go to **Settings → Security** and enable **Authenticator app (TOTP)**. You'll:
+Go to **Settings > Password and authentication** (`app.flagon.io/settings/security`)
+and enable **Authenticator app (TOTP)**:
 
 1. Confirm your password.
 2. Scan the QR code with an authenticator app (1Password, Google Authenticator,
-   Authy, ...).
-3. Save your **backup codes** somewhere safe - they let you sign in if you lose your
-   device.
+   Authy, and similar).
+3. Save your **backup codes** somewhere safe. Each lets you sign in once if you
+   lose your device.
 
-After that, signing in asks for a 6-digit code (or a backup code) as the second step.
+From then on, signing in asks for a 6-digit code (or a backup code) after your
+password. 2FA belongs to your account, so it applies in every organization you
+belong to.
 
-## Requiring 2FA for an organization
+## Require 2FA for an organization
 
-An organization owner or admin can require every member to have 2FA enabled. Go to
-**your org → Settings → Authentication** and turn on **Require two-factor
+An organization owner or admin can require every member to have 2FA enabled.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Open the org's **Settings > Authentication** and turn on **Require two-factor
 authentication**.
 
-- Members who don't have 2FA yet are sent to set it up before they can access the
-  organization.
-- **Lockout safety:** you can only turn the requirement *on* if your own 2FA is
-  already enabled - so enabling it can never lock you out.
-- The change is recorded in the organization's [audit log](/platform/organizations).
+</Tab>
 
-This pairs with [single sign-on](/platform/sso): require SSO, 2FA, or both.
+<Tab title="API">
+
+`PUT /orgs/{slug}/security` replaces the whole policy, so send all three fields:
+
+```bash
+curl -X PUT https://api.flagon.io/orgs/acme/security \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"enforce_two_factor": true, "require_sso": false, "base_permission": "read"}'
+```
+
+Read the current policy first with `GET /orgs/{slug}/security` so you do not
+change the other fields by accident. Requires `write:org` and an owner or admin
+role.
+
+</Tab>
+
+<Tab title="Assistant">
+
+Ask: "Require two-factor authentication in acme." The assistant proposes
+`set_org_security` with only `enforce_two_factor` changed; the tool leaves the
+other fields as they are.
+
+</Tab>
+
+</Tabs>
+
+What happens next:
+
+- Members without 2FA, owners included, are sent to a "two-factor
+  authentication required" page when they open the organization, and must set it
+  up before they can continue.
+- The API enforces the same rule. A member without 2FA gets `403 Forbidden`
+  (`this organization requires two-factor authentication; enable it on your account to continue`) on every operation under `/orgs/{slug}` except leaving
+  the organization, on assistant messages and confirmed actions, and on MCP tool
+  calls that name the organization. This covers dashboard sessions and
+  **personal access tokens** alike.
+- **Organization access tokens** are exempt: their service principal never signs
+  in, so 2FA does not apply to it.
+- **Lockout safety**: the API refuses to turn the requirement on unless your own
+  2FA is already enabled (`403 Forbidden`, `enable two-factor authentication on your own account before requiring it for the organization`), whether you use
+  the dashboard, the API, or the assistant. Turning it off is always allowed.
+- The change is recorded in the org's [audit log](/docs/platform/audit-log) as
+  `organization.security_changed`.
+
+<Callout type="tip" title="Before you turn it on">
+
+Because the API enforces the requirement, scripts and MCP clients that use a
+member's personal access token stop working in this organization until that
+member enables 2FA. Move shared automation to an
+[organization access token](/docs/platform/access-tokens) first.
+
+</Callout>
+
+This pairs with [single sign-on](/docs/platform/sso): you can require SSO, 2FA,
+or both. See [Require two-factor authentication](/docs/guides/require-two-factor)
+for a rollout walkthrough.
+
+## Related
+
+- [Require two-factor authentication](/docs/guides/require-two-factor)
+- [Single sign-on](/docs/platform/sso)
+- [Profile and account](/docs/platform/account)
+- [Authentication (security)](/docs/security/authentication)

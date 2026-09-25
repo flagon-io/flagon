@@ -132,6 +132,7 @@ export function Combobox({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
+          data-slot="combobox"
           id={id}
           type="button"
           variant="outline"

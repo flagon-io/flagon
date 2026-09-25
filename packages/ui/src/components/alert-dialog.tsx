@@ -3,14 +3,19 @@
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { useRef, type ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { overlayClasses } from "../lib/overlay";
 import { buttonClasses } from "./button";
 
 /** A modal that interrupts for a confirm/cancel decision (focus-trapped). */
 export const AlertDialog = AlertDialogPrimitive.Root;
-export const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
+
+export function AlertDialogTrigger(props: ComponentProps<typeof AlertDialogPrimitive.Trigger>) {
+  return <AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />;
+}
 
 export function AlertDialogContent({
   className,
+  overlayClassName,
   dismissible = false,
   children,
   ...props
@@ -22,8 +27,10 @@ export function AlertDialogContent({
    * its click to a hidden Cancel; Escape closes it as usual.)
    */
   dismissible?: boolean;
+  /** Extra classes for this dialog's backdrop (merged over the shared overlay). */
+  overlayClassName?: string;
 }) {
-  const overlayClass = "fixed inset-0 z-50 bg-black/50";
+  const overlayClass = cn(overlayClasses, overlayClassName);
   const cancelRef = useRef<HTMLButtonElement>(null);
   return (
     <AlertDialogPrimitive.Portal>
@@ -58,23 +65,53 @@ export function AlertDialogContent({
 }
 
 export function AlertDialogHeader({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("space-y-1.5", className)} {...props} />;
+  return <div data-slot="alert-dialog-header" className={cn("space-y-1.5", className)} {...props} />;
 }
 export function AlertDialogFooter({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)} {...props} />;
+  return (
+    <div
+      data-slot="alert-dialog-footer"
+      className={cn("mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
+      {...props}
+    />
+  );
 }
 export function AlertDialogTitle({ className, ...props }: ComponentProps<typeof AlertDialogPrimitive.Title>) {
-  return <AlertDialogPrimitive.Title className={cn("text-lg font-semibold text-foreground", className)} {...props} />;
+  return (
+    <AlertDialogPrimitive.Title
+      data-slot="alert-dialog-title"
+      className={cn("text-lg font-semibold text-foreground", className)}
+      {...props}
+    />
+  );
 }
 export function AlertDialogDescription({
   className,
   ...props
 }: ComponentProps<typeof AlertDialogPrimitive.Description>) {
-  return <AlertDialogPrimitive.Description className={cn("text-sm text-muted-foreground", className)} {...props} />;
+  return (
+    <AlertDialogPrimitive.Description
+      data-slot="alert-dialog-description"
+      className={cn("text-sm text-muted-foreground", className)}
+      {...props}
+    />
+  );
 }
 export function AlertDialogAction({ className, ...props }: ComponentProps<typeof AlertDialogPrimitive.Action>) {
-  return <AlertDialogPrimitive.Action className={cn(buttonClasses(), className)} {...props} />;
+  return (
+    <AlertDialogPrimitive.Action
+      data-slot="alert-dialog-action"
+      className={cn(buttonClasses(), className)}
+      {...props}
+    />
+  );
 }
 export function AlertDialogCancel({ className, ...props }: ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
-  return <AlertDialogPrimitive.Cancel className={cn(buttonClasses({ variant: "outline" }), className)} {...props} />;
+  return (
+    <AlertDialogPrimitive.Cancel
+      data-slot="alert-dialog-cancel"
+      className={cn(buttonClasses({ variant: "outline" }), className)}
+      {...props}
+    />
+  );
 }

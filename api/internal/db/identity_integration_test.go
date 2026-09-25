@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -17,7 +18,8 @@ func TestIdentityOrgsAreTenantIsolated(t *testing.T) {
 	d := Open(ctx, cfg)
 	defer d.Close()
 
-	const alice, bob = "user-alice", "user-bob"
+	u := unique(t)
+	alice, bob := "user-alice-"+u, "user-bob-"+u
 
 	// Alice creates an org and is its owner.
 	org, err := d.CreateOrg(ctx, alice, "alice@example.com", "Alice Co", "alice-co-"+unique(t))
@@ -54,12 +56,12 @@ func TestIdentityOrgsAreTenantIsolated(t *testing.T) {
 
 	// Duplicate slug is rejected. Use two fresh users so neither trips the free
 	// owned-org limit (alice already owns one) before the slug check.
-	const carol, dave = "user-carol", "user-dave"
+	carol, dave := "user-carol-"+u, "user-dave-"+u
 	slug := "dupe-" + unique(t)
 	if _, err := d.CreateOrg(ctx, carol, "carol@example.com", "Dupe", slug); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	if _, err := d.CreateOrg(ctx, dave, "dave@example.com", "Dupe", slug); err != ErrOrgSlugTaken {
+	if _, err := d.CreateOrg(ctx, dave, "dave@example.com", "Dupe", slug); !errors.Is(err, ErrOrgSlugTaken) {
 		t.Errorf("duplicate slug error = %v, want ErrOrgSlugTaken", err)
 	}
 }

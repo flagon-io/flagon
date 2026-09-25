@@ -1,0 +1,193 @@
+---
+title: Tokens and scopes
+description: How Flagon access tokens are generated, stored as hashes, scoped, expired, and revoked, and how to hand them out with the least privilege.
+---
+
+An **access token** is a long random string that lets a script, a CI job, or an
+MCP client call Flagon without a browser. Flagon has two kinds: a **personal
+access token** (PAT) acts as you, and an **organization access token** (OAT) acts
+as a service principal that belongs to one organization. Both are sent as a
+bearer credential, both carry **scopes** that limit which operations they can
+reach, and neither can ever do more than the identity behind it.
+
+This page covers what a token is made of, how Flagon stores it, and how to issue
+tokens with the least privilege. For how scopes combine with roles on each
+request, see [Permissions model](/docs/architecture/permissions-model). To create
+one, see [Access tokens](/docs/platform/access-tokens).
+
+```text
+  created in the dashboard (settings -> Tokens)
+        │
+        ▼
+  flagon_pat_ + 43 random characters   shown once, then never again
+        │
+        ├──► SHA-256 hex digest    stored in access_tokens.token_hash
+        └──► flagon_pat_ab12cd     stored as the display prefix
+
+  on each request:  Bearer secret -> SHA-256 -> lookup -> live?
+                    -> principal + scopes -> scope gate -> role checks
+```
+
+## Two kinds of token
+
+| | Personal (PAT) | Organization (OAT) |
+| --- | --- | --- |
+| Prefix | `flagon_pat_` | `flagon_oat_` |
+| Acts as | You | A service principal created for the token |
+| Reaches | Every organization you belong to, with your role in each | Only its own organization |
+| Role | Yours, as it changes | Fixed at creation: `admin`, `member` (default), or `viewer` |
+| Managed by | You, under your personal settings | Owners and admins, under the organization's settings |
+| Audited | No (it belongs to no organization) | Creation and revocation, as `token.created` and `token.revoked` |
+
+An OAT's service principal is a real user row (`svc_...` with an address at
+`svc.flagon.local`) marked as a service account. It holds a membership in the
+organization at the token's role, is left out of the people list, and is not tied
+to the person who created the token, so removing that person does not break your
+automation. A `viewer` OAT can read but not create or edit.
+
+Some operations only make sense for a person, so an OAT is refused them whatever
+its scopes: creating an organization, leaving one, listing and restoring deleted
+organizations, and mirroring a personal profile. They answer `403` "this operation
+requires a user; organization access tokens can't perform it".
+
+Because an OAT's reach and role are fixed, it is the better choice for shared
+automation. A PAT follows you: if you are promoted, it gains power; if you leave an
+organization, it loses access there.
+
+## What a token is made of
+
+`generateToken` in `api/internal/db/tokens.go` reads 32 bytes from the operating
+system's cryptographic random source, encodes them as unpadded base64url (43
+characters), and prepends the prefix, giving `flagon_pat_` or `flagon_oat_`
+followed by 43 characters: 256 bits of randomness. The prefix makes tokens easy to
+recognize in logs and secret scanners, and it is how the API tells a token apart
+from the app's internal token.
+
+## How tokens are stored
+
+Flagon never stores the secret. It stores:
+
+- `token_hash`: the SHA-256 digest of the full secret, hex-encoded, with a unique
+  index;
+- `token_prefix`: the prefix plus the first six random characters (for example
+  `flagon_pat_ab12cd`), so you can tell tokens apart in a list.
+
+The plaintext secret is returned exactly once, in the response that creates it.
+It cannot be retrieved afterwards by anyone, including Flagon. A single, unsalted
+SHA-256 is appropriate here because the input is 256 bits of randomness, not a
+human-chosen password: there is nothing to guess.
+
+To authenticate a request, the API hashes the presented bearer value and calls
+`flagon.resolve_access_token`, which matches the hash, requires the token to be
+live, updates `last_used_at`, and returns the principal and scopes. A token is
+live when it has not expired and, for an OAT, its organization has not been
+deleted. Anything else is `401` "invalid or expired token".
+
+## Scopes
+
+A token either has **full access** (no scope list; limited only by its
+principal's role) or a list of scopes. Creating a token requires at least one
+known scope or full access; an unknown scope is rejected with `422`.
+
+| Scope | Covers | Implies |
+| --- | --- | --- |
+| `read:user` | Read your profile | |
+| `user` | Account writes (none today; your profile is edited in the dashboard) | `read:user` |
+| `admin:user` | Reserved for destructive account operations | `user`, `read:user` |
+| `read:org` | Read orgs, members, invitations, security policy, SSO providers, audit log | |
+| `write:org` | Manage members, invitations, org settings, security policy, SSO providers | `read:org` |
+| `admin:org` | Create, leave, delete, and restore orgs | `write:org`, `read:org` |
+| `read:project` | Read projects, collaborators, team grants, owners | |
+| `write:project` | Create and update projects | `read:project` |
+| `admin:project` | Delete and restore projects, manage collaborators, team grants, owners | `write:project`, `read:project` |
+| `read:team` | Read teams and their members | |
+| `write:team` | Create and edit teams, manage team membership | `read:team` |
+| `admin:team` | Delete teams | `write:team`, `read:team` |
+| `notifications` | Read and manage your notifications | |
+
+Every operation's required scope is listed in
+[Scopes](/docs/reference/scopes). A scope is a ceiling, never a grant: an
+`admin:org` token held by a plain member still cannot manage members.
+
+Some operations are unreachable by any token, whatever its scopes: creating,
+listing, and revoking tokens, and the assistant's own endpoints. A token can
+therefore never mint a stronger token or widen its own access.
+
+## Expiry
+
+When you create a token you choose an expiry. The dashboard offers 7, 30 (the
+default), 90, or 365 days, a custom date, or no expiration. The API accepts
+`expires_in_days` or an absolute `expires_at` timestamp, which wins if both are
+given and must be in the future. A token with no expiry lives until it is revoked.
+
+The API does not impose a maximum lifetime. Prefer an expiry for anything that
+leaves your laptop.
+
+## Revocation
+
+Revoking a token deletes it; revoking an OAT also deletes its service principal
+and membership. Because every request re-resolves the token by hash, revocation
+takes effect on the very next request. There is no way to edit a token's scopes or
+role after creation: create a new token and revoke the old one.
+
+Tokens also stop working when:
+
+- they expire;
+- their organization is deleted (OATs);
+- the person behind a PAT loses membership in an organization (for that
+  organization only, through row-level security).
+
+The dashboard lists each token's prefix, scopes, expiry, and last use, so you can
+spot tokens nobody is using.
+
+## Least privilege, in practice
+
+- **Use an OAT for automation.** It is bound to one organization, has a fixed role,
+  and does not depend on any one person's account.
+- **Choose the lowest role.** A reporting job needs a `viewer` OAT, not `admin`.
+- **Choose the narrowest scopes.** A job that lists projects needs `read:project`.
+  Parent scopes include their children, so pick the lowest level that works.
+- **One token per consumer.** Separate tokens for CI, each MCP client, and each
+  script let you revoke one without breaking the rest.
+- **Set an expiry and rotate.** Put a reminder next to the expiry date.
+- **Keep secrets in a secret store.** Your CI provider's secret settings, not a
+  repository or a chat message. If a token leaks, revoke it first.
+
+## Tokens and the organization security policy
+
+The API enforces an organization's two-factor and SSO requirements on token
+requests too, over REST and MCP alike:
+
+- **A PAT** follows its owner. If the organization requires two-factor
+  authentication and the owner has not enabled it, requests for that organization
+  get `403`. If the organization requires SSO, the owner must have signed in
+  through one of its providers at least once; until then requests get `403`
+  explaining that. Owners of the organization are exempt from the SSO requirement.
+- **An OAT** is exempt from both requirements, because its service principal never
+  signs in. Its reach is controlled by the owners and admins who create it, and
+  they are subject to the policy when they do.
+
+See [Authentication](/docs/security/authentication) for the exact messages.
+
+## Rate limits
+
+Each token has its own request budget on the API: 50 requests per second
+sustained, with bursts of up to 300, by default. Past it, requests get `429` with
+a `Retry-After` header saying how many seconds to wait. The budget is counted per
+API machine, and self-hosters can change it with `FLAGON_RATE_LIMIT` and
+`FLAGON_RATE_BURST`. See [Limits](/docs/reference/limits).
+
+## Invitation links
+
+Invitation links use the same machinery with the prefix `flagon_inv`. Only the
+SHA-256 hash is stored, the link is valid for 7 days, and it can be accepted only
+by a signed-in user whose email matches the invitation.
+
+## Related
+
+<Cards>
+  <Card title="Access tokens" href="/docs/platform/access-tokens" description="Creating and managing tokens in the dashboard." />
+  <Card title="Scopes reference" href="/docs/reference/scopes" description="Every operation and the scope it requires." />
+  <Card title="Call the API from CI" href="/docs/guides/call-the-api-from-ci" description="A worked example of a scoped organization token in a pipeline." />
+  <Card title="Connect an MCP client" href="/docs/guides/connect-an-mcp-client" description="Give an AI client a token with only the scopes it needs." />
+</Cards>

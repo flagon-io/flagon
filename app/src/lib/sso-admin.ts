@@ -1,97 +1,36 @@
-// Server-only helpers for managing an organization's SSO providers. Registration
-// goes through BetterAuth's SSO plugin (auth.api), which owns the provider registry
-// + all the OIDC/SAML crypto; listing/removal read the auth DB directly. Callers
-// MUST first verify the current user is an owner/admin of the Flagon org (the
-// plugin's own org gate targets BetterAuth orgs, which we don't use).
-import { headers } from "next/headers";
+// Server-only SSO helpers for the org gate and the "SSO required" page. Provider
+// CONFIGURATION is owned by the Flagon API (managed via lib/api/sso.ts from the
+// settings UI, or the REST API / agent / MCP); these helpers only read the auth
+// layer's provider cache, re-syncing it from the API first so a provider removed
+// through any front door is never honored here.
 import { pool } from "@/lib/db";
-import { auth } from "@/lib/auth";
-
-export interface SSOProviderRow {
-  id: string;
-  providerId: string;
-  issuer: string;
-  domain: string | null;
-  protocol: "oidc" | "saml";
-}
+import { syncSSOProviders } from "@/lib/sso-sync";
 
 /**
- * True when the user has an SSO account linked to one of this org's providers -
- * i.e. they have signed in through the org's IdP. Used for BOTH the require-SSO
- * gate (block members who haven't) and the settings lockout safety (an admin can
- * only turn the requirement on once their own SSO is linked). BetterAuth stores an
- * SSO login as an `accounts` row whose providerId is the SSO provider's id.
+ * True when the user has an SSO account linked to one of this org's LIVE
+ * providers - i.e. they have signed in through the org's IdP. Used for BOTH the
+ * require-SSO gate (block members who haven't) and the settings lockout safety (an
+ * admin can only turn the requirement on once their own SSO is linked). The auth
+ * layer stores an SSO login as an `accounts` row whose providerId is the SSO
+ * provider's id; the provider list comes from the API.
  */
 export async function userHasSSOForOrg(userId: string, orgId: string): Promise<boolean> {
+  const providers = await syncSSOProviders({ orgId });
+  if (providers.length === 0) return false;
   const { rows } = await pool.query(
     `SELECT EXISTS (
-       SELECT 1 FROM accounts a
-       JOIN sso_providers s ON s."providerId" = a."providerId"
-       WHERE a."userId" = $1 AND s."organizationId" = $2
+       SELECT 1 FROM accounts WHERE "userId" = $1 AND "providerId" = ANY($2::text[])
      ) AS ok`,
-    [userId, orgId],
+    [userId, providers.map((p) => p.provider_id)],
   );
   return Boolean(rows[0]?.ok);
 }
 
-/** The SSO providers bound to a Flagon org (safe fields only - never the secrets). */
-export async function listOrgProviders(orgId: string): Promise<SSOProviderRow[]> {
-  const { rows } = await pool.query(
-    `SELECT id, "providerId", issuer, domain,
-            CASE WHEN "samlConfig" IS NOT NULL THEN 'saml' ELSE 'oidc' END AS protocol
-       FROM sso_providers WHERE "organizationId" = $1 ORDER BY "providerId"`,
-    [orgId],
-  );
-  return rows as SSOProviderRow[];
-}
-
-export interface OidcInput {
-  protocol: "oidc";
-  providerId: string;
-  issuer: string;
-  domain: string;
-  clientId: string;
-  clientSecret: string;
-}
-
-export interface SamlInput {
-  protocol: "saml";
-  providerId: string;
-  issuer: string;
-  domain: string;
-  entryPoint: string;
-  cert: string;
-}
-
-export type RegisterProviderInput = OidcInput | SamlInput;
-
 /**
- * Register an SSO provider for a Flagon org via the BetterAuth SSO plugin. The
- * organizationId links the provider to the org so a login through it provisions
- * membership there (see provisionUser in lib/auth.ts).
+ * The provider ids an org's members can sign in through (for the "SSO required"
+ * page, which non-admin members see, so it can't use the admin-only list).
  */
-export async function registerProvider(orgId: string, input: RegisterProviderInput) {
-  const base = {
-    providerId: input.providerId,
-    issuer: input.issuer,
-    domain: input.domain,
-    organizationId: orgId,
-  };
-  const body =
-    input.protocol === "oidc"
-      ? { ...base, oidcConfig: { clientId: input.clientId, clientSecret: input.clientSecret } }
-      : { ...base, samlConfig: { entryPoint: input.entryPoint, cert: input.cert, issuer: input.issuer } };
-  // The plugin's body is intentionally permissive; cast through unknown.
-  return auth.api.registerSSOProvider({
-    body: body as unknown as Record<string, never>,
-    headers: await headers(),
-  });
-}
-
-/** Remove an org's SSO provider (by providerId), scoped to the org for safety. */
-export async function deleteProvider(orgId: string, providerId: string): Promise<void> {
-  await pool.query(`DELETE FROM sso_providers WHERE "organizationId" = $1 AND "providerId" = $2`, [
-    orgId,
-    providerId,
-  ]);
+export async function orgProviderIds(orgId: string): Promise<string[]> {
+  const providers = await syncSSOProviders({ orgId });
+  return providers.map((p) => p.provider_id);
 }

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -10,13 +9,14 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/flagon-io/flagon/api/internal/db"
+	"github.com/flagon-io/flagon/api/internal/service"
 )
 
 // registerTokensAPI wires access-token management. These use internalAuth ONLY
 // (the app, acting as the user) - a token can never manage tokens, so it can't
 // escalate its own privileges. PATs live under /me, OATs under the org.
-func registerTokensAPI(api huma.API, store IdentityStore, internalToken string) {
-	auth := internalAuth(api, internalToken)
+func registerTokensAPI(api huma.API, d deps) {
+	auth, store := d.internal, d.store
 
 	// --- Personal access tokens ---
 	huma.Register(api, huma.Operation{
@@ -108,7 +108,7 @@ func registerTokensAPI(api huma.API, store IdentityStore, internalToken string) 
 		}
 		secret, id, err := store.CreateOAT(ctx, actorID, in.Slug, name, role, scopes, expiry)
 		if err != nil {
-			return nil, memberErr(err, "could not create token")
+			return nil, apiErr(err, "could not create token")
 		}
 		return tokenCreated(secret, id, ""), nil
 	})
@@ -123,7 +123,7 @@ func registerTokensAPI(api huma.API, store IdentityStore, internalToken string) 
 		actorID, _ := identity(ctx)
 		toks, err := store.ListOATs(ctx, actorID, in.Slug)
 		if err != nil {
-			return nil, memberErr(err, "could not list tokens")
+			return nil, apiErr(err, "could not list tokens")
 		}
 		out := &TokensOutput{}
 		out.Body.Tokens = toks
@@ -138,14 +138,9 @@ func registerTokensAPI(api huma.API, store IdentityStore, internalToken string) 
 		Middlewares: huma.Middlewares{auth},
 	}, func(ctx context.Context, in *OrgTokenIDInput) (*OKOutput, error) {
 		actorID, _ := identity(ctx)
-		err := store.RevokeOAT(ctx, actorID, in.ID)
-		switch {
-		case errors.Is(err, db.ErrForbidden):
-			return nil, huma.Error403Forbidden("you don't have permission to do that")
-		case errors.Is(err, db.ErrNotMember):
-			return nil, huma.Error404NotFound("token not found")
-		case err != nil:
-			return nil, huma.Error500InternalServerError("could not revoke token", err)
+		if err := store.RevokeOAT(ctx, actorID, in.ID); err != nil {
+			return nil, apiErr(err, "could not revoke token",
+				service.Override{Err: db.ErrNotMember, Status: http.StatusNotFound, Message: "token not found"})
 		}
 		out := &OKOutput{}
 		out.Body.OK = true
@@ -187,7 +182,7 @@ func tokenCreated(secret, id, prefix string) *CreateTokenOutput {
 type CreatePATInput struct {
 	Body struct {
 		Name          string     `json:"name"`
-		Scopes        []string   `json:"scopes,omitempty" doc:"Scopes to grant (classic-style). Omit and set full=true for full access."`
+		Scopes        []Scope    `json:"scopes,omitempty" doc:"Scopes to grant (classic-style). Omit and set full=true for full access."`
 		Full          bool       `json:"full,omitempty" doc:"Full access (no scope restriction)"`
 		ExpiresInDays int        `json:"expires_in_days,omitempty" doc:"0 = no expiry"`
 		ExpiresAt     *time.Time `json:"expires_at,omitempty" doc:"Absolute expiry (RFC3339). Takes precedence over expires_in_days."`
@@ -200,16 +195,40 @@ type CreateOATInput struct {
 	Body struct {
 		Name          string     `json:"name"`
 		Role          string     `json:"role,omitempty" enum:"admin,member,viewer" doc:"Role the token acts with (default member)"`
-		Scopes        []string   `json:"scopes,omitempty"`
+		Scopes        []Scope    `json:"scopes,omitempty"`
 		Full          bool       `json:"full,omitempty" doc:"Full access (no scope restriction)"`
 		ExpiresInDays int        `json:"expires_in_days,omitempty" doc:"0 = no expiry"`
 		ExpiresAt     *time.Time `json:"expires_at,omitempty" doc:"Absolute expiry (RFC3339). Takes precedence over expires_in_days."`
 	}
 }
 
+// Schema publishes the token scope vocabulary in the OpenAPI spec as one named
+// enum ("Scope"), generated from AllScopes. Clients derive their scope type from
+// it (the app's token checklist is typed against it), so a scope added here can
+// never be silently missing from a client: it is one list, not a hand copy.
+func (Scope) Schema(r huma.Registry) *huma.Schema {
+	const name = "Scope"
+	if _, ok := r.Map()[name]; !ok {
+		enum := make([]any, len(AllScopes))
+		for i, s := range AllScopes {
+			enum[i] = string(s)
+		}
+		r.Map()[name] = &huma.Schema{
+			Type:        huma.TypeString,
+			Enum:        enum,
+			Description: "A classic-style token scope. A parent scope implies its children (admin:x > write:x > read:x).",
+		}
+	}
+	return &huma.Schema{Ref: "#/components/schemas/" + name}
+}
+
 // cleanScopes validates a requested scope set. full=true means unrestricted
 // (nil). Otherwise at least one known scope is required (deduped).
-func cleanScopes(scopes []string, full bool) ([]string, error) {
+func cleanScopes(requested []Scope, full bool) ([]string, error) {
+	scopes := make([]string, len(requested))
+	for i, s := range requested {
+		scopes[i] = string(s)
+	}
 	if full {
 		return nil, nil
 	}

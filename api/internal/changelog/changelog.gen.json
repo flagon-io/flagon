@@ -1,12 +1,84 @@
 {
   "entries": [
     {
+      "slug": "2026-09-18-multi-tenant-core",
+      "title": "Organizations, members, and tenant isolation",
+      "date": "2026-09-18",
+      "tag": "Shipped",
+      "area": "Platform",
+      "body": "The multi-tenant core every other feature lives in is complete. Organizations are\nthe top-level tenant, and everything else - projects, teams, tokens, settings -\nbelongs to one.\n\n- **Organizations** with org-scoped URLs (`app.flagon.io/<org>/...`), created from\n  the dashboard, the API, or the assistant.\n- **Members and roles.** Owners, admins, and members, with a guarded role\n  hierarchy: only owners manage owners, and an organization can never lose its\n  last owner.\n- **Email invitations.** Invite anyone by email; the invite link registers and\n  joins in one step, and doubles as email verification.\n- **Tenant isolation in the database.** Every query runs under forced Postgres\n  row-level security as a role that cannot bypass it, so one organization can\n  never see another's data, whichever front door a request comes through.\n\nSee [Organizations](/docs/platform/organizations) and\n[Members and invitations](/docs/platform/members)."
+    },
+    {
+      "slug": "2026-09-18-tokens-and-audit-log",
+      "title": "Scoped access tokens and the audit log",
+      "date": "2026-09-18",
+      "tag": "Shipped",
+      "area": "Platform",
+      "body": "Two foundations for running Flagon safely with automation in the loop:\n\n- **Scoped access tokens.** Personal and organization access tokens carry\n  fine-grained, hierarchical scopes (`read:org`, `write:project`,\n  `admin:team`, ...). Enforcement fails closed, and a token is always bounded by\n  the role behind it. The same tokens authenticate the REST API and the MCP\n  server.\n- **The audit log.** Every change to an organization is recorded in an\n  append-only log, written in the same transaction as the change itself, so it\n  never drifts from reality. Owners and admins can search it, filter it, and ask\n  the assistant about it; actor IP disclosure is opt-in.\n\nSee [Authentication and scopes](/docs/api/authentication) and\n[Audit log](/docs/platform/audit-log)."
+    },
+    {
       "slug": "2026-09-19-flagon-ui",
       "title": "Flagon UI is live at ui.flagon.io",
       "date": "2026-09-19",
       "tag": "Shipped",
       "area": "UI",
       "body": "Flagon UI (`@flagon-io/ui`) is our design system: an accessible, Radix-based\nReact component library, documented and published at\n[ui.flagon.io](https://ui.flagon.io). It is the shared vocabulary the product is\nbuilt from, so the button you see in a login flow is the same button, with the\nsame behavior and the same accessibility guarantees, everywhere it appears.\n\nWe are shipping it as a first-class, long-term product, not an internal detail:\n\n- Accessible by default, built on Radix primitives, keyboard and screen-reader\n  ready out of the box.\n- One place to change a component, so the app and everything downstream stay\n  consistent.\n- Documented on its own site, with every component and its usage in the open.\n\nIt is the foundation the rest of the platform's interface is built on, and it is\nhere to stay."
+    },
+    {
+      "slug": "2026-09-19-projects-and-teams",
+      "title": "Projects, teams, and project access",
+      "date": "2026-09-19",
+      "tag": "Shipped",
+      "area": "Platform",
+      "body": "The core objects you create and manage inside an organization are here.\n\n- **Projects** are the deployable unit, with a README, repository link, and\n  soft delete with restore.\n- **Project access.** A five-rung collaborator ladder (read, triage, write,\n  maintain, admin) layered on an org-wide **base permission**, so access is\n  simple by default and precise when you need it.\n- **Teams** group members, with maintainers who manage the roster, and hold\n  project roles that every member inherits.\n- **Ownership.** Users or teams can own a project, a tier above admin that\n  controls deleting, restoring, and transferring it.\n\nEverything is available from the dashboard, the API, the assistant, and MCP. See\n[Projects](/docs/platform/projects), [Teams](/docs/platform/teams), and\n[Roles & permissions](/docs/platform/roles)."
+    },
+    {
+      "slug": "2026-09-19-sso-and-required-2fa",
+      "title": "Single sign-on and required two-factor",
+      "date": "2026-09-19",
+      "tag": "Shipped",
+      "area": "Platform",
+      "body": "Organizations can now control how their members sign in.\n\n- **Single sign-on.** Connect an identity provider over OIDC or SAML. Members\n  sign in through it, new people are provisioned into the organization on their\n  first sign-in, and one Flagon account can belong to several SSO organizations\n  at once. Owners can require SSO for every member.\n- **Required two-factor.** Owners and admins can require every member to have\n  two-factor authentication enabled before they can reach the organization.\n\nSee [Single sign-on](/docs/platform/sso) and\n[Two-factor authentication](/docs/platform/two-factor)."
+    },
+    {
+      "slug": "2026-09-25-documentation",
+      "title": "New documentation",
+      "date": "2026-09-25",
+      "tag": "New",
+      "area": "Docs",
+      "body": "The docs have been rewritten from the ground up and checked against the code.\n\n- **Grouped navigation:** Get started, Build and operate, Developers, Platform,\n  and Help, with a new landing page to find the right place fast.\n- **Step-by-step guides** for setting up your organization, working with projects,\n  securing your organization with 2FA and SSO, and automating with tokens, the API,\n  and MCP. Each shows the dashboard, API, and assistant way side by side.\n- **Architecture pages** that explain how Flagon fits together, from the request\n  lifecycle to tenant isolation, the permissions model, and the shared tool\n  registry.\n- **Reference pages** for every scope, role, audit action, configuration option,\n  and limit, plus new security, self-hosting, and troubleshooting sections.\n\nStart at the [docs home](/docs) or the\n[architecture overview](/docs/architecture/overview)."
+    },
+    {
+      "slug": "2026-09-25-org-delete-and-restore",
+      "title": "Delete and restore organizations",
+      "date": "2026-09-25",
+      "tag": "New",
+      "area": "Platform",
+      "body": "Organization owners can now delete an organization from **Settings -> General ->\nDanger zone**, by asking the assistant, or with `DELETE /orgs/{slug}`.\n\n- **Gone for everyone at once.** A deleted organization, with its projects,\n  members, teams, and invitations, behaves as if it does not exist for every\n  member, and its organization access tokens stop working immediately. Members\n  are notified, and the deletion is audited.\n- **Restorable for 30 days.** Owners find it under **Settings -> Organizations ->\n  Recently deleted** (or `GET /deleted-orgs`) and restore it with everything\n  intact. If its slug was taken in the meantime, restore it under a new one.\n- **Slugs are freed right away,** so a new organization can take a deleted one's\n  name. Deleted organizations don't count toward the free plan's one owned\n  organization; restoring one does.\n\nNew tools `delete_organization`, `list_deleted_organizations`, and\n`restore_organization` bring the same flow to the assistant and MCP. See\n[Organizations](/docs/platform/organizations#deleting-an-organization)."
+    },
+    {
+      "slug": "2026-09-25-project-access-enforced",
+      "title": "Project roles are now enforced",
+      "date": "2026-09-25",
+      "tag": "Fixed",
+      "area": "Platform",
+      "body": "Project roles and your organization's base permission now decide who can see and\nchange each project, everywhere: the dashboard, the API, the assistant, and MCP.\nBefore this fix, any member of an organization could see and edit every project,\nwhatever their role.\n\n- **Seeing a project takes `read`.** A project you can't see answers `404`, as if\n  it didn't exist, and it's left out of project lists.\n- **Editing its details takes `write`**, renaming its slug takes `maintain`,\n  managing its collaborators and teams takes `admin`, and deleting, restoring, or\n  changing its owners takes ownership.\n- **Whoever creates a project is granted `admin` on it**, so they can keep working\n  on it under any base permission.\n- The dashboard hides the controls you can't use, and the token form now offers\n  every scope, including `admin:project` and the team scopes.\n\n**What you may notice:** with the default base permission of `read`, members can\nno longer edit a project's details unless an admin grants them `write` (directly\nor through a team) or raises the base permission under **Settings -> Member\nprivileges**. See [Project access](/docs/platform/project-access)."
+    },
+    {
+      "slug": "2026-09-25-security-hardening",
+      "title": "Security hardening across the API",
+      "date": "2026-09-25",
+      "tag": "Improved",
+      "area": "Platform",
+      "body": "A round of hardening so the same rules hold no matter how you reach Flagon.\n\n- **Required 2FA and SSO are enforced by the API.** An organization's two-factor\n  and single sign-on requirements now apply to personal access tokens, the\n  assistant, and MCP, not just the dashboard.\n- **SSO credentials are encrypted at rest**, with a documented key rotation path.\n- **Invitation emails are sent for every front door.** Inviting someone through the\n  API, the assistant, or MCP now emails them, just like the dashboard.\n- **Rate limits and body limits.** Requests are rate limited per caller (`429` with\n  `Retry-After`) and oversized bodies are refused (`413`).\n- **Every response carries an `X-Request-Id`**, and server errors no longer include\n  internal details. Quote the id when you report a problem.\n- **Audit entries are harder to fake** and now record the client IP and user agent\n  for changes made through the assistant and MCP too.\n- **The assistant stays in its organization:** it can only act in the organization\n  you're working in, and confirmed actions count against that organization's AI\n  quota.\n\nSelf-hosters: production now refuses to start without its required secrets. See\n[Production](/docs/self-hosting/production) and the\n[configuration reference](/docs/reference/configuration)."
+    },
+    {
+      "slug": "2026-09-25-sso-providers-in-the-api",
+      "title": "SSO providers are managed through the API, the assistant and MCP",
+      "date": "2026-09-25",
+      "tag": "Improved",
+      "area": "Platform",
+      "body": "An organization's single sign-on providers are now owned by the Flagon API, the\nsame as every other setting, instead of living only in the sign-in service.\n\n- **Every front door.** List, add, update and remove OIDC and SAML providers\n  from the settings page, the REST API (`/orgs/{slug}/sso/providers`), the\n  in-product assistant, or any MCP client, with the `read:org` / `write:org`\n  scopes. Owners and admins only.\n- **Audited.** Adding, changing and removing a provider is recorded in the\n  organization's audit log.\n- **Secrets stay put.** Client secrets and signing keys are write-only: reads\n  report only whether one is set, and no tool ever returns one.\n- **Takes effect on the next sign-in.** The sign-in service re-reads the\n  provider from the API on every SSO sign-in, so a change made anywhere applies\n  at once and a removed provider stops working.\n\nProviders registered before this change are adopted automatically the first\ntime they are used. See [Single sign-on](/docs/platform/sso)."
     }
   ]
 }

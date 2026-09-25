@@ -1,29 +1,149 @@
 ---
 title: Authentication and scopes
-description: How Flagon API tokens authenticate and how scopes gate every operation.
+description: How a request proves who it is with a flagon_ access token, and how scopes and roles decide what it may do.
 visibility: public
-order: 0
 ---
 
-Every Flagon API operation is permission-scoped. A token authenticates the
-caller and carries a set of **scopes**; an operation runs only if the token's
-scopes cover it, and enforcement fails closed.
+Every Flagon API request that touches your data is made by a **principal**: a
+person, or an organization's service principal. You prove which one with an
+**access token** sent as a bearer token. The API then applies two limits: the
+token's **scopes** (which operations it may call) and the principal's **role**
+(what that person or service may do in each organization). The stricter of the
+two always wins, and enforcement fails closed.
 
-## Tokens
+## Send a token
 
-An access token is minted from the UI or the API and presented as a bearer
-token. Tokens act as a user within a single organization: they can never do
-anything the issuing user could not do themselves, and row-level security still
-applies to every query the token drives.
+Access tokens start with `flagon_` and go in the `Authorization` header:
+
+```bash
+curl https://api.flagon.io/me \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+A missing, unknown, revoked, or expired token is rejected with `401` and the
+detail `invalid or expired token`. If the API cannot check a token because a
+dependency such as its database is unavailable, it answers `503` instead; retry
+later, and keep the token. The API stores only a SHA-256 hash of each
+token, so a token is shown once, when you create it, and cannot be recovered
+later.
+
+## Two kinds of token
+
+| | Personal access token | Organization access token |
+| --- | --- | --- |
+| Prefix | `flagon_pat_` | `flagon_oat_` |
+| Acts as | You, in every organization you belong to | A service principal that is a member of one organization |
+| Bounded by | Your role in each organization | The role chosen when the token was created: `admin`, `member`, or `viewer` |
+| Created in | **Settings > Personal access tokens** | The organization's **Settings > API tokens** |
+| Who can create | Any signed-in user, for themselves | Organization owners and admins |
+
+An organization access token creates a dedicated service user inside that
+organization with the role you pick, so its activity shows up in the
+[audit log](/docs/platform/audit-log) under the token's name rather than a
+person's. It stops working if its organization is deleted.
+
+Tokens are created and revoked only in the dashboard. The token-management
+operations accept the dashboard's own credential and never an access token, so
+a token cannot mint, list, or widen tokens. The same is true of the assistant's
+endpoints under `/ai/*`: to drive the assistant from outside the dashboard, use
+the [MCP server](/docs/ai/mcp), which accepts access tokens.
+
+## Expiry
+
+When you create a token you choose an expiry: 7, 30 (the default), or 90 days,
+a custom date, or no expiration. Over the API the dashboard sends either
+`expires_in_days` (`0` means no expiry) or an absolute `expires_at`, which must
+be in the future (otherwise `422`). An expired token is rejected with `401`.
+Each successful use records a `last_used_at` time you can see in the token list.
 
 ## Scopes
 
-Scopes are hierarchical: a parent scope implies its children. When you mint a
-token you choose its scopes from a grouped checklist, each row labeled with the
-raw scope and a one-line description. The vocabulary is shared across the whole
-platform, so the same scope means the same thing whether a request comes over
-REST, from the in-product agent, or over MCP.
+When you create a token you either grant **full access** (the token is limited
+only by its principal's role) or pick scopes from a grouped checklist. Scopes are
+hierarchical: a parent implies its children, so `admin:org` also grants
+`write:org` and `read:org`.
 
-Add a scope when you add an operation. Because scopes are generated from the same
-code that generates the OpenAPI spec, this reference stays in lockstep with what
-the API actually enforces.
+| Group | Scopes, broadest first |
+| --- | --- |
+| Account | `admin:user` > `user` > `read:user` |
+| Organization | `admin:org` > `write:org` > `read:org` |
+| Projects | `admin:project` > `write:project` > `read:project` |
+| Teams | `admin:team` > `write:team` > `read:team` |
+| Notifications | `notifications` |
+
+Every token-reachable operation maps to exactly one required scope. A scoped
+token calling an operation it does not cover gets `403` with the detail `this
+token is missing the scope required for this operation`. An operation that has no
+scope mapping is unreachable by any scoped token. The complete list of scopes and
+the operations each one gates is in the [scopes reference](/docs/reference/scopes).
+
+## Roles still apply
+
+A scope says which operations a token may call. It never grants more than the
+principal could do. A full-access personal token held by an organization member
+still cannot change the organization's security settings, because members
+cannot. That request fails with `403` (`you don't have permission to do that`).
+See the [roles matrix](/docs/reference/roles-matrix) for who can do what.
+
+An organization access token's service principal is not a person, so a few
+account-level operations refuse it with `403` whatever its scopes: creating an
+organization, leaving one, listing or restoring deleted organizations, and
+syncing a profile.
+
+## Organization security policy
+
+When an organization requires two-factor authentication or single sign-on, the
+API checks it on every request that touches that organization, including token
+requests:
+
+- A **personal access token** works only if its owner has two-factor
+  authentication enabled (when 2FA is required) and has signed in through one of
+  the organization's SSO providers at least once (when SSO is required;
+  organization owners are exempt). Otherwise the request fails with `403` and a
+  detail that says what to fix.
+- An **organization access token** is exempt from both requirements: it has no
+  interactive sign-in, and only the organization's owners and admins, who are
+  subject to the policy, can create it.
+
+See the [roles matrix](/docs/reference/roles-matrix)
+for the full rules.
+
+## Rate limits
+
+Each access token has its own request budget: 50 requests per second sustained,
+bursts of up to 300, per API instance. Over it, requests fail with `429` and a
+`Retry-After` header. See [Limits](/docs/reference/limits).
+
+## Tenant isolation
+
+Row-level security in Postgres applies to every query a token drives, so a
+token cannot read another organization's rows even if a handler had a bug.
+Organizations you are not a member of answer `404`, not `403`.
+
+## Endpoints that need no token
+
+Two reads are public by design:
+
+- `GET /users/<username>`: a user's public profile.
+- `GET /invitations/<token>`: the invitation landing page lookup, where the
+  unguessable invitation token is itself the credential.
+
+The documentation, roadmap, and changelog routes (`/docs`, `/roadmap`,
+`/changelog`) and the health probes are also public. They are outside the
+OpenAPI spec; see [OpenAPI and clients](/docs/api/openapi).
+
+## One vocabulary, every front door
+
+The same scope means the same thing whether a request arrives over REST, from
+the in-product [assistant](/docs/ai/assistant), or over [MCP](/docs/ai/mcp).
+Every agent and MCP [tool](/docs/ai/tools) carries the same scope as the API
+operation it fronts, and an MCP client authenticated with a scoped token sees
+only the tools its scopes cover.
+
+## Related
+
+- [Scopes reference](/docs/reference/scopes)
+- [Roles matrix](/docs/reference/roles-matrix)
+- [Access tokens](/docs/platform/access-tokens)
+- [Errors](/docs/api/errors)
+- [Call the API from CI](/docs/guides/call-the-api-from-ci)

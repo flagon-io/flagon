@@ -10,14 +10,15 @@ export function Pagination({ className, ...props }: ComponentProps<"nav">) {
   );
 }
 export function PaginationContent({ className, ...props }: ComponentProps<"ul">) {
-  return <ul className={cn("flex items-center gap-1", className)} {...props} />;
+  return <ul data-slot="pagination-content" className={cn("flex items-center gap-1", className)} {...props} />;
 }
 export function PaginationItem(props: ComponentProps<"li">) {
-  return <li {...props} />;
+  return <li data-slot="pagination-item" {...props} />;
 }
 export function PaginationLink({ className, isActive, ...props }: ComponentProps<"a"> & { isActive?: boolean }) {
   return (
     <a
+      data-slot="pagination-link"
       aria-current={isActive ? "page" : undefined}
       className={cn(buttonClasses({ variant: isActive ? "outline" : "ghost", size: "icon" }), className)}
       {...props}
@@ -26,7 +27,7 @@ export function PaginationLink({ className, isActive, ...props }: ComponentProps
 }
 export function PaginationPrevious({ className, ...props }: ComponentProps<"a">) {
   return (
-    <a className={cn(buttonClasses({ variant: "ghost", size: "sm" }), className)} aria-label="Previous page" {...props}>
+    <a data-slot="pagination-previous" className={cn(buttonClasses({ variant: "ghost", size: "sm" }), className)} aria-label="Previous page" {...props}>
       <ChevronLeft className="size-4" />
       Previous
     </a>
@@ -34,7 +35,7 @@ export function PaginationPrevious({ className, ...props }: ComponentProps<"a">)
 }
 export function PaginationNext({ className, ...props }: ComponentProps<"a">) {
   return (
-    <a className={cn(buttonClasses({ variant: "ghost", size: "sm" }), className)} aria-label="Next page" {...props}>
+    <a data-slot="pagination-next" className={cn(buttonClasses({ variant: "ghost", size: "sm" }), className)} aria-label="Next page" {...props}>
       Next
       <ChevronRight className="size-4" />
     </a>
@@ -42,7 +43,7 @@ export function PaginationNext({ className, ...props }: ComponentProps<"a">) {
 }
 export function PaginationEllipsis({ className, ...props }: ComponentProps<"span">) {
   return (
-    <span aria-hidden className={cn("flex size-9 items-center justify-center", className)} {...props}>
+    <span data-slot="pagination-ellipsis" aria-hidden className={cn("flex size-9 items-center justify-center", className)} {...props}>
       <MoreHorizontal className="size-4 text-muted-foreground" />
     </span>
   );

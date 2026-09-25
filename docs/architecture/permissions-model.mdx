@@ -1,0 +1,282 @@
+---
+title: Permissions model
+description: How Flagon decides whether a request may run, from token scopes through the org access policy, organization roles, project roles, and ownership down to row-level security.
+---
+
+Every request Flagon serves has to answer two separate questions. The first is
+about the **credential**: is this token allowed to call this kind of operation at
+all? The second is about the **person** (or service principal) behind it: does
+their role in this organization, and on this project, give them the authority to
+do this specific thing? Flagon keeps the two questions apart on purpose, and a
+request runs only when both answers are yes. Between them sits the organization's
+**access policy**: whether the way the person signed in meets the org's 2FA and SSO
+requirements.
+
+This page walks through how each answer is computed, where in the code each check
+lives, and how they combine. If you only want the reference tables, see
+[Roles matrix](/docs/reference/roles-matrix) and [Scopes](/docs/reference/scopes).
+
+```text
+     A request: dashboard session (via the app) or a flagon_ token
+                                 │
+                                 ▼
+ ┌────────────────────────────────────────────────────────────────┐
+ │ 1. Credential scope        api/internal/server/scopes.go       │
+ │    Does the token hold the operation's scope?   no -> 403      │
+ └───────────────────────────────┬────────────────────────────────┘
+                                 │ acts as the token's principal
+                                 ▼
+ ┌────────────────────────────────────────────────────────────────┐
+ │ 2. Org access policy       api/internal/service/access.go      │
+ │    2FA and SSO requirements met?                no -> 403      │
+ └───────────────────────────────┬────────────────────────────────┘
+                                 │
+                                 ▼
+ ┌────────────────────────────────────────────────────────────────┐
+ │ 3. Organization role       api/internal/db/rbac.go             │
+ │    owner > admin > member                       no -> 403      │
+ └───────────────────────────────┬────────────────────────────────┘
+                                 │ project operations only
+                                 ▼
+ ┌────────────────────────────────────────────────────────────────┐
+ │ 4. Project authority       api/internal/db/project_rbac.go     │
+ │    role  = max(org floor, user grant, team grant)              │
+ │    owner = direct, via a team, or org owner/admin              │
+ │    cannot view -> 404          can view, cannot act -> 403     │
+ └───────────────────────────────┬────────────────────────────────┘
+                                 │ every query
+                                 ▼
+ ┌────────────────────────────────────────────────────────────────┐
+ │ 5. Row-level security      Postgres, NOBYPASSRLS app role      │
+ │    Other orgs, and projects you cannot view, do not exist      │
+ │                                                     -> 404     │
+ └────────────────────────────────────────────────────────────────┘
+```
+
+## Two axes: what the credential may call, what the principal may do
+
+A **scope** is a label on an access token, such as `read:project` or `admin:org`,
+that limits which API operations the token can reach. A **role** is what a person
+holds in an organization (owner, admin, member) or on a project (read through
+admin). Scopes and roles never substitute for each other:
+
+- A scope can only **narrow**. A token with `admin:org` held by a plain member
+  still cannot manage members, because the member's role does not allow it.
+- A role can only be exercised through a credential that reaches the operation.
+  An org owner whose token holds only `read:project` cannot create a project with
+  that token.
+
+The effective permission of a request is the intersection of the two. Dashboard
+sessions have no scopes at all: the app calls the API with its internal token and
+the verified user id, and the request runs with that user's full role. See
+[Identity and auth](/docs/architecture/identity-and-auth) for how the session and
+token paths reach the API.
+
+## 1. Credential scope
+
+Scopes are defined in `api/internal/server/scopes.go`. There are 13, grouped by
+resource and hierarchical: a parent scope implies its children.
+
+| Parent | Implies |
+| --- | --- |
+| `admin:user` | `user`, `read:user` |
+| `admin:org` | `write:org`, `read:org` |
+| `admin:project` | `write:project`, `read:project` |
+| `admin:team` | `write:team`, `read:team` |
+
+`notifications` stands alone. The `operationScopes` map assigns every
+token-reachable operation exactly one required scope, for example `list-projects`
+requires `read:project` and `delete-project` requires `admin:project`. The
+OpenAPI spec publishes the scope names as an enum, and the token creation screen
+offers all 13.
+
+The check runs in `combinedAuth` (`api/internal/server/identity.go`) before the
+handler, and before the org access policy. It is **fail-closed**: an operation
+missing from `operationScopes` is denied to every scoped token, so forgetting to
+assign a scope can never open an operation up. A token created with full access
+(no scope list, stored as SQL `NULL`) skips this check and is limited by its
+principal's role alone. A denied request gets `403` with the message "this token is
+missing the scope required for this operation".
+
+Some operations are deliberately out of reach of every token. Token management
+(`create-pat`, `list-oats`, and the rest), the AI chat endpoints, invitation
+acceptance, SSO member provisioning, and the account soft-delete mirror use
+`internalAuth`, which accepts only the app's internal token; the SSO configuration
+reads for the auth layer use `internalSystemAuth`, which needs no user at all. A
+token can therefore never mint or widen another token. The guardrail test
+`api/internal/server/guardrails_test.go` fails CI if an operation is neither scoped
+nor listed as a documented exemption.
+
+Organization access tokens act as a service principal, not a person, so a few
+account-level operations refuse them with `403` regardless of scope: `create-org`,
+`leave-org`, `list-deleted-orgs`, and `restore-org`.
+
+## 2. Org access policy
+
+An organization can require two-factor authentication, single sign-on, or both.
+Every operation under `/orgs/{slug}` (except `leave-org`) runs
+`service.CheckOrgAccess` after authentication and before the handler, and the
+assistant and the tool runner run the same check for the org they act in. A member
+who does not meet a requirement gets `403` with a message saying what to fix:
+enable 2FA, or sign in through the org's identity provider. Owners are exempt from
+the SSO requirement as a break-glass path, and organization access tokens are
+exempt from both. A non-member passes this step untouched and gets `404` from the
+next one, so the policy never reveals that an org exists.
+
+The details, including how a personal access token satisfies an SSO requirement,
+are on [Identity and authentication](/docs/architecture/identity-and-auth).
+
+## 3. Organization role
+
+Each membership row (`public.memberships`) carries one role. The ranking lives in
+`api/internal/db/rbac.go`: owner, then admin, then member. A fourth value,
+`viewer`, is legacy: migration `0023_base_permission.sql` folded existing viewers
+into members, and it survives only as a role you can give an organization access
+token.
+
+The `Can(role, capability)` function answers coarse org-level questions:
+
+| Capability | Minimum role |
+| --- | --- |
+| read the org and its members | any role |
+| create projects | member |
+| manage members, org settings, org tokens | admin |
+| delete or restore the organization | owner |
+
+Reading and editing an individual project is decided by the project ladder in the
+next section, not by the org role alone.
+
+Most mutations in `api/internal/db` start the same way: resolve the org slug inside
+the caller's transaction (which fails with "organization not found" if you are not
+a member), read your role with `memberRole`, and compare. Role changes add two
+more rules: you can never grant a role above your own, and an admin can only
+manage members strictly below admin. The last owner can never be demoted or
+removed. Admin-only reads, such as the audit log, answer a plain member with `403`
+rather than an empty result.
+
+## 4. Project authority
+
+Projects add a second ladder, defined in `api/internal/db/project_rbac.go`:
+`read < triage < write < maintain < admin`. A member's **effective project role**
+is the highest of three sources:
+
+1. **The org floor.** Owners and admins get `admin` on every project. Members get
+   the organization's **base permission**, one of `none`, `read`, `triage`,
+   `write`, `maintain`, or `admin` (default `read`). `none` means no floor. A
+   legacy `viewer` gets `read`.
+2. **A direct grant** in `public.project_members`.
+3. **Team grants** in `public.project_team_members`, taking the highest role of
+   any live team you belong to.
+
+A grant can raise you above the floor on one project; it can never lower you.
+Whoever creates a project and is not an org owner or admin is automatically given
+a direct `admin` grant on it (recorded in the audit log as `project.access_granted`),
+so they can manage what they made even when the base permission is `none`.
+Creating a project does not make you its owner.
+
+**Ownership** sits above the ladder and is not a role. A project owner is a user
+or a team listed in `public.project_owners`; every org owner and admin is also
+treated as an owner of every project, so the organization can never lock itself
+out. `resolveProjectAuthority` returns both values (role and owner flag), and
+`projectAuthority.can` checks a capability: an owner holds all of them, otherwise
+the role rank decides.
+
+| Capability | Needs | Gates |
+| --- | --- | --- |
+| `project:view` | read or above | get and list the project, and read its collaborators, team grants, and owners |
+| `project:write` | write or above | edit metadata: name, description, README, repository URL |
+| `project:manage` | maintain or above | rename the project's slug |
+| `project:admin` | admin role or owner | add, change, and remove collaborators and team grants |
+| `project:own` | owner | delete and restore the project, add and remove owners |
+
+The two failure modes answer differently on purpose. A project you cannot view
+does not exist as far as you can tell: every operation on it, including a
+mutation, answers `404 project not found` (`resolveViewableProject`). A project you
+can view but lack the capability for answers `403`. `get-project` returns your own
+access as `viewer: { role, owner, permissions }`, which the dashboard uses to hide
+controls you cannot use.
+
+The rule is enforced twice. The Go layer applies it through
+`resolveViewableProject` and `resolveOrgProjectAuthority`, and since migration
+`0034` the database applies the same rule on its own through
+`flagon.project_effective_role` and `flagon.project_permits`: the `projects` read
+policy requires `read`, the update policy requires `write`, and the access lists
+and project listing windows require `read`. A missed check in Go still cannot leak
+a project, and an integration test (`TestProjectAccessSQLMatchesGo`) proves the two
+agree.
+
+## 5. Row-level security
+
+Underneath every Go check, the database enforces tenant boundaries on its own.
+Every runtime query runs as a Postgres role created with `NOBYPASSRLS`, inside a
+transaction that `inUserTx` binds to the acting user with
+`set_config('flagon.user_id', ...)`. Row-level security policies on the tenant
+tables compare against `flagon.current_user_id()`, so a query that forgets a
+`WHERE org_id = ...` clause still cannot return another organization's rows, or a
+project you cannot view. That is why an organization you do not belong to answers
+`404`, never `403`: from your transaction's point of view it does not exist. The
+details are on [Multi-tenancy](/docs/architecture/multi-tenancy) and
+[Tenant isolation](/docs/security/tenant-isolation).
+
+## Where each check lives
+
+| Layer | File | Decides |
+| --- | --- | --- |
+| Scope gate | `api/internal/server/scopes.go`, `identity.go` | Can this token call this operation? |
+| Internal gate | `internalAuth`, `internalSystemAuth` in `api/internal/server` | Is this the app itself? |
+| Org access policy | `withOrgPolicy` in `api/internal/server/org_policy.go`, `service.CheckOrgAccess` | Does the way this person signed in meet the org's 2FA and SSO requirements? |
+| Service | `api/internal/service` | Input validation, error mapping, the org policy, service-principal refusals; only ever narrows |
+| Role checks | `api/internal/db/rbac.go`, `project_rbac.go`, `teams.go` | Does the principal's role allow it? |
+| Row-level security | `api/internal/db/migrations` | Which rows the transaction can see at all |
+
+The service layer is intentionally not where roles are decided. It shapes input,
+applies the checks that can only take access away (the org policy, and refusing
+account operations to service principals), and classifies errors so the REST API,
+the assistant, and MCP answer the same way. The role decision itself stays in the
+store, acting as the caller.
+
+## Worked examples
+
+**A scoped token tries to create a project.** Priya's token holds `read:project`.
+She calls `POST /orgs/acme/projects`. `combinedAuth` looks up `create-project`,
+finds it needs `write:project`, sees that `read:project` does not imply it, and
+answers `403` before any database work happens. Her owner role never comes into
+play.
+
+**A member deletes a project through a team.** Sam is a member of `acme`, whose
+base permission is `read`. His team `platform` has the `admin` role on project
+`billing`. Sam's effective role on `billing` is `admin`, which lets him add
+collaborators. When he tries to delete it, `SetProjectDeleted` checks
+`project:own`; Sam is not an owner, so he gets `403`. If an admin adds the
+`platform` team as an owner of `billing`, the same request succeeds.
+
+**A member with no floor.** Ana is a member of `acme`, whose base permission is
+`none`, and has no grant on `billing`. `GET /orgs/acme/projects` does not list
+`billing`, `GET /orgs/acme/projects/billing` answers `404`, and so does an attempt
+to rename it. When an admin grants her `read`, the project appears and the rename
+answers `403` instead; with `maintain` it succeeds.
+
+**An admin with a narrow token manages owners.** Lee is an org admin with a token
+scoped to `admin:project`. `add-project-owner` requires `admin:project`, so the
+scope gate passes. In the database, Lee's org role gives owner-level authority on
+every project, so the owner is added and an audit entry is written in the same
+transaction.
+
+**A token in an org that requires 2FA.** Kai has a full-access personal access
+token but has not enabled 2FA. `acme` turns on its 2FA requirement. Kai's next call
+to `GET /orgs/acme/projects` answers `403` with a message telling Kai to enable
+two-factor authentication; his calls to orgs without the requirement keep working.
+
+**A token for a foreign organization.** A full-access token belonging to someone
+outside `acme` calls `GET /orgs/acme/projects`. No scope check applies, the org
+policy lets a non-member through, and `resolveOrg` runs under row-level security,
+sees no `acme` row, and the request returns `404` with "organization not found".
+
+## Related
+
+<Cards>
+  <Card title="Roles and permissions" href="/docs/platform/roles" description="The role vocabulary as users see it in the dashboard." />
+  <Card title="Tokens and scopes" href="/docs/security/tokens-and-scopes" description="Token formats, storage, expiry, and least-privilege guidance." />
+  <Card title="Tool registry" href="/docs/architecture/tool-registry" description="How the assistant and MCP inherit the same scopes and roles." />
+  <Card title="Tenant isolation" href="/docs/security/tenant-isolation" description="The database-level boundary under every check on this page." />
+</Cards>

@@ -1,39 +1,185 @@
 ---
 title: Contributing
-description: Flagon is open source. How it is built, how to run it, and how to contribute.
-order: 0
+description: How Flagon is built and how to contribute - the repositories, local setup with make, the golden path for a new capability, tests, and keeping docs, roadmap, and changelog in the same change.
 ---
 
-Flagon is open source, and built in the open. If you want to fix something, add a
-capability, or just understand how it works, everything is right here.
+Flagon is developed in the open. The product (the API, the app, and the design
+system) and its documentation live in one repository, so a change and its docs
+ship together. This page gets you from a fresh clone to a pull request that
+passes CI, and explains the rules every change follows.
+
+The root `AGENTS.md` in the repository is the full contributor guide (it is also
+what AI coding agents read). This page summarizes it; when they differ,
+`AGENTS.md` wins.
 
 ## The repositories
 
-- **[flagon-io/flagon](https://github.com/flagon-io/flagon)** the product: the
-  API, the app, and the design system.
-- **[flagon-io/flagon.io](https://github.com/flagon-io/flagon.io)** this site and
-  the company handbook.
+| Repository | What lives there |
+| --- | --- |
+| [flagon-io/flagon](https://github.com/flagon-io/flagon) | The API (`api/`), the app (`app/`), the design system (`packages/ui/`), the docs (`docs/`), the roadmap (`roadmap/`), and the changelog (`changelog/`). |
+| [flagon-io/website](https://github.com/flagon-io/website) | The marketing site. It renders the docs, roadmap, and changelog as a client of the API, so it holds no copy of them. |
 
-## How it is built
+## Set up a development environment
 
-Two principles shape every change:
+Follow [Installation](/docs/self-hosting/installation) for the prerequisites and
+the one-time steps (copy `compose.override.example.yml`, create
+`app/.env.local`, `npm install`). The API needs no configuration: it binds
+`127.0.0.1` by default, which runs it in development mode against the compose
+Postgres. After that, the `Makefile` wraps everything; `make help` lists every
+target.
 
-- **API-first.** Every capability is an API operation first, and the OpenAPI spec
-  is generated from the code. If it is not in the API, it does not exist.
-- **AI-first.** Every capability becomes available to the assistant and the MCP
-  server as it ships, from one shared tool registry.
+| Command | What it does |
+| --- | --- |
+| `make dev` | Starts Postgres in Docker, then runs the API and the app together (Ctrl-C stops both). |
+| `make api` | Runs the API on `:8080`; it migrates on boot. |
+| `make app` | Builds `@flagon-io/ui`, then runs the app on `:3000`. |
+| `make db` | Starts only the compose Postgres. |
+| `make migrate` | Applies the API's migrations and the app's auth migrations. |
+| `make seed` | Creates the demo user and organization (needs the API running). |
+| `make test` | Go tests plus the design system's unit tests. |
+| `make lint` | `go vet`, golangci-lint (skipped with an install hint if it is not on your `PATH`), eslint, and the design system's typecheck. |
+| `make check` | Every drift check plus lint and tests: the local mirror of CI. Run it before you push. |
+| `make openapi` | Writes `openapi/openapi.json` from the code. |
+| `make api-types` | Regenerates the app's TypeScript API types from a fresh spec. |
+| `make docs`, `make roadmap`, `make changelog` | Regenerates an embedded corpus. |
 
-Documentation is part of that: docs live in the product repo next to the code
-they describe, so a change and its docs ship together.
+The Makefile is a thin wrapper over the commands in `AGENTS.md`, and every
+recipe works under GNU make on Linux, macOS, and Windows (Git Bash).
 
-## Run it locally
+## How Flagon is built
 
-See [Self-hosting Flagon](/docs/self-hosting/overview) for bringing the platform
-up on your machine. The short version is one Postgres in Docker and the services
-run directly.
+Three principles shape every change:
+
+- **API-first.** Every capability is an API operation first. Operations are
+  registered with huma in `api/internal/server`, and the OpenAPI spec is
+  generated from them, never written by hand.
+- **AI-first.** Anything you can do in the dashboard, you can do by asking the
+  assistant, and the reverse.
+- **One tool registry, three front doors.** The in-product assistant and the MCP
+  server call the same tools, which run through the same service layer as the
+  REST handlers. Adding an operation once makes it available everywhere.
+
+Two rules follow from those and are enforced in review: the app never reaches
+around the API to the domain database, and no assistant or MCP tool exists
+without a real, permission-checked API operation behind it.
+
+## The golden path for a new capability
+
+To add a capability (say, "archive a team"), do these in order. Steps 1, 2, and
+4 land in the same change; only the UI may follow later.
+
+<Steps>
+
+<Step title="API operation">
+
+Register a huma operation in `api/internal/server` that calls the service layer
+(`api/internal/service`), which calls the data layer (`api/internal/db`) where
+row-level security and role checks apply. Give the operation a scope in
+`api/internal/server/scopes.go`; enforcement fails closed, so an operation
+without one is unreachable by scoped tokens. If it changes an organization's
+state, add an `Action` constant in `api/internal/audit` and record the audit
+entry inside the same transaction as the change.
+
+</Step>
+
+<Step title="Tool">
+
+Add the tool to the registry in `api/internal/ai` (the `tools_*.go` files), with
+the same scope as its operation, its `Operation` ID, and `Mutating: true` if it
+writes. This is not optional: a capability with no tool is invisible to the
+assistant and MCP, and counts as unfinished.
+
+</Step>
+
+<Step title="UI">
+
+Build the screen in `app/`, calling the API through the gateway in
+`app/src/lib/api`. Use `@flagon-io/ui` components; if the one you need does not
+exist, build it in `packages/ui` rather than hand-rolling it in the app.
+
+</Step>
+
+<Step title="Docs">
+
+Add or update the page under `docs/` and run `make docs` to regenerate the
+embedded corpus. Commit both.
+
+</Step>
+
+</Steps>
+
+## Tests
+
+| Layer | Where | How to run |
+| --- | --- | --- |
+| Go unit and handler tests | `api/**/*_test.go` | `make test-go` (or `cd api && go test ./...`) |
+| Go database integration tests | `api/internal/db/*_integration_test.go` | Set `FLAGON_TEST_DATABASE_URL` to a Postgres the tests may use, with a role that can create roles. Without it they are skipped. CI always runs them. |
+| Design system unit tests (Vitest) | `packages/ui/src/**/*.test.ts` | `npm run test:unit` |
+| Component tests (Playwright) | `app/tests/` | `npm run test:e2e` in `app/` (reuses your dev server locally) |
+| Product end to end (Playwright) | `app/tests/product/` | `npm run test:e2e:product` in `app/`, against the full stack with the API on the mock AI provider |
+
+A few tests guard the architecture itself, and they fail when a change skips a
+step of the golden path:
+
+- **Scopes.** Every operation must have a scope or be explicitly exempt, and
+  `api/internal/server/permissions_test.go` drives real scoped tokens against
+  operations (allowed versus `403`). Copy its table for a new endpoint.
+- **Tools.** `api/internal/server/guardrails_test.go` checks that every scoped
+  operation has a tool, and that each tool's scope and read or write nature match
+  its operation.
+
+When you add or change a UI component, add or extend its Playwright spec; pure
+logic (parsers, formatters) gets a Vitest spec too.
+
+## Documentation, roadmap, and changelog
+
+These are part of the work, not follow-ups, and CI checks each one:
+
+- **Docs** live in `docs/` (see `docs/README.md`). `make docs` compiles them into
+  `api/internal/docs/corpus.gen.json`, which the API embeds and serves.
+- **Roadmap** items live in `roadmap/`, one file each. Move an item forward by
+  changing its `stage`; `make roadmap` regenerates the corpus.
+- **Changelog** entries live in `changelog/`, one dated file each. When a roadmap
+  item ships, delete it from `roadmap/` and add a changelog entry in the same
+  change; `make changelog` regenerates the corpus.
+
+CI runs the `-check` mode of all three generators and fails if a committed
+corpus is stale. It also regenerates the app's API types from the spec and fails
+on any difference, so run `make api-types` after changing an operation's shape.
+
+## Conventions
+
+- **No em dashes** anywhere: code, copy, docs, or messages.
+- **Don't name products Flagon's design imitates** in source or copy.
+- **Organization-scoped by default.** App routes are `/<org>/...`; personal
+  settings at `/settings` are the only exception.
+- **Row-level security is never bypassed.** Runtime queries use the
+  `NOBYPASSRLS` app role, and the assistant gets no special powers.
+- **Migrations are immutable once shipped.** Fix a shipped migration with a new
+  one. Do not put `BEGIN` or `COMMIT` inside a migration file; the runner wraps
+  all pending migrations in one transaction.
+- **Dependencies.** After changing npm dependencies, run `scripts/relock.sh`
+  (requires Docker) so `package-lock.json` carries every platform's native
+  binaries; otherwise `npm ci` can fail on Linux CI.
+
+## Reporting a security issue
+
+Please do not open a public issue for a vulnerability. Email **hey@flagon.io**
+with what you found and how to reproduce it. The repository's
+[SECURITY.md](https://github.com/flagon-io/flagon/blob/main/SECURITY.md) has the
+full policy, and [Security overview](/docs/security/overview) describes the
+security model and its current limitations.
 
 ## Sending a change
 
-Work in small pieces, open a pull request, and keep the docs in the same change
-as the code. The [handbook](/handbook) covers how the team works, reviews, and
-ships in more depth.
+Keep changes small and focused, with the code, its tool, its tests, and its docs
+together. Run `make check` before pushing; CI runs the same gates plus the
+end-to-end suites, a vulnerability scan, and the API type drift check.
+
+## Related
+
+- [Self-hosting overview](/docs/self-hosting/overview)
+- [Installation](/docs/self-hosting/installation)
+- [Architecture overview](/docs/architecture/overview)
+- [Tool registry](/docs/architecture/tool-registry)
+- [Permissions model](/docs/architecture/permissions-model)

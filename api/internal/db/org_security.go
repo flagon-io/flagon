@@ -10,8 +10,9 @@ import (
 )
 
 // OrgSecurity is an organization's security + member-access policy. The app's auth
-// layer owns the mechanisms (2FA, SSO); these are the org-level REQUIREMENTS the
-// app gate reads and enforces for members. Grows as we add SSO enforcement.
+// layer owns the mechanisms (2FA, SSO); these are the org-level REQUIREMENTS. The
+// API enforces them on every org-scoped operation (service.CheckOrgAccess); the
+// app's page gate reads them too, for the redirect UX.
 type OrgSecurity struct {
 	// EnforceTwoFactor requires every member to have 2FA enabled to access the org.
 	EnforceTwoFactor bool `json:"enforce_two_factor"`
@@ -79,6 +80,10 @@ func (d *DB) SetOrgSecurity(ctx context.Context, actorID, slug string, s OrgSecu
 		if err := tx.QueryRow(ctx,
 			`SELECT enforce_two_factor, require_sso, base_permission FROM public.orgs WHERE id = $1`, orgID).
 			Scan(&cur.EnforceTwoFactor, &cur.RequireSSO, &cur.BasePermission); err != nil {
+			return err
+		}
+		// Self-lockout guard: never switch on a requirement the actor doesn't meet.
+		if err := selfLockoutCheck(ctx, tx, orgID, actorID, cur, s); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx,

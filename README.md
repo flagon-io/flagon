@@ -1,32 +1,49 @@
 # Flagon
 
-Flagon is split into two independently deployed pieces:
+Flagon is a self-hostable developer platform for operating your whole system,
+driven from the dashboard, the API, or an AI assistant. The repo holds three
+deployables:
 
 | Location | What | Stack | Hosting |
 | --- | --- | --- | --- |
-| [`app/`](app) | `app.flagon.io` - the web UI and gateway | Next.js (TypeScript) | Vercel |
-| [`api/`](api) | `api.flagon.io` - the source of truth | Go (chi + [huma](https://huma.rocks)) | Fly.io |
+| [`app/`](app) | `app.flagon.io` - the web UI and gateway | Next.js 16, React 19 (TypeScript) | Vercel |
+| [`api/`](api) | `api.flagon.io` (and `mcp.flagon.io`) - the source of truth | Go (chi + [huma](https://huma.rocks)) | Fly.io |
+| [`packages/ui/`](packages/ui) | `@flagon-io/ui` - the design system | React + Radix | npm workspace |
 
-`app` is a thin gateway: it renders the UI and forwards requests to `api`. It
-never talks to Postgres or Stripe directly. `api` owns all business data and
-logic, is multi-tenant via Postgres Row-Level Security (one Postgres org per
-tenant, scoped by `org_id`), and is the only thing that holds real secrets
-(Stripe keys, DB credentials, etc.).
+`app` is a thin gateway: it renders the UI, holds the user session, and forwards
+requests to `api`. It never talks to the domain database or Stripe directly.
+`api` owns all business data and logic, hosts the AI agent and the MCP server,
+and is the only thing that holds real secrets (Stripe keys, DB credentials,
+etc.). It is multi-tenant in a single database: every tenant-owned row carries
+an `org_id`, and forced Postgres Row-Level Security scopes every runtime query to
+the organizations the acting user belongs to.
+
+[`AGENTS.md`](AGENTS.md) is the contributor guide: the architecture, the
+non-negotiable principles, and the golden path for adding a capability.
 
 ## Repository layout
 
 ```
 api/        Go module (github.com/flagon-io/flagon/api)
-  cmd/flagon-server the API server - `serve` runs the HTTP API, `migrate` migrates
-  cmd/flagon        the user-facing `flagon` CLI - a thin HTTP client (baseline skeleton)
-  cmd/genspec       generates openapi/openapi.json as a build artifact
-  cmd/gendocs       compiles docs/ into internal/docs/corpus.gen.json (embedded)
-  internal/server   chi router + huma API setup used by the server + genspec
+  cmd/flagon-server  the API server - `serve` runs the HTTP API (migrating on boot), `migrate` migrates
+  cmd/flagon         the user-facing `flagon` CLI - a thin HTTP client (baseline skeleton)
+  cmd/genspec        generates openapi/openapi.json as a build artifact
+  cmd/gendocs        compiles docs/ into internal/docs/corpus.gen.json (embedded)
+  cmd/genroadmap     compiles roadmap/ into internal/roadmap/roadmap.gen.json (embedded)
+  cmd/genchangelog   compiles changelog/ into internal/changelog/changelog.gen.json (embedded)
+  internal/server    chi router + huma API setup used by the server + genspec
+  internal/ai        the agent, providers, and the shared tool registry (agent + MCP)
+  internal/db        the domain data layer, migrations, and RLS
 app/        Next.js app - the web UI + gateway
-packages/   shared npm workspaces (e.g. packages/ui, the @flagon-io/ui design system)
+packages/   shared npm workspaces (packages/ui, the @flagon-io/ui design system)
 docs/       Markdown/MDX documentation - the single source of truth (see docs/README.md)
+roadmap/    public roadmap items, one file each (see roadmap/README.md)
+changelog/  public changelog entries, one dated file each (see changelog/README.md)
 openapi/    generated OpenAPI spec (gitignored, not hand-edited)
+scripts/    repo maintenance scripts (relock.sh regenerates the cross-platform lockfile)
+.docker/    local Postgres init scripts used by compose.yml
 .github/    CI + dependabot configuration
+Makefile    developer shortcuts (make help lists them)
 ```
 
 The JavaScript side is an npm workspaces monorepo: the single `package-lock.json`
@@ -47,7 +64,7 @@ server serves it live:
 
 ```sh
 cd api && go run ./cmd/flagon-server serve
-# GET  http://localhost:8080/           (JSON index of the API, api.github.com style)
+# GET  http://localhost:8080/           (JSON index of the API)
 # GET  http://localhost:8080/openapi.json
 # GET  http://localhost:8080/openapi.yaml
 ```
@@ -56,8 +73,7 @@ There is no built-in docs UI - the website renders its own docs viewer from the
 spec above. The API only serves the raw OpenAPI (`/openapi.json`,
 `/openapi.yaml`).
 
-The root `/` returns a flat JSON map of `<name>_url` discovery links, in the
-style of <https://api.github.com/>. It is built from the live OpenAPI
+The root `/` returns a flat JSON map of `<name>_url` discovery links. It is built from the live OpenAPI
 definition, so every endpoint registered with `huma.Register` appears there
 automatically as the API grows - nothing to keep in sync by hand.
 
@@ -70,7 +86,7 @@ deployed binary doesn't ship it - it serves the spec live instead).
 Product documentation lives in [`docs/`](docs) as Markdown/MDX files and is the
 **single source of truth**: docs ship in the same PR as the code they describe,
 so a capability and its docs can't quietly drift apart. Each file carries YAML
-frontmatter (`title`, plus optional `description`, `section`, `visibility`,
+frontmatter (`title`, plus optional `description`, `section`, `status`, `visibility`,
 `order`), and its slug is the path under `docs/` without the extension
 (`docs/platform/projects.mdx` -> `platform/projects`).
 
@@ -90,6 +106,14 @@ in for the API to build. Regenerate and commit it whenever you change anything
 under `docs/` - CI runs `go run ./cmd/gendocs -check` and fails if the committed
 corpus is stale. The full convention (frontmatter fields, `internal` visibility,
 the corpus flow) lives in [`docs/README.md`](docs/README.md).
+
+The public **roadmap** ([`roadmap/`](roadmap)) and **changelog**
+([`changelog/`](changelog)) work exactly the same way: one Markdown file per item
+or entry, compiled by `make roadmap` / `make changelog` into corpora the API
+embeds and serves at `GET /roadmap` and `GET /changelog`. When a roadmap item
+ships, delete it and add a changelog entry in the same change. CI runs all three
+drift checks (`make docs-check roadmap-check changelog-check`), and `make check`
+runs them locally along with lint and tests.
 
 ## Local development
 
@@ -136,6 +160,19 @@ cd api && go run ./cmd/flagon-server serve
 cd app && npm install && npm run dev   # http://localhost:3000
 npm run db:migrate                     # one-time: BetterAuth + user_email tables
 npm run db:seed                        # demo user for local login + tests
+```
+
+The `Makefile` wraps the common commands (`make help` lists every target):
+
+```sh
+make api        # run the API natively (go run ./cmd/flagon-server serve)
+make app        # run the app natively (builds @flagon-io/ui, then next dev)
+make dev        # start Postgres in Docker, then run the API and the app together
+make migrate    # API migrations + the app's auth migrations (the API also migrates on boot)
+make seed       # the demo user + org (needs the API running)
+make test       # Go tests + design system unit tests
+make lint       # go vet + eslint + @flagon-io/ui typecheck
+make check      # every drift check (docs, roadmap, changelog) + lint + test
 ```
 
 ### Demo user (seeding)
@@ -195,5 +232,9 @@ embedded and run on boot) backed by Postgres. Wire `app` to the API with
 `FLAGON_API_URL` / `FLAGON_INTERNAL_TOKEN` and give `api` a `DATABASE_URL`; how
 and where you host them is up to you.
 
-Our own instance deploys on every push to `main` via CI (`app` to Vercel, `api`
-to Fly). See [`.github/workflows`](.github/workflows) for exactly what runs.
+Our own instance deploys on every push to `main`: `app` to Vercel (configured by
+[`vercel.json`](vercel.json)) and `api` to Fly (configured by
+[`api/fly.toml`](api/fly.toml)), each through the host's Git integration rather
+than a workflow in this repo - [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+runs CI only. The API applies its migrations when it boots, so there is no
+separate release step; the app's auth tables migrate during the Vercel build.

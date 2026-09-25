@@ -9,9 +9,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// registerIndex serves a JSON index of the API at the root path, in the style
-// of https://api.github.com/ : a flat map of "<name>_url" keys to absolute URL
-// templates, so a caller hitting the root can discover what the API offers.
+// registerIndex serves a JSON index of the API at the root path: a flat map of
+// "<name>_url" keys to absolute URL templates, so a caller hitting the root can
+// discover what the API offers.
 //
 // The resource entries are built from the live OpenAPI definition, so every
 // endpoint registered with huma.Register shows up here automatically as the

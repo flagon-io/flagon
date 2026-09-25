@@ -10,6 +10,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@flagon-io/ui";
+import { errorMessage } from "@/lib/client-fetch";
 
 export function LeaveOrgButton({ slug, name }: { slug: string; name: string }) {
   const router = useRouter();
@@ -21,10 +22,9 @@ export function LeaveOrgButton({ slug, name }: { slug: string; name: string }) {
     setBusy(true);
     setError(null);
     const res = await fetch(`/api/orgs/${encodeURIComponent(slug)}/leave`, { method: "POST" });
-    const data = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
-      setError(data.error ?? "Couldn't leave the organization.");
+      setError(await errorMessage(res, "Couldn't leave the organization."));
       return;
     }
     setOpen(false);

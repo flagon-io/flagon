@@ -19,53 +19,65 @@ import {
   SelectValue,
   cn,
 } from "@flagon-io/ui";
+import { errorMessage } from "@/lib/client-fetch";
+import type { TokenScope } from "@/lib/api/types";
 
 // A classic-token-style scope tree: exactly two levels. A group has one parent
 // scope (the superset) and a FLAT list of the finer scopes beneath it, all shown
 // at a single indent - never a scope nested inside another scope. Which scope
 // grants which is a separate concern (SCOPE_IMPLIES below), so a linear chain
 // like admin:org > write:org > read:org still renders as one parent with two
-// sibling children. Keep this in lockstep with api/internal/server/scopes.go.
-type ScopeNode = { value: string; desc: string };
+// sibling children.
+type ScopeNode = { value: TokenScope; desc: string };
+type ScopeGroup = "Account" | "Organizations" | "Projects" | "Teams" | "Notifications";
 
-const SCOPE_GROUPS: { group: string; parent: ScopeNode; children: ScopeNode[] }[] = [
-  {
-    group: "Account",
-    parent: { value: "admin:user", desc: "Full control of your account, including deletion" },
-    children: [
-      { value: "user", desc: "Update your profile" },
-      { value: "read:user", desc: "Read your profile" },
-    ],
-  },
-  {
+const GROUP_ORDER: ScopeGroup[] = ["Account", "Organizations", "Projects", "Teams", "Notifications"];
+
+// Every scope the API accepts, keyed by the generated TokenScope type (the API's
+// one scope list, AllScopes in api/internal/server/scopes.go). Being a Record over
+// that type, a scope added to the API that is missing here is a type error, so the
+// checklist cannot silently fall behind. Within a group, list scopes from most to
+// least privileged: the first is the group's parent, and each scope implies every
+// scope listed after it (the API's implication table, admin > write > read).
+const SCOPES: Record<TokenScope, { group: ScopeGroup; desc: string }> = {
+  "admin:user": { group: "Account", desc: "Full control of your account, including deletion" },
+  user: { group: "Account", desc: "Account writes (none today; your profile is edited in the dashboard). Implies read:user" },
+  "read:user": { group: "Account", desc: "Read your profile" },
+  "admin:org": {
     group: "Organizations",
-    parent: { value: "admin:org", desc: "Full control: create and leave organizations" },
-    children: [
-      { value: "write:org", desc: "Manage members and organization settings" },
-      { value: "read:org", desc: "Read organizations and members" },
-    ],
+    desc: "Full control: create, leave, delete and restore organizations",
   },
-  {
+  "write:org": { group: "Organizations", desc: "Manage members and organization settings" },
+  "read:org": { group: "Organizations", desc: "Read organizations and members" },
+  "admin:project": {
     group: "Projects",
-    parent: { value: "write:project", desc: "Create and update projects" },
-    children: [{ value: "read:project", desc: "Read projects" }],
+    desc: "Delete and restore projects, and manage their collaborators, teams and owners",
   },
-  {
-    group: "Notifications",
-    parent: { value: "notifications", desc: "Read and manage your notifications" },
-    children: [],
-  },
-];
-
-// value -> every scope it transitively grants. This is what nests the scopes
-// (checking a parent locks its grantees checked); the layout stays flat.
-const SCOPE_IMPLIES: Record<string, string[]> = {
-  user: ["read:user"],
-  "admin:user": ["user", "read:user"],
-  "write:org": ["read:org"],
-  "admin:org": ["write:org", "read:org"],
-  "write:project": ["read:project"],
+  "write:project": { group: "Projects", desc: "Create and update projects" },
+  "read:project": { group: "Projects", desc: "Read projects, collaborators, teams and owners" },
+  "admin:team": { group: "Teams", desc: "Delete teams" },
+  "write:team": { group: "Teams", desc: "Create and edit teams, and manage their members" },
+  "read:team": { group: "Teams", desc: "Read teams and their members" },
+  notifications: { group: "Notifications", desc: "Read and manage your notifications" },
 };
+
+const SCOPE_GROUPS: { group: ScopeGroup; parent: ScopeNode; children: ScopeNode[] }[] =
+  GROUP_ORDER.map((group) => {
+    const nodes = (Object.keys(SCOPES) as TokenScope[])
+      .filter((value) => SCOPES[value].group === group)
+      .map((value) => ({ value, desc: SCOPES[value].desc }));
+    return { group, parent: nodes[0], children: nodes.slice(1) };
+  });
+
+// value -> every scope it transitively grants: the scopes listed after it in its
+// group. This is what nests the scopes (checking a parent locks its grantees
+// checked); the layout stays flat.
+const SCOPE_IMPLIES: Record<string, string[]> = Object.fromEntries(
+  SCOPE_GROUPS.flatMap((g) => {
+    const ordered = [g.parent, ...g.children].map((n) => n.value);
+    return ordered.map((value, i) => [value, ordered.slice(i + 1)]);
+  }),
+);
 
 function tomorrow(): Date {
   const d = new Date();
@@ -140,8 +152,7 @@ export function TokenCreateForm({
     });
     setCreating(false);
     if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      setError(d.error ?? "Couldn't create the token.");
+      setError(await errorMessage(res, "Couldn't create the token."));
       return;
     }
     const d = await res.json();

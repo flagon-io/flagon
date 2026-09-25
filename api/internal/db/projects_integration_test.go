@@ -21,7 +21,7 @@ func TestProjectListingQueries(t *testing.T) {
 	d := Open(ctx, cfg)
 	defer d.Close()
 
-	const owner = "user-proj-owner"
+	owner := "user-proj-owner-" + unique(t)
 	slug := "proj-co-" + unique(t)
 	if _, err := d.CreateOrg(ctx, owner, "owner@example.com", "Proj Co", slug); err != nil {
 		t.Fatalf("CreateOrg: %v", err)

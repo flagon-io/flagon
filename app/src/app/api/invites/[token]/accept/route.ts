@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError } from "@/lib/route-error";
 import { acceptInvitation } from "@/lib/flagon-api";
 
 // Accept an invitation as the currently signed-in user (their email must match
@@ -8,8 +9,7 @@ export async function POST(_request: Request, ctx: { params: Promise<{ token: st
   try {
     const result = await acceptInvitation(token);
     return NextResponse.json(result);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not accept the invitation.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not accept the invitation.");
   }
 }

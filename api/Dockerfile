@@ -3,6 +3,10 @@
 FROM golang:1.27-alpine AS base
 RUN apk add --no-cache ca-certificates tzdata git && update-ca-certificates
 WORKDIR /src
+# Containers must bind all interfaces to be reachable. Binding a routable
+# interface is also what classifies the server as production when FLAGON_ENV is
+# unset (fail closed: no development secrets); compose sets FLAGON_ENV=development.
+ENV FLAGON_HOST=0.0.0.0
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
   --mount=type=cache,target=/root/.cache/go-build \
@@ -31,7 +35,8 @@ COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /out/flagon-server /usr/local/bin/flagon-server
 WORKDIR /app
 USER appuser
-ENV PORT=8080
+# All interfaces (see the base stage): a container with no FLAGON_ENV is production.
+ENV PORT=8080 FLAGON_HOST=0.0.0.0
 EXPOSE 8080
 # GET, not --spider (HEAD): the health route only answers GET.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

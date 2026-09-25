@@ -49,7 +49,10 @@ async function main() {
 
   // Mirror to the API so the public profile is visible again (best-effort).
   const apiUrl = (process.env.FLAGON_API_URL ?? "http://localhost:8080").replace(/\/+$/, "");
-  const token = process.env.FLAGON_INTERNAL_TOKEN ?? "";
+  // Same rule as the app: the public development token only outside production.
+  const token =
+    process.env.FLAGON_INTERNAL_TOKEN?.trim() ||
+    (process.env.NODE_ENV === "production" ? "" : "dev-internal-token");
   if (token) {
     try {
       await fetch(`${apiUrl}/me/deleted`, {

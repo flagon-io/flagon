@@ -1,48 +1,58 @@
 ---
 title: SCIM provisioning
-description: Automatically provision and deprovision members from your identity provider.
-section: Platform
+description: The planned design for provisioning and deprovisioning members from your identity provider with SCIM 2.0.
 status: planned
-order: 32
 ---
 
-# SCIM provisioning
+<Callout type="warn" title="Not available yet">
 
-SCIM (System for Cross-domain Identity Management) lets your identity provider
-(Okta, Azure AD, ...) **push** users into a Flagon organization and remove them
-automatically, so membership stays in lockstep with your directory - a step beyond
-[SSO](/platform/sso), which provisions a member the first time they sign in.
+SCIM is designed but not built. None of the endpoints on this page exist, and
+there is no SCIM setting in the dashboard. Today, members are provisioned when
+they first sign in through your [SSO](/docs/platform/sso) provider, and removed by
+an owner or admin from **People**.
+
+</Callout>
+
+**SCIM** (System for Cross-domain Identity Management) lets an identity provider
+such as Okta or Microsoft Entra ID **push** users into a Flagon organization and
+remove them automatically, so membership follows your directory. It is one step
+beyond [SSO](/docs/platform/sso), which provisions a member only the first time
+they sign in and never removes anyone.
 
 ## How it will work
 
-An organization owner/admin mints a **SCIM provisioning token** (a scoped
-organization token) and gives your IdP two values:
+An organization owner or admin will mint a **SCIM provisioning token** (a scoped
+[organization access token](/docs/platform/access-tokens)) and give the IdP two
+values:
 
-- **SCIM base URL:** `https://api.flagon.io/scim/v2`
-- **Bearer token:** the provisioning token.
+- **SCIM base URL**: `https://api.flagon.io/scim/v2`
+- **Bearer token**: the provisioning token
 
-The IdP then calls Flagon's SCIM API to create, update, deactivate, and remove users,
-which maps onto Flagon organization memberships. All writes go through the same
-membership, RBAC, and [audit](/platform/organizations) paths as everything else.
+The IdP then calls Flagon's SCIM API to create, update, deactivate, and remove
+users, which map onto organization memberships. All writes are designed to go
+through the same membership, RBAC, and [audit](/docs/platform/audit-log) paths as
+everything else, so a SCIM-provisioned member is indistinguishable from one added
+by hand.
 
-## Endpoints (SCIM 2.0)
+## Planned endpoints (SCIM 2.0)
 
-| Method / path | Effect |
+| Method and path | Effect |
 | --- | --- |
-| `GET /scim/v2/ServiceProviderConfig` | Advertises supported capabilities. |
-| `GET /scim/v2/Users?filter=userName eq "…"` | Look up a user by email (existence check). |
-| `POST /scim/v2/Users` | Provision a member. If the person already has a Flagon account, they're added to the org; otherwise a pending invitation is created and completed when they sign up. |
+| `GET /scim/v2/ServiceProviderConfig` | Advertise supported capabilities. |
+| `GET /scim/v2/Users?filter=userName eq "..."` | Look up a user by email. |
+| `POST /scim/v2/Users` | Provision a member. An existing Flagon account is added to the org; otherwise a pending invitation is created and completed at sign-up. |
 | `GET /scim/v2/Users/{id}` | Read one provisioned user. |
-| `PATCH /scim/v2/Users/{id}` | `active: false` deactivates (removes membership); `active: true` re-activates. |
-| `DELETE /scim/v2/Users/{id}` | Deprovision (remove membership). |
-| `GET/POST/PATCH /scim/v2/Groups` | Optional: map IdP groups to org roles (a later step). |
+| `PATCH /scim/v2/Users/{id}` | `active: false` removes the membership; `active: true` restores it. |
+| `DELETE /scim/v2/Users/{id}` | Deprovision (remove the membership). |
+| `GET`, `POST`, `PATCH /scim/v2/Groups` | Optional later step: map IdP groups to org roles or teams. |
 
-Responses use standard SCIM envelopes (`schemas`, `meta`, `ListResponse` with
-`totalResults`/`startIndex`/`itemsPerPage`) and SCIM error format.
+Responses will use standard SCIM envelopes (`schemas`, `meta`, and a
+`ListResponse` with `totalResults`, `startIndex`, and `itemsPerPage`) and the SCIM
+error format. When SCIM ships, this page moves to `published` and the dashboard
+gains a SCIM section under **Settings > Authentication**.
 
-## Status
+## Related
 
-SCIM is designed and scoped but not yet enabled. Provisioning on **first SSO login**
-already works today (see [SSO](/platform/sso)) - SCIM adds directory-driven
-create/deactivate ahead of first login. When it ships, this page moves to
-`published` and the settings surface gains **Settings → Authentication → SCIM**.
+- [Single sign-on](/docs/platform/sso)
+- [Members and invitations](/docs/platform/members)
+- [Access tokens](/docs/platform/access-tokens)

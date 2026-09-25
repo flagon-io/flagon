@@ -1,7 +1,5 @@
-import { headers } from "next/headers";
 import { redirect, notFound } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { getMe, getProject } from "@/lib/flagon-api";
+import { getProject, projectCan } from "@/lib/flagon-api";
 import { PageBody } from "@/components/shell/page-header";
 import { ReadmeEditor } from "@/components/projects/readme-editor";
 
@@ -12,16 +10,10 @@ export default async function ProjectReadmeEditPage({
 }) {
   const { org: slug, project: projectSlug } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
-
-  // Editing the README needs write access; viewers get the read-only view.
-  const me = await getMe().catch(() => null);
-  const role = me?.orgs.find((o) => o.slug === slug)?.role ?? "viewer";
-  if (role === "viewer") redirect(`/${slug}/projects/${projectSlug}`);
-
-  const project = await getProject(slug, projectSlug).catch(() => null);
+  const project = await getProject(slug, projectSlug);
   if (!project) notFound();
+  // Editing the README needs write on this project; read-only users get the view.
+  if (!projectCan(project, "project:write")) redirect(`/${slug}/projects/${projectSlug}`);
 
   return (
     <PageBody className="max-w-4xl">

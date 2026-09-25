@@ -3,21 +3,14 @@
 import { useId, useRef, useState, type ComponentProps, type PointerEvent as ReactPointerEvent } from "react";
 import { Calendar as CalendarIcon } from "lucide-react";
 import { DayButton as DefaultDayButton, type DateRange, type Matcher } from "react-day-picker";
-import { format as formatDate } from "date-fns";
 import { cn } from "../lib/cn";
-import { controlHeight, type ControlSize } from "../lib/control";
+import { controlHeight, focusRing, type ControlSize } from "../lib/control";
+import { dateKey, formatRange, parseDateKey, rangeMatcher, yearsFromNow } from "../lib/date-range";
 import { Calendar } from "./calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 
 // Each day button is tagged with its local date so a drag can map a pointer to a
 // day without threading React state through every cell.
-function dateKey(d: Date): string {
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-function parseDateKey(key: string): Date {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m, d);
-}
 function DragDayButton(props: ComponentProps<typeof DefaultDayButton>) {
   return <DefaultDayButton {...props} data-date={dateKey(props.day.date)} />;
 }
@@ -131,6 +124,7 @@ export function DateRangeField({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
+        data-slot="date-range-field"
         id={fieldId}
         type="button"
         disabled={disabled}
@@ -138,8 +132,9 @@ export function DateRangeField({
         className={cn(
           controlHeight[size],
           "flex w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-left text-sm text-foreground",
-          "outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-          "disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:ring-2 data-[state=open]:ring-ring",
+          "transition",
+          focusRing,
+          "disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-ring",
           className,
         )}
       >
@@ -180,35 +175,4 @@ export function DateRangeField({
       </PopoverContent>
     </Popover>
   );
-}
-
-function formatRange(range: DateRange | undefined, fmt: string): string {
-  if (!range?.from) return "";
-  if (!range.to) return `${formatDate(range.from, fmt)} - ...`;
-  // Collapse a same-year range to one year label: "Aug 1 - Aug 8, 2026".
-  const sameYear = range.from.getFullYear() === range.to.getFullYear();
-  const fromFmt = sameYear ? fmt.replace(/,?\s*yyyy/, "") : fmt;
-  return `${formatDate(range.from, fromFmt)} - ${formatDate(range.to, fmt)}`;
-}
-
-// Default calendar bounds so the year dropdown has a useful range when no
-// explicit min/max is given.
-function yearsFromNow(delta: number): Date {
-  const d = new Date();
-  return new Date(d.getFullYear() + delta, delta < 0 ? 0 : 11, delta < 0 ? 1 : 31);
-}
-
-function startOf(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-}
-function endOf(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
-}
-function rangeMatcher(min?: Date, max?: Date, extra?: Matcher | Matcher[]): Matcher[] | undefined {
-  const m: Matcher[] = [];
-  if (min) m.push({ before: startOf(min) });
-  if (max) m.push({ after: endOf(max) });
-  if (Array.isArray(extra)) m.push(...extra);
-  else if (extra) m.push(extra);
-  return m.length ? m : undefined;
 }

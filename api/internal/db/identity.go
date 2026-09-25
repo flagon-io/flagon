@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,10 @@ type User struct {
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
 	CreatedAt time.Time `json:"created_at"`
+	// TwoFactorEnabled is the API's mirrored copy of the account's 2FA state (what
+	// the org 2FA requirement is enforced against). The app compares it with the
+	// auth layer's value and re-mirrors on drift.
+	TwoFactorEnabled bool `json:"two_factor_enabled"`
 }
 
 // Org is an organization plus the caller's role in it.
@@ -31,6 +36,8 @@ type Org struct {
 	EnforceTwoFactor bool      `json:"enforce_two_factor"`
 	RequireSSO       bool      `json:"require_sso"`
 	CreatedAt        time.Time `json:"created_at"`
+	// DeletedAt is set only on the org returned by a delete; live reads omit it.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 // ErrOrgSlugTaken is returned when creating an org whose slug already exists.
@@ -70,7 +77,7 @@ type ProfileInput struct {
 	AvatarURL   string
 }
 
-// PublicProfile is the GitHub-style public view of a user. Optional fields are
+// PublicProfile is the public view of a user. Optional fields are
 // pointers so an unset value serializes as JSON null (not an empty string).
 type PublicProfile struct {
 	ID          string    `json:"id"`
@@ -95,14 +102,14 @@ func (d *DB) inUserTx(ctx context.Context, userID string, fn func(context.Contex
 	if d == nil || d.pool == nil {
 		return ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := withQueryTimeout(ctx)
 	defer cancel()
 
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }() // no-op (ErrTxClosed) after Commit
 
 	if _, err := tx.Exec(ctx, "SELECT set_config('flagon.user_id', $1, true)", userID); err != nil {
 		return err
@@ -119,7 +126,7 @@ func (d *DB) Me(ctx context.Context, userID, email string) (User, []Org, error) 
 	var u User
 	var orgs []Org
 	err := d.inUserTx(ctx, userID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := upsertUser(ctx, tx, userID, email).Scan(&u.ID, &u.Email, &u.CreatedAt); err != nil {
+		if err := upsertUser(ctx, tx, userID, email).Scan(&u.ID, &u.Email, &u.CreatedAt, &u.TwoFactorEnabled); err != nil {
 			return err
 		}
 		var e error
@@ -154,6 +161,29 @@ func (d *DB) ListOrgs(ctx context.Context, userID string) ([]Org, error) {
 	})
 	return orgs, err
 }
+
+// IsOrgMember reports whether userID belongs to the (live) org with the given id.
+// It runs in the user's RLS context, so it can only ever see the caller's own
+// memberships. A malformed id is simply "not a member", never an error, so a
+// caller-supplied id can't be used to probe for anything.
+func (d *DB) IsOrgMember(ctx context.Context, userID, orgID string) (bool, error) {
+	if !uuidPattern.MatchString(orgID) {
+		return false, nil
+	}
+	var ok bool
+	err := d.inUserTx(ctx, userID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM public.memberships m
+				JOIN public.orgs o ON o.id = m.org_id
+				WHERE m.org_id = $1::uuid AND m.user_id = $2 AND o.deleted_at IS NULL
+			)`, orgID, userID).Scan(&ok)
+	})
+	return ok, err
+}
+
+// uuidPattern matches a canonical (hyphenated, any-case) UUID.
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // CreateOrg creates an org and makes the caller its owner, in one transaction.
 // It ensures the caller's user record exists first (FK target). A duplicate
@@ -267,7 +297,7 @@ func (d *DB) PublicUserProfile(ctx context.Context, username string) (*PublicPro
 	if d == nil || d.pool == nil {
 		return nil, ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := withQueryTimeout(ctx)
 	defer cancel()
 
 	var p PublicProfile
@@ -335,7 +365,7 @@ func upsertUser(ctx context.Context, tx pgx.Tx, userID, email string) pgx.Row {
 	return tx.QueryRow(ctx,
 		`INSERT INTO public.users (id, email) VALUES ($1, $2)
 		 ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, updated_at = now()
-		 RETURNING id, email, created_at`, userID, email)
+		 RETURNING id, email, created_at, two_factor_enabled`, userID, email)
 }
 
 func upsertUserExec(ctx context.Context, tx pgx.Tx, userID, email string) (pgconn.CommandTag, error) {

@@ -3,6 +3,7 @@
 import * as SliderPrimitive from "@radix-ui/react-slider";
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/control";
 
 /**
  * A slider for picking a number (or a range, with multiple values). Built on the
@@ -63,7 +64,7 @@ export function Slider({
           data-slot="slider-thumb"
           className={cn(
             "block size-4 shrink-0 rounded-full border-2 border-primary bg-background shadow-sm transition-[color,box-shadow]",
-            "outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            focusRing,
             "hover:ring-4 hover:ring-ring/20 disabled:pointer-events-none",
           )}
         />

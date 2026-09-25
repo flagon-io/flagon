@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Alert, Button, Input, Label } from "@flagon-io/ui";
+import type { Team } from "@/lib/api/types";
+import { errorMessage } from "@/lib/client-fetch";
 
 function slugify(s: string): string {
   return s
@@ -40,11 +42,10 @@ export function NewTeamForm({ orgSlug }: { orgSlug: string }) {
     });
     if (!res.ok) {
       setCreating(false);
-      const d = await res.json().catch(() => ({}));
-      setError(d.error ?? "Couldn't create the team.");
+      setError(await errorMessage(res, "Couldn't create the team."));
       return;
     }
-    const team = await res.json();
+    const team = (await res.json()) as Team;
     router.push(`/${orgSlug}/teams/${team.slug}`);
   }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/flagon-io/flagon/api/internal/docs"
@@ -30,7 +31,7 @@ func testDocsRouter(t *testing.T) http.Handler {
 func get(t *testing.T, h http.Handler, path string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
 	var body map[string]any
 	if rec.Body.Len() > 0 {
 		_ = json.Unmarshal(rec.Body.Bytes(), &body)
@@ -97,5 +98,73 @@ func TestSearchDocs(t *testing.T) {
 	rec, _ = get(t, h, "/docs/search")
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("empty query should be 422, got %d", rec.Code)
+	}
+}
+
+func TestDocsNav(t *testing.T) {
+	idx := docs.NewIndex(docs.Corpus{
+		Docs: []docs.Doc{
+			{Slug: "index", Title: "Welcome", Visibility: docs.Public},
+			{Slug: "platform/projects", Title: "Projects", Section: "Features", Visibility: docs.Public},
+			{Slug: "handbook/pay", Title: "Compensation", Section: "handbook", Visibility: docs.Internal},
+		},
+		Nav: &docs.Nav{
+			Index: &docs.NavItem{Type: docs.NavPage, Slug: "index", Title: "Welcome"},
+			Groups: []docs.NavGroup{{
+				Title: "Build and operate",
+				Sections: []docs.NavSection{{
+					Folder: "platform",
+					Title:  "Features",
+					Items: []docs.NavItem{
+						{Type: docs.NavSeparator, Title: "Resources"},
+						{Type: docs.NavPage, Slug: "platform/projects", Title: "Projects"},
+					},
+				}},
+			}},
+		},
+	})
+	router, _ := New(WithDocs(idx))
+
+	rec, body := get(t, router, "/docs/nav")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /docs/nav = %d", rec.Code)
+	}
+	nav, _ := body["nav"].(map[string]any)
+	if index, _ := nav["index"].(map[string]any); index["slug"] != "index" {
+		t.Fatalf("expected the landing page in nav.index, got %v", nav["index"])
+	}
+	groups, _ := nav["groups"].([]any)
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	g := groups[0].(map[string]any)
+	sections := g["sections"].([]any)
+	items := sections[0].(map[string]any)["items"].([]any)
+	if first := items[0].(map[string]any); first["type"] != "separator" || first["title"] != "Resources" {
+		t.Fatalf("expected a separator first, got %v", first)
+	}
+	if strings.Contains(rec.Body.String(), "handbook") {
+		t.Fatal("internal handbook pages must not appear in the public nav")
+	}
+
+	// The list follows nav order: the landing page first.
+	_, body = get(t, router, "/docs")
+	list, _ := body["docs"].([]any)
+	if first := list[0].(map[string]any); first["slug"] != "index" {
+		t.Fatalf("expected /docs to list the landing page first, got %v", first["slug"])
+	}
+
+	// No corpus wired: 503, like the other docs routes.
+	bare, _ := New()
+	if rec, _ := get(t, bare, "/docs/nav"); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET /docs/nav without a corpus = %d, want 503", rec.Code)
+	}
+}
+
+func TestDocsNav_EmptyCorpusHasGroupsArray(t *testing.T) {
+	router, _ := New(WithDocs(testDocsIndex()))
+	rec, _ := get(t, router, "/docs/nav")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"groups":[]`) {
+		t.Fatalf("GET /docs/nav on a nav-less corpus = %d %s; want 200 with an empty groups array", rec.Code, rec.Body.String())
 	}
 }

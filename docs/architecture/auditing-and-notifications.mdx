@@ -1,0 +1,194 @@
+---
+title: Auditing and notifications
+description: How Flagon records every organization change in an append-only audit log inside the same transaction, and how that differs from per-person notifications.
+---
+
+Flagon writes two kinds of records when something changes, and they answer
+different questions. The **audit log** answers "what happened to this
+organization, who did it, from where, and when". It belongs to the organization,
+only owners and admins can read it, and nobody can edit or delete it. A
+**notification** answers "what does this one person need to know". It belongs to
+its recipient, who can mark it read or unread.
+
+Keeping them apart is deliberate. An audit log that people could dismiss, or a
+notification feed that every admin could read, would each fail at its own job.
+This page covers how both are produced and stored, and where the code lives.
+
+```text
+  A mutation: REST call, confirmed assistant action, or MCP tool call
+                                  │
+                                  ▼
+ ┌─────────────────────────────────────────────────────────────────┐
+ │ Store transaction  (inUserTx, running as the actor)             │
+ │   1. role check                                                 │
+ │   2. the change itself                                          │
+ │   3. audit.Record  ->  flagon.record_audit(...)                 │
+ │      one transaction: both commit, or neither does              │
+ └───────────────┬─────────────────────────────────┬───────────────┘
+                 │ inside the transaction          │ after commit
+                 ▼                                 ▼
+ ┌───────────────────────────────┐  ┌──────────────────────────────┐
+ │ public.audit_logs             │  │ service.notify (best effort) │
+ │ one log per organization      │  │ flagon.create_notification() │
+ │ append-only                   │  │ public.notifications         │
+ │ read: owners and admins       │  │ read: the recipient only     │
+ └───────────────────────────────┘  └──────────────────────────────┘
+```
+
+## Audit is a subsystem
+
+The audit code lives in its own package, `api/internal/audit`, rather than being
+scattered through the handlers. It exposes three things:
+
+- **A vocabulary.** Every auditable change has a typed `Action` constant, a dotted
+  `resource.verb` key such as `project.created`, `member.role_changed`, or
+  `sso_provider.updated`. There are 36 today, listed in the `Actions` slice so the
+  filter UI can enumerate them. Adding a mutation means adding its constant here,
+  so the write side and the filter side can never disagree. The full list is on
+  [Audit actions](/docs/reference/audit-actions).
+- **A write seam.** `audit.Record(ctx, tx, entry)` appends one entry. The domain
+  layer calls it through a thin wrapper, `recordAudit` in
+  `api/internal/db/audit.go`.
+- **A read seam.** `audit.Store.List` returns a filtered, paginated page of events.
+
+### Written inside the mutation's transaction
+
+Every organization mutation in `api/internal/db` ends by calling `recordAudit`
+inside the same transaction that made the change, for example `AddMember` inserts
+the membership row and then records `member.added`. Because both happen in one
+transaction, they commit together or not at all. There is no window where a
+change exists without its entry, and a failure to write the entry rolls the change
+back. Audit is not best-effort.
+
+An entry records the organization, the actor's user id, the action, a target type
+and id (for example `project` and the project slug), and a short summary written
+as a predicate ("created project Billing API"), so a row reads naturally after the
+actor's name.
+
+### Append-only by construction
+
+The runtime database role cannot write to `public.audit_logs` directly. The table
+has row-level security with a single `SELECT` policy and no `INSERT`, `UPDATE`, or
+`DELETE` policy, so any direct write matches nothing. The only way in is the
+`flagon.record_audit` function, which is `SECURITY DEFINER` (it runs as the table
+owner) and only inserts. No code path updates or deletes an entry. When a user is
+deleted, their entries stay and the actor reference becomes empty.
+
+### Readable by owners and admins
+
+The read policy and the read function both require the caller to be an owner or
+admin of the organization (migration `0017_audit_admin_only.sql`), and the
+operation checks the role up front, so a plain member gets `403` and a non-member
+`404` rather than an empty page. Reads go through `flagon.org_audit`, a
+`SECURITY DEFINER` window that joins the actor's profile for display and applies
+the filters: a free-text query over summary, action, actor, and country (and IP,
+only when IP disclosure is on); a list of actions; a single actor; and a keyset
+cursor over `(created_at, id)`, newest first. Pages default to 30 entries and cap
+at 100.
+
+Since migration `0036` the window also requires its `p_actor` argument to equal the
+transaction's bound user (`flagon.current_user_id()`), and `audit.Store.List`
+binds the caller in its own read-only transaction before calling it. The
+owner-or-admin check therefore applies to the user the database knows is asking,
+not to an id passed in from Go.
+
+The same log is reachable from all three front doors: `GET /orgs/{slug}/audit`
+(scope `read:org`, next page in the `Link` header), the `list_audit_events` tool,
+and the audit page in the dashboard. See [Audit log](/docs/platform/audit-log).
+
+### The "where": request context, not function arguments
+
+Each entry also records the actor's IP address, country, and user agent. These
+never pass through the domain layer's function signatures. The HTTP layer stores
+them on the request context once per request, and `audit.Record` reads them back
+from there. Which values it trusts depends on who is calling, because a value the
+caller controls is a value the caller can forge:
+
+| Caller | IP | Country | User agent |
+| --- | --- | --- | --- |
+| The app gateway (internal token): dashboard actions and confirmed assistant proposals | `X-Flagon-Client-Ip`, forwarded by the app from the end user's request | `X-Flagon-Client-Country` | `X-Flagon-Client-Ua`, then `User-Agent` |
+| An access token over REST | The connection address | Not recorded | `User-Agent` |
+| An access token over MCP | The connection address | Not recorded | `User-Agent` |
+
+The **connection address** is the TCP peer, or the header named by
+`FLAGON_CLIENT_IP_HEADER` when the API sits behind a proxy that overwrites it
+(`Fly-Client-IP` in production, set in `api/fly.toml`). Only the internal-token
+middlewares (`withAuditMeta` with the gateway flag) read `X-Flagon-Client-*`; for a
+token caller those headers, and any `X-Forwarded-For`, are ignored, so a token
+holder cannot plant a false IP or location in the log. The app gateway fills the
+`X-Flagon-Client-*` headers from the end user's request
+(`app/src/lib/api/client.ts`), so dashboard and assistant actions record the
+person's location, not the gateway's.
+
+### IP disclosure is opt-in
+
+IP addresses are always recorded, but `flagon.org_audit` returns them as empty
+unless the organization has turned on IP disclosure (`orgs.audit_ip_disclosure`,
+default off, migration `0020_audit_ip_disclosure.sql`). With disclosure off, the
+free-text search does not match against IPs either (migration `0036`), so an admin
+cannot probe for a hidden address by searching candidate values. Country and user
+agent are always shown. Owners and admins toggle it with `PUT /orgs/{slug}/audit/config`
+(scope `write:org`) or the `set_audit_config` tool, and the toggle itself is
+recorded as `organization.audit_config_changed`.
+
+### Built to move out
+
+Postgres is the right home for the log today, but a busy log eventually wants its
+own service or a columnar store. The seams are shaped for that. `Record` writes
+through a minimal `execer` interface, so its body can become a transactional
+outbox write (still inside the same transaction) with a relay to another system,
+and no call site changes. `Store` is a small type with one `List` method that a
+remote implementation can replace. The `Action` vocabulary stays in the package
+either way. None of this is built yet; it is the reason the package exists as a
+seam instead of inline SQL.
+
+## Notifications
+
+A notification is a row in `public.notifications` with a recipient (`user_id`), an
+optional organization for context, a type such as `project.access_granted`, a
+title, an optional body and link, and a read timestamp.
+
+**Who can see it.** Row-level security lets a user select and update only their
+own notifications. There is no insert policy for the runtime role.
+
+**How it is created.** An actor often needs to notify someone else, for example
+when an admin adds you to a project. The `flagon.create_notification` function is
+`SECURITY DEFINER`, so it can insert a row for any recipient without giving the
+actor any way to read that recipient's feed.
+
+**Where it is emitted.** Notifications come from the service layer
+(`api/internal/service`), not the database layer, through `Service.notify`. They
+are sent after the store call succeeds, which means after the change has
+committed. They are best-effort: a failure is logged as a warning and never fails
+the operation, because the change is already done. Emitting from the service
+layer means the REST API, the assistant, and MCP all produce the same
+notifications for the same action.
+
+Today's types are `org.created`, `org.deleted`, `org.member_added`,
+`org.role_changed`, `org.member_removed`, `org.invite_accepted`,
+`project.access_granted`, `project.access_changed`, and `team.member_added`.
+
+**Reading them.** `GET /notifications` returns unread first, then newest (default
+30). Marking read, unread, or all read are separate operations. All of them need
+the `notifications` scope on a token, and the assistant and MCP have matching
+tools. See [Notifications](/docs/platform/notifications).
+
+## Side by side
+
+| | Audit log | Notifications |
+| --- | --- | --- |
+| Belongs to | The organization | One user |
+| Who reads it | Org owners and admins | The recipient |
+| Mutable | Never | Read state only |
+| Written | Inside the mutation's transaction | After commit, from the service layer |
+| On write failure | The mutation rolls back | Logged, the mutation stands |
+| Code | `api/internal/audit`, `db/audit.go` | `service/service.go`, `db/notifications.go` |
+
+## Related
+
+<Cards>
+  <Card title="Audit log" href="/docs/platform/audit-log" description="Searching and filtering the log from the dashboard, API, and assistant." />
+  <Card title="Review the audit log" href="/docs/guides/review-the-audit-log" description="A task guide for common investigations." />
+  <Card title="Notifications" href="/docs/platform/notifications" description="The bell, the notifications page, and read state." />
+  <Card title="Permissions model" href="/docs/architecture/permissions-model" description="The role checks that run before a change is recorded." />
+</Cards>

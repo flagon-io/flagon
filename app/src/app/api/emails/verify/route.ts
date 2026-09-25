@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/session";
+import { badRequest, routeError } from "@/lib/route-error";
 import { verifyUserEmailOtp } from "@/lib/user-emails";
 
 export async function POST(request: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { email, otp } = await request.json();
   if (typeof email !== "string" || typeof otp !== "string") {
-    return NextResponse.json({ error: "Email and code are required." }, { status: 400 });
+    return badRequest("Email and code are required.");
   }
 
   try {
     await verifyUserEmailOtp(session.user.id, email, otp);
     return NextResponse.json({ status: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Something went wrong.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Something went wrong.");
   }
 }

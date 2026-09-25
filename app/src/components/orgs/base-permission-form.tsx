@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { Alert, Card, SelectField } from "@flagon-io/ui";
-import type { BasePermission } from "@/lib/flagon-api";
+import type { BasePermission } from "@/lib/api/types";
+import { errorMessage } from "@/lib/client-fetch";
 
-// The base permission the org grants every member across all projects. We mirror
-// GitHub's four base-permission levels - Triage and Maintain exist as per-project
+// The base permission the org grants every member across all projects. We offer
+// four base-permission levels - Triage and Maintain exist as per-project
 // grants but aren't sensible org-wide defaults. We show the level names only; what
 // each level actually grants isn't scoped yet, so we don't spell it out here.
 const BASE_OPTIONS: { value: BasePermission; label: string }[] = [
@@ -46,8 +47,7 @@ export function BasePermissionForm({
     setBusy(false);
     if (!res.ok) {
       setBase(prev);
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(body.error ?? "Couldn't save the base permission.");
+      setError(await errorMessage(res, "Couldn't save the base permission."));
     }
   }
 

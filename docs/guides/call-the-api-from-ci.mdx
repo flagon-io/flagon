@@ -1,0 +1,149 @@
+---
+title: Call the API from CI
+description: Store an organization access token as a CI secret and call the Flagon API from a pipeline, with a complete GitHub Actions example that syncs a project's README.
+---
+
+Anything you can do in the dashboard is an API operation, so a CI pipeline can keep Flagon in
+step with your repository. The pattern is always the same: create an **organization access
+token** with only the scopes the job needs, store it as an encrypted CI secret, and call
+`https://api.flagon.io` with it as a bearer token.
+
+By the end of this guide you will have a GitHub Actions workflow that, on every push to `main`,
+checks that its token works and publishes the repository's `README.md` to the matching Flagon
+project. The same steps work in any CI system that can run `curl`.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** organization **owner** or **admin**, to create the organization token.
+- **A project** to sync, for example `checkout` in the `acme` organization. See
+  [Create a project](/docs/guides/create-a-project).
+- **Token:** an organization access token with the scope `write:project` (which includes
+  `read:project`). Editing a project needs an effective `write` role on it. A token with role
+  **Member** gets the organization's [base permission](/docs/guides/set-base-permissions)
+  (default `read`), which is not enough; a token with role **Admin** has `admin` on every
+  project. The scope still limits what an Admin token can do: with only `write:project` it can
+  read, create, and edit projects, and nothing else.
+
+</Callout>
+
+## Steps
+
+<Steps>
+
+<Step title="Create a narrowly scoped organization token">
+
+In organization **Settings > API tokens**, select **Generate new token**. Name it after the job
+(`checkout-readme-sync`), choose role **Admin** (or **Member** if your base permission is
+`write` or higher), an expiration you will actually rotate (for
+example **90 days**), and check only `write:project`. Copy the secret; it is shown once. See
+[Automate with access tokens](/docs/guides/automate-with-access-tokens) for details.
+
+</Step>
+
+<Step title="Store it as a CI secret">
+
+In your GitHub repository, go to **Settings > Secrets and variables > Actions** and add a
+repository secret named `FLAGON_TOKEN` with the token as its value. GitHub masks the value in
+logs. Other CI systems have an equivalent encrypted variable; never put the token in the
+repository or the workflow file.
+
+</Step>
+
+<Step title="Add the workflow">
+
+Save this as `.github/workflows/flagon.yml`:
+
+```yaml
+name: Sync to Flagon
+
+on:
+  push:
+    branches: [main]
+    paths: [README.md]
+  workflow_dispatch:
+
+jobs:
+  sync-readme:
+    runs-on: ubuntu-latest
+    env:
+      FLAGON_API: https://api.flagon.io
+      FLAGON_ORG: acme
+      FLAGON_PROJECT: checkout
+      FLAGON_TOKEN: ${{ secrets.FLAGON_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the token can see the project
+        run: |
+          curl --fail-with-body -sS \
+            -H "Authorization: Bearer $FLAGON_TOKEN" \
+            -H "User-Agent: flagon-ci/${{ github.repository }}" \
+            "$FLAGON_API/orgs/$FLAGON_ORG/projects/$FLAGON_PROJECT" \
+            | jq '{name, slug, updated_at}'
+
+      - name: Publish README.md to the project
+        run: |
+          jq -Rs '{readme: .}' README.md > body.json
+          curl --fail-with-body -sS -X PATCH \
+            -H "Authorization: Bearer $FLAGON_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: flagon-ci/${{ github.repository }}" \
+            --data @body.json \
+            "$FLAGON_API/orgs/$FLAGON_ORG/projects/$FLAGON_PROJECT" \
+            | jq '{slug, updated_at}'
+```
+
+What each part does:
+
+- `--fail-with-body` makes `curl` exit non-zero on a `4xx` or `5xx` while still printing the
+  error body, so the step fails and the log shows Flagon's `detail` message.
+- `jq -Rs '{readme: .}'` reads the whole file as one string and builds valid JSON, so quotes and
+  newlines in the README can't break the request.
+- `PATCH` changes only the fields you send; here, just `readme`.
+- A descriptive `User-Agent` is recorded in the organization's audit log for each change, which
+  makes CI-driven changes easy to spot.
+
+</Step>
+
+<Step title="Verify it worked">
+
+- Push a README change to `main` (or run the workflow manually). Both steps pass, and the second
+  prints the project's new `updated_at`.
+- The project's **Overview** shows the new README.
+- The organization's audit log records `project.updated` with the token's name as the actor.
+
+</Step>
+
+</Steps>
+
+## Other calls a pipeline often makes
+
+| Goal | Request | Scope |
+| --- | --- | --- |
+| Create the project if it doesn't exist | `POST /orgs/{slug}/projects` with `{"name": "...", "slug": "..."}`; treat `409` as "already exists" | `write:project` |
+| Read project metadata | `GET /orgs/{slug}/projects/{project}` | `read:project` |
+| List projects | `GET /orgs/{slug}/projects?limit=100`, following the `Link` header | `read:project` |
+| Export the audit log | `GET /orgs/{slug}/audit`, following the `Link` header | `read:org`, token role `admin` |
+
+Paths in the table use `{slug}` and `{project}` as placeholders. The full, generated contract is
+at `https://api.flagon.io/openapi.json`; see [OpenAPI](/docs/api/openapi).
+
+## Troubleshooting
+
+| Status | `detail` | Fix |
+| --- | --- | --- |
+| `401` | `invalid or expired token` | The secret is wrong, revoked, or expired. Create a new token and update `FLAGON_TOKEN`. |
+| `403` | `this token is missing the scope required for this operation` | Create a token with the scope in the table above. |
+| `403` | `you don't have permission to do that` | The token's role gives it less than `write` on the project. Use an Admin token, or raise the base permission. |
+| `404` | `project not found` | Check `FLAGON_ORG` and `FLAGON_PROJECT`, and that the token can see the project. |
+| `413` | `request body is too large` | The body is over the API's request size cap (4 MiB by default). Very large READMEs won't fit. |
+| `422` | `validation failed` | The body isn't what the operation expects. Print `body.json` to check it. |
+| `429` | `rate limit exceeded; retry after Ns` | The token sent requests faster than the API's per-token limit. Wait for the number of seconds in the `Retry-After` header, then retry. |
+| `5xx` | a generic message | A server-side failure. Retry, and quote the response's `X-Request-Id` header if you report it. |
+
+## Related
+
+- [Automate with access tokens](/docs/guides/automate-with-access-tokens)
+- [Using the API](/docs/api/using-the-api)
+- [Errors](/docs/api/errors)
+- [Pagination](/docs/api/pagination)

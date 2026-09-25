@@ -10,15 +10,15 @@ export function Field({ className, ...props }: ComponentProps<"div">) {
   return <div data-slot="field" className={cn("space-y-1.5", className)} {...props} />;
 }
 export function FieldLabel(props: ComponentProps<typeof Label>) {
-  return <Label {...props} />;
+  return <Label data-slot="field-label" {...props} />;
 }
 export function FieldDescription({ className, ...props }: ComponentProps<"p">) {
-  return <p className={cn("text-xs text-muted-foreground", className)} {...props} />;
+  return <p data-slot="field-description" className={cn("text-xs text-muted-foreground", className)} {...props} />;
 }
 export function FieldError({ className, children, ...props }: ComponentProps<"p">) {
   if (!children) return null;
   return (
-    <p role="alert" className={cn("text-xs text-destructive", className)} {...props}>
+    <p data-slot="field-error" role="alert" className={cn("text-xs text-destructive", className)} {...props}>
       {children}
     </p>
   );

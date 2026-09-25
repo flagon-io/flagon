@@ -1,0 +1,183 @@
+---
+title: Tool reference
+description: Every tool the assistant and the MCP server expose, with the API operation behind it, the scope it requires, and whether it changes data.
+visibility: public
+---
+
+The in-product [assistant](/docs/ai/assistant) and the [MCP server](/docs/ai/mcp)
+draw from **one tool registry** (`api/internal/ai`). Every operational tool is the
+front door for one real, permission-checked [API](/docs/api/using-the-api)
+operation and calls the same service method, so the three front doors cannot
+drift. CI enforces the pairing: an API operation that users can call without a
+matching tool, or a tool whose scope or read/write nature differs from its
+operation, fails the build. This page lists the whole registry: 60 tools.
+
+## How to read the tables
+
+- **API** is the operation the tool runs. Its request and response shapes are in
+  the [OpenAPI spec](/docs/api/openapi).
+- **Scope** is the [token scope](/docs/platform/access-tokens#scopes) the tool
+  requires over MCP, the same scope as its API operation. Parent scopes imply
+  their children (`admin:org` covers `write:org` and `read:org`). The in-product
+  assistant uses your session, so only your role applies there.
+- **Changes data** marks mutating tools. The assistant never runs these on its
+  own: it **proposes** them and runs them after you confirm. Over MCP they run as
+  soon as they are called, so your client is responsible for confirmation.
+- Scopes are a ceiling, never a grant. Every tool also checks your role: for
+  example, the SSO and audit tools work only for org owners and admins, whatever
+  the token holds.
+- Organization tools take the organization's slug as an `org` argument, and
+  project and team tools add the project or team slug. The account and
+  notification tools act on you and take no organization.
+- Any tool call that names an organization first passes that organization's
+  [security policy](/docs/platform/two-factor): if it requires two-factor
+  authentication or single sign-on and your sign-in does not satisfy it, the call
+  fails with 403, on both the assistant and MCP.
+- The in-product assistant is confined to the organization its conversation
+  belongs to. A call that names any other organization is refused with 403, and
+  `restore_organization` (which addresses a deleted organization by id) is
+  refused from the assistant entirely; use your personal **Settings >
+  Organizations** page for it. MCP has no
+  conversation, so a token acts in every organization its user can reach.
+
+## Account and organizations
+
+| Tool | What it does | API | Scope | Changes data |
+| --- | --- | --- | --- | --- |
+| `whoami` | Your account (id, email) and the organizations you belong to. | `GET /me` | `read:user` | |
+| `list_organizations` | List your organizations with your role in each. | `GET /orgs` | `read:org` | |
+| `create_organization` | Create an organization you own; the slug is derived from the name if omitted. | `POST /orgs` | `admin:org` | Yes |
+| `update_organization` | Rename an organization (owners and admins). The slug does not change. | `PATCH /orgs/{slug}` | `write:org` | Yes |
+| `leave_organization` | Leave an organization. The only owner cannot leave. | `POST /orgs/{slug}/leave` | `admin:org` | Yes |
+| `delete_organization` | Soft-delete an organization for every member (owners only). Restorable for 30 days. | `DELETE /orgs/{slug}` | `admin:org` | Yes |
+| `list_deleted_organizations` | List organizations you owned that were deleted in the last 30 days, with `id` and `purge_at`. | `GET /deleted-orgs` | `read:org` | |
+| `restore_organization` | Restore a deleted organization by id, optionally under a new `slug` (owners only, within 30 days). MCP only: the assistant refuses it. | `POST /deleted-orgs/{id}/restore` | `admin:org` | Yes |
+| `get_org_security` | Read the security policy: 2FA requirement, SSO requirement, base permission. | `GET /orgs/{slug}/security` | `read:org` | |
+| `set_org_security` | Change the security policy (`enforce_two_factor`, `require_sso`, `base_permission`). Only the fields you pass change. | `PUT /orgs/{slug}/security` | `write:org` | Yes |
+
+## Single sign-on
+
+| Tool | What it does | API | Scope | Changes data |
+| --- | --- | --- | --- | --- |
+| `list_sso_providers` | List the org's OIDC and SAML providers (owners and admins). Secrets are never returned. | `GET /orgs/{slug}/sso/providers` | `read:org` | |
+| `get_sso_provider` | Read one provider by its provider ID. Secrets are never returned. | `GET /orgs/{slug}/sso/providers/{provider}` | `read:org` | |
+| `create_sso_provider` | Add an OIDC or SAML provider. Its client secret or private key is write-only. | `POST /orgs/{slug}/sso/providers` | `write:org` | Yes |
+| `update_sso_provider` | Change a provider's domain, issuer, or settings, or replace its secret. | `PATCH /orgs/{slug}/sso/providers/{provider}` | `write:org` | Yes |
+| `delete_sso_provider` | Remove a provider; sign-in through it stops at the next attempt. | `DELETE /orgs/{slug}/sso/providers/{provider}` | `write:org` | Yes |
+
+## Members and invitations
+
+| Tool | What it does | API | Scope | Changes data |
+| --- | --- | --- | --- | --- |
+| `list_members` | List the organization's members and their roles. | `GET /orgs/{slug}/members` | `read:org` | |
+| `add_member` | Add an existing Flagon user by email or username. | `POST /orgs/{slug}/members` | `write:org` | Yes |
+| `set_member_role` | Change a member's organization role, by user id. | `PUT /orgs/{slug}/members/{userId}/role` | `write:org` | Yes |
+| `remove_member` | Remove a member from the organization, by user id. | `DELETE /orgs/{slug}/members/{userId}` | `write:org` | Yes |
+| `list_invitations` | List pending invitations. | `GET /orgs/{slug}/invitations` | `read:org` | |
+| `invite_member` | Invite someone by email as a `member` (default) or `admin`; owners can't be invited. Adds them directly if they already have an account. Otherwise the API emails the invitation and the result reports `email_sent` (`false` when the server only logs email or delivery failed; never the invitation token). | `POST /orgs/{slug}/invitations` | `write:org` | Yes |
+| `revoke_invitation` | Revoke a pending invitation by id. | `DELETE /orgs/{slug}/invitations/{id}` | `write:org` | Yes |
+
+## Projects
+
+| Tool | What it does | API | Scope | Changes data |
+| --- | --- | --- | --- | --- |
+| `list_projects` | List the organization's projects, with optional search and a cursor for paging. | `GET /orgs/{slug}/projects` | `read:project` | |
+| `list_deleted_projects` | List projects deleted in the last 30 days, each with its `purge_at` (org owners and admins). | `GET /orgs/{slug}/deleted-projects` | `read:project` | |
+| `get_project` | Read one project, including its README. | `GET /orgs/{slug}/projects/{project}` | `read:project` | |
+| `create_project` | Create a project; the slug is derived from the name if omitted. | `POST /orgs/{slug}/projects` | `write:project` | Yes |
+| `update_project` | Edit a project's name, slug, description, README, or repository URL. Only the fields you pass change. | `PATCH /orgs/{slug}/projects/{project}` | `write:project` | Yes |
+| `delete_project` | Soft-delete a project (owner tier); its slug is freed. | `DELETE /orgs/{slug}/projects/{project}` | `admin:project` | Yes |
+| `restore_project` | Restore a project deleted in the last 30 days by its slug (owner tier). Pass `new_slug` if a live project has taken the old slug. | `POST /orgs/{slug}/projects/{project}/restore` | `admin:project` | Yes |
+
+## Project access
+
+| Tool | What it does | API | Scope | Changes data |
+| --- | --- | --- | --- | --- |
+| `list_project_members` | List a project's explicit collaborators and their roles. | `GET /orgs/{slug}/projects/{project}/members` | `read:project` | |
+| `add_project_member` | Give an organization member a role on a project. | `POST /orgs/{slug}/projects/{project}/members` | `admin:project` | Yes |
+| `set_project_member_role` | Change a collaborator's project role, by user id. | `PUT /orgs/{slug}/projects/{project}/members/{userId}/role` | `admin:project` | Yes |
+| `remove_project_member` | Remove a collaborator, dropping them to their org-level access. | `DELETE /orgs/{slug}/projects/{project}/members/{userId}` | `admin:project` | Yes |
+| `list_project_teams` | List the teams a project is shared with and their roles. | `GET /orgs/{slug}/projects/{project}/teams` | `read:project` | |
+| `add_project_team` | Grant a team a role on a project. | `POST /orgs/{slug}/projects/{project}/teams` | `admin:project` | Yes |
+| `set_project_team_role` | Change a team's role on a project. | `PUT /orgs/{slug}/projects/{project}/teams/{team}/role` | `admin:project` | Yes |
+| `remove_project_team` | Remove a team's access to a project. | `DELETE /orgs/{slug}/projects/{project}/teams/{team}` | `admin:project` | Yes |
+| `list_project_owners` | List a project's owners (users and teams). | `GET /orgs/{slug}/projects/{project}/owners` | `read:project` | |
+| `add_project_owner` | Make a user or team an owner of a project (owner tier). | `POST /orgs/{slug}/projects/{project}/owners` | `admin:project` | Yes |
+| `remove_project_owner` | Remove a project owner (owner tier). | `DELETE /orgs/{slug}/projects/{project}/owners/{type}/{principalId}` | `admin:project` | Yes |
+
+## Teams
+
+| Tool | What it does | API | Scope | Changes data |
+| --- | --- | --- | --- | --- |
+| `list_teams` | List the organization's teams with member counts. | `GET /orgs/{slug}/teams` | `read:team` | |
+| `get_team` | Read one team by slug. | `GET /orgs/{slug}/teams/{team}` | `read:team` | |
+| `create_team` | Create a team (org owners and admins); you become its first maintainer. | `POST /orgs/{slug}/teams` | `write:team` | Yes |
+| `update_team` | Edit a team's name, slug, or description. | `PATCH /orgs/{slug}/teams/{team}` | `write:team` | Yes |
+| `delete_team` | Delete a team (org owners and admins); its grants stop having effect. | `DELETE /orgs/{slug}/teams/{team}` | `admin:team` | Yes |
+| `list_team_members` | List a team's members and their team roles. | `GET /orgs/{slug}/teams/{team}/members` | `read:team` | |
+| `list_team_projects` | List the projects a team can reach and its role on each. | `GET /orgs/{slug}/teams/{team}/projects` | `read:team` | |
+| `add_team_member` | Add an organization member to a team as maintainer or member. | `POST /orgs/{slug}/teams/{team}/members` | `write:team` | Yes |
+| `set_team_member_role` | Make a team member a maintainer or a regular member. | `PUT /orgs/{slug}/teams/{team}/members/{userId}/role` | `write:team` | Yes |
+| `remove_team_member` | Remove someone from a team. | `DELETE /orgs/{slug}/teams/{team}/members/{userId}` | `write:team` | Yes |
+
+## Audit log
+
+| Tool | What it does | API | Scope | Changes data |
+| --- | --- | --- | --- | --- |
+| `list_audit_events` | Read the organization's audit log, newest first (owners and admins). | `GET /orgs/{slug}/audit` | `read:org` | |
+| `get_audit_config` | Read whether actor IP addresses are disclosed in the log (owners and admins). | `GET /orgs/{slug}/audit/config` | `read:org` | |
+| `set_audit_config` | Turn actor IP disclosure on or off (owners and admins); the change is audited. | `PUT /orgs/{slug}/audit/config` | `write:org` | Yes |
+
+## Notifications
+
+| Tool | What it does | API | Scope | Changes data |
+| --- | --- | --- | --- | --- |
+| `list_notifications` | List your notifications, unread first. | `GET /notifications` | `notifications` | |
+| `count_unread_notifications` | Count your unread notifications. | `GET /notifications/unread-count` | `notifications` | |
+| `mark_notification_read` | Mark one notification read, by id. | `POST /notifications/{id}/read` | `notifications` | Yes |
+| `mark_notification_unread` | Mark one notification unread, by id. | `POST /notifications/{id}/unread` | `notifications` | Yes |
+| `mark_all_notifications_read` | Mark every notification read. | `POST /notifications/read-all` | `notifications` | Yes |
+
+## Documentation
+
+The documentation tools are the only **public** tools: they are read-only, touch
+no tenant data, and need no token. They are the only tools an anonymous MCP
+client sees.
+
+| Tool | What it does | API | Scope | Changes data |
+| --- | --- | --- | --- | --- |
+| `search_docs` | Search the documentation (and, for authenticated callers, internal pages). Returns ranked slugs, titles, and snippets; default 5 results. | none | none | |
+| `get_doc` | Read one documentation page in full by slug, such as `platform/projects`. | none | none | |
+
+Pages marked `visibility: internal` (none today; the handbook is public) are served
+only to authenticated callers. There is nothing to configure.
+
+| Caller | Pages |
+| --- | --- |
+| Anonymous MCP client | Public pages only |
+| MCP client with an access token | Public and internal pages |
+| In-product assistant | Public and internal pages |
+
+The public HTTP routes (`/docs`, `/docs/search`, `/docs/page`) serve the same
+corpus, public pages only.
+
+## Not available as tools
+
+A few capabilities deliberately have no tool:
+
+- **Access tokens.** Minting and revoking tokens is dashboard-only, so a
+  credential can never create more credentials. See
+  [Access tokens](/docs/platform/access-tokens).
+- **Your account.** Password, emails, sessions, profile edits, and account
+  deletion are managed in **Settings**, so a token or an agent cannot take over
+  the account behind it.
+- **Internal operations.** Accepting an invitation, SSO provisioning, and the
+  sign-in service's SSO configuration reads run only with Flagon's internal
+  credential.
+
+## Related
+
+- [The assistant](/docs/ai/assistant)
+- [MCP server](/docs/ai/mcp)
+- [Tool registry architecture](/docs/architecture/tool-registry)
+- [Scopes reference](/docs/reference/scopes)

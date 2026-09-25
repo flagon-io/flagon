@@ -45,6 +45,7 @@ export function FlagonMark({
 
   return (
     <svg
+      data-slot="flagon-mark"
       viewBox="11.3 12.3 41 41"
       width={size}
       height={size}

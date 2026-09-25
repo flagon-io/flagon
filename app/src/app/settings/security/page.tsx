@@ -1,12 +1,11 @@
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/session";
 import { SettingsHeader, SettingsSubheader } from "@/components/settings/section";
 import { ChangePasswordForm } from "@/components/settings/change-password-form";
 import { TwoFactorSetup } from "@/components/settings/two-factor-setup";
 
 export default async function SecuritySettingsPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getSession();
   if (!session) redirect("/login");
 
   const twoFactorEnabled = Boolean((session.user as { twoFactorEnabled?: boolean }).twoFactorEnabled);

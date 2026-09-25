@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Alert, Badge, Button, Input, Label } from "@flagon-io/ui";
 import { authClient } from "@/lib/auth-client";
 import { AuthCard } from "@/components/auth/auth-card";
-import type { InviteLookup } from "@/lib/flagon-api";
+import type { InviteLookup } from "@/lib/api/types";
 
 const USERNAME_RE = /^[a-zA-Z0-9_-]{3,30}$/;
 

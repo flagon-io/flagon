@@ -1,4 +1,4 @@
-import type { HTMLAttributes } from "react";
+import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
 
 export type BadgeVariant = "default" | "secondary" | "outline" | "brand" | "success" | "warning";
@@ -8,19 +8,21 @@ const variants: Record<BadgeVariant, string> = {
   secondary: "border-transparent bg-secondary text-secondary-foreground",
   outline: "border-hairline text-muted-foreground",
   brand: "border-transparent bg-brand/12 text-brand-bright",
-  success: "border-transparent bg-emerald-500/12 text-emerald-700 dark:text-emerald-400",
-  warning: "border-transparent bg-amber-500/14 text-amber-700 dark:text-amber-400",
+  success: "border-transparent bg-success/12 text-success",
+  warning: "border-transparent bg-warning/14 text-warning",
 };
 
 export function Badge({
   className,
   variant = "default",
   ...props
-}: HTMLAttributes<HTMLSpanElement> & { variant?: BadgeVariant }) {
+}: ComponentProps<"span"> & { variant?: BadgeVariant }) {
   return (
     <span
+      data-slot="badge"
+      data-variant={variant}
       className={cn(
-        "inline-flex items-center justify-center rounded-full border px-2 py-1 text-[10px] leading-none font-semibold uppercase tracking-wide",
+        "inline-flex items-center justify-center rounded-full border px-2 py-1 text-2xs leading-none font-semibold uppercase tracking-wide",
         variants[variant],
         className,
       )}

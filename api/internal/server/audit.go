@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -11,27 +10,33 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/flagon-io/flagon/api/internal/audit"
-	"github.com/flagon-io/flagon/api/internal/db"
 )
 
 // registerAuditAPI wires the org-scoped audit log (read-only, owners/admins only,
 // enforced in the audit store's SECURITY DEFINER window). It supports search, an
 // action filter, an actor filter, and keyset pagination advertised via the RFC
 // 5988 Link header (rel="next") - the modern, cursor-based approach for logs.
-func registerAuditAPI(api huma.API, store IdentityStore, auditStore *audit.Store, internalToken string) {
-	if auditStore == nil {
-		return
-	}
-	auth := combinedAuth(api, store, internalToken)
-
+//
+// Every operation is registered unconditionally so the OpenAPI spec is complete
+// even when no store is wired (spec generation); a missing store is a 503 at
+// request time.
+func registerAuditAPI(api huma.API, d deps, auditStore *audit.Store) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-audit-log",
 		Method:      http.MethodGet,
 		Path:        "/orgs/{slug}/audit",
 		Summary:     "List an organization's audit log",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *AuditListInput) (*AuditOutput, error) {
+		if auditStore == nil {
+			return nil, huma.Error503ServiceUnavailable("the audit log is not available")
+		}
 		actorID, _ := identity(ctx)
+		// The store's window returns no rows to a plain member; answer 403 (and
+		// 404 for a non-member) like every other admin-only read.
+		if err := d.svc.RequireOrgAdmin(ctx, actor(ctx), in.Slug); err != nil {
+			return nil, apiErr(err, "could not load the audit log")
+		}
 
 		cursor, err := audit.DecodeCursor(in.Cursor)
 		if err != nil {
@@ -52,7 +57,7 @@ func registerAuditAPI(api huma.API, store IdentityStore, auditStore *audit.Store
 			Limit:   in.Limit,
 		})
 		if err != nil {
-			return nil, huma.Error500InternalServerError("could not load the audit log", err)
+			return nil, apiErr(err, "could not load the audit log")
 		}
 
 		out := &AuditOutput{}
@@ -68,14 +73,13 @@ func registerAuditAPI(api huma.API, store IdentityStore, auditStore *audit.Store
 		Method:      http.MethodGet,
 		Path:        "/orgs/{slug}/audit/config",
 		Summary:     "Get an organization's audit configuration",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *struct {
 		Slug string `path:"slug"`
 	}) (*AuditConfigOutput, error) {
-		actorID, _ := identity(ctx)
-		ip, err := store.GetAuditConfig(ctx, actorID, in.Slug)
+		ip, err := d.svc.GetAuditConfig(ctx, actor(ctx), in.Slug)
 		if err != nil {
-			return nil, auditConfigErr(err)
+			return nil, apiErr(err, "could not read the audit configuration")
 		}
 		out := &AuditConfigOutput{}
 		out.Body.IPDisclosure = ip
@@ -87,27 +91,16 @@ func registerAuditAPI(api huma.API, store IdentityStore, auditStore *audit.Store
 		Method:      http.MethodPut,
 		Path:        "/orgs/{slug}/audit/config",
 		Summary:     "Update an organization's audit configuration",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *AuditConfigInput) (*AuditConfigOutput, error) {
-		actorID, _ := identity(ctx)
-		if err := store.SetAuditConfig(ctx, actorID, in.Slug, in.Body.IPDisclosure); err != nil {
-			return nil, auditConfigErr(err)
+		ip, err := d.svc.SetAuditConfig(ctx, actor(ctx), in.Slug, in.Body.IPDisclosure)
+		if err != nil {
+			return nil, apiErr(err, "could not update the audit configuration")
 		}
 		out := &AuditConfigOutput{}
-		out.Body.IPDisclosure = in.Body.IPDisclosure
+		out.Body.IPDisclosure = ip
 		return out, nil
 	})
-}
-
-func auditConfigErr(err error) error {
-	switch {
-	case errors.Is(err, db.ErrNotMember):
-		return huma.Error404NotFound("organization not found")
-	case errors.Is(err, db.ErrForbidden):
-		return huma.Error403Forbidden("you don't have permission to do that")
-	default:
-		return huma.Error500InternalServerError("could not update the audit configuration", err)
-	}
 }
 
 // AuditConfigInput sets an org's audit configuration.

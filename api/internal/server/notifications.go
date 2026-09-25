@@ -12,20 +12,18 @@ import (
 // registerNotificationsAPI wires the notification feed endpoints. Like the rest
 // of the app-facing API they are gated by the internal token and act as the
 // forwarded user (RLS scopes everything to that user).
-func registerNotificationsAPI(api huma.API, store IdentityStore, internalToken string) {
-	auth := combinedAuth(api, store, internalToken)
+func registerNotificationsAPI(api huma.API, d deps) {
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-notifications",
 		Method:      http.MethodGet,
 		Path:        "/notifications",
 		Summary:     "List the caller's notifications",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *ListNotificationsInput) (*NotificationsOutput, error) {
-		userID, _ := identity(ctx)
-		items, err := store.ListNotifications(ctx, userID, in.Limit)
+		items, err := d.svc.ListNotifications(ctx, actor(ctx), in.Limit)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("could not load notifications", err)
+			return nil, apiErr(err, "could not load notifications")
 		}
 		out := &NotificationsOutput{}
 		out.Body.Notifications = items
@@ -37,12 +35,11 @@ func registerNotificationsAPI(api huma.API, store IdentityStore, internalToken s
 		Method:      http.MethodGet,
 		Path:        "/notifications/unread-count",
 		Summary:     "Count the caller's unread notifications",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, _ *struct{}) (*UnreadCountOutput, error) {
-		userID, _ := identity(ctx)
-		count, err := store.UnreadNotificationCount(ctx, userID)
+		count, err := d.svc.UnreadNotificationCount(ctx, actor(ctx))
 		if err != nil {
-			return nil, huma.Error500InternalServerError("could not count notifications", err)
+			return nil, apiErr(err, "could not count notifications")
 		}
 		out := &UnreadCountOutput{}
 		out.Body.Count = count
@@ -54,15 +51,12 @@ func registerNotificationsAPI(api huma.API, store IdentityStore, internalToken s
 		Method:      http.MethodPost,
 		Path:        "/notifications/{id}/read",
 		Summary:     "Mark a notification read",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *ReadNotificationInput) (*OKOutput, error) {
-		userID, _ := identity(ctx)
-		if err := store.MarkNotificationRead(ctx, userID, in.ID); err != nil {
-			return nil, huma.Error500InternalServerError("could not update notification", err)
+		if err := d.svc.MarkNotificationRead(ctx, actor(ctx), in.ID); err != nil {
+			return nil, apiErr(err, "could not update notification")
 		}
-		out := &OKOutput{}
-		out.Body.OK = true
-		return out, nil
+		return okOutput(), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -70,15 +64,12 @@ func registerNotificationsAPI(api huma.API, store IdentityStore, internalToken s
 		Method:      http.MethodPost,
 		Path:        "/notifications/{id}/unread",
 		Summary:     "Mark a notification unread",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *ReadNotificationInput) (*OKOutput, error) {
-		userID, _ := identity(ctx)
-		if err := store.MarkNotificationUnread(ctx, userID, in.ID); err != nil {
-			return nil, huma.Error500InternalServerError("could not update notification", err)
+		if err := d.svc.MarkNotificationUnread(ctx, actor(ctx), in.ID); err != nil {
+			return nil, apiErr(err, "could not update notification")
 		}
-		out := &OKOutput{}
-		out.Body.OK = true
-		return out, nil
+		return okOutput(), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -86,21 +77,18 @@ func registerNotificationsAPI(api huma.API, store IdentityStore, internalToken s
 		Method:      http.MethodPost,
 		Path:        "/notifications/read-all",
 		Summary:     "Mark all the caller's notifications read",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, _ *struct{}) (*OKOutput, error) {
-		userID, _ := identity(ctx)
-		if err := store.MarkAllNotificationsRead(ctx, userID); err != nil {
-			return nil, huma.Error500InternalServerError("could not update notifications", err)
+		if err := d.svc.MarkAllNotificationsRead(ctx, actor(ctx)); err != nil {
+			return nil, apiErr(err, "could not update notifications")
 		}
-		out := &OKOutput{}
-		out.Body.OK = true
-		return out, nil
+		return okOutput(), nil
 	})
 }
 
 // ListNotificationsInput is the notifications list request.
 type ListNotificationsInput struct {
-	Limit int `query:"limit" doc:"Max notifications to return" default:"30"`
+	Limit int `query:"limit" doc:"Max notifications to return (default 30; values above 100 are capped at 100)" default:"30"`
 }
 
 // NotificationsOutput is the notifications list response.
@@ -127,4 +115,11 @@ type OKOutput struct {
 	Body struct {
 		OK bool `json:"ok"`
 	}
+}
+
+// okOutput is the {"ok": true} acknowledgement.
+func okOutput() *OKOutput {
+	out := &OKOutput{}
+	out.Body.OK = true
+	return out
 }

@@ -1,0 +1,258 @@
+---
+title: Identity and authentication
+description: How Flagon knows who is calling - BetterAuth sessions in the app, the internal-token trust boundary to the API, personal and organization access tokens, org SSO with the API as source of truth, the org 2FA and SSO requirements the API enforces, and the account mirror.
+---
+
+Flagon authenticates people in one place and machines in another. People sign in
+to the **app** (`app/`), which runs [BetterAuth](https://www.better-auth.com) and
+keeps sessions in its own auth database. Scripts, CI jobs, and MCP clients present
+an **access token** directly to the **API** (`api/`). Either way, by the time a
+request reaches the service layer it carries one verified user id, and every query
+runs as that user.
+
+This page covers how each path establishes identity and where the trust boundaries
+are. Authorization (roles and scopes) is covered in
+[Permissions model](/docs/architecture/permissions-model).
+
+```text
+                  ┌── app (Next.js) ───────────────────────────────────────┐
+ Browser ────────►│ BetterAuth: password, email OTP, Google, GitHub,       │
+ (session cookie) │ TOTP two-factor, org SSO (OIDC, SAML)  ─► Auth DB      │
+                  │ [org] layout: redirects to the 2FA and SSO pages       │
+                  │ lib/api/client.ts: the only caller with the token      │
+                  └────────────────────┬───────────────────────────────────┘
+                                       │ Bearer FLAGON_INTERNAL_TOKEN
+                                       │ X-Flagon-User-Id, X-Flagon-User-Email
+                                       │ X-Flagon-Auth-Sso-Provider
+ Scripts, CI, MCP ─────────────────────┼── Bearer flagon_... ──────┐
+                                       │                           │
+                  ┌── api (Go) ────────▼───────────────────────────▼───────┐
+                  │ internalAuth        app only, forwarded user           │
+                  │ internalSystemAuth  app only, no user (pre-sign-in)    │
+                  │ combinedAuth        app, or a flagon_ token + scope    │
+                  │ tokens resolved by SHA-256 hash; missing scope = 403   │
+                  │ withOrgPolicy       org 2FA and SSO requirements = 403 │
+                  └────────────────────────────────────────────────────────┘
+```
+
+## Sessions in the app
+
+BetterAuth is configured in `app/src/lib/auth.ts` and mounted at
+`app/src/app/api/auth/[...all]/route.ts`. It owns every sign-in method:
+
+- **Email and password**, with email verification required before first sign-in
+  and password reset by an emailed link that expires after one hour.
+- **Email one-time codes** (the `emailOTP` plugin), which also back email
+  verification; the email carries both the code and a click-to-verify link.
+- **Google and GitHub**, each enabled only when its client id and secret are set.
+- **TOTP two-factor** with backup codes (the `twoFactor` plugin). An enrolled user
+  gets a second step at sign-in.
+- **Usernames** alongside email (the `username` plugin).
+- **Org SSO** over OIDC and SAML (the `@better-auth/sso` plugin), covered below.
+
+Auth endpoints are rate limited, with counters stored in the auth database so the
+limit holds across app instances: 20 requests per minute by default, tighter for
+sign-up (5), sending a verification code (3), and requesting a password reset (3).
+
+Two session hooks run on every sign-in. `session.create.before` refuses a new
+session for a soft-deleted account and, when the session is created by an SSO
+callback, stamps it with that provider's id (`sessions.ssoProviderId`).
+`session.create.after` re-mirrors the user's profile and auth state to the API (see
+the account mirror section below).
+
+In production the session cookie is `SameSite=None; Secure`. A SAML identity
+provider posts its assertion back cross-site, and a `Lax` cookie would not ride
+along, so Flagon could not link the SSO identity to the account that started the
+flow. BetterAuth's origin checks cover CSRF. Local development over HTTP uses `Lax`.
+
+## The gateway trust boundary
+
+The API never sees a BetterAuth session. The app verifies the session, then calls
+the API through `app/src/lib/api/client.ts` with:
+
+- `Authorization: Bearer <FLAGON_INTERNAL_TOKEN>`, a secret shared only by the app
+  and the API;
+- `X-Flagon-User-Id` and `X-Flagon-User-Email`, the verified user;
+- `X-Flagon-Client-Ip`, `X-Flagon-Client-Country`, and `X-Flagon-Client-Ua`, the end
+  user's request context for the audit log;
+- `X-Flagon-Auth-Sso-Provider`, only when the current session was established
+  through an SSO provider: that provider's id.
+
+The API believes those headers only when the internal token matches (compared in
+constant time). A token caller that sends them is ignored: the SSO assertion and
+the client context are bound only on internal-token requests. That makes the
+internal token the most sensitive secret in the system: anyone holding it can act
+as any user. It lives only in server-side environment variables of the two
+services, and `client.ts` is marked never to be imported from client code.
+
+Neither side has a default in production. The API refuses to start without
+`FLAGON_INTERNAL_TOKEN`, or with the public development value
+`dev-internal-token`, unless it runs in development mode, and the app's
+`internalToken()` (`app/src/lib/internal-token.ts`) falls back to the development
+value only when `NODE_ENV` is not `production`.
+
+Three middlewares in `api/internal/server` enforce the boundary, and all of them
+fail closed:
+
+| Middleware | Accepts | Used by |
+| --- | --- | --- |
+| `internalAuth` | The internal token plus `X-Flagon-User-Id` | Operations only the app may call as a user: token management, the assistant (`/ai/*`), invitation acceptance, SSO provisioning, the profile mirror (`PUT /me/profile`), the account soft-delete mirror |
+| `internalSystemAuth` | The internal token alone | Pre-sign-in reads by the auth layer: the SSO provider configuration and its import |
+| `combinedAuth` | The internal token plus user headers, or a `flagon_` access token | Every other user-facing operation |
+
+`internalAuth` and `combinedAuth` are both wrapped by `withOrgPolicy`, which
+enforces the org 2FA and SSO requirements described below once the caller is
+known. A missing or wrong internal token is `401`, a missing user id is `401`, and
+an API with no internal token configured answers `503` rather than accept
+anything. For an access token, `combinedAuth` answers `401` "invalid or expired
+token" only when the token is unknown, expired, or revoked; if the lookup itself
+fails (for example, the database is down) it answers a redacted `503` and logs the
+cause with the request id, so a valid caller is never told to discard a good
+token.
+
+## Access tokens
+
+An **access token** lets a program call the API as a principal without a browser.
+Tokens start with `flagon_pat_` or `flagon_oat_`; `combinedAuth` and the MCP
+server recognize the `flagon_` prefix.
+
+| Kind | Acts as | Managed by |
+| --- | --- | --- |
+| Personal access token (PAT) | The user who created it | That user, under `/me/tokens` |
+| Organization access token (OAT) | A service principal that belongs to one org | Org owners and admins, under `/orgs/{slug}/tokens` |
+
+How a token resolves:
+
+1. The secret is never stored. Flagon keeps its SHA-256 hash and a short display
+   prefix in `access_tokens`.
+2. On each request `flagon.resolve_access_token` looks the hash up. A revoked or
+   expired token, or an OAT whose org has been deleted, does not resolve, and the
+   request gets `401 invalid or expired token`. A successful lookup stamps
+   `last_used_at`.
+3. If the token has a scope list, the operation's required scope must be held
+   (directly or implied by a parent scope), or the request gets `403`. A token with
+   no scope list is limited only by its principal's role.
+4. The principal's user id is bound to the request, and from there the request is
+   identical to a dashboard request. See
+   [Request lifecycle](/docs/architecture/request-lifecycle).
+
+An OAT's **service principal** is a real row in the API's `users` table, marked
+`is_service`, with a membership in the token's org at the role chosen when the
+token was made (`admin`, `member`, or `viewer`). Because it is a member like any
+other, RLS and role checks apply to it unchanged. It is not a person: it is hidden
+from member lists, and it outlives the admin who created it. Revoking the OAT
+deletes the principal and its membership.
+
+Token management operations use `internalAuth`, so a token can never create,
+list, or revoke tokens. A leaked token cannot mint itself a broader successor.
+
+A few account-level operations only make sense for a person, so an OAT's service
+principal gets `403` on them whatever its scopes: `create-org`, `leave-org`,
+`list-deleted-orgs`, and `restore-org`.
+
+## Org SSO
+
+An organization can require its members to sign in through its own identity
+provider, such as Okta or Microsoft Entra ID, over OIDC or SAML.
+
+**The API is the source of truth.** Provider configuration lives in the API's
+`sso_providers` table and is managed through API operations (`create-sso-provider`
+and siblings, owner or admin only, scope `write:org`), so it is available from the
+dashboard, REST, the assistant, and MCP, and every change is audited. Secrets (an
+OIDC client secret or a SAML signing key) sit in their own column that no
+user-facing read selects; owners and admins see only whether one is set. They are
+sealed at rest with AES-256-GCM under `FLAGON_SECRETS_KEY` (`api/internal/secrets`),
+and rows that predate encryption are sealed on the next boot. See
+[Data ownership](/docs/architecture/data-ownership).
+
+**BetterAuth holds a cache.** The SSO plugin runs the protocol from its own
+provider table. A `hooks.before` (`ssoBeforeHook` in `app/src/lib/sso-hook.ts`)
+re-syncs the provider a request is about to use from the API's internal read
+before every SSO sign-in, callback, and SAML endpoint, so changes apply on the next
+sign-in and a deleted provider stops working. If the API is unreachable, SSO fails
+closed with `503`. The plugin's own registration endpoints are disabled. See
+[Data ownership](/docs/architecture/data-ownership).
+
+**Signing in.** A user starts SSO by provider id or by email domain; a domain
+routes to at most one live provider. After the plugin verifies the assertion:
+
+- If someone is already signed in, the SSO identity is linked to that current
+  account, even when the email the identity provider asserts differs. One Flagon
+  account can carry the SSO identities of several orgs.
+- `provisionUser` calls the API's internal `POST /internal/sso/provision-member`,
+  which idempotently ensures the user is a member of the provider's org (as
+  `member` by default). It runs on every SSO sign-in, and a failure never blocks a
+  valid sign-in.
+- The new session records the provider it came through (`ssoProviderId`), and the
+  account's linked SSO identities are mirrored to the API on sign-in. Those two
+  facts are what the SSO requirement below checks.
+
+## Org two-factor and SSO requirements
+
+An org's security policy has two switches, `enforce_two_factor` and `require_sso`,
+stored on the org in the API and changed with `set-org-security` (owners and admins,
+scope `write:org`). They travel on every org object the API returns.
+
+**The API enforces them.** `service.CheckOrgAccess` (`api/internal/service/access.go`)
+makes the decision, from the org's policy and the caller's mirrored auth state read
+through the `flagon.org_access_state` window (migration `0035`). It runs on every
+front door:
+
+- REST: `withOrgPolicy` runs it for every operation under `/orgs/{slug}` except
+  `leave-org`, which only removes access and must always work;
+- the assistant: `POST /ai/messages` and `POST /ai/actions/execute` run it for the
+  conversation's org;
+- tools: the registry wraps every tool so it runs for any tool call with an `org`
+  argument, in the assistant and over MCP alike.
+
+The rules, applied to a member of the org:
+
+| Requirement | Session (dashboard, assistant) | Personal access token | Org access token |
+| --- | --- | --- | --- |
+| 2FA required | `403` unless the user has 2FA enabled | `403` unless the user has 2FA enabled | Exempt |
+| SSO required | `403` unless the current session was established through one of the org's live providers | `403` unless the user has signed in through one of the org's providers at least once | Exempt |
+
+Owners are exempt from the SSO requirement (not from 2FA) as a break-glass path: SSO
+can fail in ways 2FA cannot, such as an identity provider outage or an expired
+certificate, and an owner must always be able to reach settings to fix it. An org
+access token is exempt from both because its principal is a service account with
+no interactive sign-in, minted by an owner or admin who was subject to the policy.
+A non-member is never refused by the policy; the operation itself answers `404`.
+The `403` message says what to fix.
+
+**The app turns the `403` into a redirect.** `app/src/app/[org]/layout.tsx`, which
+every page under `/<org>` renders through, applies the same rules and sends a
+member who does not meet them to `/2fa-required` or `/sso-required` (both outside
+the org layout, so they cannot loop). It also re-mirrors the account's 2FA state
+when the API's copy disagrees with the session.
+
+**No self-lockout.** `set-org-security` refuses (`403`) to switch on a requirement
+the person making the change does not meet: you need 2FA yourself to require 2FA,
+and a linked SSO identity with one of the org's providers to require SSO. The guard
+lives in the API (`db.SetOrgSecurity`), so it holds on every front door.
+
+## The account mirror
+
+The account and its public profile (name, username, bio, links, avatar) belong to
+the app. The API keeps a mirror in its `users` table so domain rows can reference
+users and so it can serve the public profile at `GET /users/{username}` without
+authentication, through a `SECURITY DEFINER` window that returns only public
+columns. The mirror also carries the two auth facts the org policy needs: whether
+2FA is enabled, and which SSO providers the account has signed in through
+(`user_sso_identities`).
+
+The app pushes the profile to `PUT /me/profile` from BetterAuth's user create and
+update hooks and again on every new session, best-effort with a 2.5 second timeout.
+The endpoint accepts only the internal token (`internalAuth`): the profile, the
+username, and the auth-state fields all belong to the app's auth layer, so an
+access token gets `401` whatever its scopes. An account soft delete is mirrored through the internal-only
+`PUT /me/deleted`, which hides the profile. See
+[Data ownership](/docs/architecture/data-ownership).
+
+## Related
+
+- [Permissions model](/docs/architecture/permissions-model)
+- [Request lifecycle](/docs/architecture/request-lifecycle)
+- [Single sign-on](/docs/platform/sso)
+- [Two-factor authentication](/docs/platform/two-factor)
+- [Authentication (security)](/docs/security/authentication)

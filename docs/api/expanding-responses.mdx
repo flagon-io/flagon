@@ -1,56 +1,88 @@
 ---
 title: Expanding responses
-description: Inline related objects in a single request with Stripe-style expand[] parameters.
-order: 4
+description: Inline a related object in the same response with the expand[] query parameter instead of making a second request.
 ---
 
-Flagon is a hub for your data, and its objects reference each other - a project
-belongs to an organization, an audit event has an actor, and so on. By default a
-response returns a **reference** to a related object (an id, like `org_id`), not
-the whole thing, so payloads stay small and predictable.
+Flagon objects reference each other: a project belongs to an organization, an
+audit event has an actor. By default a response returns a **reference** to a
+related object (an id such as `org_id`), not the whole object, so payloads stay
+small and predictable. When you need the related object too, ask for it with the
+**`expand[]`** query parameter instead of making a second request.
 
-When you need the related object too, ask for it with **`expand[]`** (the same
-convention Stripe uses) instead of making a second request.
+## Supported expansions
+
+Expansion is opt-in per operation. Today one operation supports it:
+
+| Operation | Relation | What it adds |
+| --- | --- | --- |
+| `GET /orgs/<org>/projects/<project>` (`get-project`) | `organization` | An `organization` object next to `org_id`: `id`, `name`, `slug`, your `role`, `enforce_two_factor`, `require_sso`, `created_at`. |
+
+The delete project operation (`DELETE /orgs/<org>/projects/<project>`) shares
+`get-project`'s input, so the [OpenAPI spec](/docs/api/openapi) lists an
+`expand[]` parameter on it too, but it does not expand anything today. More relations will be added operation by
+operation, following this same convention.
 
 ## How it works
 
-Add one `expand[]` parameter per relation you want inlined. The expanded object
-appears alongside the reference it came from.
+Add an `expand[]` parameter naming the relation. The expanded object appears
+alongside the reference it came from:
 
-```sh
-# Just the project (org_id only):
-GET /orgs/acme/projects/billing-api
+```bash
+# The project alone (org_id only):
+curl "https://api.flagon.io/orgs/acme/projects/billing-api" \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
 
-# The project with its organization inlined:
-GET /orgs/acme/projects/billing-api?expand[]=organization
+# The project with its organization inlined. -g stops curl treating [] as a glob.
+curl -g "https://api.flagon.io/orgs/acme/projects/billing-api?expand[]=organization" \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
 ```
 
-```jsonc
+```json
 {
-  "id": "…",
+  "id": "75919af9-2064-4bcd-998d-5b63eb411de6",
+  "org_id": "fcda53fb-3ab8-4b53-9f7f-fca413901062",
+  "name": "Billing API",
   "slug": "billing-api",
-  "org_id": "org_…",
-  // present only because organization was expanded:
-  "organization": { "id": "org_…", "name": "Acme", "slug": "acme", "role": "owner" }
+  "organization": {
+    "id": "fcda53fb-3ab8-4b53-9f7f-fca413901062",
+    "name": "Acme",
+    "slug": "acme",
+    "role": "owner",
+    "enforce_two_factor": false,
+    "require_sso": false,
+    "created_at": "2026-09-17T16:14:22.59927Z"
+  }
 }
 ```
 
-You can expand several relations at once, and the parser is forgiving - repeated
-params and comma-separated lists both work:
+(Other project fields are omitted here for brevity.)
 
+To ask for several relations, repeat the parameter or separate names with commas
+inside one value. Both forms are equivalent:
+
+```text
+?expand[]=organization&expand[]=another_relation
+?expand[]=organization,another_relation
 ```
-?expand[]=organization&expand[]=created_by
-?expand=organization,created_by
-```
+
+The parameter name must be `expand[]` with the brackets (URL-encoded as
+`expand%5B%5D` if your client needs it). A bare `expand=organization` is not
+read.
 
 ## Rules
 
-- **Opt-in.** Nothing is expanded unless you ask; the reference id is always
+- **Opt-in.** Nothing is expanded unless you ask, and the reference id is always
   present whether or not you expand it.
-- **Permission-scoped.** An expanded object is only ever returned if your token
-  and role could read it on its own - expand never widens access.
-- **Unknown expansions are ignored**, so adding an `expand[]` your client
-  understands but a given endpoint doesn't is harmless.
+- **Never widens access.** An expanded object is loaded with the same identity
+  and permission checks as a direct request for it. If that load fails, the
+  whole request fails with that error rather than returning a partial object.
+- **Unknown names are ignored.** Names are trimmed and lowercased, and a name an
+  operation does not support is skipped silently, so asking for a relation a
+  given endpoint does not know is harmless.
 
-Expansion is being rolled out across the API; each operation's OpenAPI entry
-lists the relations it supports.
+## Related
+
+- [Using the API](/docs/api/using-the-api)
+- [Pagination and search](/docs/api/pagination)
+- [OpenAPI and clients](/docs/api/openapi)
+- [Projects](/docs/platform/projects)

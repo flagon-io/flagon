@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError } from "@/lib/route-error";
 import { markNotificationUnread } from "@/lib/flagon-api";
 
 export async function POST(_request: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -6,7 +7,7 @@ export async function POST(_request: Request, ctx: { params: Promise<{ id: strin
   try {
     await markNotificationUnread(id);
     return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json({ error: "Could not update notification." }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not update notification.");
   }
 }

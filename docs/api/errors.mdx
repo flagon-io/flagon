@@ -1,6 +1,114 @@
 ---
 title: Errors
-description: How the API reports errors, and what each status means.
-status: planned
-order: 2
+description: How the API reports failures as RFC 9457 problem details, and what each status code means.
+visibility: public
 ---
+
+Flagon uses conventional HTTP status codes: `2xx` means the request succeeded,
+`4xx` means something about the request needs to change, and `5xx` means
+something failed on the server. Every error response has the same shape, so a
+client can handle all of them with one code path.
+
+## The error shape
+
+Errors are **problem details** (RFC 9457) with the content type
+`application/problem+json`:
+
+```json
+{
+  "$schema": "https://api.flagon.io/schemas/ErrorModel.json",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "project not found"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `title` | The standard phrase for the status (`Not Found`, `Conflict`, ...). Stable for a given status. |
+| `status` | The HTTP status code, repeated in the body. |
+| `detail` | A human-readable explanation of this occurrence. Safe to show to a user. |
+| `errors` | Optional. A list of individual problems, each with a `message` and, for validation failures, the `location` (for example `body` or `body.name`) and the offending `value`. |
+| `$schema` | A link to the JSON Schema of the error body (`ErrorModel`), which is also in the [OpenAPI spec](/docs/api/openapi), so generated clients get a typed error model. |
+
+Branch on `status`, not on the text of `detail`. The wording of a message can
+improve over time; the status for a given condition does not change.
+
+## Request ids and server errors
+
+Every response, success or failure, carries an `X-Request-Id` header. The API
+generates a random id, or keeps the one you send in `X-Request-Id` when it is 8
+to 128 characters of letters, digits, `.`, `_`, and `-` (so the dashboard can
+propagate its own id across the hop).
+
+Server-side failures (`5xx`) never include internal error text such as SQL,
+hostnames, or upstream provider responses. The body keeps only `title`,
+`status`, and a generic `detail` such as `could not create project`; the
+underlying cause is written to the server log together with the request id.
+When you report a failure, quote the `X-Request-Id` value so an operator can find
+the matching log line.
+
+```bash
+curl -i https://api.flagon.io/me -H "Authorization: Bearer $FLAGON_TOKEN"
+# HTTP/2 200
+# x-request-id: 3f9c1a0e5b7d4c2a9e8f6b1d0c3a5e7f
+```
+
+## Status codes
+
+| Status | When you see it |
+| --- | --- |
+| `400 Bad Request` | The body could not be parsed, for example malformed JSON. The `errors` list carries the parser's message. Also returned when confirming an assistant action that names an unknown or non-executable tool. |
+| `401 Unauthorized` | No credential, or one that is not valid: a missing bearer token, or an access token that is unknown, revoked, or expired. An organization access token also stops working when its organization is deleted. |
+| `402 Payment Required` | The action needs a paid plan. Today this is creating, or restoring, a second organization you own: the free plan includes one owned organization. |
+| `403 Forbidden` | You are authenticated but not allowed. Common causes: your **token is missing the scope** the operation requires; your **role** does not permit the action (a member changing the organization's security policy or reading the audit log, or a project `read` collaborator editing a project they can see); the organization **requires two-factor authentication or single sign-on** and you do not meet it (the `detail` says what to fix); turning on a 2FA or SSO requirement you do not meet yourself; an **organization access token** calling an operation that needs a human (creating, leaving, or restoring an organization, or listing deleted organizations); or the assistant being asked to act in an organization other than its conversation's. Accepting an invitation that was sent to a different email address is also a `403`. |
+| `404 Not Found` | The resource does not exist, **or you cannot see it**. Organizations you do not belong to, their projects and teams, and projects inside your organization that you have no role on, return `404` rather than `403` (for reads and changes alike), so the API never confirms that something exists outside your reach. Restoring a project or organization deleted more than 30 days ago is also a `404`. |
+| `409 Conflict` | The request conflicts with current state: a slug or username that is already taken, a user who is already a member or collaborator, a pending invitation that already exists, a change that would leave an organization without an owner (including the only owner trying to leave), changing your own membership through the member endpoints, or restoring a deleted organization or project whose slug was taken meanwhile (pass a new `slug`). |
+| `410 Gone` | An invitation that has expired. Invitations are valid for seven days. |
+| `413 Content Too Large` | The request body is too large. API operations accept up to 1 MiB; the server also enforces a global cap (`FLAGON_MAX_BODY_BYTES`, 4 MiB by default) on every route, including the MCP endpoint. See [Limits](/docs/reference/limits). |
+| `422 Unprocessable Entity` | The request was readable but not valid: it failed schema validation (the `errors` list says which fields and why), or failed a domain rule such as an unknown role, an empty name, an unknown scope, an expiry in the past, or an invalid base permission. An invalid or tampered **pagination cursor** is also a `422` (see [Pagination](/docs/api/pagination)). |
+| `429 Too Many Requests` | One of two limits. **Rate limit**: you sent requests faster than the per-caller rate limit allows; the response has a `Retry-After` header (in seconds) and a `detail` like `rate limit exceeded; retry after 2s`. Wait that long and retry. **AI quota**: the organization has used its daily AI allowance (`detail` is `AI usage limit reached for this organization`, no `Retry-After`); only the assistant's endpoints return this, and it clears as the 24-hour window rolls. See [Limits](/docs/reference/limits). |
+| `500 Internal Server Error` | An unexpected failure on the server. The body carries a generic `detail` only; quote the `X-Request-Id` header when reporting it. The request may be retried. |
+| `503 Service Unavailable` | Something the request needs is not available: the assistant is not configured (`the AI agent is not configured`: no model provider, a missing API key, or the provider rejected the key), the assistant could not record usage for a turn (the turn fails closed rather than going unmetered), the audit log is not available on this deployment, the API could not check an access token (for example, its database is down; the token itself may be fine, so retry rather than replacing it), or `GET /readyz` cannot reach the database. |
+
+## Validation errors
+
+When a request fails schema validation, the response lists every problem at
+once, so a client can surface them all in one pass:
+
+```json
+{
+  "$schema": "https://api.flagon.io/schemas/ErrorModel.json",
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "validation failed",
+  "errors": [
+    {
+      "message": "expected required property name to be present",
+      "location": "body",
+      "value": {}
+    }
+  ]
+}
+```
+
+## One mapping, every front door
+
+Each domain condition maps to exactly one status in one table
+(`api/internal/service/errors.go`), and every front door uses it. The same
+mistake produces the same error whether you call the REST API directly, go
+through the dashboard, or confirm an action proposed by the
+[assistant](/docs/ai/assistant): confirming an assistant action returns the
+underlying operation's real status (a `403` for a missing permission, a `409`
+for a taken slug), not a generic failure.
+
+Tools called over [MCP](/docs/ai/mcp) report failures the MCP way instead: a
+tool result flagged `isError` whose text is the same caller-safe message, rather
+than an HTTP status.
+
+## Related
+
+- [Using the API](/docs/api/using-the-api)
+- [Authentication and scopes](/docs/api/authentication)
+- [Pagination and search](/docs/api/pagination)
+- [Troubleshooting API errors](/docs/troubleshooting/api-errors)

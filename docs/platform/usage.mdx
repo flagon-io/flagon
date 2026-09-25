@@ -1,0 +1,85 @@
+---
+title: Usage and AI limits
+description: How assistant usage is metered per organization, the rolling daily limit, and what happens when you reach it.
+visibility: public
+---
+
+Flagon meters usage **per organization**, so limits and plans apply to the org,
+not to an individual. Today that metering covers the
+[assistant](/docs/ai/assistant): every assistant turn and every confirmed action
+is recorded against the organization it ran in, and a rolling daily limit caps
+how many there can be. Plan-based limits and billing will build on the same
+records.
+
+## What is metered
+
+Each time the assistant does work, Flagon writes a usage record for the
+organization the conversation belongs to:
+
+- **Each assistant turn** (one message you send, including every read tool it
+  runs and every model call along the way) records one entry with the model used
+  and the input and output tokens it consumed.
+- **Each confirmed action** (a change the assistant proposed and you approved)
+  records one entry for the tool that ran.
+
+Both kinds count toward the daily limit. If a turn's usage cannot be recorded,
+the turn fails with `503 Service Unavailable` rather than running unmetered.
+
+Calling the REST API directly, or calling tools over [MCP](/docs/ai/mcp), runs no
+model on Flagon's side and is **not** metered as AI usage. Usage records are
+tenant-isolated like everything else: no other organization can read them.
+
+## The daily limit
+
+Each organization can make a fixed number of AI calls in any **rolling 24
+hours**. The default is **100 per organization**, which is what the hosted
+service uses. The limit is checked when you send the assistant a message and
+again before a confirmed action runs: once the organization has reached it,
+either request fails with `429 Too Many Requests` and the message
+`AI usage limit reached for this organization`, and neither the model nor the
+action runs.
+Because the window is rolling, capacity returns gradually as older calls age past
+24 hours; there is no midnight reset.
+
+Everything else keeps working when the limit is reached. The dashboard, the API,
+and MCP are not affected, and anything the assistant can do you can still do
+yourself.
+
+## Plans
+
+Every organization is on the **Free** plan today, shown under the org's
+**Settings > Billing**. The Free plan includes the AI daily limit above and one
+organization you own; creating a second owned organization returns
+`402 Payment Required` (see [Organizations](/docs/platform/organizations#plan-limit)).
+
+<Callout type="warn" title="Not available yet">
+
+Paid plans, billing, and the org's **Usage** page (it shows a "Coming soon"
+preview) are not built yet. See the [roadmap](https://flagon.io/roadmap).
+
+</Callout>
+
+## Self-hosting
+
+On your own instance the limit and the model are configuration on the API server:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FLAGON_AI_DAILY_LIMIT` | `100` | Maximum AI calls per organization per rolling 24 hours. `0` means unlimited: fine for a private instance, never for a shared one. |
+| `FLAGON_AI_PROVIDER` | `auto` | `anthropic`, `openai` (any OpenAI-compatible endpoint), `mock` (offline, no key), or `auto`. Pinning `anthropic` or `openai` without its credentials, or an unknown value, stops the API at startup. |
+| `ANTHROPIC_API_KEY` | none | Enables the Anthropic provider. |
+| `FLAGON_AI_BASE_URL` | none | Base URL of an OpenAI-compatible endpoint, such as a local Ollama or vLLM server. `OPENAI_BASE_URL` also works. |
+| `FLAGON_AI_API_KEY` | none | Key for the OpenAI-compatible endpoint (leave empty for keyless local servers). `OPENAI_API_KEY` also works. |
+| `FLAGON_AI_MODEL` | provider default | The model the assistant runs. |
+
+Pointing the assistant at a model you host yourself gives you a flat cost; the
+daily limit still applies unless you raise or disable it. See
+[The assistant](/docs/ai/assistant#providers-and-models) for how the provider is
+chosen and [Configuration](/docs/reference/configuration) for every setting.
+
+## Related
+
+- [The assistant](/docs/ai/assistant)
+- [Organizations](/docs/platform/organizations)
+- [Configuration reference](/docs/reference/configuration)
+- [Self-hosting](/docs/self-hosting/overview)

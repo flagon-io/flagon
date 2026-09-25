@@ -3,12 +3,17 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/flagon-io/flagon/api/internal/ai"
+	"github.com/flagon-io/flagon/api/internal/audit"
+	"github.com/flagon-io/flagon/api/internal/db"
+	"github.com/flagon-io/flagon/api/internal/service"
 )
 
 // registerMCP mounts the MCP front door at /mcp. It speaks the Model Context
@@ -73,23 +78,44 @@ func mcpHandler(registry *ai.Registry, store IdentityStore) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 
-		caller, ok := authenticateMCP(r, store)
-		if !ok {
+		caller, err := authenticateMCP(r, store)
+		switch {
+		case errors.Is(err, errMCPInvalidToken):
 			// A token was presented but did not resolve: fail loud rather than
 			// silently downgrading to anonymous, so a rotated/expired token is
 			// obvious instead of quietly losing access to the user's tools.
 			writeJSON(w, http.StatusOK, rpcErr(nil, -32001, "invalid or expired token"))
 			return
+		case err != nil:
+			// Not a verdict on the token (e.g. the database is down), so don't
+			// tell a valid caller to discard it. Same rule as the REST combinedAuth.
+			slog.ErrorContext(r.Context(), "mcp: could not resolve access token",
+				"request_id", RequestID(r.Context()), "err", err)
+			writeProblem(w, http.StatusServiceUnavailable, "the service is temporarily unavailable")
+			return
 		}
 
 		req, err := decodeRPC(r)
 		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeProblem(w, http.StatusRequestEntityTooLarge, "request body is too large")
+				return
+			}
 			writeJSON(w, http.StatusOK, rpcErr(nil, -32700, "parse error"))
 			return
 		}
-		resp, notification := handleRPC(r.Context(), registry, caller, req)
+		// Tools an authenticated caller runs act as their user and may write audit
+		// entries; stamp the request's "where" (the connection address - MCP has no
+		// trusted gateway forwarding an end-user IP - and the client's user agent)
+		// so those entries record it, the same as a REST call with the same token.
+		ctx := r.Context()
+		if caller.authed {
+			ctx = audit.WithContext(ctx, connIP(ctx), "", strings.TrimSpace(r.UserAgent()))
+		}
+		resp, notification := handleRPC(ctx, registry, caller, req)
 		if notification {
 			w.WriteHeader(http.StatusAccepted)
 			return
@@ -98,27 +124,42 @@ func mcpHandler(registry *ai.Registry, store IdentityStore) http.HandlerFunc {
 	}
 }
 
+// errMCPInvalidToken marks a presented Flagon token that is unknown, expired, or
+// revoked, as opposed to a lookup that failed for another reason.
+var errMCPInvalidToken = errors.New("invalid or expired token")
+
 // authenticateMCP resolves the request's Authorization header into a caller. No
-// Flagon token (missing header, or a non-flagon bearer) is an anonymous caller,
-// ok=true. A Flagon token that fails to resolve returns ok=false so the handler
-// can reject it. Tokens act as the user, mirroring the REST API's combinedAuth.
-func authenticateMCP(r *http.Request, store IdentityStore) (mcpCaller, bool) {
+// Flagon token (missing header, or a non-flagon bearer) is an anonymous caller.
+// A Flagon token that doesn't resolve returns errMCPInvalidToken so the handler
+// can reject it; any other failure (the store is missing or the lookup errored)
+// is returned as-is and answered with a 503. Tokens act as the user, mirroring
+// the REST API's combinedAuth.
+func authenticateMCP(r *http.Request, store IdentityStore) (mcpCaller, error) {
 	presented := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !strings.HasPrefix(presented, "flagon_") {
-		return mcpCaller{}, true // anonymous
+		return mcpCaller{}, nil // anonymous
 	}
 	if store == nil {
-		return mcpCaller{}, false
+		return mcpCaller{}, errors.New("mcp: no identity store configured")
 	}
 	p, err := store.ResolveToken(r.Context(), presented)
-	if err != nil {
-		return mcpCaller{}, false
+	if errors.Is(err, db.ErrInvalidToken) {
+		return mcpCaller{}, errMCPInvalidToken
 	}
-	tc := ai.ToolContext{UserID: p.UserID, Email: p.Email, AllowInternalDocs: true}
+	if err != nil {
+		return mcpCaller{}, err
+	}
+	// An authenticated caller may read internal docs; the anonymous MCP never can.
+	tc := ai.ToolContext{
+		UserID:            p.UserID,
+		Email:             p.Email,
+		Via:               tokenVia(p.Kind),
+		AllowInternalDocs: true,
+	}
 	if p.OrgID != nil {
 		tc.OrgID = *p.OrgID
 	}
-	return mcpCaller{tc: tc, scopes: p.Scopes, authed: true}, true
+	return mcpCaller{tc: tc, scopes: p.Scopes, authed: true}, nil
 }
 
 // mcpHostGate turns the dedicated MCP hostname into a single-purpose front door.
@@ -220,7 +261,7 @@ func handleRPC(ctx context.Context, registry *ai.Registry, caller mcpCaller, req
 			tools = append(tools, map[string]any{
 				"name":        d.Name,
 				"description": d.Description,
-				"inputSchema": json.RawMessage(d.InputSchema),
+				"inputSchema": d.InputSchema,
 			})
 		}
 		return rpcOK(req.ID, map[string]any{"tools": tools}), false
@@ -261,7 +302,13 @@ func callTool(ctx context.Context, registry *ai.Registry, caller mcpCaller, req 
 	// docs); authenticated callers act as their user.
 	out, err := tool.Run(ctx, caller.tc, args)
 	if err != nil {
-		return rpcOK(req.ID, toolResult(err.Error(), true))
+		// Only a classified (caller-safe) message ever leaves the server; an
+		// internal fault is logged and reported generically, never as raw
+		// err.Error() (which can carry SQL, hostnames, or other internals).
+		if _, known := service.Classify(err); !known {
+			slog.ErrorContext(ctx, "mcp tool failed", "request_id", RequestID(ctx), "tool", params.Name, "err", err)
+		}
+		return rpcOK(req.ID, toolResult(service.PublicMessage(err), true))
 	}
 	payload, err := json.Marshal(out)
 	if err != nil {

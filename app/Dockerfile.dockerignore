@@ -1,0 +1,18 @@
+# Build context for app/Dockerfile (the repo root, because the npm workspace's
+# lockfile lives there). Docker reads this file because it sits next to that
+# Dockerfile, so it never affects other builds. The api image uses ./api.
+**/node_modules
+**/.next
+**/dist
+**/.env*
+**/test-results
+**/playwright-report
+**/tsconfig.tsbuildinfo
+.git
+.vercel
+api
+docs
+roadmap
+changelog
+openapi
+npm-debug.log*

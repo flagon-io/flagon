@@ -1,8 +1,8 @@
 "use client";
 
-import { useId, useState, type InputHTMLAttributes } from "react";
+import { useId, useState, type ChangeEvent, type ComponentProps } from "react";
 import { cn } from "../lib/cn";
-import { controlHeight, type ControlSize } from "../lib/control";
+import { controlHeight, focusRing, type ControlSize } from "../lib/control";
 import { InputGroup } from "./input-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select";
 
@@ -176,7 +176,7 @@ export function detectCurrency(text: string, currencies: string[], locale?: stri
 }
 
 export type MoneyInputProps = Omit<
-  InputHTMLAttributes<HTMLInputElement>,
+  ComponentProps<"input">,
   "value" | "defaultValue" | "onChange" | "size" | "prefix"
 > & {
   /** Uncontrolled starting amount. */
@@ -290,7 +290,7 @@ export function MoneyInput({
     disabled,
     placeholder: placeholder ?? (selectable ? "0" : "$0"),
     value: display,
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setText(e.target.value),
+    onChange: (e: ChangeEvent<HTMLInputElement>) => setText(e.target.value),
     onFocus: handleFocus,
     onBlur: handleBlur,
     ...props,
@@ -310,7 +310,7 @@ export function MoneyInput({
             <SelectTrigger
               size={size}
               aria-label="Currency"
-              className="h-full w-auto gap-1 rounded-none border-0 bg-transparent px-3 font-medium text-muted-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:text-foreground"
+              className="h-full w-auto gap-1 rounded-none border-0 bg-transparent px-3 font-medium text-muted-foreground shadow-none focus-visible:outline-none data-[state=open]:text-foreground"
             >
               <SelectValue />
             </SelectTrigger>
@@ -330,12 +330,14 @@ export function MoneyInput({
 
   return (
     <input
+      data-slot="money-input"
       {...inputProps}
       className={cn(
         controlHeight[size],
         "w-full rounded-md border border-input bg-background px-3 text-sm text-foreground tabular-nums",
         "placeholder:text-muted-foreground",
-        "outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "transition",
+        focusRing,
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}

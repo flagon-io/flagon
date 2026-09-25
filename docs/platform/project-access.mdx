@@ -1,117 +1,174 @@
 ---
 title: Project access
-description: Repository-style collaborator roles that layer on top of organization roles for a single project.
+description: Per-project collaborator roles, team grants, and ownership that layer on top of organization roles.
 visibility: public
-order: 3
 ---
 
-Most teams run on **organization roles** alone: owners and admins run the org,
-members build, viewers read. But sometimes one person needs more (or less) reach
-on a **single project** than their org role gives them. Project access adds
-repository-style **collaborator roles** for exactly that, without changing what
-they can do anywhere else.
+Most organizations run on **organization roles** and the **base permission**
+alone. But sometimes one person or team needs more reach on a **single project**
+than the organization gives them. Project access adds **collaborator roles**,
+**team grants**, and **ownership** for exactly that, without changing what anyone
+can do on other projects.
+
+Everything on this page is managed from a project's **Settings > Access**
+(`app.flagon.io/<org>/projects/<project>/settings/access`), which has sections
+for collaborators, teams, and owners.
 
 ## The roles
 
-A project role is one of five rungs, lowest to highest:
+A project role is one of five rungs, lowest to highest. The ladder is
+cumulative: each role can do everything the ones below it can.
 
-- **Read** - see the project and its collaborators.
-- **Triage** - read, plus manage the project's work items (reserved for
-  deployment and workflow features as they land).
-- **Write** - edit the project's name, slug, description, README, and repository
-  URL.
-- **Maintain** - write, plus manage project-level settings (reserved for
-  environments and configuration as they land).
-- **Admin** - full control over the project's collaborators and settings.
+| Role | Grants |
+| --- | --- |
+| **Read** | See the project, its README, and its collaborators, teams, and owners. |
+| **Triage** | Read today. Reserved for work-item powers as deployment and workflow features land. |
+| **Write** | Edit the project's name, description, README, and repository URL. |
+| **Maintain** | Write, plus renaming the project's slug, and project-level settings (environments and configuration) as they land. |
+| **Admin** | Manage the project's collaborators and team grants. |
 
-The ladder is cumulative: each role can do everything the ones below it can.
-**Ownership** sits above the ladder as a separate tier - it is not a rung, and it
-carries powers admin does not (see [Project ownership](#project-ownership) below).
+A person with no effective role on a project cannot see it at all: it is left
+out of project lists, and its pages and API operations (reads and writes alike)
+return `404 Not Found`. Someone who can see a project but lacks the rung an
+operation needs gets `403 Forbidden`. The API checks this in its Go layer and
+Postgres row-level security enforces the same rule underneath.
+
+`GET /orgs/{slug}/projects/{project}` (and the `get_project` tool) returns your
+own access in a `viewer` object: your effective `role`, whether you are an
+`owner`, and the `permissions` that grants (`project:view`, `project:write`,
+`project:manage`, `project:admin`, `project:own`). The dashboard uses it to hide
+controls you can't use; the server still checks every operation.
+
+**Ownership** sits above the ladder as a separate tier. See
+[Project ownership](#project-ownership).
 
 ## How access combines
 
-A person can pick up access to a project three different ways, and their
-**effective role** is the **higher** of all of them:
+A person can pick up access to a project three ways, and their **effective role**
+is the **highest** of them:
 
-- the **organization floor** - what their org role and the base permission grant
+- the **organization floor**: what their org role and the base permission grant
   on every project;
 - their **explicit collaborator grant** on this project, if any;
-- any grant from a **team** they belong to that has been given a role on this
+- the role of any **team** they belong to that has been granted access to this
   project.
 
 | Org role | Floor project role |
 | --- | --- |
-| Owner | Admin (plus ownership) |
-| Admin | Admin (plus ownership) |
-| Member | Base permission |
+| Owner | Admin (plus owner powers) |
+| Admin | Admin (plus owner powers) |
+| Member | The base permission (default `read`; `none` means no floor) |
+| Viewer (legacy) | Read |
 
-Because the effective role is a **maximum**, any grant can only ever **raise**
-someone on a specific project, never lower them below their organization floor.
-Granting `read` to a member whose floor is already `write` changes nothing;
-granting `admin` lets that same member manage the project's collaborators and
-settings, without making them an org admin everywhere else.
+Because the effective role is a maximum, a grant can only **raise** someone on a
+specific project, never lower them below their organization floor. Granting
+`read` to a member whose floor is already `write` changes nothing; granting
+`admin` lets that member manage the project's collaborators without making them
+an org admin anywhere else. To keep a project private to a group, set the base
+permission to `none` and grant access explicitly.
+
+## Collaborators
+
+A **collaborator** is an organization member with an explicit role on one
+project. Anyone who can see the project can see its collaborators; people with an
+effective `admin` role (or owner powers) can add, change, and remove them.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Open the project, go to **Settings > Access**, and add a collaborator by
+username or email with a role. Change or remove them from the same list.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects/billing-api/members \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"login": "dev@example.com", "role": "write"}'
+```
+
+</Tab>
+
+<Tab title="Assistant">
+
+Ask: "Give dev@example.com write access to billing-api." The assistant proposes
+`add_project_member` and runs it when you confirm.
+
+</Tab>
+
+</Tabs>
+
+- A collaborator must already be a **member of the organization**: a project
+  grant elevates an existing member, it never adds outsiders (`409 Conflict`,
+  `that user must be an organization member first`).
+- You can't change your own grant (`409 Conflict`); another project admin has
+  to.
+- **Removing** a collaborator drops them back to their organization-level access.
+- The person is notified when they are granted access or their role changes.
 
 ## Team access
 
-You can share a project with a **team** instead of listing members one by one.
-Grant the team a project role from the ladder above, and every member of the team
-inherits that role on the project. A project can be shared with many teams, and a
-team can hold access to many projects; each grant is independent.
-
-Team grants fold into the same maximum as everything else: a member's effective
-role is the highest of their org floor, their own collaborator grant, and the
-roles of any teams they are on. Managing team grants uses the same
-**Settings -> Access** surface as individual collaborators. See
-[Teams](/docs/platform/teams) for how teams themselves are built and managed.
+Share a project with a **team** instead of listing people one by one. Grant the
+team a role from the ladder and every member of the team inherits it on this
+project. A project can be shared with many teams and a team can hold access to
+many projects; each grant is independent. Team grants are managed in the same
+**Settings > Access** page. See [Teams](/docs/platform/teams).
 
 ## Project ownership
 
-**Ownership** is a distinct relation that sits **above** the admin rung, not a
-step on the ladder. An owner can do everything an admin can, and in addition can:
+**Ownership** is a distinct relation that sits **above** the admin rung. An owner
+can do everything an admin can, and in addition:
 
 - **delete and restore** the project;
-- **transfer** the project;
-- **manage the project's owners**.
+- **manage the project's owners**, which is also how you transfer a project: add
+  the new owner, then remove the old one.
 
 A project can have **multiple owners**, and an owner can be an **individual user
-or a team** - adding a team as an owner makes every member of that team an owner.
-Ownership can be held directly, inherited through a team, or come from being an
-org owner or admin.
+or a team** (making a team an owner makes every member of it an owner). A person
+has owner powers when any of these is true:
 
-**Org owners and admins always have owner-level authority on every project**, so
-an organization can never be locked out of its own project even if the explicit
-owner list changes. In full, a person has owner powers on a project when any of
-these is true: they are an org owner or admin, they are listed as a direct owner,
-or they belong to a team that is listed as an owner.
+- they are an org owner or admin (always, on every project);
+- they are listed as a direct owner;
+- they belong to a team listed as an owner.
 
-So the complete picture of a person's authority on a project is: the **role** is
-the maximum of their org floor, their explicit grant, and their team grants; and
-**owner powers** apply on top of that role when they own the project directly,
-through a team, or as an org owner or admin.
+Creating a project does **not** make you its owner. A member who creates a
+project is instead granted an explicit **admin** collaborator role on it, so
+they can manage its access from day one. Because org owners and admins
+always hold owner authority, an organization can never be locked out of its own
+project even if the explicit owner list is empty. See
+[Transfer project ownership](/docs/guides/transfer-project-ownership).
 
-## Managing collaborators
+## Operations
 
-Open a project and go to **Settings -> Access**. Anyone who can see the project
-can see its collaborators; **project admins** (org owners/admins, or someone with
-an explicit `admin` grant) can add, change, and remove them.
+| Operation | API | Tool | Scope |
+| --- | --- | --- | --- |
+| List collaborators | `GET /orgs/{slug}/projects/{project}/members` | `list_project_members` | `read:project` |
+| Add a collaborator | `POST /orgs/{slug}/projects/{project}/members` | `add_project_member` | `admin:project` |
+| Change a collaborator's role | `PUT /orgs/{slug}/projects/{project}/members/{userId}/role` | `set_project_member_role` | `admin:project` |
+| Remove a collaborator | `DELETE /orgs/{slug}/projects/{project}/members/{userId}` | `remove_project_member` | `admin:project` |
+| List team grants | `GET /orgs/{slug}/projects/{project}/teams` | `list_project_teams` | `read:project` |
+| Grant a team a role | `POST /orgs/{slug}/projects/{project}/teams` | `add_project_team` | `admin:project` |
+| Change a team's role | `PUT /orgs/{slug}/projects/{project}/teams/{team}/role` | `set_project_team_role` | `admin:project` |
+| Remove a team's access | `DELETE /orgs/{slug}/projects/{project}/teams/{team}` | `remove_project_team` | `admin:project` |
+| List owners | `GET /orgs/{slug}/projects/{project}/owners` | `list_project_owners` | `read:project` |
+| Add an owner (user or team) | `POST /orgs/{slug}/projects/{project}/owners` | `add_project_owner` | `admin:project` |
+| Remove an owner | `DELETE /orgs/{slug}/projects/{project}/owners/{type}/{principalId}` | `remove_project_owner` | `admin:project` |
 
-- **Add** a collaborator by username or email. They must already be a member of
-  the organization - a project grant elevates an existing member, it does not add
-  outsiders.
-- **Change** a collaborator's role at any time.
-- **Remove** a collaborator to drop them back to their organization-level access.
+Collaborator and team management needs an effective project `admin` role; adding
+and removing owners needs owner powers, not merely `admin`. Every change is
+audited (`project.access_granted`, `project.access_changed`,
+`project.access_revoked`, `project.team_access_granted`,
+`project.team_access_changed`, `project.team_access_revoked`,
+`project.owner_added`, `project.owner_removed`).
 
-As everywhere in Flagon, you can do all of this by clicking, by asking the
-in-product assistant, or over the API and MCP - the same permission-checked
-operation backs every path.
+## Related
 
-## Permissions
-
-Listing collaborators requires the `read:project` scope. Adding, changing, and
-removing collaborators and teams on a project requires `admin:project`. The
-owner-tier actions - deleting, restoring, and transferring the project, and
-managing its owners - also go through `admin:project` but additionally require
-owner authority (a direct owner, an owner via a team, or an org owner/admin), not
-merely a project `admin` grant. Scopes are a ceiling on top of your role: a token
-can never do something you could not do yourself, and tenant isolation is enforced
-in the database with row-level security.
+- [Manage project access](/docs/guides/manage-project-access)
+- [Transfer project ownership](/docs/guides/transfer-project-ownership)
+- [Roles & permissions](/docs/platform/roles)
+- [Teams](/docs/platform/teams)
+- [Projects](/docs/platform/projects)

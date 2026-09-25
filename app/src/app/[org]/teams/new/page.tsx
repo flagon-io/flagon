@@ -1,30 +1,24 @@
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { getMe } from "@/lib/flagon-api";
+import { getOrgContext, isOrgAdmin } from "@/lib/org-context";
 import { NewTeamForm } from "@/components/teams/new-team-form";
-import { PageHeader, PageBody } from "@/components/shell/page-header";
+import { PageBody } from "@/components/shell/page-header";
 
 export default async function NewTeamPage({ params }: { params: Promise<{ org: string }> }) {
   const { org: slug } = await params;
-
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
-
-  const me = await getMe().catch(() => null);
-  const role = me?.orgs.find((o) => o.slug === slug)?.role ?? "member";
+  const { role } = await getOrgContext(slug);
   // Only owners and admins create teams.
-  if (role !== "owner" && role !== "admin") redirect(`/${slug}/teams`);
+  if (!isOrgAdmin(role)) redirect(`/${slug}/teams`);
 
   return (
-    <>
-      <PageHeader
-        title="New team"
-        description="A named group of members. Grant it a role on a project and everyone on the team gets that access."
-      />
-      <PageBody>
-        <NewTeamForm orgSlug={slug} />
-      </PageBody>
-    </>
+    <PageBody>
+      <div className="mb-6 max-w-2xl">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">New team</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          A named group of members. Grant it a role on a project and everyone on the team gets that
+          access.
+        </p>
+      </div>
+      <NewTeamForm orgSlug={slug} />
+    </PageBody>
   );
 }

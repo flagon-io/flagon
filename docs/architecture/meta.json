@@ -1,0 +1,16 @@
+{
+  "title": "Architecture",
+  "pages": [
+    "overview",
+    "request-lifecycle",
+    "data-ownership",
+    "multi-tenancy",
+    "identity-and-auth",
+    "permissions-model",
+    "tool-registry",
+    "ai-runtime",
+    "auditing-and-notifications",
+    "content-corpora",
+    "deployment-topology"
+  ]
+}

@@ -1,0 +1,196 @@
+---
+title: Assistant and MCP
+description: Fixes for the in-product assistant (usage limits, mock mode, provider errors, organization scope, confirmations) and for MCP clients (authentication, missing tools, scope errors, rate limits, transport).
+---
+
+The in-product assistant and the MCP server are two front doors to the same tool
+registry the REST API is built on. The **assistant** runs a model on Flagon's
+side, reads freely, and proposes changes for you to confirm. **MCP** lets an
+external agent (such as Claude Desktop or Cursor) call the same tools with a
+Flagon access token. Problems usually come from one of three places: the
+organization's AI allowance, the model configuration, or the credential an MCP
+client presents.
+
+## The assistant
+
+### "AI usage limit reached for this organization"
+
+The assistant returned `429 Too Many Requests`. Each organization has a daily
+allowance of AI calls over a rolling 24 hours (100 by default). Every message you
+send counts as one call, and so does every change you confirm. The allowance
+belongs to the organization, so other members' use counts too. The limit is
+checked before a confirmed change runs as well, so at the limit, **Confirm** fails
+with the same `429` and nothing changes.
+
+Wait for older calls to age out of the window; there is no midnight reset.
+Everything else, including the dashboard, the REST API, and MCP, keeps working
+in the meantime. On your own instance, raise the limit with
+`FLAGON_AI_DAILY_LIMIT` (`0` removes it). See [Usage and AI limits](/docs/platform/usage).
+
+### The assistant answers in "mock mode"
+
+The reply begins "I'm Flagon's local assistant running in offline **mock**
+mode - no AI model is configured, so I match on keywords instead of reasoning."
+
+**What it means.** The API has no model configured and fell back to the offline
+mock provider. The mock understands a few phrases (list, create, who am I) and
+nothing else. This only happens on self-hosted instances.
+
+**How to fix.** Configure a provider on the API and restart it: set
+`ANTHROPIC_API_KEY`, or point `FLAGON_AI_BASE_URL` at any OpenAI-compatible
+endpoint (a local Ollama server is `http://localhost:11434/v1`). The API logs
+which provider it chose at boot (`AI agent enabled`, with `provider` and
+`model`). See [Configuration](/docs/self-hosting/configuration#ai).
+
+### "the AI agent is not configured"
+
+The assistant returned `503`. The API has no usable model: there is no provider
+key, or the provider rejected the key it has (a `401` or `403` from the
+provider). Set or replace `ANTHROPIC_API_KEY` (or `FLAGON_AI_API_KEY` for an
+OpenAI-compatible endpoint) and restart the API.
+
+Pinning a provider without its key no longer gets this far: with
+`FLAGON_AI_PROVIDER=anthropic` and no `ANTHROPIC_API_KEY`, the API refuses to
+start with `FLAGON_AI_PROVIDER=anthropic requires ANTHROPIC_API_KEY (or --anthropic-api-key); unset FLAGON_AI_PROVIDER to fall back automatically`,
+and an unknown provider name fails the same way. See
+[Self-hosting issues](/docs/troubleshooting/self-hosting-issues).
+
+### "agent error"
+
+The assistant returned `500` with `agent error`. The call to the model failed for
+another reason: the model name is wrong, the endpoint is down, or the provider
+returned an error. The response does not include the provider's message; on your
+own instance, find it in the API's log under the response's `X-Request-Id`. Fix
+the provider settings and restart the API.
+
+### "AI usage could not be recorded; please try again"
+
+The assistant returned `503`. The turn ran, but Flagon could not record its usage
+against the organization, so it failed the turn rather than let it go unmetered.
+Retry. If it persists on your own instance, check `/readyz`: this usually means
+the database is unavailable.
+
+### The assistant says it can't do something
+
+The assistant is confined to operating Flagon. It declines unrelated requests,
+and it can only do what a tool in the registry can do. If you ask for something
+that isn't built (deployments or logs, for example), it has no tool for it.
+It also acts **as you**: anything your role or the organization's settings
+forbid, it cannot do either, and it reports the same `403` or `404` you would get.
+That includes the organization's security policy: if the organization requires
+two-factor authentication or SSO and you do not meet it, the assistant answers
+`403` with the same message as the REST API (see
+[Access and permissions](/docs/troubleshooting/access-and-permissions)).
+
+A conversation is confined to the organization you opened it in. Asking it to act
+in another organization fails with a message such as
+`this conversation is scoped to the "acme" organization and can't act in "other"; switch to that organization in Flagon to work there`.
+Switch organizations in the dashboard and ask there. Restoring a deleted
+organization is refused from the assistant with a message ending
+`use the Flagon dashboard for it`; use **Recently deleted** in your personal
+settings instead.
+
+### The assistant can't find internal pages
+
+No page is marked `internal` today; the handbook is public. When a page is
+internal, the assistant can read it, and so can an MCP client that presents a
+valid access token. The public `/docs` routes and an anonymous MCP client never
+see it, so if an MCP client can't find an internal page, check that it sends
+`Authorization: Bearer flagon_...`.
+
+Each message runs at most six rounds of tool calls. For a large request, ask in
+smaller steps.
+
+### Why a change needs your confirmation
+
+Reading runs immediately. Anything that **changes** data (creating a project,
+inviting a member, changing a setting) comes back as a **proposed action** with
+a one-line summary, and nothing happens until you choose **Confirm**. This keeps
+you in control of every write the model suggests, even when the model misreads
+your intent.
+
+When you confirm, the action runs through the same permission-checked operation
+as the dashboard and the REST API. If it fails, you get that operation's real
+error (`403`, `404`, `409`, or `422`), not a generic one. The action runs with
+exactly the input the assistant proposed, so read the summary before you
+confirm.
+
+## MCP clients
+
+### The client only sees `search_docs` and `get_doc`
+
+The client is connecting **anonymously**. Without a Flagon token, the MCP
+endpoint exposes only the public documentation tools. Add the header
+`Authorization: Bearer flagon_...` with a personal or organization access token
+in your client's MCP server settings. `tools/list` then returns every tool your
+token's scopes allow. See [Connect an MCP client](/docs/guides/connect-an-mcp-client).
+
+A bearer value that does not start with `flagon_` is treated as no token at all.
+
+### "invalid or expired token" (code -32001)
+
+A `flagon_` token was presented but did not resolve: it was revoked, it expired,
+or its organization was deleted. Flagon rejects the request rather than quietly
+treating you as anonymous, so a rotated token is obvious. Create a new token and
+update the client.
+
+If you instead get an HTTP `503` with "the service is temporarily unavailable",
+Flagon couldn't check the token (for example, its database is down). The token
+may be fine: retry later and quote the `X-Request-Id` header if you report it.
+
+### "unknown tool: ..." (code -32602)
+
+The tool name does not exist, or it exists but requires authentication and you
+connected anonymously. Anonymous callers are never told that authenticated tools
+exist. Check the name against `tools/list` after authenticating.
+
+### "this token is missing the scope required for ..." (code -32003)
+
+You are authenticated, but the token does not hold the tool's scope. Tools carry
+the same scope as the REST operation they front, so the
+[scopes reference](/docs/reference/scopes) applies. Create a token with the
+scope and revoke the old one.
+
+### A tool call returns `isError: true`
+
+The tool ran and the operation refused, for example because of a permission check,
+the organization's two-factor or SSO requirement, or a slug conflict. The text is
+the same safe message the REST API would return (such as `project not found` or
+`this organization requires two-factor authentication; enable it on your account to continue`).
+An unexpected internal failure reads `something went wrong; please try again`.
+
+### HTTP `429` or `413` instead of a JSON-RPC response
+
+These come from the API in front of the MCP endpoint, so they are plain HTTP
+problem responses, not JSON-RPC errors. `429` with
+`rate limit exceeded; retry after <n>s` means the token made too many requests (50 per second sustained,
+bursts of 300, by default); wait for the `Retry-After` header's seconds. `413`
+with `request body is too large` means the JSON-RPC body is over the API's body
+cap (4 MiB by default).
+
+### `405 method not allowed`, or the client can't connect
+
+The endpoint accepts only `POST`. It implements the request/response (POST)
+channel of MCP's Streamable HTTP transport, not a server-sent events stream over
+`GET`. Use a client that supports Streamable HTTP, and point it at:
+
+| Instance | URL |
+| --- | --- |
+| Hosted | `https://mcp.flagon.io` (or `https://api.flagon.io/mcp`) |
+| Self-hosted | `https://<your api host>/mcp`, or the root of your `FLAGON_MCP_HOST` |
+
+### MCP changes happen without a confirmation step
+
+Over MCP, Flagon runs a tool call when the client sends it: the proposal and
+confirmation flow belongs to the in-product assistant. Most MCP clients ask you
+before running a tool; check your client's settings. To limit what an agent can
+do, give it a token with only the scopes it needs (read scopes only, for a
+read-only agent).
+
+## Related
+
+- [Assistant](/docs/ai/assistant)
+- [MCP](/docs/ai/mcp)
+- [Tools](/docs/ai/tools)
+- [Usage and AI limits](/docs/platform/usage)
+- [AI safety](/docs/security/ai-safety)

@@ -2413,15 +2413,34 @@ const [range, setRange] = useState<DateRange>();
   <div className="p-4">...</div>
 </ScrollArea>`,
         render: (
-          <ScrollArea className="h-48 w-64 rounded-lg border border-hairline">
-            {/* Padding goes on the content inside the viewport, never on the
-             * ScrollArea root: root padding insets the viewport but not Radix's
-             * scrollbar track, which throws off the thumb's position. */}
+          <ScrollArea aria-label="Regions" className="h-48 w-64 rounded-lg border border-hairline">
+            {/* Padding goes on the content, not the ScrollArea, so the
+             * scrollbar sits flush against the edge. */}
             <div className="p-4">
               <p className="mb-2 text-sm font-medium text-foreground">Regions</p>
               {Array.from({ length: 20 }).map((_, i) => (
                 <div key={i} className="border-b border-hairline py-2 text-sm text-muted-foreground last:border-0">
                   Region {i + 1}
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        ),
+      },
+      {
+        title: "Horizontal",
+        code: `<ScrollArea orientation="horizontal" className="w-80 rounded-lg border">
+  <div className="flex w-max gap-3 p-4">...</div>
+</ScrollArea>`,
+        render: (
+          <ScrollArea aria-label="Releases" orientation="horizontal" className="w-80 rounded-lg border border-hairline">
+            <div className="flex w-max gap-3 p-4">
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="flex h-20 w-28 shrink-0 items-center justify-center rounded-md bg-muted text-sm text-muted-foreground"
+                >
+                  v1.{i}.0
                 </div>
               ))}
             </div>

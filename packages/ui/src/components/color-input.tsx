@@ -3,57 +3,9 @@
 import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Pipette } from "lucide-react";
 import { cn } from "../lib/cn";
-import { controlHeight, type ControlSize } from "../lib/control";
+import { controlHeight, focusRing, focusWithinRing, type ControlSize } from "../lib/control";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
-
-// --- color math -----------------------------------------------------------
-
-type RGB = { r: number; g: number; b: number };
-type HSV = { h: number; s: number; v: number };
-
-function clamp(n: number, lo = 0, hi = 1) {
-  return Math.min(hi, Math.max(lo, n));
-}
-function normalizeHex(input: string): string | null {
-  let h = input.trim().replace(/^#/, "");
-  if (/^[0-9a-fA-F]{3}$/.test(h)) h = h.split("").map((c) => c + c).join("");
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-  return `#${h.toLowerCase()}`;
-}
-function hexToRgb(hex: string): RGB {
-  const h = (normalizeHex(hex) ?? "#000000").slice(1);
-  return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
-}
-function rgbToHex({ r, g, b }: RGB): string {
-  const to = (n: number) => Math.round(clamp(n, 0, 255)).toString(16).padStart(2, "0");
-  return `#${to(r)}${to(g)}${to(b)}`;
-}
-function rgbToHsv({ r, g, b }: RGB): HSV {
-  const rr = r / 255, gg = g / 255, bb = b / 255;
-  const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb), d = max - min;
-  let h = 0;
-  if (d !== 0) {
-    if (max === rr) h = ((gg - bb) / d) % 6;
-    else if (max === gg) h = (bb - rr) / d + 2;
-    else h = (rr - gg) / d + 4;
-    h *= 60;
-    if (h < 0) h += 360;
-  }
-  return { h, s: max === 0 ? 0 : d / max, v: max };
-}
-function hsvToRgb({ h, s, v }: HSV): RGB {
-  const c = v * s;
-  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
-  const m = v - c;
-  let r = 0, g = 0, b = 0;
-  if (h < 60) [r, g, b] = [c, x, 0];
-  else if (h < 120) [r, g, b] = [x, c, 0];
-  else if (h < 180) [r, g, b] = [0, c, x];
-  else if (h < 240) [r, g, b] = [0, x, c];
-  else if (h < 300) [r, g, b] = [x, 0, c];
-  else [r, g, b] = [c, 0, x];
-  return { r: (r + m) * 255, g: (g + m) * 255, b: (b + m) * 255 };
-}
+import { clamp, hexToRgb, hsvToRgb, normalizeHex, rgbToHex, rgbToHsv, type HSV } from "../lib/color";
 
 // --- component ------------------------------------------------------------
 
@@ -88,7 +40,7 @@ export function ColorInput({
 
   const swatch = (
     <span
-      className="block size-5 shrink-0 rounded ring-1 ring-inset ring-black/15"
+      className="block size-5 shrink-0 rounded ring-1 ring-inset ring-hairline"
       style={{ background: hex }}
     />
   );
@@ -97,20 +49,23 @@ export function ColorInput({
     <Popover>
       {compact ? (
         <PopoverTrigger
+          data-slot="color-input"
           aria-label={ariaLabel ?? "Pick a color"}
           disabled={disabled}
           className={cn(
-            "block size-8 rounded-md ring-1 ring-inset ring-hairline outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+            "block size-8 rounded-md ring-1 ring-inset ring-hairline transition disabled:opacity-50",
+            focusRing,
             className,
           )}
           style={{ background: hex }}
         />
       ) : (
         <div
+          data-slot="color-input"
           className={cn(
             controlHeight[size],
             "flex items-center gap-2 rounded-md border border-input bg-background pr-2 pl-2 text-sm",
-            "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
+            focusWithinRing,
             disabled && "opacity-50",
             className,
           )}
@@ -118,7 +73,7 @@ export function ColorInput({
           <PopoverTrigger
             aria-label="Open color picker"
             disabled={disabled}
-            className="rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn("rounded", focusRing)}
           >
             {swatch}
           </PopoverTrigger>
@@ -209,7 +164,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
   const hasEyeDropper = typeof window !== "undefined" && "EyeDropper" in window;
 
   return (
-    <div className="space-y-3">
+    <div data-slot="color-picker" className="space-y-3">
       <div
         ref={svRef}
         onPointerDown={onSvPointer}
@@ -246,7 +201,10 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
             type="button"
             onClick={eyedrop}
             aria-label="Pick from screen"
-            className="flex size-9 shrink-0 items-center justify-center rounded-md border border-input text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn(
+              "flex size-9 shrink-0 items-center justify-center rounded-md border border-input text-muted-foreground transition-colors hover:text-foreground",
+              focusRing,
+            )}
           >
             <Pipette className="size-4" />
           </button>
@@ -263,7 +221,8 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
           onBlur={() => setText(value)}
           className={cn(
             controlHeight.sm,
-            "min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground uppercase outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-sm text-foreground uppercase",
+            focusRing,
           )}
         />
       </div>
@@ -278,7 +237,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
               setText(c);
               onChange(c);
             }}
-            className="size-6 rounded ring-1 ring-inset ring-black/15 outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn("size-6 rounded ring-1 ring-inset ring-hairline transition", focusRing)}
             style={{ background: c }}
           />
         ))}

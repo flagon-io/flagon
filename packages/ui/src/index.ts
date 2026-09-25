@@ -6,7 +6,8 @@
 // Both expect the theme tokens from "@flagon-io/ui/styles.css" (or an app that
 // already defines them) and a surrounding <ThemeProvider>.
 export { cn } from "./lib/cn";
-export { controlHeight, type ControlSize } from "./lib/control";
+export { controlHeight, focusRing, focusRingInset, focusWithinRing, type ControlSize } from "./lib/control";
+export { overlayClasses } from "./lib/overlay";
 export {
   brandCss,
   serializeBrand,

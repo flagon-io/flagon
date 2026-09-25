@@ -1,6 +1,79 @@
 ---
 title: CLI
-description: Drive Flagon from your terminal.
-status: planned
-order: 0
+description: What the flagon command-line tool is for, the commands its skeleton defines today, and why every command currently exits with code 3.
 ---
+
+The `flagon` CLI is how you will operate Flagon from a terminal and from CI:
+sign in, list your organizations, manage projects, and run a local MCP server
+for your editor. It is a thin HTTP client: it talks to the Flagon API as you,
+with the same scopes and permissions as any other access token, and links none
+of the server's code (no database driver, no AI providers). The server is a
+separate binary, `flagon-server`.
+
+<Callout type="warn" title="Not available yet">
+The CLI is a skeleton. Its commands, flags, and help text are defined, but no
+command does anything yet: each one prints `<command>: not implemented yet` and
+exits with code **3**. It is not published as a download. Until it ships, use
+the [API](/docs/api/using-the-api) with an access token, or connect an agent
+through [MCP](/docs/ai/mcp).
+</Callout>
+
+## What exists today
+
+The source is `api/cmd/flagon/main.go`. You can build and run it from a checkout
+to see the command surface:
+
+```bash
+cd api
+go run ./cmd/flagon --help
+go run ./cmd/flagon projects list
+# flagon projects list: not implemented yet
+# (exit status 3)
+```
+
+### Global flags
+
+| Flag | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `--api-url` | `FLAGON_API_URL` | `https://api.flagon.io` | Base URL of the Flagon API. Point it at your own deployment when self-hosting. |
+| `--token` | `FLAGON_TOKEN` | none | A personal or organization access token. Overrides the stored login. |
+| `--org` | `FLAGON_ORG` | none | The organization slug to act within. |
+
+### Commands
+
+| Command | Intended purpose |
+| --- | --- |
+| `flagon login` | Authenticate this machine to Flagon. |
+| `flagon logout` | Remove stored Flagon credentials from this machine. |
+| `flagon whoami` | Show the currently authenticated user. |
+| `flagon orgs` | List the organizations you belong to. |
+| `flagon projects list` | List projects. |
+| `flagon projects create` | Create a project. |
+| `flagon deploy` | Deploy a project. |
+| `flagon logs` | Stream logs for a project. |
+| `flagon mcp` | Run a local MCP server over stdio that forwards tool calls to Flagon as you, for editors and agents. |
+
+Every command above exits with code 3, and so does `flagon projects` on its
+own. Only `--help` (and `help`) do real work today. `deploy` and `logs` also depend on
+deployments and logging, which are not built in the platform yet.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `3` | The command exists but is not implemented yet. Scripts can tell this apart from a usage error. |
+| other non-zero | A usage error or an unexpected failure. |
+
+## What it will be built on
+
+When the commands are implemented they will call the same API operations
+documented in the [OpenAPI spec](/docs/api/openapi), with the token's
+[scopes](/docs/reference/scopes) applying exactly as they do to any other
+client. Nothing the CLI does will bypass the API.
+
+## Related
+
+- [Using the API](/docs/api/using-the-api)
+- [Call the API from CI](/docs/guides/call-the-api-from-ci)
+- [MCP server](/docs/ai/mcp)
+- [Access tokens](/docs/platform/access-tokens)

@@ -1,0 +1,14 @@
+{
+  "groups": [
+    { "title": "Get started", "sections": ["get-started"] },
+    { "title": "Build and operate", "sections": ["guides", "platform", "ai"] },
+    { "title": "Developers", "sections": ["api", "reference", "cli"] },
+    { "title": "Platform", "sections": ["architecture", "security", "self-hosting"] },
+    { "title": "Help", "sections": ["troubleshooting", "open-source"] },
+    {
+      "title": "Roadmap",
+      "sections": ["agents", "context", "deploying", "governance", "mcp-hub", "metrics", "observability", "skills"]
+    }
+  ],
+  "exclude": ["handbook"]
+}

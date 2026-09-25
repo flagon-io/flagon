@@ -1,0 +1,180 @@
+---
+title: Create a project
+description: Create a project in your organization, give it a README and repository link, and confirm it from the dashboard or the API.
+---
+
+A **project** is the core unit in Flagon: one deployable app or service, with a name, a URL
+slug, a one-line description, a Markdown README, and a link to its source repository. Access
+to a project is controlled per project (see
+[Manage project access](/docs/guides/manage-project-access)), and every change to it lands in the
+organization's audit log.
+
+By the end of this guide you will have a project at `app.flagon.io/<org>/projects/<slug>`,
+with a README, that teammates can open according to their access.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** organization **owner**, **admin**, or **member** to create a project. Editing it
+  afterwards needs an effective `write` role on that project, and renaming its slug needs
+  `maintain`. If you are a member, Flagon grants you `admin` on the project you create.
+- **API token scope:** `write:project` (which includes `read:project`).
+
+</Callout>
+
+<Callout type="note" title="Deployments are not built yet">
+
+A project today holds metadata, a README, and access control. The **Deployments** and
+**Activity** tabs on a project are placeholders for features that have not shipped. See
+[Deployments](/docs/deploying/deployments) for the plan.
+
+</Callout>
+
+## Steps
+
+<Steps>
+
+<Step title="Create the project">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open **Projects** in the sidebar and select **New project**.
+2. Fill in **Project name** (for example, `Checkout Service`). The **Slug** is derived from the
+   name; edit it if you want a different URL.
+3. Optionally add a **Description** (one line) and a **Repository URL**.
+4. Select **Create project**. Flagon opens the project's **Overview**.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Checkout Service",
+    "slug": "checkout",
+    "description": "Takes payments and places orders",
+    "repository_url": "https://github.com/acme/checkout",
+    "readme": "# Checkout\n\nOwned by the payments team."
+  }'
+```
+
+Only `name` is required; `slug` is derived from it when omitted. A `201 Created` returns the
+project:
+
+```json
+{
+  "$schema": "https://api.flagon.io/schemas/Project.json",
+  "id": "0d9a...",
+  "org_id": "6f1c...",
+  "name": "Checkout Service",
+  "slug": "checkout",
+  "description": "Takes payments and places orders",
+  "readme": "# Checkout\n\nOwned by the payments team.",
+  "repository_url": "https://github.com/acme/checkout",
+  "created_by": "u_123",
+  "created_at": "2026-09-25T12:00:00Z",
+  "updated_at": "2026-09-25T12:00:00Z"
+}
+```
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Create a project called Checkout Service in acme, linked to https://github.com/acme/checkout.
+
+The assistant proposes **Confirm: Create project "Checkout Service" in "acme"** and creates it
+after you select **Confirm**.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Add a README">
+
+The README is Markdown and renders on the project's **Overview** tab.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Open the project and edit the README from the **Overview** tab. Name, slug, description, and
+repository URL live under the project's **Settings > General**.
+
+</Tab>
+
+<Tab title="API">
+
+`PATCH` changes only the fields you send:
+
+```bash
+curl -X PATCH https://api.flagon.io/orgs/acme/projects/checkout \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"readme": "# Checkout\n\nRuns on Postgres. On call: #payments."}'
+```
+
+Sending `slug` renames the project and changes its URL; that needs an effective `maintain` role
+on the project, while the other fields need `write`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Update the checkout project's description to "Payments and order placement".
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Verify it worked">
+
+- The project appears on **Projects**, and its page loads at `app.flagon.io/acme/projects/checkout`.
+- `GET /orgs/acme/projects/checkout` returns it. Add `?expand[]=organization` to inline the
+  organization object in the response.
+- `GET /orgs/acme/projects` lists it inside `{"projects": [...]}`. Lists are paginated with
+  `limit` and a `cursor` from the `Link` header; see [Pagination](/docs/api/pagination).
+- The audit log records `project.created`, and `project.updated` for each edit.
+
+</Step>
+
+<Step title="Decide who can reach it">
+
+Right after creation, access follows the organization's
+[base permission](/docs/guides/set-base-permissions): with the default `read`, every member can
+see the project. The creator is the exception: a member who creates a project gets a direct
+`admin` grant on it (recorded in the audit log as `project.access_granted`), so they can manage
+its access even when the base permission is `read` or `none`. Org owners and admins already hold
+`admin` and the owner tier on every project. Creating a project does not make you its owner, so
+deleting it still takes an owner. To grant people or teams more, or to add owners, see
+[Manage project access](/docs/guides/manage-project-access) and
+[Transfer project ownership](/docs/guides/transfer-project-ownership).
+
+</Step>
+
+</Steps>
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `409` | `a project with that slug already exists` | Slugs are unique among live projects in the organization. Pick another, or restore or rename the existing one. |
+| `422` | `name is required and must contain a letter or digit` | Send a non-empty `name`. |
+| `403` | `you don't have permission to do that` | Your organization role can't create projects (a legacy viewer, or an organization access token with the viewer role), or your project role is below `write` for edits or below `maintain` for a slug rename. |
+| `404` | `project not found` | The slug is wrong, the project was deleted, or you have no access to it. |
+| `403` | `this token is missing the scope required for this operation` | Use a token with `write:project`. |
+
+## Related
+
+- [Projects](/docs/platform/projects)
+- [Manage project access](/docs/guides/manage-project-access)
+- [Delete and restore](/docs/guides/delete-and-restore)
+- [Expanding responses](/docs/api/expanding-responses)

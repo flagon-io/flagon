@@ -1,53 +1,106 @@
 ---
 title: Introduction
-description: Flagon is a developer platform for operating your whole system, from the dashboard, the API, or an AI assistant.
-order: 0
+description: What Flagon is, the three ways you drive it, what is built today, and how these docs are organized.
 ---
 
-Flagon is a **developer platform** for operating your whole system: a single
-place to bring your projects and tools together, understand what's happening
-across them, and act on it, from the dashboard, the API, or an AI assistant. It's
-powerful with AI, and great without it.
+Flagon is a developer platform for operating your engineering system: your **projects**, the
+**organization** that owns them, and the **people and teams** who work on them, in one place. You
+can use the hosted service at [app.flagon.io](https://app.flagon.io) or run the whole stack
+yourself.
 
-Use it hosted at [app.flagon.io](https://app.flagon.io), or run the whole thing
-yourself. It is open source and self-hostable end to end.
+AI is a first-class way to operate Flagon, but never a requirement. Everything the assistant can do
+is an ordinary API operation that you can also run from the dashboard or a script, so a team that
+never opens the assistant still gets the full platform.
 
-## The idea
+## Three front doors, one set of operations
 
-Your work is spread across a dozen tools. Flagon's job is to pull that together
-into one system you can operate and reason about, with AI wired through all of it.
-The point is not another dashboard to check; it's to ask
-_"what changed across everything this week?"_ and get a real answer, grounded in
-your actual data.
+You reach Flagon in three ways, and all three land on the same permission-checked operations in the
+Flagon API:
 
-Everything runs on a few ideas:
+```text
+ ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────────────┐
+ │    Dashboard    │   │     REST API    │   │    Assistant and MCP    │
+ │  app.flagon.io  │   │  api.flagon.io  │   │  Ask AI, mcp.flagon.io  │
+ └────────┬────────┘   └────────┬────────┘   └────────────┬────────────┘
+          │                     │                         │
+          │ session             │ token                   │ tool calls
+          └─────────────────────┼─────────────────────────┘
+                                ▼
+           ┌─────────────────────────────────────────┐
+           │    Flagon API: one set of operations,   │
+           │  permission-checked, one tool registry  │
+           └────────────────────┬────────────────────┘
+                                ▼
+           ┌─────────────────────────────────────────┐
+           │   Postgres, row-level security per org  │
+           └─────────────────────────────────────────┘
+```
 
-- **One place, many surfaces.** Anything you can do in the dashboard you can do by
-  asking the [assistant](/docs/ai/assistant), or over the
-  [API](/docs/api/using-the-api) and [MCP](/docs/ai/mcp). Same operations, same
-  permissions, three front doors.
-- **AI over your real data, safely.** The assistant acts as you, with your scopes,
-  and changes are proposed for you to confirm. AI is a first-class way to operate
-  Flagon, not a bolt-on.
-- **Open and yours.** Self-hostable, permission-scoped, and built in the open.
+- **Dashboard.** The web app at `app.flagon.io` holds your sign-in session and forwards every
+  request to the API as you. It never writes domain data itself.
+- **REST API.** `https://api.flagon.io` is the source of truth. Its OpenAPI spec is generated from
+  the code, so the spec always matches what the server does. You call it with an access token. See
+  [Using the API](/docs/api/using-the-api).
+- **Assistant and MCP.** The **Ask AI** panel in the dashboard and the MCP server at
+  `mcp.flagon.io` expose the same operations as tools from one shared registry. The in-product
+  assistant runs read operations right away and proposes every change for you to confirm. See
+  [The assistant](/docs/ai/assistant) and [MCP server](/docs/ai/mcp).
+
+Because all three share one implementation, a capability added to the API is available in every
+front door, and none of them can do more than you can: the same roles, scopes, and tenant isolation
+apply everywhere.
 
 ## What you can do today
 
-- Create and manage **organizations** and invite **members** with scoped roles.
-- Create **projects** to organize the systems you operate.
-- Mint **API tokens** with fine-grained **scopes**, and drive everything
-  programmatically or over MCP.
-- Ask the **assistant** to do any of the above, and to read these docs, for you.
+- **Organizations.** Create an organization, rename it, leave it, and soft-delete and restore it
+  within 30 days. See [Organizations](/docs/platform/organizations).
+- **People.** Invite people by email or username, assign org roles, and group members into
+  **teams**. See [Members](/docs/platform/members) and [Teams](/docs/platform/teams).
+- **Projects.** Create projects with a name, description, README, and repository URL; grant
+  per-project roles to people and teams; assign project owners; delete and restore. See
+  [Projects](/docs/platform/projects) and [Project access](/docs/platform/project-access).
+- **Security.** Require two-factor authentication for members, configure single sign-on over OIDC
+  or SAML, and set a base permission for member access. See [SSO](/docs/platform/sso) and
+  [Two-factor](/docs/platform/two-factor).
+- **Accountability.** Every change to an organization is written to an append-only audit log that
+  owners and admins can read, and changes that affect you arrive as notifications. See
+  [Audit log](/docs/platform/audit-log).
+- **Automation.** Mint personal or organization access tokens limited by scopes, then drive
+  everything over the REST API or MCP. See [Access tokens](/docs/platform/access-tokens).
+- **The assistant.** Ask the assistant to do any of the above, or to answer questions from these
+  docs. AI usage is metered per organization and capped by a daily limit.
 
-## Where it's going
+## What is not built yet
 
-Flagon is growing into the hub for your whole engineering system: connected
-context across your tools, metrics and insights, agents and orchestration with
-humans in the loop, and the governance to run AI safely over real data. Those
-areas are marked _Soon_ in the navigation as they land.
+<Callout type="warn" title="Not available yet">
 
-## Next steps
+Deployments, logs and observability, packages, SCIM provisioning, the `flagon` command-line tool
+(a skeleton whose commands exit with code 3), and billing beyond the free plan limit of one owned
+organization are not built. Pages for these areas are marked as planned. The **Roadmap** group
+in the navigation covers where the platform is heading: connected context across your tools,
+agents, an MCP hub, metrics, reusable skills, and governance.
 
-- **[Quickstart](/docs/get-started/quickstart)** to get your first project going.
-- **[Core concepts](/docs/get-started/core-concepts)** for the model behind it all.
-- **[The assistant](/docs/ai/assistant)** to start operating Flagon by asking.
+</Callout>
+
+## How these docs are organized
+
+| Group | What it covers |
+| --- | --- |
+| Get started | This page, the [Quickstart](/docs/get-started/quickstart), and [Core concepts](/docs/get-started/core-concepts). |
+| Build and operate | Task-oriented [guides](/docs/guides/create-an-organization), a page per feature, and the [AI](/docs/ai/assistant) surfaces. |
+| Developers | The [API](/docs/api/using-the-api), the [reference](/docs/reference/scopes) tables (scopes, roles, audit actions, configuration), and the [CLI](/docs/cli/overview). |
+| Platform | [Architecture](/docs/architecture/overview), [security](/docs/security/overview), and [self-hosting](/docs/self-hosting/overview). |
+| Help | [Troubleshooting](/docs/troubleshooting/overview) and [contributing](/docs/open-source/contributing). |
+| Roadmap | One page per planned pillar. |
+
+These docs live in the same repository as the code and ship in the same change, so they describe
+what the product does now. The assistant and the MCP server read them through the `search_docs` and
+`get_doc` tools, which means you can ask the assistant how something works and get an answer from
+this text.
+
+## Related
+
+- [Quickstart](/docs/get-started/quickstart)
+- [Core concepts](/docs/get-started/core-concepts)
+- [Architecture overview](/docs/architecture/overview)
+- [Self-hosting overview](/docs/self-hosting/overview)

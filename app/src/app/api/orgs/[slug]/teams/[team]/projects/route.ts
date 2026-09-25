@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError, listOptionsFrom } from "@/lib/route-error";
 import { listTeamProjects } from "@/lib/flagon-api";
 
 export async function GET(
@@ -6,16 +7,10 @@ export async function GET(
   ctx: { params: Promise<{ slug: string; team: string }> },
 ) {
   const { slug, team } = await ctx.params;
-  const url = new URL(request.url);
-  const limitParam = url.searchParams.get("limit");
   try {
-    const page = await listTeamProjects(slug, team, {
-      q: url.searchParams.get("q") ?? undefined,
-      cursor: url.searchParams.get("cursor") ?? undefined,
-      limit: limitParam ? Number(limitParam) : undefined,
-    });
+    const page = await listTeamProjects(slug, team, listOptionsFrom(request));
     return NextResponse.json({ items: page.items, next: page.next });
-  } catch {
-    return NextResponse.json({ items: [], next: null });
+  } catch (e) {
+    return routeError(e);
   }
 }

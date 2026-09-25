@@ -7,6 +7,8 @@ import { Bell, Check, CheckCheck } from "lucide-react";
 import { Button, Popover, PopoverContent, PopoverTrigger, Skeleton, buttonClasses, cn } from "@flagon-io/ui";
 import { type Notification, notificationMeta, timeAgo } from "@/lib/notifications";
 import { NotificationDialog } from "@/components/notifications/notification-dialog";
+import { fetchJson, messageOf } from "@/lib/client-fetch";
+import { ListError } from "@/components/shared/list-states";
 
 export function Notifications() {
   const router = useRouter();
@@ -14,22 +16,32 @@ export function Notifications() {
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // The badge fails silently: a failed poll keeps the last known count (0 on
+  // first load, i.e. no badge) rather than inventing one.
   const loadCount = useCallback(async () => {
-    const res = await fetch("/api/notifications/unread-count");
-    if (res.ok) {
-      const d = await res.json();
+    try {
+      const d = await fetchJson<{ count?: number }>("/api/notifications/unread-count");
       setUnread(d.count ?? 0);
+    } catch {
+      // keep the last known count
     }
   }, []);
 
   const loadList = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/notifications?limit=10");
-    if (res.ok) {
-      const d = await res.json();
+    setListError(null);
+    try {
+      const d = await fetchJson<{ notifications?: Notification[] | null }>(
+        "/api/notifications?limit=10",
+        undefined,
+        "Couldn't load your notifications.",
+      );
       setItems(d.notifications ?? []);
+    } catch (e) {
+      setListError(messageOf(e, "Couldn't load your notifications."));
     }
     setLoading(false);
   }, []);
@@ -102,7 +114,7 @@ export function Notifications() {
       >
         <Bell className="size-4.5" />
         {unread > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold leading-none text-white ring-2 ring-background">
+          <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-2xs font-semibold leading-none text-brand-foreground ring-2 ring-background">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
@@ -138,6 +150,14 @@ export function Notifications() {
                   </div>
                 </div>
               ))}
+            </div>
+          ) : listError ? (
+            <div className="p-3">
+              <ListError
+                title="Couldn't load notifications"
+                message={listError}
+                onRetry={() => void loadList()}
+              />
             </div>
           ) : items.length === 0 ? (
             <EmptyState />
@@ -207,7 +227,7 @@ function NotificationRow({
             {n.title}
           </span>
           {n.body && <span className="line-clamp-2 text-xs text-muted-foreground">{n.body}</span>}
-          <span className="text-[11px] text-muted-foreground">{timeAgo(n.created_at)}</span>
+          <span className="text-2xs text-muted-foreground">{timeAgo(n.created_at)}</span>
         </span>
       </button>
       {/* Unread dot, swapped for a "mark read" button on hover/focus. */}

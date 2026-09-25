@@ -8,6 +8,8 @@
 // Override any field with env vars:
 //   SEED_EMAIL, SEED_USERNAME, SEED_PASSWORD, SEED_NAME
 //   SEED_ORG_NAME, SEED_ORG_SLUG
+//   SEED_SKIP_ORG=1  seed only the user, with no org (the e2e suite's org owner,
+//                    who must stay under the free owned-org limit)
 //
 // The user + credential live in the app's auth DB (this script writes them
 // directly). The ORG is a domain resource owned by the Go API, so we create it
@@ -99,6 +101,10 @@ async function main() {
   console.log(`  username: ${username}`);
   console.log(`  password: ${password}`);
 
+  if (process.env.SEED_SKIP_ORG) {
+    console.log("\nSkipped org (SEED_SKIP_ORG is set).");
+    return;
+  }
   await seedOrg(userId);
 }
 
@@ -108,7 +114,10 @@ async function main() {
 // still counts - we just print how to finish the org.
 async function seedOrg(userId) {
   const apiUrl = (process.env.FLAGON_API_URL ?? "http://localhost:8080").replace(/\/+$/, "");
-  const token = process.env.FLAGON_INTERNAL_TOKEN ?? "";
+  // Same rule as the app: the public development token only outside production.
+  const token =
+    process.env.FLAGON_INTERNAL_TOKEN?.trim() ||
+    (process.env.NODE_ENV === "production" ? "" : "dev-internal-token");
 
   if (!token) {
     console.warn(`\nSkipped demo org: FLAGON_INTERNAL_TOKEN is not set.`);
@@ -129,7 +138,7 @@ async function seedOrg(userId) {
     });
   } catch (err) {
     console.warn(`\nSkipped demo org: could not reach the API at ${apiUrl} (${err.cause?.code ?? err.message}).`);
-    console.warn(`Start it with 'cd api && go run ./cmd/flagon serve', then re-run 'npm run db:seed'.`);
+    console.warn(`Start it with 'cd api && go run ./cmd/flagon-server serve', then re-run 'npm run db:seed'.`);
     return;
   }
 

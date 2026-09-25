@@ -1,6 +1,6 @@
-import type { InputHTMLAttributes, ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../lib/cn";
-import { controlHeight, type ControlSize } from "../lib/control";
+import { controlHeight, focusWithinRing, type ControlSize } from "../lib/control";
 
 /**
  * A text input with an optional leading/trailing addon (prefix/suffix), rendered
@@ -18,7 +18,7 @@ export function InputGroup({
   disabled,
   size = "md",
   ...props
-}: Omit<InputHTMLAttributes<HTMLInputElement>, "size" | "prefix"> & {
+}: Omit<ComponentProps<"input">, "size" | "prefix"> & {
   prefix?: ReactNode;
   suffix?: ReactNode;
   inputClassName?: string;
@@ -30,16 +30,18 @@ export function InputGroup({
 }) {
   return (
     <div
+      data-slot="input-group"
       className={cn(
         controlHeight[size],
         "flex items-stretch overflow-hidden rounded-md border border-input bg-background text-sm",
-        "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
+        focusWithinRing,
         disabled && "opacity-60",
         className,
       )}
     >
       {prefix != null && (
         <span
+          data-slot="input-group-prefix"
           className={cn(
             "flex select-none items-center border-r border-input bg-muted/40 px-3 text-muted-foreground",
             prefixClassName,
@@ -49,6 +51,7 @@ export function InputGroup({
         </span>
       )}
       <input
+        data-slot="input-group-input"
         disabled={disabled}
         className={cn(
           "min-w-0 flex-1 bg-transparent px-3 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed",
@@ -58,6 +61,7 @@ export function InputGroup({
       />
       {suffix != null && (
         <span
+          data-slot="input-group-suffix"
           className={cn(
             "flex select-none items-center border-l border-input bg-muted/40 px-3 text-muted-foreground",
             suffixClassName,

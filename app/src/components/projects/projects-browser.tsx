@@ -4,7 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Boxes, GitBranch, Plus, Search } from "lucide-react";
 import { Button, Input, Kbd } from "@flagon-io/ui";
-import type { Project } from "@/lib/flagon-api";
+import type { Page, Project } from "@/lib/api/types";
+import { fetchJson, messageOf } from "@/lib/client-fetch";
+import { ListError } from "@/components/shared/list-states";
+import { LoadMore } from "./access/access-list-layout";
 
 function repoHost(url: string): string | null {
   if (!url) return null;
@@ -34,6 +37,11 @@ export function ProjectsBrowser({
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // A failed search replaces the list with an error (the rows shown would no
+  // longer match the query); a failed "load more" keeps the rows and says so.
+  const [listError, setListError] = useState<string | null>(null);
+  const [moreError, setMoreError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const firstRender = useRef(true);
 
@@ -42,12 +50,11 @@ export function ProjectsBrowser({
       const params = new URLSearchParams();
       if (q) params.set("q", q);
       if (cursor) params.set("cursor", cursor);
-      const res = await fetch(
+      return fetchJson<Page<Project>>(
         `/api/orgs/${encodeURIComponent(orgSlug)}/projects?${params.toString()}`,
         { signal },
+        "Couldn't load projects.",
       );
-      if (!res.ok) throw new Error(`projects ${res.status}`);
-      return (await res.json()) as { items: Project[]; next: string | null };
     },
     [orgSlug],
   );
@@ -67,9 +74,11 @@ export function ProjectsBrowser({
         if (!controller.signal.aborted) {
           setProjects(data.items);
           setNext(data.next);
+          setListError(null);
+          setMoreError(null);
         }
-      } catch {
-        /* aborted or failed - leave the current list in place */
+      } catch (e) {
+        if (!controller.signal.aborted) setListError(messageOf(e, "Couldn't load projects."));
       } finally {
         if (!controller.signal.aborted) setSearching(false);
       }
@@ -78,7 +87,7 @@ export function ProjectsBrowser({
       controller.abort();
       clearTimeout(t);
     };
-  }, [query, fetchPage]);
+  }, [query, fetchPage, retry]);
 
   // Press "/" anywhere to jump to search, unless already typing in a field.
   useEffect(() => {
@@ -98,18 +107,23 @@ export function ProjectsBrowser({
   const loadMore = useCallback(async () => {
     if (!next) return;
     setLoadingMore(true);
+    setMoreError(null);
     try {
       const data = await fetchPage(query.trim(), next);
       setProjects((prev) => [...prev, ...data.items]);
       setNext(data.next);
-    } catch {
-      /* leave the list as-is on failure */
+    } catch (e) {
+      setMoreError(messageOf(e, "Couldn't load more projects."));
     } finally {
       setLoadingMore(false);
     }
   }, [next, query, fetchPage]);
 
   const empty = projects.length === 0 && !searching;
+  const retrySearch = () => {
+    setListError(null);
+    setRetry((n) => n + 1);
+  };
 
   return (
     <div>
@@ -136,7 +150,11 @@ export function ProjectsBrowser({
         )}
       </div>
 
-      {empty ? (
+      {listError ? (
+        <div className="mt-5">
+          <ListError title="Couldn't load projects" message={listError} onRetry={retrySearch} />
+        </div>
+      ) : empty ? (
         query ? (
           <p className="mt-10 text-center text-sm text-muted-foreground">
             No projects match &ldquo;{query}&rdquo;.
@@ -195,10 +213,13 @@ export function ProjectsBrowser({
           </ul>
 
           {next && (
-            <div className="mt-6 flex justify-center">
-              <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? "Loading..." : "Load more"}
-              </Button>
+            <div className="mt-6">
+              <LoadMore
+                next={next}
+                loading={loadingMore}
+                error={moreError}
+                onLoadMore={() => void loadMore()}
+              />
             </div>
           )}
         </>

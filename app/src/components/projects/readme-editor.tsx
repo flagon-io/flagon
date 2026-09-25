@@ -14,7 +14,8 @@ import {
   TabsTrigger,
   Textarea,
 } from "@flagon-io/ui";
-import type { Project } from "@/lib/flagon-api";
+import { errorMessage } from "@/lib/client-fetch";
+import type { Project } from "@/lib/api/types";
 import { Markdown } from "@/components/markdown";
 
 const PLACEHOLDER = `# My project
@@ -43,8 +44,7 @@ export function ReadmeEditor({ orgSlug, project }: { orgSlug: string; project: P
     );
     if (!res.ok) {
       setSaving(false);
-      const d = await res.json().catch(() => ({}));
-      setError(d.error ?? "Couldn't save the README.");
+      setError(await errorMessage(res, "Couldn't save the README."));
       return;
     }
     router.push(overview);

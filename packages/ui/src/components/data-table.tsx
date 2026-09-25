@@ -28,6 +28,7 @@ import {
 import { ArrowDown, ArrowUp, Check, ChevronsUpDown, PlusCircle, SlidersHorizontal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/control";
 import { Badge } from "./badge";
 import { Button } from "./button";
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList, CommandSeparator } from "./command";
@@ -126,7 +127,7 @@ export function DataTable<TData extends RowData>({
   const hasToolbar = filterCol || toolbarNode || enableColumnVisibility;
 
   return (
-    <div className={cn("space-y-3", className)}>
+    <div data-slot="data-table" className={cn("space-y-3", className)}>
       {hasToolbar && (
         <div className="flex items-center gap-2">
           {filterCol && (
@@ -182,7 +183,7 @@ export function DataTable<TData extends RowData>({
                         <button
                           type="button"
                           onClick={header.column.getToggleSortingHandler()}
-                          className="-ml-1 inline-flex items-center gap-1 rounded px-1 py-0.5 hover:text-foreground"
+                          className={cn("-ml-1 inline-flex items-center gap-1 rounded px-1 py-0.5 hover:text-foreground", focusRing)}
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
                           {sorted === "asc" ? (
@@ -275,7 +276,13 @@ export function DataTableFacetedFilter<TData extends RowData, TValue>({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="border-dashed" aria-label={`Filter by ${title}`}>
+        <Button
+          data-slot="data-table-faceted-filter"
+          variant="outline"
+          size="sm"
+          className="border-dashed"
+          aria-label={`Filter by ${title}`}
+        >
           <PlusCircle className="size-4" />
           {title}
           {selected.size > 0 && (

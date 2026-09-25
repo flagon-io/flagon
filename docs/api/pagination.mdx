@@ -1,81 +1,130 @@
 ---
 title: Pagination and search
-description: How list endpoints page and search - keyset cursors, Link headers, and the HTTP QUERY method.
-order: 5
+description: How list endpoints search on the server and page with opaque keyset cursors, Link headers, and the HTTP QUERY method.
 ---
 
-Every list endpoint in Flagon shares one convention: results are **searched on the
-server** and returned a page at a time, with the next page reached through a
-**cursor**. The rules below are identical for projects, members, teams,
-collaborators, owners, invitations, and every other list, so a client that can
+Every paginated list in Flagon shares one convention: results are **searched on
+the server** and returned a page at a time, and the next page is reached through
+an opaque **cursor** that the API hands you in a `Link` header. A client that can
 page one list can page them all.
+
+## Which lists paginate
+
+| Lists | Parameters |
+| --- | --- |
+| Projects, deleted projects (organization owners and admins only; each row has a `purge_at`), organization members, pending invitations, teams, team members, a team's projects, project collaborators, project teams, project owners | `q`, `limit`, `cursor` (this page) |
+| The audit log (`GET /orgs/<org>/audit`) | `q`, `action`, `actor`, `limit`, `cursor` (see "The audit log" below) |
+| Notifications (`GET /notifications`) | `limit` only: default 30, values above 100 are clamped to 100, `0` or a negative value means 30; no cursor |
+| Organizations, deleted organizations, access tokens, SSO providers | Not paginated: the whole list in one response |
 
 ## Parameters
 
-A list request takes three optional parameters:
+| Param | Meaning |
+| --- | --- |
+| `q` | Free-text search, matched case-insensitively against the resource's human columns (a project's name and slug; a person's name, email, and username; an invitation's email). Omit it for no filter. |
+| `limit` | Page size. Defaults to 30; values above 100 are clamped to 100; `0` or a negative value means the default. |
+| `cursor` | The opaque cursor from the previous page's `Link` header. Omit it for the first page. |
+
+```bash
+# First page of projects whose name or slug contains "api":
+curl "https://api.flagon.io/orgs/acme/projects?q=api&limit=20" \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+## Following the Link header
+
+The rows come back in the body (`{"projects": [...]}`), and when more exist the
+response carries a `Link` header (RFC 8288) with `rel="next"`:
+
+```http
+Link: </orgs/acme/projects?cursor=WyJiaWxsaW5nIGFwaSIsIjc1OTE5YWY5LTIwNjQtNGJjZC05OThkLTViNjNlYjQxMWRlNiJd&limit=20&q=api>; rel="next"
+Link: </schemas/ProjectsOutputBody.json>; rel="describedBy"
+```
+
+Two things to know when you parse it:
+
+- **Pick the `rel="next"` link.** Every response also carries a
+  `rel="describedBy"` link to its JSON Schema, so a response can have more than
+  one `Link` header.
+- **The next URL is a path**, relative to the API's base URL. Resolve it against
+  `https://api.flagon.io` (or your self-hosted origin) before requesting it.
+
+The next URL already carries your `q` and `limit`, so you only ever echo back
+what Flagon gave you. When there is no `rel="next"` link, you are on the last
+page.
+
+```bash
+url="/orgs/acme/projects?limit=100"
+while [ -n "$url" ]; do
+  curl -s -D headers.txt "https://api.flagon.io$url" \
+    -H "Authorization: Bearer $FLAGON_TOKEN" | jq -r '.projects[].slug'
+  url=$(grep -i '^link:' headers.txt | grep 'rel="next"' | sed -E 's/.*<([^>]*)>.*/\1/')
+done
+```
+
+## Why keyset cursors
+
+Pagination is **keyset**, not page numbers: each page resumes strictly after the
+last row of the previous one, ordered by a stable key the database computes (for
+projects, the lowercased name and then the id). Deep pages stay as fast as the
+first, and rows are never skipped or repeated when data changes underneath you.
+The trade-off is that there is **no total count and no page count**: you page
+until there is no next link, rather than jumping to "page 7".
+
+- **The cursor is opaque.** Echo it back; do not parse or build it. Its format
+  can change without notice.
+- **A cursor belongs to its query.** Keep `q` the same while you page. Changing
+  the search means starting again from the first page.
+- **A malformed or tampered cursor** is rejected with `422` and the detail
+  `invalid pagination cursor`.
+
+## Querying with a body: the QUERY method
+
+Long searches can be sent with the HTTP `QUERY` method instead of `GET`. `QUERY`
+is a safe, read-only method that carries its parameters in the request body.
+Every list in the first row of the table above accepts it at the same path, with
+the same three fields in a JSON body:
+
+```bash
+curl -X QUERY https://api.flagon.io/orgs/acme/projects \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"q": "api", "limit": 20}'
+```
+
+The response is identical to the `GET` form, including the `Link` header. To
+fetch the next page, either follow the `Link` URL with `GET`, or send another
+`QUERY` with the cursor from it in the body (`"cursor": "..."`).
+
+`QUERY` is optional; the dashboard uses `GET`. OpenAPI 3.1 has no field for the
+`QUERY` method, so these operations (`query-projects`, `query-members`, and so
+on) are routed and validated but do not appear in the generated spec. Each one
+requires the same scope as its `GET` twin.
+
+## The audit log
+
+`GET /orgs/<org>/audit` pages the same way (newest events first, a `Link` header
+with `rel="next"`, `limit` default 30 and clamped to 100, `0` or a negative
+value meaning 30) and adds two filters:
 
 | Param | Meaning |
 | --- | --- |
-| `q` | Free-text search. Matched case-insensitively against the human columns of the resource (a project's name and slug, a person's name, email and username, and so on). Omit it for no filter. |
-| `limit` | Page size, 1-100. Defaults to 30; values above 100 are clamped. |
-| `cursor` | An opaque keyset cursor marking where the previous page ended. Omit it for the first page. |
+| `q` | Search across the summary, action, actor, and location. |
+| `action` | Only these [action keys](/docs/reference/audit-actions). Repeat it for several: `?action=project.created&action=project.deleted`. |
+| `actor` | Only events by this user id. |
 
-```sh
-# First page of projects whose name or slug contains "api":
-GET /orgs/acme/projects?q=api&limit=20
-```
-
-## Paging with the Link header
-
-The response carries the rows in its body and, when more results exist, a
-[Link header](https://www.rfc-editor.org/info/rfc8288) pointing at the next page:
-
-```
-Link: </orgs/acme/projects?q=api&limit=20&cursor=eyJ2IjoxLCJrIjpbImFwaS1ndyJdfQ>; rel="next"
-```
-
-Follow that URL to get the next page; it already carries your `q` and `limit`, so
-you only ever hand back the cursor Flagon gave you. When there is no `rel="next"`
-link, you have reached the last page.
-
-Pagination is **keyset**, not page-number based: each page resumes exactly after
-the last row of the previous one, ordered by a stable key. This stays fast no
-matter how deep you page and never skips or repeats a row when the data changes
-underneath you. The trade is that there is **no total count or page count** - you
-page until there is no next link, rather than jumping to "page 7".
-
-- **The cursor is opaque.** Treat it as a token to echo back, not something to
-  parse or build. Its contents can change without notice.
-- **A cursor belongs to its query.** Keep `q` (and `limit`) the same as you page;
-  changing the search means starting a new sequence from the first page.
-- **A malformed or foreign cursor** is rejected with `422`.
-
-## Querying with a request body: the QUERY method
-
-Long searches, or structured filters you would rather not cram into a URL, can be
-sent with the **[HTTP QUERY method](https://www.rfc-editor.org/info/rfc9110)**
-instead of GET. QUERY is a safe, read-only method that carries its parameters in
-the request body. Every list endpoint accepts it at the same path, with the same
-three fields in a JSON body:
-
-```sh
-QUERY /orgs/acme/projects
-Content-Type: application/json
-
-{ "q": "api", "limit": 20, "cursor": "eyJ2IjoxLCJrIjpbImFwaS1ndyJdfQ" }
-```
-
-The behavior is identical to the GET form, including the `Link` header on the
-response. QUERY is offered for clients that support it; it is not required, and
-Flagon's own dashboard uses the GET form. Because QUERY is newer than OpenAPI's
-fixed method set, these endpoints are not listed under a `query` verb in the
-generated spec, but they are fully supported at runtime.
+It has no `QUERY` form. See [Audit log](/docs/platform/audit-log).
 
 ## Rules
 
 - **Search is always server-side.** There is no "fetch everything and filter"
-  path; `q` does the work in the database, so a client never has to hold a whole
-  list in memory.
-- **Permission-scoped.** Paging and search never widen access: you only ever see
-  rows you could already read, and the same token scope that guards the GET form
-  guards the QUERY form.
+  path; `q` does the work in the database.
+- **Paging never widens access.** You only ever see rows you could already read,
+  and the `QUERY` form requires the same scope as the `GET` form.
+
+## Related
+
+- [Using the API](/docs/api/using-the-api)
+- [Expanding responses](/docs/api/expanding-responses)
+- [Errors](/docs/api/errors)
+- [Limits](/docs/reference/limits)

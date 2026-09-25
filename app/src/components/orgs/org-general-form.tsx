@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Copy } from "lucide-react";
 import { Alert, Button, Input, InputGroup, cn } from "@flagon-io/ui";
+import { errorMessage } from "@/lib/client-fetch";
 import { SettingsCard } from "@/components/settings/settings-card";
 
 export function OrgGeneralForm({
@@ -39,8 +40,7 @@ export function OrgGeneralForm({
     });
     setSaving(false);
     if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      setError(d.error ?? "Couldn't save your changes.");
+      setError(await errorMessage(res, "Couldn't save your changes."));
       return;
     }
     setSaved(true);

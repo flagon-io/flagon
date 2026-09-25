@@ -1,0 +1,245 @@
+---
+title: Data ownership
+description: What lives in the app's auth database versus the API's domain database, the single-writer rule that keeps them apart, how profile, auth state, and SSO data cross the boundary, how secrets are sealed at rest, how migrations run, and how soft delete works.
+---
+
+Flagon keeps two Postgres databases, and each has exactly one owner. The **auth
+database** belongs to the app (`app/`) and holds sign-in state. The **domain
+database** belongs to the API (`api/`) and holds everything your organization
+creates. Neither service writes the other's database, and the few facts that must
+exist on both sides cross the boundary through the API, in one direction each.
+
+Knowing which side owns a piece of data tells you where to look when it is wrong,
+which service must be up for it to change, and what a backup of each database
+contains.
+
+```text
+   app  (Next.js + BetterAuth)                    api  (Go)
+                │ reads, writes                       │ single writer
+ ┌──────────────▼──────────────┐      ┌───────────────▼───────────────┐
+ │ Auth DB  (app only)         │      │ Domain DB  (api only)         │
+ │ users, sessions, accounts,  │      │ users (the account mirror),   │
+ │ verifications, two_factors, │      │ user_sso_identities,          │
+ │ rateLimit, user_emails,     │      │ orgs, memberships,            │
+ │ sso_providers (a cache)     │      │ org_invitations, teams,       │
+ │                             │      │ projects, grants, owners,     │
+ │                             │      │ access_tokens, audit_logs,    │
+ │                             │      │ notifications, ai_usage,      │
+ │ written only by the app     │      │ sso_providers (the truth)     │
+ │                             │      │ written only by the api       │
+ └─────────────────────────────┘      └───────────────────────────────┘
+  profile, 2FA, SSO links: app ── PUT /me/profile ──────► users mirror
+  SSO config:     cache ◄── GET /internal/sso/providers ── sso_providers
+```
+
+## The auth database (app)
+
+The app connects to it with its own `DATABASE_URL` through one `pg` pool
+(`app/src/lib/db.ts`) that [BetterAuth](https://www.better-auth.com) and the app's
+own queries share. BetterAuth is configured in `app/src/lib/auth.ts` with plural
+table names.
+
+| Table | What it holds |
+| --- | --- |
+| `users` | The account: email, name, username, profile fields, and a `deletedAt` soft-delete marker |
+| `sessions` | Signed-in sessions |
+| `accounts` | Linked sign-in methods: password, Google, GitHub, and each org SSO identity |
+| `verifications` | Email verification and one-time codes |
+| `two_factors` | TOTP secrets and backup codes |
+| `rateLimit` | Shared rate-limit counters for the auth endpoints |
+| `user_emails` | Every email address on an account (a Flagon table, not BetterAuth's) |
+| `sso_providers` | The SSO plugin's provider table, used only as a cache (see below) |
+
+The app migrates this database itself. On Vercel, the `vercel-build` script runs
+`app/scripts/deploy-migrate.mjs` before `next build`: it renames any old singular
+BetterAuth tables, applies BetterAuth's schema with its programmatic migration
+engine (`app/scripts/auth-migrate.ts`), and applies the `user_emails` migration. A
+failed step fails the build, so a broken auth schema never ships. Locally,
+`npm run db:migrate` in `app/` runs the same steps.
+
+## The domain database (api)
+
+The API is the **single writer** of every domain table. The schema lives in
+`api/internal/db/migrations/`, one numbered SQL file per change.
+
+| Table | What it holds |
+| --- | --- |
+| `users` | A mirror of each account (id, email, public profile fields, and whether 2FA is enabled), plus the service principals behind org access tokens (`is_service`) |
+| `user_sso_identities` | Which SSO providers each user has signed in through at least once, mirrored from the app for the org SSO policy |
+| `orgs`, `memberships` | Organizations, their security policy, and who belongs with which role |
+| `org_invitations` | Pending email invitations, stored as token hashes |
+| `teams`, `team_members` | Teams and their members |
+| `projects` | Projects, with soft delete |
+| `project_members`, `project_team_members`, `project_owners` | Per-project role grants and ownership |
+| `access_tokens` | Personal and organization access tokens, stored as SHA-256 hashes |
+| `audit_logs` | The append-only org audit log |
+| `notifications` | Per-user notifications |
+| `sso_providers` | Each org's OIDC and SAML configuration, with secrets in their own column, sealed with AES-256-GCM |
+| `ai_usage` | Per-org assistant usage (model, input and output tokens) for metering |
+| `schema_migrations` | Applied migration versions and their checksums |
+| `rls_selfcheck` | A two-row fixture that `/internal/rls-check` uses to prove isolation |
+
+Every tenant table has row-level security enabled, and every runtime query runs as
+a role that cannot bypass it. See [Multi-tenancy](/docs/architecture/multi-tenancy).
+
+## The single-writer rule
+
+The app has no connection string for the domain database, and the API has none for
+the auth database. That is the enforcement: each service has no way to write the
+other's data.
+
+- **The app reaches domain data only through the gateway.** Route handlers call
+  `app/src/lib/api/client.ts`, which calls the API with the internal token and the
+  verified user id. See [Request lifecycle](/docs/architecture/request-lifecycle).
+- **The API never handles passwords, sessions, or 2FA secrets.** It learns who a
+  user is from the gateway headers, or from a `flagon_` access token it issued
+  itself.
+
+Why split them at all? Sign-in data and tenant data have different risk profiles
+and different change rates. Keeping credentials out of the database the API serves
+tenant queries from narrows what any single compromise exposes, and it lets
+BetterAuth manage its own schema without touching the domain migrations.
+
+## Data that crosses the boundary
+
+Two kinds of data exist on both sides. In each case one side is the source of truth
+and the other holds a copy that the source keeps current.
+
+### The account mirror (app to API)
+
+The account, its profile, and its sign-in state belong to the app. The API keeps a
+copy in its `users` table because domain rows reference users (memberships, project
+creators, audit actors), because the public profile read, `GET /users/{username}`,
+is an API operation, and because the API enforces each organization's 2FA and SSO
+requirements itself and needs two facts to do it: whether the account has 2FA
+enabled (`users.two_factor_enabled`), and which SSO providers it has ever signed in
+through (`user_sso_identities`, migration `0035`).
+
+- `app/src/lib/user-profile.ts` sends the profile to `PUT /me/profile` from
+  BetterAuth's `user.create` and `user.update` hooks, and again on every
+  `session.create`, so the API knows every account from its first sign-in and heals
+  any drift (for example after the domain database is rebuilt). The same call
+  carries `twoFactorEnabled` (on every user update, so turning 2FA on or off
+  re-syncs at once) and `ssoProviderIds`, the account's linked SSO identities (on
+  every sign-in). The org layout also re-mirrors when it sees the API's 2FA flag
+  disagree with the session.
+- The mirror is written only by the app: `PUT /me/profile` accepts only the
+  internal token, and any access token gets `401`, whatever its scopes. So a
+  token can neither overwrite the profile (username included) nor grant itself
+  2FA or an SSO link.
+- The mirror is best-effort and time-boxed to 2.5 seconds. A failure never blocks
+  sign-in; the next sign-in or profile save re-syncs.
+- An account soft delete is decided in the app (`deletedAt`) and mirrored through
+  the internal-only `PUT /me/deleted`, which hides the public profile.
+- `GET /me` also upserts the user's id and email, so any authenticated dashboard
+  load creates the row if it is missing.
+
+The public read goes through `public.user_profile`, a `SECURITY DEFINER` function
+that returns only public columns. An unauthenticated caller can read one profile
+without the runtime role ever being allowed to read other users' rows.
+
+### SSO provider configuration (API to app)
+
+An org's OIDC or SAML configuration is a security setting, so the API owns it: it
+has operations, scopes, tools, and audit entries like every other capability. The
+BetterAuth SSO plugin still runs the protocol (redirects, assertions, signatures),
+and it reads providers from its own `sso_providers` table. That table is a
+**cache** of the API's configuration.
+
+- A `hooks.before` in `app/src/lib/auth.ts` (`ssoBeforeHook` in
+  `app/src/lib/sso-hook.ts`) re-syncs the provider an SSO request is about to use,
+  from `GET /internal/sso/providers`, before the plugin runs. A change made from the
+  dashboard, the API, the assistant, or MCP takes effect on the next sign-in, and a
+  deleted provider stops working.
+- If the API cannot answer, SSO fails closed with `503` ("Single sign-on is
+  temporarily unavailable").
+- The plugin's own provider-management endpoints are disabled
+  (`SSO_MANAGEMENT_PATHS`) and `providersLimit` is `0`, so nothing writes the cache
+  except the sync.
+- Cache rows that predate API ownership are adopted through
+  `POST /internal/sso/providers/import`. A provider deleted in the API leaves a
+  tombstone row, so a stale cache row can never bring it back. `npm run
+  sso:backfill` in `app/` runs the adoption on demand.
+
+Both internal routes accept only the internal token, never a user token. The
+internal read returns full configuration, secrets included, because the plugin
+needs them in the clear; the cache row in the auth database therefore holds them
+in plaintext, while the API's copy is sealed. See
+[Identity and authentication](/docs/architecture/identity-and-auth).
+
+## Secrets at rest
+
+The API stores a few credentials it must later use in the clear: OIDC client
+secrets and SAML signing keys. `api/internal/secrets` seals each one with
+AES-256-GCM before it is written, as a self-describing string
+`enc:v1:<key id>:<ciphertext>`. The key id (the first 8 hex characters of the
+key's SHA-256) names the key that sealed a value, so a keyring can keep opening
+values sealed by an older key after a rotation. Each value is sealed with
+associated data naming the field, so a ciphertext copied into another field fails
+to open. A database dump, backup, or replica alone never yields them.
+
+- The key is `FLAGON_SECRETS_KEY`, 32 random bytes in base64
+  (`openssl rand -base64 32`). A production API refuses to start without it; in
+  development the server falls back to a fixed, public key and logs a warning.
+- On every boot, `db.SealStoredSecrets` (run as the migrator) encrypts any value
+  still in plaintext, for example rows written before encryption existed. It is
+  idempotent, and a failure is logged and retried on the next boot, because reads
+  still accept legacy plaintext.
+- User-facing reads never select the secrets column; owners and admins see only
+  whether a secret is set.
+
+## Migrations
+
+API migrations are embedded SQL (`//go:embed migrations/*.sql` in
+`api/internal/db/migrate.go`), so the binary always carries the schema it expects.
+`db.Setup` runs them on every boot of `flagon-server serve`, and
+`flagon-server migrate` runs the same step and exits.
+
+- **One transaction.** All pending files apply in filename order inside a single
+  transaction. Either every pending migration applies or none does, so migration
+  files must not contain `BEGIN` or `COMMIT`.
+- **Serialized boots.** The run first takes `pg_advisory_xact_lock(4972011)`. When
+  several machines boot at once, the first applies and the rest wait, then find
+  nothing to do. The lock is transaction-scoped so it works through a
+  transaction-pooling connection such as pgbouncer.
+- **Immutable once shipped.** `schema_migrations` records a SHA-256 checksum per
+  file. If a shipped file changes, the run fails ("migrations are immutable once
+  shipped") and the server refuses to start. `TestMigrationsAreImmutableOnceApplied`
+  in `api/internal/db/setup_integration_test.go` proves it.
+- **Degraded, not dead.** If Postgres is unreachable, the server starts anyway and
+  `/readyz` answers `503` with the reason. If Postgres is reachable but a migration
+  fails, the server exits rather than serve against a half-known schema.
+
+Setup also provisions the runtime app role (creating it, setting its password from
+`FLAGON_APP_DATABASE_URL`, and pinning `NOBYPASSRLS`) and grants it table
+privileges. Both steps are best-effort: on a managed Postgres that owns its roles,
+the database refuses with `insufficient_privilege` and the platform's role model
+applies instead.
+
+## Soft delete
+
+Nothing a user deletes disappears immediately. Each resource marks itself deleted
+with a timestamp and can be restored.
+
+| Resource | Who can delete and restore | Behavior |
+| --- | --- | --- |
+| Project | A project owner (directly or through a team), or an org owner or admin | The slug is freed at once (a live-rows-only unique index). Restorable for 30 days, the same window as organizations: the deleted list returns each project's `purge_at`, restore brings back the newest deleted project with that slug, and it accepts an optional new slug. A slug taken meanwhile, with no new one given, is `409`; outside the window the project is `404` |
+| Organization | Org owners | Every membership predicate treats a deleted org as nonexistent, so its projects, members, teams, invitations, tokens, and audit log read as not found. Restorable for 30 days, under a new slug if the old one was taken |
+| Account | The account holder, in the app | BetterAuth refuses new sessions, and the public profile is hidden through the mirror |
+| SSO provider | Org owners and admins | A tombstone frees the provider id and domain, and blocks re-import |
+
+<Callout type="warn" title="Not available yet">
+
+There is no automatic hard purge yet. A deleted organization or project stops
+being listed or restorable after the 30-day window (`DeletedRetention` in
+`api/internal/db/org_delete.go`), but its rows stay in the database until a future
+scheduled purge job removes them.
+
+</Callout>
+
+## Related
+
+- [Multi-tenancy](/docs/architecture/multi-tenancy)
+- [Identity and authentication](/docs/architecture/identity-and-auth)
+- [Auditing and notifications](/docs/architecture/auditing-and-notifications)
+- [Deployment topology](/docs/architecture/deployment-topology)

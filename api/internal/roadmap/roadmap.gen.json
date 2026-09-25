@@ -2,16 +2,15 @@
   "items": [
     {
       "slug": "access-and-security",
-      "title": "Access and security",
-      "stage": "beta",
+      "title": "Provisioning and session controls",
+      "stage": "concept",
       "team": "Platform",
-      "summary": "Who can do what, proven rather than assumed. Role-based access across the org and each product, backed by tenant isolation and a full audit trail, with the account protections teams expect.",
+      "summary": "Single sign-on, required two-factor, scoped tokens, and the audit log have shipped. What's left is the lifecycle around them: keeping an organization's roster in step with its identity provider automatically, and giving owners control over how long, and where, their members stay signed in.",
       "includes": [
-        "Org-wide and per-product roles and permissions",
-        "Single sign-on and two-factor authentication",
-        "Org security policies and session controls",
-        "Scoped access tokens for programmatic use",
-        "An audit log of every sensitive action"
+        "SCIM provisioning and deprovisioning from your identity provider",
+        "Org session policies: session lifetime and idle timeouts",
+        "Sign members out of an organization everywhere, at once",
+        "Built on the same roles, scopes, and audit trail as the rest of the platform"
       ],
       "order": 2
     },
@@ -50,7 +49,7 @@
       "stage": "concept",
       "team": "Platform",
       "tag": "Next",
-      "summary": "The heart of Flagon: your products and teams stay in sync with the systems those definitions already live in, in both directions. Define once, and let it flow to and from the tools you already use.",
+      "summary": "The heart of Flagon: your projects and teams stay in sync with the systems those definitions already live in, in both directions. Define once, and let it flow to and from the tools you already use.",
       "includes": [
         "Two-way sync, not one-way import",
         "Connect the systems your definitions already live in",
@@ -72,36 +71,6 @@
         "One consistent contract across all of them"
       ],
       "order": 3
-    },
-    {
-      "slug": "multi-tenant-core",
-      "title": "Multi-tenant platform core",
-      "stage": "beta",
-      "team": "Platform",
-      "tag": "Foundation",
-      "summary": "The home base every tenant lives in: organizations, the people who belong to them, and the roles that decide what each can do. Multi-tenant from the first commit, with every tenant's data isolated at the database itself.",
-      "includes": [
-        "Organizations as the top-level tenant",
-        "People, membership, and ownership",
-        "Roles that decide who can do what",
-        "Tenant isolation enforced in the database with row-level security"
-      ],
-      "order": 1
-    },
-    {
-      "slug": "products-and-teams",
-      "title": "Products and teams",
-      "stage": "alpha",
-      "team": "Platform",
-      "tag": "In progress",
-      "summary": "The core objects people create and manage inside an org: the products they ship and the teams that own them. This is what we're building out right now.",
-      "includes": [
-        "Products as first-class objects",
-        "Teams that own and organize them",
-        "Assigning teams to the products they own",
-        "The same permissions model as the rest of the platform"
-      ],
-      "order": 1
     },
     {
       "slug": "public-api",
@@ -136,12 +105,12 @@
       "title": "Usage and billing",
       "stage": "concept",
       "team": "Platform",
-      "summary": "Metering turned into plans and limits. Usage is already tracked per organization; this turns it into transparent limits and billing, priced to sit below what it costs to run.",
+      "summary": "Metering turned into plans and limits. AI usage is already metered per organization, with a daily cap enforced today; this turns that into a usage dashboard, transparent plan limits, and billing, priced to sit below what it costs to run.",
       "includes": [
-        "Per-organization usage and limits",
-        "Plan enforcement",
+        "A usage dashboard for every organization",
+        "Plan limits and enforcement beyond today's free-plan caps",
         "Transparent, honest pricing",
-        "Billing and invoicing"
+        "Billing, payment methods, and invoicing"
       ],
       "order": 2
     }

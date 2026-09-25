@@ -1,0 +1,148 @@
+---
+title: Access and permissions
+description: Why an organization or project shows 404 instead of 403, how to tell a token scope problem from a role or organization policy problem, base permission surprises, and what happens to deleted organizations and projects.
+---
+
+Access in Flagon is decided by independent checks. Your **role** (in the
+organization, and on each project) decides what you may do. When you use an
+access token, its **scopes** decide which operations that token may call, and it
+can never do more than your role allows. On top of both, an organization can
+require **two-factor authentication** or **single sign-on**, and the API refuses
+requests from members who do not meet that policy. Most "why can't I" questions
+come down to which check said no, and the status code and message tell you
+which.
+
+## An organization returns 404, not 403
+
+<Callout type="warn" title="The organization page or API says it doesn't exist">
+
+Opening `/<org>` shows a 404 page, or the API answers `404 Not Found` with
+`organization not found`, but you know the organization is real.
+
+</Callout>
+
+**What it means.** Flagon answers the same way for an organization that does not
+exist, one you are not a member of, and one that was deleted. It never confirms
+that an organization exists outside your reach, so a 404 is the expected answer
+where you might expect a 403. The dashboard's 404 page is also deliberately
+generic for the same reason. Projects and teams inside an organization you can't
+see return 404 as well.
+
+The same applies to projects inside an organization you do belong to. If your
+effective role on a project is below `read` (for example the organization's base
+permission is `none` and nobody granted you access), the project returns `404`
+"project not found", for reads and for changes alike, and it is left out of the
+project list. Ask a project admin or an organization owner or admin for a grant.
+
+**How to fix.**
+
+1. Check the slug in the URL or request. Slugs are lowercase.
+2. Make sure you are signed in as the account that belongs to the organization.
+   The organization switcher lists every organization your account is in.
+3. Ask an owner or admin to [invite you](/docs/guides/invite-your-team).
+4. If the organization was deleted, see [deleted organizations](#deleted-organizations-and-projects).
+5. Using an **organization access token**? It acts only inside the organization
+   that issued it, so every other organization returns 404. Use a personal access
+   token, or a token issued by the other organization.
+
+## 403: is it the token or the role?
+
+A `403 Forbidden` always means Flagon knows who you are and has decided you may
+not do this. The message says which check refused:
+
+| Message | Which check | Fix |
+| --- | --- | --- |
+| `this token is missing the scope required for this operation` | The token's **scopes** | Create a token that includes the scope the operation needs, then revoke the old one. Scopes are fixed when a token is created. |
+| `you don't have permission to do that` | Your **role** (or, for an organization token, the token's role) | Ask an owner or admin for a higher role or a project grant. A token cannot fix this: it never exceeds its principal's permissions. |
+| `only an organization owner can delete it` / `only an organization owner can restore it` | Your organization **role** | Only owners delete or restore an organization. |
+| `only organization owners and admins can do that` | Your organization **role** | The audit log (and other admin-only reads) needs an owner or admin. |
+| `this organization requires two-factor authentication; enable it on your account to continue` | The organization's **2FA requirement** | Enable two-factor authentication on your account at `/settings/security`. Tokens you already hold start working again once it is on. |
+| `this organization requires single sign-on; sign in through the organization's identity provider to continue` | The organization's **SSO requirement**, for a dashboard session | Sign out and sign in again through the organization's identity provider (**Continue with SSO**). |
+| `this organization requires single sign-on; sign in through the organization's identity provider at least once before using a personal access token with it` | The **SSO requirement**, for a personal access token | Sign in to the dashboard through the organization's identity provider once. The token then works. Alternatively, use an organization access token, which the policy does not apply to. |
+| `this operation requires a user; organization access tokens can't perform it` | The **kind of token** | Creating, leaving, listing deleted, or restoring organizations need a person. Use a personal access token or the dashboard. |
+
+The organization policy checks apply to every `/orgs/{slug}/...` operation
+except leaving the organization, to assistant and MCP tools that name the
+organization, and to the assistant itself. Organization owners are exempt from
+the SSO requirement, so an owner can always reach settings to fix a broken
+provider. Organization access tokens are exempt from both requirements.
+
+Every operation's scope is listed in the [scopes reference](/docs/reference/scopes).
+A parent scope implies its children, so `admin:org` covers `write:org` and
+`read:org`. Over MCP, the same scope failure reads
+`this token is missing the scope required for <tool name>`.
+
+## Base permission surprises
+
+The **base permission** (Settings, then Access, then Member privileges) is the
+project role every organization **member** gets on every project. The dashboard
+offers `none`, `read`, `write`, and `admin`, and owners or admins change it. A few
+consequences catch people out:
+
+- **It is a floor, not a ceiling.** A project grant (to a person or a team) can
+  raise a member above the base permission on one project, but nothing lowers a
+  member below it. To keep one project private from most members, lower the base
+  permission for everyone and grant access where it's needed.
+- **Owners and admins are unaffected.** Organization owners and admins are
+  project admins everywhere and hold owner authority on every project, whatever
+  the base permission says.
+- **`admin` is broad.** Setting the base permission to `admin` makes every member
+  an admin on every project, so every member can manage every project's
+  collaborators and team grants.
+- **Each project action has its own minimum.** Viewing a project needs `read`,
+  editing its name, description, README, or repository URL needs `write`,
+  changing its slug needs `maintain`, and managing collaborators and team grants
+  needs `admin`. A member who can view a project but lacks the role for an action
+  gets `403` with `you don't have permission to do that`.
+- **Deleting a project needs ownership, not admin.** Deleting, restoring, and
+  changing a project's owners are owner-tier actions: a project owner (a person or
+  a team) or an organization owner or admin. A project admin who is not an owner
+  gets `403` with `you don't have permission to do that`.
+- **Creating a project does not make you its owner.** The creator is granted
+  `admin` on the new project, which lets them manage its access but not delete
+  it.
+- **The change applies to everyone at once.** Lowering it takes access away from
+  every member who has no explicit grant, immediately.
+
+See [Roles and permissions](/docs/platform/roles) for the full model.
+
+## You can't see the audit log
+
+The audit log is readable by organization **owners and admins** only. Anyone
+else gets `403` "only organization owners and admins can do that", from the REST
+API and from the `list_audit_events` tool the assistant and MCP use.
+
+## Deleted organizations and projects
+
+**A deleted organization** disappears for everyone at once: its pages and API
+operations return `404`, its organization access tokens stop working (`401`),
+and its slug is freed. Owners can restore it for 30 days from **Settings, then
+Organizations, then Recently deleted** in personal settings (or
+`POST /deleted-orgs/{id}/restore`). Restore can fail with:
+
+| Status | Message | Fix |
+| --- | --- | --- |
+| `409` | `that org slug is now taken; restore it under a new slug` | Pass a new `slug` in the restore request body. |
+| `402` | `the free plan includes one organization; add a payment method to restore another` | You already own as many organizations as the plan allows. |
+| `404` | `no restorable organization with that id` | The 30 days have passed, or you were not an owner. |
+
+**A deleted project** returns `404` with `project not found`, and its slug is
+free for a new project immediately. Project owners, and organization owners and
+admins, restore it for 30 days from the organization's **Settings, then Archive,
+then Deleted projects** (or `POST /orgs/{slug}/projects/{project}/restore`).
+Restore can fail with:
+
+| Status | Message | Fix |
+| --- | --- | --- |
+| `409` | `that project slug is now taken; restore it under a new slug` | Pass a new `slug` in the restore request body, or rename the project that took it. |
+| `404` | `no restorable project with that slug` | The 30 days have passed, or the project is not deleted. |
+| `403` | `you don't have permission to do that` | Restoring needs project ownership, or organization owner or admin. |
+
+See [Delete and restore](/docs/guides/delete-and-restore).
+
+## Related
+
+- [Roles and permissions](/docs/platform/roles)
+- [Project access](/docs/platform/project-access)
+- [Scopes reference](/docs/reference/scopes)
+- [API errors](/docs/troubleshooting/api-errors)

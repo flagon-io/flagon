@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { buttonClasses } from "@flagon-io/ui";
-import { getMe } from "@/lib/flagon-api";
+import { requireMe } from "@/lib/org-context";
 
 export const metadata = { title: "Two-factor required - Flagon" };
 
@@ -14,8 +13,7 @@ export default async function TwoFactorRequiredPage({
 }: {
   searchParams: Promise<{ org?: string }>;
 }) {
-  const me = await getMe();
-  if (!me) redirect("/login");
+  const { me } = await requireMe();
 
   const { org: slug } = await searchParams;
   const org = slug ? me.orgs.find((o) => o.slug === slug) : undefined;

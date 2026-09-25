@@ -3,13 +3,13 @@
 // deletedAt. A future job can hard-purge long-deleted accounts.
 import { pool } from "@/lib/db";
 
+import { internalToken } from "@/lib/internal-token";
+
 const API_URL = process.env.FLAGON_API_URL ?? "http://localhost:8080";
-const INTERNAL_TOKEN = process.env.FLAGON_INTERNAL_TOKEN ?? "";
 
 /** Mirror the soft-delete state into the API so the public profile hides deleted
  *  accounts. Best-effort + time-boxed: never block account deletion over it. */
 async function mirrorDeletedState(userId: string, email: string, deleted: boolean) {
-  if (!INTERNAL_TOKEN) return;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2500);
   try {
@@ -17,7 +17,7 @@ async function mirrorDeletedState(userId: string, email: string, deleted: boolea
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${INTERNAL_TOKEN}`,
+        Authorization: `Bearer ${internalToken()}`,
         "X-Flagon-User-Id": userId,
         "X-Flagon-User-Email": email,
       },

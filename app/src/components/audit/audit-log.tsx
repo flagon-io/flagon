@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Check, ListFilter, Loader2, MapPin, MoreHorizontal, Search } from "lucide-react";
 import {
   Badge,
@@ -14,13 +14,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Input,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
   cn,
 } from "@flagon-io/ui";
-import type { AuditConfig, AuditEvent, AuditPage } from "@/lib/flagon-api";
+import type { AuditConfig, AuditEvent, AuditPage } from "@/lib/api/types";
+import { errorMessage, fetchJson, messageOf } from "@/lib/client-fetch";
+import { ListError, TableShell } from "@/components/shared/list-states";
 import { timeAgo } from "@/lib/notifications";
 
 // The filterable action vocabulary, mirroring internal/audit Actions.
@@ -34,6 +42,7 @@ const ACTIONS: { value: string; label: string }[] = [
   { value: "member.removed", label: "Member removed" },
   { value: "invitation.sent", label: "Invitation sent" },
   { value: "invitation.revoked", label: "Invitation revoked" },
+  { value: "invitation.accepted", label: "Invitation accepted" },
   { value: "organization.updated", label: "Organization updated" },
   { value: "organization.audit_config_changed", label: "Audit settings changed" },
 ];
@@ -79,19 +88,34 @@ function Events({ orgSlug, initial }: { orgSlug: string; initial: AuditPage }) {
   const [events, setEvents] = useState<AuditEvent[]>(initial.events);
   const [next, setNext] = useState<string | null>(initial.next);
   const [loading, setLoading] = useState(false);
+  // A failed page-1 load (search/filter change) replaces the list with an error;
+  // a failed "load more" keeps what's shown and reports inline.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [moreError, setMoreError] = useState<string | null>(null);
 
   const load = useCallback(
     async (opts: { before?: string; append?: boolean } = {}) => {
       setLoading(true);
+      if (opts.append) setMoreError(null);
+      else setLoadError(null);
       const qs = new URLSearchParams();
       if (q.trim()) qs.set("q", q.trim());
       for (const a of actions) qs.append("action", a);
       qs.set("limit", String(PER_PAGE));
       if (opts.before) qs.set("cursor", opts.before);
-      const res = await fetch(`/api/orgs/${encodeURIComponent(orgSlug)}/audit?${qs.toString()}`);
-      const data: AuditPage = res.ok ? await res.json() : { events: [], next: null };
-      setEvents((prev) => (opts.append ? [...prev, ...data.events] : data.events));
-      setNext(data.next);
+      try {
+        const data = await fetchJson<AuditPage>(
+          `/api/orgs/${encodeURIComponent(orgSlug)}/audit?${qs.toString()}`,
+          undefined,
+          "Couldn't load the audit log.",
+        );
+        setEvents((prev) => (opts.append ? [...prev, ...data.events] : data.events));
+        setNext(data.next);
+      } catch (e) {
+        const msg = messageOf(e, "Couldn't load the audit log.");
+        if (opts.append) setMoreError(msg);
+        else setLoadError(msg);
+      }
       setLoading(false);
     },
     [orgSlug, q, actions],
@@ -171,7 +195,9 @@ function Events({ orgSlug, initial }: { orgSlug: string; initial: AuditPage }) {
         </div>
       </div>
 
-      {events.length === 0 ? (
+      {loadError ? (
+        <ListError title="Couldn't load the audit log" message={loadError} onRetry={() => void load()} />
+      ) : events.length === 0 ? (
         <Card className="px-6 py-14 text-center">
           <p className="text-sm font-medium text-foreground">
             {q || actions.length ? "No matching events" : "No activity yet"}
@@ -184,15 +210,32 @@ function Events({ orgSlug, initial }: { orgSlug: string; initial: AuditPage }) {
         </Card>
       ) : (
         <>
-          <Card className="overflow-hidden p-0">
-            <ul className="divide-y divide-hairline">
-              {events.map((e) => (
-                <AuditRow key={e.id} event={e} />
-              ))}
-            </ul>
-          </Card>
+          <TableShell>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="pl-4">Event</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>When</TableHead>
+                  <TableHead className="w-12 pr-4 text-right">
+                    <span className="sr-only">Details</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {events.map((e) => (
+                  <AuditRow key={e.id} event={e} />
+                ))}
+              </TableBody>
+            </Table>
+          </TableShell>
 
-          <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-2">
+            {moreError && (
+              <p className="text-sm text-destructive" role="alert">
+                {moreError}
+              </p>
+            )}
             {next ? (
               <Button
                 variant="outline"
@@ -201,7 +244,7 @@ function Events({ orgSlug, initial }: { orgSlug: string; initial: AuditPage }) {
                 onClick={() => void load({ before: next, append: true })}
               >
                 {loading ? <Loader2 className="size-4 animate-spin" /> : null}
-                Load more
+                {moreError ? "Try again" : "Load more"}
               </Button>
             ) : (
               <p className="py-1 text-xs text-muted-foreground">End of the log.</p>
@@ -210,14 +253,6 @@ function Events({ orgSlug, initial }: { orgSlug: string; initial: AuditPage }) {
         </>
       )}
     </div>
-  );
-}
-
-function Sep() {
-  return (
-    <span aria-hidden className="text-muted-foreground/40">
-      |
-    </span>
   );
 }
 
@@ -240,44 +275,54 @@ function AuditRow({ event: e }: { event: AuditEvent }) {
   ].filter((r) => r.value);
 
   return (
-    <li className="px-4 py-3">
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-brand/12 text-[11px] font-semibold text-brand-bright uppercase">
-          {actor.charAt(0)}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm">
-            <span className="font-semibold text-foreground">{actor}</span>{" "}
-            <span className="font-semibold text-link">{e.action}</span>
-          </p>
-          <p className="mt-0.5 text-sm text-muted-foreground">{e.summary}</p>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-            {locLabel && (
-              <>
-                <span className="inline-flex items-center gap-1" title={locDetail || undefined}>
-                  <MapPin className="size-3" />
-                  {locLabel}
-                </span>
-                <Sep />
-              </>
-            )}
-            <time dateTime={e.created_at} title={new Date(e.created_at).toLocaleString()}>
-              {timeAgo(e.created_at)}
-            </time>
-            <Sep />
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              aria-label="Toggle event details"
-              className="flex items-center rounded border border-hairline px-1.5 py-0.5 text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <MoreHorizontal className="size-3.5" />
-            </button>
+    <Fragment>
+      <TableRow className={cn(open && "border-b-0")}>
+        <TableCell className="pl-4 align-top">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-brand/12 text-2xs font-semibold text-brand-bright uppercase">
+              {actor.charAt(0)}
+            </span>
+            <div className="min-w-0">
+              <p>
+                <span className="font-semibold text-foreground">{actor}</span>{" "}
+                <span className="font-semibold text-link">{e.action}</span>
+              </p>
+              <p className="mt-0.5 text-muted-foreground">{e.summary}</p>
+            </div>
           </div>
-
-          {open && (
-            <dl className="mt-3 grid grid-cols-[8rem_1fr] gap-x-4 gap-y-1.5 rounded-md border border-hairline bg-panel/40 px-3 py-3 text-xs">
+        </TableCell>
+        <TableCell className="align-top text-xs whitespace-nowrap text-muted-foreground">
+          {locLabel ? (
+            <span className="inline-flex items-center gap-1" title={locDetail || undefined}>
+              <MapPin className="size-3" />
+              {locLabel}
+            </span>
+          ) : (
+            <span className="text-muted-foreground/40">-</span>
+          )}
+        </TableCell>
+        <TableCell className="align-top text-xs whitespace-nowrap text-muted-foreground">
+          <time dateTime={e.created_at} title={new Date(e.created_at).toLocaleString()}>
+            {timeAgo(e.created_at)}
+          </time>
+        </TableCell>
+        <TableCell className="pr-4 text-right align-top">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-label="Toggle event details"
+            className="size-7"
+          >
+            <MoreHorizontal className="size-3.5" />
+          </Button>
+        </TableCell>
+      </TableRow>
+      {open && (
+        <TableRow className="hover:bg-transparent">
+          <TableCell colSpan={4} className="px-4 pt-0 pb-3">
+            <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-1.5 rounded-md border border-hairline bg-panel/40 px-3 py-3 text-xs">
               {detail.map((f) => (
                 <div key={f.label} className="contents">
                   <dt className="font-medium text-muted-foreground">{f.label}</dt>
@@ -287,10 +332,10 @@ function AuditRow({ event: e }: { event: AuditEvent }) {
                 </div>
               ))}
             </dl>
-          )}
-        </div>
-      </div>
-    </li>
+          </TableCell>
+        </TableRow>
+      )}
+    </Fragment>
   );
 }
 
@@ -313,8 +358,7 @@ function AuditSettings({ orgSlug, initial }: { orgSlug: string; initial: AuditCo
     });
     setSaving(false);
     if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      setError(d.error ?? "Couldn't save the setting.");
+      setError(await errorMessage(res, "Couldn't save the setting."));
       return;
     }
     setBaseline(enabled); // new baseline so `dirty` resets

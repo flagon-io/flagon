@@ -4,7 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { ShieldCheck, KeyRound, AlertTriangle } from "lucide-react";
 import { Alert, Card, Spinner, Switch } from "@flagon-io/ui";
-import type { OrgSecurity } from "@/lib/flagon-api";
+import type { OrgSecurity } from "@/lib/api/types";
+import { errorMessage } from "@/lib/client-fetch";
 
 /**
  * Org security policy: the 2FA requirement (an owner can only turn it ON if their
@@ -53,8 +54,7 @@ export function OrgSecurityForm({
     setBusy(false);
     if (!res.ok) {
       revert();
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(body.error ?? "Couldn't save the setting.");
+      setError(await errorMessage(res, "Couldn't save the setting."));
     }
   }
 

@@ -1,6 +1,7 @@
 package paginate
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 	"testing"
@@ -42,11 +43,11 @@ func TestDecodeCursorEmptyAndBad(t *testing.T) {
 	if err != nil || got != nil {
 		t.Fatalf("empty cursor = (%v, %v), want (nil, nil)", got, err)
 	}
-	if _, err := DecodeCursor("!!!not base64!!!"); err != ErrBadCursor {
+	if _, err := DecodeCursor("!!!not base64!!!"); !errors.Is(err, ErrBadCursor) {
 		t.Fatalf("bad cursor err = %v, want ErrBadCursor", err)
 	}
 	// Valid base64 that isn't a JSON string array is also rejected.
-	if _, err := DecodeCursor("Zm9v"); err != ErrBadCursor { // base64("foo")
+	if _, err := DecodeCursor("Zm9v"); !errors.Is(err, ErrBadCursor) { // base64("foo")
 		t.Fatalf("non-array cursor err = %v, want ErrBadCursor", err)
 	}
 }

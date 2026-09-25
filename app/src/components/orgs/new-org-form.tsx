@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Alert, Button, Input, Label } from "@flagon-io/ui";
+import { errorMessage } from "@/lib/client-fetch";
 
 /** Slugify a name the same way we'd expect the API to, for the live preview. */
 function slugify(value: string) {
@@ -33,9 +34,8 @@ export function NewOrgForm() {
     });
 
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
       setSubmitting(false);
-      setError(data.error ?? "Could not create organization.");
+      setError(await errorMessage(res, "Could not create organization."));
       return;
     }
 

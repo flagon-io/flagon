@@ -1,31 +1,145 @@
 ---
 title: The assistant
-description: Operate Flagon by asking. Reads run automatically; changes are proposed for you to confirm.
-order: 0
+description: Operate Flagon by asking. The assistant acts as you, runs reads immediately, and proposes every change for you to confirm.
 ---
 
-Flagon is AI-first: anything you can do in the dashboard, you can do by asking
-the assistant, and anything the assistant can do, you can also do yourself. It is
-built into the platform, not bolted on, so it gains new abilities as the product
-grows.
+The **assistant** is Flagon's built-in AI agent. Anything you can do in the
+dashboard, you can do by asking it, and anything it can do, you can also do
+yourself: it is an accelerant, never a requirement. It works through the same
+[tool registry](/docs/ai/tools) as the [MCP server](/docs/ai/mcp), and every tool
+calls the same permission-checked operation as the [API](/docs/api/using-the-api),
+so the assistant gains each new capability as it is built.
+
+## Where to find it
+
+- The organization dashboard (`app.flagon.io/<org>`) leads with it: the first
+  thing on the page is the prompt.
+- **Ask AI** in the top bar opens the assistant panel from any page in the
+  organization.
+- In the command menu (`Ctrl K`, or `Cmd K` on macOS), **Shift+Enter** hands
+  whatever you typed to the assistant.
+
+A conversation is scoped to the organization you are in: its usage is metered
+against that organization, and its tools can act only there. Flagon does not
+store conversations on the server: the panel sends the conversation so far with
+each message, and clearing the panel discards it.
 
 ## How it behaves
 
-- **It acts as you.** The assistant runs operations with your identity and your
-  organization's scope, so it can never do anything you could not do yourself.
-- **Reads run, changes are proposed.** Read-only actions happen immediately.
-  Anything that changes data is returned as a proposed action for you to confirm
-  first, so you stay in control.
-- **It is scoped to Flagon.** The assistant helps you operate Flagon. It is not a
-  general chatbot, and it will steer back to what it can actually do.
-- **It can read the docs.** Ask it how something works and it searches this
-  documentation to answer, rather than guessing.
+- **It acts as you.** Every tool runs with your identity and your organization
+  membership, so the assistant can never do anything you could not do yourself.
+  Row-level security and role checks apply exactly as they do in the dashboard.
+- **It stays in this organization.** A tool call that names a different
+  organization is refused with `403`, before it runs or is proposed. Restoring a
+  deleted organization (`restore_organization`) addresses the organization by id
+  rather than by the one you are in, so the assistant refuses it outright; use
+  your personal **Settings > Organizations** page or MCP for that. To work in another organization, switch to it in
+  Flagon and ask there.
+- **The organization's security policy applies.** If the organization requires
+  two-factor authentication or single sign-on and your session does not satisfy
+  it, sending a message or confirming an action fails with `403`, the same as
+  any other request to that organization. See
+  [Two-factor authentication](/docs/platform/two-factor) and
+  [Single sign-on](/docs/platform/sso).
+- **Reads run, changes are proposed.** Read-only tools (listing projects,
+  reading the audit log, searching the docs) run immediately. Any tool that
+  changes data is returned as a **proposal** instead of running.
+- **It is scoped to Flagon.** The assistant only has Flagon tools and a system
+  prompt that confines it to operating Flagon. Ask it about something unrelated
+  and it politely declines and steers back to what it can do.
+- **It reads the docs.** For "how does this work" questions it searches this
+  documentation with `search_docs` and reads pages with `get_doc`, and names the
+  page it used, rather than answering from memory. Pages marked
+  `visibility: internal` (none today; the handbook is public) are available to
+  the assistant too, because it always acts for a signed-in user.
 
-## Model choice and cost
+## Confirming changes
 
-The model is configuration, not code. Flagon ships with a hosted default and can
-point at any OpenAI-compatible endpoint or a self-hosted model, so you can run
-your own for a flat cost. Usage is metered per organization so plans can be
-enforced.
+Human-in-the-loop is the default. When the assistant wants to change something,
+the panel shows a card for each proposed action, such as
+**Confirm: Create project "billing-api" in "acme"**, with a **Confirm** button.
+Nothing happens until you press it; then Flagon runs exactly the proposed tool
+with exactly the proposed input, as you. If the action fails, you get the same
+error the API would return (for example `403` or `409`).
 
-See [MCP server](/docs/ai/mcp) to give the same abilities to an external agent.
+```text
+ you: "create a project called billing-api"
+   │
+   ▼
+ assistant ──► read tools run now (list_projects ...)
+   │
+   ▼
+ proposal: create_project { org: "acme", name: "billing-api" }
+   │
+   ▼
+ you press Confirm ──► tool runs as you ──► result in the panel
+```
+
+The panel's mode picker offers two settings:
+
+| Mode | Behavior |
+| --- | --- |
+| **Ask before editing** (default) | Every proposed change waits for you to press **Confirm**. |
+| **Automatically edit** | Proposed changes run as soon as the assistant proposes them, for this conversation. |
+
+**Automatically edit** is a convenience in the dashboard, not a bypass: each
+change still goes through the same confirm step on the server, still runs as you,
+and is still subject to your permissions.
+
+See [Work with the assistant](/docs/guides/work-with-the-assistant) for
+examples.
+
+## Providers and models
+
+The model is configuration, not code. The assistant talks to a **provider**
+through one interface, and three ship with Flagon:
+
+| Provider | Selected when | Default model |
+| --- | --- | --- |
+| **Anthropic** | `FLAGON_AI_PROVIDER=anthropic`, or `auto` with `ANTHROPIC_API_KEY` set | `claude-haiku-4-5` |
+| **OpenAI-compatible** | `FLAGON_AI_PROVIDER=openai`, or `auto` with `FLAGON_AI_BASE_URL` or `FLAGON_AI_API_KEY` set | `gpt-4o-mini` |
+| **Mock** | `FLAGON_AI_PROVIDER=mock`, or `auto` with nothing configured | offline, deterministic |
+
+`FLAGON_AI_PROVIDER` defaults to `auto`, which prefers Anthropic, then an
+OpenAI-compatible endpoint, then the mock. The OpenAI-compatible provider works
+with any server that speaks the Chat Completions API: OpenAI itself, hosted
+open-weight models (OpenRouter, Together, Groq), or a model you run yourself with
+Ollama or vLLM for a flat cost. `FLAGON_AI_MODEL` overrides the model for any
+provider. The mock needs no key and no network, so the assistant works in local
+development out of the box. Pinning `FLAGON_AI_PROVIDER` to `anthropic` or
+`openai` without its credentials, or naming an unknown provider, stops the API
+at startup with a clear error rather than failing on every message. If a
+configured key is later rejected by the provider (`401` or `403` upstream), the
+assistant answers `503` with `the AI agent is not configured`.
+
+The system prompt is a swappable file: point `FLAGON_AI_SYSTEM_PROMPT_FILE` at a
+Markdown document to replace the built-in prompt without recompiling. See
+[AI runtime](/docs/architecture/ai-runtime) for how the loop works and
+[Configuration](/docs/reference/configuration) for every setting.
+
+## Metering and limits
+
+Every assistant turn and every confirmed action is recorded against the
+organization, and each organization has a rolling daily limit: 100 calls per 24
+hours by default (`FLAGON_AI_DAILY_LIMIT`). The limit is checked before each
+message and before each confirmed action runs. When it is reached, both fail
+with `429 Too Many Requests` (`AI usage limit reached for this organization`)
+until older calls age out; everything else in Flagon keeps working. See [Usage and AI limits](/docs/platform/usage).
+
+## Limits of the assistant
+
+- It is available only in the dashboard, with your signed-in session. The
+  `/ai/messages` operation does not accept access tokens; external agents use
+  [MCP](/docs/ai/mcp) instead.
+- One message runs at most six model round trips (read tools included) before the
+  assistant replies.
+- It has no tools for access tokens, your password, emails, sessions, or account
+  deletion. Those stay in **Settings** by design.
+
+## Related
+
+- [Tool reference](/docs/ai/tools)
+- [MCP server](/docs/ai/mcp)
+- [Work with the assistant](/docs/guides/work-with-the-assistant)
+- [AI safety](/docs/security/ai-safety)
+- [Usage and AI limits](/docs/platform/usage)

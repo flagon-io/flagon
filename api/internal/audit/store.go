@@ -17,6 +17,14 @@ type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
+// beginner is a querier that can open a transaction (*pgxpool.Pool is one). The
+// store uses it to bind the caller as the transaction's RLS user before reading,
+// which the SECURITY DEFINER window requires (migration 0036). A querier that
+// cannot begin (a test double) is queried directly.
+type beginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
 // Store reads the audit log. It is the read half of the subsystem seam: a remote
 // audit service would provide its own type satisfying the same List shape.
 type Store struct {
@@ -59,8 +67,25 @@ func (s *Store) List(ctx context.Context, orgSlug, actorID string, f Filter) (Pa
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	// Bind the caller as the transaction's user: the window serves rows only
+	// when its p_actor matches flagon.current_user_id(). The bind is
+	// transaction-local, so it never leaks to another request on a pooled
+	// connection. Read-only, so the transaction is always rolled back.
+	q := s.q
+	if b, ok := s.q.(beginner); ok {
+		tx, err := b.Begin(ctx)
+		if err != nil {
+			return Page{}, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "SELECT set_config('flagon.user_id', $1, true)", actorID); err != nil {
+			return Page{}, err
+		}
+		q = tx
+	}
+
 	// Fetch one extra row to detect whether a next page exists.
-	rows, err := s.q.Query(ctx,
+	rows, err := q.Query(ctx,
 		`SELECT id, actor_id, actor_name, actor_email, actor_username, actor_avatar,
 		        action, target_type, target_id, summary, actor_ip, actor_country, actor_ua, created_at
 		 FROM flagon.org_audit($1, $2, $3, $4, $5, $6, $7, $8)`,

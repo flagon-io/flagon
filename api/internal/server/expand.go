@@ -3,7 +3,7 @@ package server
 import "strings"
 
 // ExpandSet is the set of related objects a client asked to inline on a response,
-// via Stripe-style `expand[]` query params. By default the API returns a
+// via `expand[]` query params. By default the API returns a
 // reference (e.g. `org_id`); when the caller opts in with `expand[]=organization`
 // the full object is embedded alongside it. This keeps responses lean while
 // letting a client fetch a whole graph in one round trip.

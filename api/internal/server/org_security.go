@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -32,22 +31,20 @@ type OrgSecurityInput struct {
 // registerOrgSecurityAPI wires an org's security policy (owners/admins only). The
 // app gate enforces the policy; this is where owners configure it. The 2FA
 // mechanism lives in the app's auth layer, so this stores the requirement only.
-func registerOrgSecurityAPI(api huma.API, store IdentityStore, internalToken string) {
-	auth := combinedAuth(api, store, internalToken)
+func registerOrgSecurityAPI(api huma.API, d deps) {
 
 	huma.Register(api, huma.Operation{
 		OperationID: "get-org-security",
 		Method:      http.MethodGet,
 		Path:        "/orgs/{slug}/security",
 		Summary:     "Get an organization's security policy",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *struct {
 		Slug string `path:"slug"`
 	}) (*OrgSecurityOutput, error) {
-		actorID, _ := identity(ctx)
-		s, err := store.GetOrgSecurity(ctx, actorID, in.Slug)
+		s, err := d.svc.GetOrgSecurity(ctx, actor(ctx), in.Slug)
 		if err != nil {
-			return nil, orgSecurityErr(err)
+			return nil, apiErr(err, "could not read the organization security policy")
 		}
 		out := &OrgSecurityOutput{}
 		out.Body.EnforceTwoFactor = s.EnforceTwoFactor
@@ -61,16 +58,15 @@ func registerOrgSecurityAPI(api huma.API, store IdentityStore, internalToken str
 		Method:      http.MethodPut,
 		Path:        "/orgs/{slug}/security",
 		Summary:     "Update an organization's security policy",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *OrgSecurityInput) (*OrgSecurityOutput, error) {
-		actorID, _ := identity(ctx)
-		s := db.OrgSecurity{
+		s, err := d.svc.SetOrgSecurity(ctx, actor(ctx), in.Slug, db.OrgSecurity{
 			EnforceTwoFactor: in.Body.EnforceTwoFactor,
 			RequireSSO:       in.Body.RequireSSO,
 			BasePermission:   in.Body.BasePermission,
-		}
-		if err := store.SetOrgSecurity(ctx, actorID, in.Slug, s); err != nil {
-			return nil, orgSecurityErr(err)
+		})
+		if err != nil {
+			return nil, apiErr(err, "could not update the organization security policy")
 		}
 		out := &OrgSecurityOutput{}
 		out.Body.EnforceTwoFactor = s.EnforceTwoFactor
@@ -78,17 +74,4 @@ func registerOrgSecurityAPI(api huma.API, store IdentityStore, internalToken str
 		out.Body.BasePermission = s.BasePermission
 		return out, nil
 	})
-}
-
-func orgSecurityErr(err error) error {
-	switch {
-	case errors.Is(err, db.ErrNotMember):
-		return huma.Error404NotFound("organization not found")
-	case errors.Is(err, db.ErrForbidden):
-		return huma.Error403Forbidden("you do not have permission to manage this organization's security")
-	case errors.Is(err, db.ErrInvalidBasePermission):
-		return huma.Error422UnprocessableEntity("invalid base permission")
-	default:
-		return huma.Error500InternalServerError("could not read or update the organization's security policy", err)
-	}
 }

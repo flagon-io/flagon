@@ -4,7 +4,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"log"
 	"os"
@@ -17,27 +16,15 @@ func main() {
 	out := flag.String("out", filepath.Join("..", "openapi", "openapi.json"), "path to write the generated OpenAPI spec")
 	flag.Parse()
 
-	_, api := server.New()
-
-	spec, err := api.OpenAPI().MarshalJSON()
+	spec, err := server.Spec()
 	if err != nil {
-		log.Fatalf("marshal openapi spec: %v", err)
+		log.Fatal(err)
 	}
-
-	var indented []byte
-	buf := &json.RawMessage{}
-	if err := json.Unmarshal(spec, buf); err != nil {
-		log.Fatalf("parse openapi spec: %v", err)
-	}
-	if indented, err = json.MarshalIndent(buf, "", "  "); err != nil {
-		log.Fatalf("format openapi spec: %v", err)
-	}
-	indented = append(indented, '\n')
 
 	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
 		log.Fatalf("create output dir: %v", err)
 	}
-	if err := os.WriteFile(*out, indented, 0o644); err != nil {
+	if err := os.WriteFile(*out, spec, 0o644); err != nil {
 		log.Fatalf("write openapi spec: %v", err)
 	}
 

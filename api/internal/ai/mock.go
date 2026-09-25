@@ -50,7 +50,7 @@ func (m *Mock) Complete(_ context.Context, req CompleteRequest) (CompleteRespons
 		}, nil
 	}
 
-	reply := mockGeneric(req.Tools)
+	reply := mockGeneric()
 	return CompleteResponse{
 		Blocks:     []Block{{Type: "text", Text: reply}},
 		StopReason: "end_turn",
@@ -145,7 +145,7 @@ func mockSummary(last *Message) string {
 	return "Here's what I found:\n\n```json\n" + joined + "\n```"
 }
 
-func mockGeneric(tools []ToolDef) string {
+func mockGeneric() string {
 	var b strings.Builder
 	b.WriteString("I'm Flagon's local assistant running in offline **mock** mode - no AI model is configured, so I match on keywords instead of reasoning. ")
 	b.WriteString("Try:\n\n")

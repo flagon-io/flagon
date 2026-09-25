@@ -57,9 +57,9 @@ func TestBuildFromDir(t *testing.T) {
 
 func TestHumanize(t *testing.T) {
 	cases := map[string]string{
-		"get-started": "Get started",
-		"api":         "API",
-		"ai":          "AI",
+		"get-started":  "Get started",
+		"api":          "API",
+		"ai":           "AI",
 		"self-hosting": "Self hosting",
 		"open-source":  "Open source",
 		"platform":     "Platform",

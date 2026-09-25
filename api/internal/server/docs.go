@@ -30,6 +30,17 @@ func registerDocsAPI(router chi.Router, index *docs.Index) {
 		writeJSON(w, http.StatusOK, map[string]any{"docs": index.List(false)})
 	})
 
+	// GET /docs/nav - the grouped navigation compiled from the meta.json files:
+	// the landing page, then groups -> sections -> items (pages and separators).
+	// Public pages only; excluded folders (the handbook) have their own surface.
+	router.Get("/docs/nav", func(w http.ResponseWriter, r *http.Request) {
+		if index == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "documentation is not available"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"nav": index.Nav()})
+	})
+
 	// GET /docs/search?q=&limit= - rank public docs against a query.
 	router.Get("/docs/search", func(w http.ResponseWriter, r *http.Request) {
 		if index == nil {

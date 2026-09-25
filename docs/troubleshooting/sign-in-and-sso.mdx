@@ -1,0 +1,200 @@
+---
+title: Sign-in and SSO
+description: Fixes for email verification, two-factor codes, sign-in rate limits, the two-factor and single sign-on requirement pages, SSO provider errors, and deleted accounts.
+---
+
+Sign-in is handled by the Flagon app (the web UI), using BetterAuth for
+passwords, email codes, two-factor authentication, social sign-in, and
+organization single sign-on (SSO). Organizations can then add their own
+requirements on top: two-factor for every member, or sign-in through the
+organization's identity provider. This page walks through each place sign-in can
+stop you and what to do.
+
+## Your email isn't verified
+
+<Callout type="warn" title="Signing in sends you to a verification page">
+
+You enter a correct email and password, and instead of the dashboard you land on
+the email verification page.
+
+</Callout>
+
+**What it means.** Every account must verify its email before it can sign in.
+When sign-in is refused because the address is unverified, the app routes you to
+verification. If you signed in with a username, the page asks for your email
+first.
+
+**How to fix.**
+
+1. Enter the code from the verification email, or click the link in it. Verifying
+   signs you in.
+2. If the link says "That link didn't work or expired. Enter the code below
+   instead.", request a fresh code on the page and type it in.
+3. If no email arrives, check spam. On a self-hosted instance, see
+   [emails are not delivered](/docs/troubleshooting/self-hosting-issues#emails-are-not-delivered).
+
+Password reset links work the same way and expire after one hour; request a new
+one if yours is older.
+
+## "Too many requests. Please try again later."
+
+<Callout type="warn" title="Sign-in, sign-up, or a code request fails with 429">
+
+The form shows "Too many requests. Please try again later." and the request
+returned `429 Too Many Requests`.
+
+</Callout>
+
+**What it means.** The auth endpoints are rate limited per client to stop
+password guessing, code brute-forcing, and email flooding. The limits, per
+60-second window:
+
+| Action | Limit |
+| --- | --- |
+| Sign up | 5 requests |
+| Send a verification code | 3 requests |
+| Verify an email code | 10 requests |
+| Request a password reset | 3 requests |
+| Reset a password | 10 requests |
+| Any other auth request (including sign-in) | 20 requests |
+
+**How to fix.** Wait. The response carries an `X-Retry-After` header with the
+number of seconds until the window resets. The counters are stored in the app's
+database, so they apply across every app instance and a different browser tab
+does not reset them.
+
+## Two-factor codes don't work
+
+**What it means.** If your account has two-factor authentication (2FA), a correct
+password takes you to a second step that asks for a 6-digit code from your
+authenticator app. "That code didn't work. Try again." means the code was wrong
+or expired.
+
+**How to fix.**
+
+1. Check that your device's clock is set automatically. Authenticator codes are
+   time-based, and a drifting clock produces codes the server rejects.
+2. Use the newest code, not one that is about to roll over.
+3. Lost your device? Switch to **backup code** on the same page and enter one of
+   the codes you saved when you enabled 2FA. Each backup code works once.
+
+## "Two-factor authentication required"
+
+<Callout type="warn" title="Opening an organization sends you to a two-factor page">
+
+You are signed in, but opening the organization shows "Two-factor
+authentication required" with a **Set up two-factor** button.
+
+</Callout>
+
+**What it means.** An owner or admin of that organization turned on **Require
+two-factor authentication** (Settings, then Security, then Authentication), and
+your account does not have 2FA enabled. Your other organizations and your
+personal settings still work.
+
+**How to fix.**
+
+1. Choose **Set up two-factor**, which opens your personal
+   [security settings](/docs/platform/two-factor) at `/settings/security`, and
+   enable it.
+2. Return and choose **I've enabled it - continue**.
+
+If you are the admin trying to turn the requirement on and the switch is
+disabled, the page explains why: enable 2FA on your own account first, so turning
+the requirement on cannot lock you out. The API enforces the same rule, answering
+`403` "enable two-factor authentication on your own account before requiring it
+for the organization" if the change is attempted anyway.
+
+The requirement is enforced by the API as well as by this page, so scripts using
+your personal access token, the assistant, and MCP clients get `403` for that
+organization until you enable 2FA. See
+[Access and permissions](/docs/troubleshooting/access-and-permissions).
+
+## "Single sign-on required"
+
+<Callout type="warn" title="Opening an organization sends you to a single sign-on page">
+
+You are signed in, but opening the organization shows "Single sign-on required"
+with a **Continue with SSO** button.
+
+</Callout>
+
+**What it means.** The organization requires members to sign in through its
+identity provider, and your current session was not established through one of
+its providers (for example, you signed in with a password or another
+organization's SSO). Organization **owners** are exempt, so an owner can always
+reach settings to fix or turn off SSO.
+
+**How to fix.**
+
+1. Choose **Continue with SSO** and complete sign-in at your identity provider.
+   You come back signed in to the same Flagon account, with the organization's
+   SSO identity linked to it, even if the identity provider uses a different
+   email address.
+2. If the page says "No SSO provider is configured for this organization yet.
+   Contact an owner.", the requirement is on but no provider exists. Only an
+   owner can fix that, by adding a provider or turning the requirement off.
+
+The API applies the same rule to every request for the organization, so a
+personal access token also gets `403` until you have signed in through one of the
+organization's providers at least once. See
+[Access and permissions](/docs/troubleshooting/access-and-permissions).
+
+## SSO sign-in fails
+
+**"Single sign-on is temporarily unavailable. Try again shortly."** Before every
+SSO sign-in, the app refreshes the provider's settings from the Flagon API, and
+it fails closed when it cannot. The API was unreachable or refused the app. Try
+again; on your own instance, check that the app can reach the API and that
+`FLAGON_INTERNAL_TOKEN` matches on both sides.
+
+**"No SSO provider is configured for that email domain."** Signing in with
+**Sign in with SSO** looks up the provider by the domain of the email you type.
+Check the address, or ask an organization owner which domain the provider is
+registered for.
+
+**The identity provider shows an error before sending you back.** This is almost
+always a mismatch between what the provider expects and what Flagon sends. Check
+that the provider has the exact callback URL for your provider ID:
+
+| Protocol | URL to register at the identity provider |
+| --- | --- |
+| OIDC | `https://<app host>/api/auth/sso/callback/<providerId>` |
+| SAML | ACS URL `https://<app host>/api/auth/sso/saml2/sp/acs/<providerId>` |
+
+Also confirm the issuer, client ID and secret (OIDC) or entry point and signing
+certificate (SAML) in the organization's SSO settings. Changes made there take
+effect on the next sign-in. See [Set up SSO with OIDC](/docs/guides/set-up-sso-oidc)
+and [Set up SSO with SAML](/docs/guides/set-up-sso-saml).
+
+**SAML works locally but not in production, or the reverse.** SAML posts its
+response back to the app from the identity provider's site. In production the app
+issues its session cookie with `SameSite=None; Secure` so that post carries your
+session, which requires HTTPS end to end.
+
+## "This account has been deleted. Contact support to restore it."
+
+**What it means.** The account was deleted, which blocks every way of signing in.
+The account is soft-deleted, so it can be restored.
+
+**How to fix.** Contact support for the hosted service. On your own instance, an
+operator can restore it from the app directory:
+
+```bash
+npm run restore-user --workspace app -- someone@example.com --dry-run   # preview
+npm run restore-user --workspace app -- someone@example.com
+```
+
+## Social sign-in buttons are disabled
+
+Google and GitHub sign-in buttons are always shown, and are enabled only when
+the instance has credentials for that provider. On your own instance, set
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (or the `GITHUB_` pair) and rebuild
+the app; the enabled state is decided at build time.
+
+## Related
+
+- [Two-factor authentication](/docs/platform/two-factor)
+- [Single sign-on](/docs/platform/sso)
+- [Require two-factor](/docs/guides/require-two-factor)
+- [Access and permissions](/docs/troubleshooting/access-and-permissions)

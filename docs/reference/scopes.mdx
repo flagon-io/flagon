@@ -1,0 +1,238 @@
+---
+title: Scopes
+description: Every access token scope, what it implies, and the exact API operations and assistant tools each one gates.
+---
+
+A **scope** is a named permission an access token carries. When you create a
+token you either grant full access or choose scopes; a scoped token can call
+only the operations whose required scope it holds. This page lists every scope
+and every operation it gates, generated from the scope table in
+`api/internal/server/scopes.go` (`operationScopes`) and the tool registry in
+`api/internal/ai`.
+
+Scopes are a ceiling on top of the principal's role, never a grant beyond it: a
+token can do at most what the person (or, for an organization token, the
+service principal's role) could do. See [Roles matrix](/docs/reference/roles-matrix).
+
+## How scopes combine
+
+- **Parents imply children.** Holding a parent scope satisfies any operation that
+  requires one of its children.
+- **Full access** (a token created with no scopes) is not scope-limited at all;
+  it is bounded only by the role behind it.
+- **Fail-closed.** An operation with no entry in the scope table cannot be called
+  by any scoped token. CI enforces that every registered operation is either
+  scoped or explicitly listed as unreachable (the last section below).
+- **One vocabulary.** Every assistant and MCP tool declares the same scope as
+  the operation it fronts, so an MCP client authenticated with a scoped token can
+  see and run only the matching tools. The documentation tools (`search_docs`,
+  `get_doc`) are public and need no scope.
+- **Some operations need a person.** An organization access token is refused
+  with `403` on `create-org`, `leave-org`, `list-deleted-orgs`, and
+  `restore-org`, whatever scopes it holds, because those act on a human's
+  account.
+
+## All scopes
+
+| Scope | Grants | Implies |
+| --- | --- | --- |
+| `read:user` | Read your own account. | |
+| `user` | Account writes. No operation needs it today: your profile is edited in the dashboard. | `read:user` |
+| `admin:user` | Full account control. Reserved for destructive account operations; none is token-reachable today. | `user`, `read:user` |
+| `read:org` | Read organizations, members, pending invitations, the security policy, SSO providers, the audit log and its configuration, and your recently deleted organizations. | |
+| `write:org` | Rename an organization; manage members and invitations; change the security policy, SSO providers, and audit configuration. | `read:org` |
+| `admin:org` | Create, leave, delete, and restore organizations. | `write:org`, `read:org` |
+| `read:project` | Read projects, the deleted-projects archive, and each project's collaborators, teams, and owners. | |
+| `write:project` | Create and update projects. | `read:project` |
+| `admin:project` | Delete and restore projects; manage a project's collaborators, team grants, and owners. | `write:project`, `read:project` |
+| `read:team` | Read teams, their members, and the projects they can access. | |
+| `write:team` | Create and edit teams and manage their membership. | `read:team` |
+| `admin:team` | Delete teams. | `write:team`, `read:team` |
+| `notifications` | Read your notifications and mark them read or unread. | |
+
+The `QUERY` rows below are the body-based twins of paginated lists (see
+[Pagination and search](/docs/api/pagination)). They are not in the OpenAPI spec
+but require the same scope as their `GET` form, and the `GET` form's tool covers
+them.
+
+## Account
+
+### `read:user`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `get-me` | `GET /me` | `whoami` |
+
+### `user`
+
+No operation requires `user` today; it implies `read:user`. Your profile is
+edited in the dashboard, and the dashboard mirrors it into the API through
+`PUT /me/profile` (`sync-profile`), which only the app can call: no access token
+reaches it, whatever its scopes.
+
+### `admin:user`
+
+No operation requires `admin:user` today. It exists so destructive account
+operations (such as deleting your account) have a scope when they become API
+operations. Account deletion currently happens only in the dashboard.
+
+## Organization
+
+### `read:org`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `list-deleted-orgs` | `GET /deleted-orgs` | `list_deleted_organizations` |
+| `list-orgs` | `GET /orgs` | `list_organizations` |
+| `list-audit-log` | `GET /orgs/{slug}/audit` | `list_audit_events` |
+| `get-audit-config` | `GET /orgs/{slug}/audit/config` | `get_audit_config` |
+| `list-invitations` | `GET /orgs/{slug}/invitations` | `list_invitations` |
+| `query-invitations` | `QUERY /orgs/{slug}/invitations` | `list_invitations` |
+| `list-members` | `GET /orgs/{slug}/members` | `list_members` |
+| `query-members` | `QUERY /orgs/{slug}/members` | `list_members` |
+| `get-org-security` | `GET /orgs/{slug}/security` | `get_org_security` |
+| `list-sso-providers` | `GET /orgs/{slug}/sso/providers` | `list_sso_providers` |
+| `get-sso-provider` | `GET /orgs/{slug}/sso/providers/{provider}` | `get_sso_provider` |
+
+### `write:org`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `update-org` | `PATCH /orgs/{slug}` | `update_organization` |
+| `set-audit-config` | `PUT /orgs/{slug}/audit/config` | `set_audit_config` |
+| `invite-member` | `POST /orgs/{slug}/invitations` | `invite_member` |
+| `revoke-invitation` | `DELETE /orgs/{slug}/invitations/{id}` | `revoke_invitation` |
+| `add-member` | `POST /orgs/{slug}/members` | `add_member` |
+| `remove-member` | `DELETE /orgs/{slug}/members/{userId}` | `remove_member` |
+| `set-member-role` | `PUT /orgs/{slug}/members/{userId}/role` | `set_member_role` |
+| `set-org-security` | `PUT /orgs/{slug}/security` | `set_org_security` |
+| `create-sso-provider` | `POST /orgs/{slug}/sso/providers` | `create_sso_provider` |
+| `update-sso-provider` | `PATCH /orgs/{slug}/sso/providers/{provider}` | `update_sso_provider` |
+| `delete-sso-provider` | `DELETE /orgs/{slug}/sso/providers/{provider}` | `delete_sso_provider` |
+
+### `admin:org`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `restore-org` | `POST /deleted-orgs/{id}/restore` | `restore_organization` |
+| `create-org` | `POST /orgs` | `create_organization` |
+| `delete-org` | `DELETE /orgs/{slug}` | `delete_organization` |
+| `leave-org` | `POST /orgs/{slug}/leave` | `leave_organization` |
+
+Leaving an organization needs `admin:org`, not `write:org`. The assistant
+in the dashboard refuses `restore_organization`, because a deleted
+organization is outside every conversation's organization; restore it from
+**Settings > Organizations**, the API, or MCP.
+
+## Projects
+
+### `read:project`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `list-deleted-projects` | `GET /orgs/{slug}/deleted-projects` | `list_deleted_projects` |
+| `query-deleted-projects` | `QUERY /orgs/{slug}/deleted-projects` | `list_deleted_projects` |
+| `list-projects` | `GET /orgs/{slug}/projects` | `list_projects` |
+| `query-projects` | `QUERY /orgs/{slug}/projects` | `list_projects` |
+| `get-project` | `GET /orgs/{slug}/projects/{project}` | `get_project` |
+| `list-project-members` | `GET /orgs/{slug}/projects/{project}/members` | `list_project_members` |
+| `query-project-members` | `QUERY /orgs/{slug}/projects/{project}/members` | `list_project_members` |
+| `list-project-owners` | `GET /orgs/{slug}/projects/{project}/owners` | `list_project_owners` |
+| `query-project-owners` | `QUERY /orgs/{slug}/projects/{project}/owners` | `list_project_owners` |
+| `list-project-teams` | `GET /orgs/{slug}/projects/{project}/teams` | `list_project_teams` |
+| `query-project-teams` | `QUERY /orgs/{slug}/projects/{project}/teams` | `list_project_teams` |
+
+### `write:project`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `create-project` | `POST /orgs/{slug}/projects` | `create_project` |
+| `update-project` | `PATCH /orgs/{slug}/projects/{project}` | `update_project` |
+
+### `admin:project`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `delete-project` | `DELETE /orgs/{slug}/projects/{project}` | `delete_project` |
+| `add-project-member` | `POST /orgs/{slug}/projects/{project}/members` | `add_project_member` |
+| `remove-project-member` | `DELETE /orgs/{slug}/projects/{project}/members/{userId}` | `remove_project_member` |
+| `set-project-member-role` | `PUT /orgs/{slug}/projects/{project}/members/{userId}/role` | `set_project_member_role` |
+| `add-project-owner` | `POST /orgs/{slug}/projects/{project}/owners` | `add_project_owner` |
+| `remove-project-owner` | `DELETE /orgs/{slug}/projects/{project}/owners/{type}/{principalId}` | `remove_project_owner` |
+| `restore-project` | `POST /orgs/{slug}/projects/{project}/restore` | `restore_project` |
+| `add-project-team` | `POST /orgs/{slug}/projects/{project}/teams` | `add_project_team` |
+| `remove-project-team` | `DELETE /orgs/{slug}/projects/{project}/teams/{team}` | `remove_project_team` |
+| `set-project-team-role` | `PUT /orgs/{slug}/projects/{project}/teams/{team}/role` | `set_project_team_role` |
+
+## Teams
+
+### `read:team`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `list-teams` | `GET /orgs/{slug}/teams` | `list_teams` |
+| `query-teams` | `QUERY /orgs/{slug}/teams` | `list_teams` |
+| `get-team` | `GET /orgs/{slug}/teams/{team}` | `get_team` |
+| `list-team-members` | `GET /orgs/{slug}/teams/{team}/members` | `list_team_members` |
+| `query-team-members` | `QUERY /orgs/{slug}/teams/{team}/members` | `list_team_members` |
+| `list-team-projects` | `GET /orgs/{slug}/teams/{team}/projects` | `list_team_projects` |
+| `query-team-projects` | `QUERY /orgs/{slug}/teams/{team}/projects` | `list_team_projects` |
+
+### `write:team`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `create-team` | `POST /orgs/{slug}/teams` | `create_team` |
+| `update-team` | `PATCH /orgs/{slug}/teams/{team}` | `update_team` |
+| `add-team-member` | `POST /orgs/{slug}/teams/{team}/members` | `add_team_member` |
+| `remove-team-member` | `DELETE /orgs/{slug}/teams/{team}/members/{userId}` | `remove_team_member` |
+| `set-team-member-role` | `PUT /orgs/{slug}/teams/{team}/members/{userId}/role` | `set_team_member_role` |
+
+### `admin:team`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `delete-team` | `DELETE /orgs/{slug}/teams/{team}` | `delete_team` |
+
+## Notifications
+
+### `notifications`
+
+| Operation | Method and path | Tool |
+| --- | --- | --- |
+| `list-notifications` | `GET /notifications` | `list_notifications` |
+| `read-all-notifications` | `POST /notifications/read-all` | `mark_all_notifications_read` |
+| `notifications-unread-count` | `GET /notifications/unread-count` | `count_unread_notifications` |
+| `read-notification` | `POST /notifications/{id}/read` | `mark_notification_read` |
+| `unread-notification` | `POST /notifications/{id}/unread` | `mark_notification_unread` |
+
+## Operations no access token can reach
+
+These operations have no scope on purpose, so every access token, even a
+full-access one, is refused. They are either public or callable only by the
+dashboard with its internal credential.
+
+| Operation | Method and path | Why |
+| --- | --- | --- |
+| `get-user` | `GET /users/{username}` | Public: a user's public profile. Needs no token at all. |
+| `get-invitation` | `GET /invitations/{token}` | Public: the invitation landing page, where the invitation token is the credential. |
+| `accept-invitation` | `POST /invitations/{token}/accept` | Dashboard only: the dashboard accepts the invitation on the invitee's behalf. |
+| `create-pat`, `list-pats`, `revoke-pat` | `/me/tokens` | Dashboard only: tokens never manage tokens, so a token cannot mint or widen its own access. |
+| `create-oat`, `list-oats`, `revoke-oat` | `/orgs/{slug}/tokens` | Dashboard only, for the same reason. |
+| `ai-send-message` | `POST /ai/messages` | Dashboard only: the assistant itself. External agents use the [MCP server](/docs/ai/mcp). |
+| `ai-execute-action` | `POST /ai/actions/execute` | Dashboard only: the assistant's confirm step for a proposed change. |
+| `set-account-deleted` | `PUT /me/deleted` | Dashboard only: mirrors the account's deleted state. |
+| `provision-sso-member` | `POST /internal/sso/provision-member` | Dashboard only: runs after the sign-in service verifies an SSO assertion. |
+| `get-sso-provider-configs` | `GET /internal/sso/providers` | Dashboard only: full SSO configuration, secrets included, for the sign-in service. |
+| `import-sso-provider` | `POST /internal/sso/providers/import` | Dashboard only: one-time adoption of providers registered before the API owned them. |
+
+The content routes (`/docs`, `/roadmap`, `/changelog`), the health probes, and
+the MCP endpoint are outside the OpenAPI spec and outside this table; see
+[OpenAPI and clients](/docs/api/openapi).
+
+## Related
+
+- [Authentication and scopes](/docs/api/authentication)
+- [Roles matrix](/docs/reference/roles-matrix)
+- [Assistant tools](/docs/ai/tools)
+- [Access tokens](/docs/platform/access-tokens)

@@ -1,7 +1,5 @@
-import { headers } from "next/headers";
 import { redirect, notFound } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { getMe, getProject } from "@/lib/flagon-api";
+import { getProject, projectCan } from "@/lib/flagon-api";
 import { ProjectSettingsForm } from "@/components/projects/project-settings-form";
 
 export default async function ProjectSettingsPage({
@@ -11,16 +9,17 @@ export default async function ProjectSettingsPage({
 }) {
   const { org: slug, project: projectSlug } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
-
-  // Editing needs write access; send viewers back to the read-only project page.
-  const me = await getMe().catch(() => null);
-  const role = me?.orgs.find((o) => o.slug === slug)?.role ?? "viewer";
-  if (role === "viewer") redirect(`/${slug}/projects/${projectSlug}`);
-
-  const project = await getProject(slug, projectSlug).catch(() => null);
+  const project = await getProject(slug, projectSlug);
   if (!project) notFound();
+  // Editing needs write on this project; send read-only users back to the project.
+  if (!projectCan(project, "project:write")) redirect(`/${slug}/projects/${projectSlug}`);
 
-  return <ProjectSettingsForm orgSlug={slug} project={project} />;
+  return (
+    <ProjectSettingsForm
+      orgSlug={slug}
+      project={project}
+      canRename={projectCan(project, "project:manage")}
+      canDelete={projectCan(project, "project:own")}
+    />
+  );
 }

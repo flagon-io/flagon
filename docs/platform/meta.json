@@ -1,0 +1,24 @@
+{
+  "title": "Features",
+  "pages": [
+    "---Organizations and people---",
+    "organizations",
+    "members",
+    "teams",
+    "roles",
+    "---Projects---",
+    "projects",
+    "project-access",
+    "environments",
+    "---Security---",
+    "access-tokens",
+    "sso",
+    "two-factor",
+    "scim",
+    "audit-log",
+    "---Your account---",
+    "account",
+    "notifications",
+    "usage"
+  ]
+}

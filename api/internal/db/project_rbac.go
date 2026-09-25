@@ -50,7 +50,7 @@ func validProjectRole(role string) bool { return projectRoleRank(role) > 0 }
 const BasePermissionNone = "none"
 
 // impliedProjectRole maps an org role to the project role it grants on every
-// project in the org (the floor), GitHub-style: owners/admins are admins
+// project in the org (the floor): owners/admins are admins
 // everywhere; a plain member's floor is the org's BASE PERMISSION (default read,
 // or none for no floor). "" means no implied access (non-member, or a member in a
 // base=none org). "viewer" is legacy (folded into member by migration 0023) and
@@ -102,9 +102,9 @@ const (
 // expressible as a role, so ProjCapOwn is never satisfied by a role alone - use
 // projectAuthority.can, which folds ownership in. The single source of truth for
 // "who can do what" on a project by role.
-func ProjectCan(role string, cap ProjectCapability) bool {
+func ProjectCan(role string, capability ProjectCapability) bool {
 	rank := projectRoleRank(role)
-	switch cap {
+	switch capability {
 	case ProjCapView:
 		return rank >= projectRoleRank(ProjectRoleRead)
 	case ProjCapWrite:
@@ -131,11 +131,11 @@ type projectAuthority struct {
 
 // can reports whether the authority holds a capability. An owner holds every
 // capability (including ProjCapOwn); otherwise the role ladder decides.
-func (a projectAuthority) can(cap ProjectCapability) bool {
+func (a projectAuthority) can(capability ProjectCapability) bool {
 	if a.Owner {
 		return true
 	}
-	return ProjectCan(a.Role, cap)
+	return ProjectCan(a.Role, capability)
 }
 
 // maxProjectRole returns the higher-ranked of two project roles ("" ranks 0).
@@ -164,9 +164,10 @@ type ProjectMember struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ListProjectMembers returns a project's explicit collaborator grants. Any org
-// member may view them (the SECURITY DEFINER helper gates on org membership).
-// Errors ErrNotMember / ErrProjectNotFound if the caller can't see the project.
+// ListProjectMembers returns a project's explicit collaborator grants. Anyone who
+// can view the project may see them (ProjCapView; the SECURITY DEFINER helper
+// applies the same gate). Errors ErrNotMember / ErrProjectNotFound if the caller
+// can't see the org or the project.
 func (d *DB) ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]ProjectMember, string, error) {
 	var members []ProjectMember
 	var next string
@@ -175,7 +176,7 @@ func (d *DB) ListProjectMembers(ctx context.Context, actorID, orgSlug, projectSl
 		if err != nil {
 			return err
 		}
-		if _, err := resolveProject(ctx, tx, orgID, projectSlug); err != nil {
+		if _, _, err := resolveViewableProject(ctx, tx, orgID, projectSlug, actorID); err != nil {
 			return err
 		}
 		cur, err := cursorArg(q, 2)
@@ -333,25 +334,6 @@ func orgBasePermission(ctx context.Context, tx pgx.Tx, orgID string) (string, er
 	return base, err
 }
 
-// effectiveProjectRole computes the actor's effective role on a project from
-// their org role, the org's base permission, and any explicit grant. This is the
-// role-ladder view only (no ownership); most callers want resolveProjectAuthority.
-func effectiveProjectRole(ctx context.Context, tx pgx.Tx, orgID, projectID, userID string) (string, error) {
-	orgRole, err := memberRole(ctx, tx, orgID, userID)
-	if err != nil {
-		return "", err
-	}
-	base, err := orgBasePermission(ctx, tx, orgID)
-	if err != nil {
-		return "", err
-	}
-	grant, err := projectGrant(ctx, tx, projectID, userID)
-	if err != nil {
-		return "", err
-	}
-	return EffectiveProjectRole(orgRole, base, grant), nil
-}
-
 // projectTeamGrant returns the highest role a user is granted on a project through
 // any team they belong to ("" if none).
 func projectTeamGrant(ctx context.Context, tx pgx.Tx, projectID, userID string) (string, error) {
@@ -381,6 +363,11 @@ func resolveProjectAuthority(ctx context.Context, tx pgx.Tx, orgID, projectID, u
 	if err != nil {
 		return projectAuthority{}, err
 	}
+	if orgRole == "" {
+		// Not a member of the (live) org: no access at all, whatever stale grant
+		// or ownership rows may still name the user. Mirrors the SQL helpers.
+		return projectAuthority{}, nil
+	}
 	if orgRole == RoleOwner || orgRole == RoleAdmin {
 		return projectAuthority{Role: ProjectRoleAdmin, Owner: true}, nil
 	}
@@ -408,29 +395,48 @@ func resolveProjectAuthority(ctx context.Context, tx pgx.Tx, orgID, projectID, u
 // can administer the project's access (effective admin or owner). The shared front
 // half of every access-grant mutation.
 func (d *DB) resolveOrgProjectAsAdmin(ctx context.Context, tx pgx.Tx, actorID, orgSlug, projectSlug string) (orgID, projectID string, err error) {
-	orgID, projectID, _, err = d.resolveOrgProjectAuthority(ctx, tx, actorID, orgSlug, projectSlug, ProjCapAdmin)
+	orgID, projectID, err = d.resolveOrgProjectAuthority(ctx, tx, actorID, orgSlug, projectSlug, ProjCapAdmin)
 	return orgID, projectID, err
 }
 
 // resolveOrgProjectAuthority resolves the org + live project, computes the actor's
-// authority, and asserts it holds cap. Errors ErrForbidden otherwise.
-func (d *DB) resolveOrgProjectAuthority(ctx context.Context, tx pgx.Tx, actorID, orgSlug, projectSlug string, cap ProjectCapability) (orgID, projectID string, auth projectAuthority, err error) {
+// authority, and asserts it holds capability. A project the actor cannot VIEW is
+// reported as ErrProjectNotFound (its existence is not disclosed, the same way a
+// non-member's org reads as not found); a viewable project whose capability the
+// actor lacks is ErrForbidden.
+func (d *DB) resolveOrgProjectAuthority(ctx context.Context, tx pgx.Tx, actorID, orgSlug, projectSlug string, capability ProjectCapability) (orgID, projectID string, err error) {
 	orgID, _, err = resolveOrg(ctx, tx, orgSlug)
 	if err != nil {
-		return "", "", projectAuthority{}, err
+		return "", "", err
 	}
-	projectID, err = resolveProject(ctx, tx, orgID, projectSlug)
+	projectID, auth, err := resolveViewableProject(ctx, tx, orgID, projectSlug, actorID)
 	if err != nil {
-		return "", "", projectAuthority{}, err
+		return "", "", err
 	}
-	auth, err = resolveProjectAuthority(ctx, tx, orgID, projectID, actorID)
+	if !auth.can(capability) {
+		return "", "", ErrForbidden
+	}
+	return orgID, projectID, nil
+}
+
+// resolveViewableProject resolves a live project by slug and the actor's authority
+// on it, asserting the actor may view it (ProjCapView). A project the actor cannot
+// view is ErrProjectNotFound, never ErrForbidden, so its existence is not leaked.
+// RLS already hides such a row (migration 0034); the explicit check keeps the Go
+// layer correct on its own.
+func resolveViewableProject(ctx context.Context, tx pgx.Tx, orgID, projectSlug, actorID string) (string, projectAuthority, error) {
+	projectID, err := resolveProject(ctx, tx, orgID, projectSlug)
 	if err != nil {
-		return "", "", projectAuthority{}, err
+		return "", projectAuthority{}, err
 	}
-	if !auth.can(cap) {
-		return "", "", projectAuthority{}, ErrForbidden
+	auth, err := resolveProjectAuthority(ctx, tx, orgID, projectID, actorID)
+	if err != nil {
+		return "", projectAuthority{}, err
 	}
-	return orgID, projectID, auth, nil
+	if !auth.can(ProjCapView) {
+		return "", projectAuthority{}, ErrProjectNotFound
+	}
+	return projectID, auth, nil
 }
 
 // requireOrgMemberByLogin resolves a user by email/username and asserts they are

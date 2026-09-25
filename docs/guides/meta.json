@@ -1,0 +1,25 @@
+{
+  "title": "Guides",
+  "pages": [
+    "---Set up your organization---",
+    "create-an-organization",
+    "invite-your-team",
+    "organize-with-teams",
+    "set-base-permissions",
+    "---Work with projects---",
+    "create-a-project",
+    "manage-project-access",
+    "transfer-project-ownership",
+    "delete-and-restore",
+    "---Secure your organization---",
+    "require-two-factor",
+    "set-up-sso-oidc",
+    "set-up-sso-saml",
+    "review-the-audit-log",
+    "---Automate---",
+    "automate-with-access-tokens",
+    "call-the-api-from-ci",
+    "connect-an-mcp-client",
+    "work-with-the-assistant"
+  ]
+}

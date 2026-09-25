@@ -1,19 +1,20 @@
 import { NextResponse } from "next/server";
+import { routeError, badRequest } from "@/lib/route-error";
 import { createPAT, listPATs, type CreateTokenBody } from "@/lib/flagon-api";
 
 export async function GET() {
   try {
     const tokens = await listPATs();
     return NextResponse.json({ tokens });
-  } catch {
-    return NextResponse.json({ tokens: [] });
+  } catch (e) {
+    return routeError(e);
   }
 }
 
 export async function POST(request: Request) {
   const raw = await request.json().catch(() => ({}));
   const name = typeof raw.name === "string" ? raw.name.trim() : "";
-  if (!name) return NextResponse.json({ error: "A name is required." }, { status: 400 });
+  if (!name) return badRequest("A name is required.");
 
   const body: CreateTokenBody = { name };
   if (raw.full === true) body.full = true;
@@ -24,8 +25,7 @@ export async function POST(request: Request) {
   try {
     const created = await createPAT(body);
     return NextResponse.json(created, { status: 201 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not create token.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not create token.");
   }
 }

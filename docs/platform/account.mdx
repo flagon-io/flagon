@@ -1,0 +1,103 @@
+---
+title: Profile and account
+description: Your personal Flagon account, including public profile, emails, sign-in security, sessions, personal tokens, and the organizations you belong to.
+visibility: public
+---
+
+You have **one Flagon account**, and it can belong to any number of
+[organizations](/docs/platform/organizations). Everything personal to you lives
+under **Settings** at `app.flagon.io/settings`, the one area of Flagon that sits
+outside any organization. Organization settings (members, org tokens, billing)
+live under each org's own **Settings** instead.
+
+Your account and sign-in credentials are owned by the web app's auth service
+(BetterAuth). The app mirrors your public profile to the API so the rest of the
+platform can reference you.
+
+## Public profile
+
+**Settings > Public profile** is what other people see: your name, avatar, bio,
+pronouns, website, company, location, up to four social links, and an optional
+public email. Anyone can read it at `GET /users/{username}`, which needs no
+authentication and returns only these public fields. A deleted account's profile
+is hidden.
+
+## Account
+
+**Settings > Account** holds the settings that identify you:
+
+- **Username**: your handle across Flagon. You can sign in with it instead of
+  your email, and others use it to add you to organizations, teams, and projects.
+  Usernames are unique; changing yours can break existing links to your profile.
+- **Delete account**: deactivates your account and signs you out everywhere. It
+  is reversible (support can restore an account deleted by mistake). You cannot
+  delete your account while you own an organization: first hand ownership to
+  someone else and leave, or
+  [delete the organization](/docs/platform/organizations#deleting-an-organization).
+
+## Emails
+
+**Settings > Emails** lists the addresses on your account. Add and verify more
+addresses there, and choose your **primary** email, which is used for sign-in and
+for notifications. Accepting an [invitation](/docs/platform/members) verifies the
+invited address, since the link proves you control that mailbox.
+
+## Password, two-factor, and sessions
+
+- **Settings > Password and authentication** changes your password (which signs
+  out your other sessions) and sets up
+  [two-factor authentication](/docs/platform/two-factor). An organization can
+  require 2FA of every member.
+- **Settings > Sessions** lists the devices and browsers signed in to your
+  account. Revoke any session you do not recognize, or sign out every session but
+  the current one.
+
+If an organization you belong to uses [single sign-on](/docs/platform/sso), that
+org's identity is linked to this same account, so one sign-in reaches every
+organization you belong to.
+
+## Personal access tokens
+
+**Settings > Personal access tokens** (under **Developer settings**) is where you
+generate and revoke **personal access tokens** (`flagon_pat_...`) for the
+[API](/docs/api/using-the-api) and [MCP](/docs/ai/mcp). A personal token acts as
+you, across every organization you belong to, and carries the scopes and expiry
+you choose. See [Access tokens](/docs/platform/access-tokens), which also covers
+organization tokens.
+
+## Organizations, notifications, and appearance
+
+- **Settings > Organizations** lists the organizations you belong to with your
+  role in each. From there you create a new organization, leave one, and restore
+  one you deleted in the last 30 days (**Recently deleted**).
+- **Settings > Notifications** is your personal
+  [notification](/docs/platform/notifications) feed across every organization.
+- **Settings > Appearance** sets your theme: light, dark, or matching your
+  system.
+
+## Over the API and the assistant
+
+`GET /me` returns your account and the organizations you belong to (scope
+`read:user`); the assistant and MCP answer the same question with the `whoami`
+tool.
+
+```bash
+curl https://api.flagon.io/me \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+Profile, email, password, session, and token changes are made in **Settings**,
+not through the assistant, and the API has no operations for emails, passwords,
+sessions, or account deletion that a token can reach. That is deliberate: a
+credential should never be able to take over the account behind it or mint more
+credentials. (The API's `PUT /me/profile` exists so the app can mirror your
+public profile to the API after you save it in **Settings**. Only the app can
+call it; every access token gets `401 Unauthorized`, so a token can never change
+your profile, your username, or your two-factor or SSO state.)
+
+## Related
+
+- [Access tokens](/docs/platform/access-tokens)
+- [Two-factor authentication](/docs/platform/two-factor)
+- [Notifications](/docs/platform/notifications)
+- [Identity and auth](/docs/architecture/identity-and-auth)

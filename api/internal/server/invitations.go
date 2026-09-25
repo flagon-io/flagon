@@ -2,9 +2,7 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -18,16 +16,13 @@ import (
 // uses. Management ops are gated by combinedAuth + role; the token lookup is
 // public (the token is the secret) and acceptance is internal-only (the app
 // triggers it right after the invitee registers).
-func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken string) {
-	auth := combinedAuth(api, store, internalToken)
-
+func registerInvitationsAPI(api huma.API, d deps) {
 	// list-invitations is paginated: a documented GET plus a Hidden QUERY twin
 	// sharing one fetch. See listing.go.
 	listInvitations := func(ctx context.Context, slug string, q paginate.Query) (*InvitationsOutput, error) {
-		actorID, _ := identity(ctx)
-		invites, next, err := store.ListInvitations(ctx, actorID, slug, q)
+		invites, next, err := d.svc.ListInvitations(ctx, actor(ctx), slug, q)
 		if err != nil {
-			return nil, inviteErr(err, "could not list invitations")
+			return nil, apiErr(err, "could not list invitations")
 		}
 		out := &InvitationsOutput{}
 		out.Body.Invitations = invites
@@ -39,11 +34,11 @@ func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken str
 		Method:      http.MethodGet,
 		Path:        "/orgs/{slug}/invitations",
 		Summary:     "List an organization's pending invitations",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *InvitationsInput) (*InvitationsOutput, error) {
 		return listInvitations(ctx, in.Slug, in.ListQuery())
 	})
-	registerQueryList(api, auth, "query-invitations", "/orgs/{slug}/invitations",
+	registerQueryList(api, d.auth, "query-invitations", "/orgs/{slug}/invitations",
 		"List an organization's pending invitations (QUERY)",
 		func(ctx context.Context, in *InvitationsQueryInput) (*InvitationsOutput, error) {
 			return listInvitations(ctx, in.Slug, in.Body.ListQuery())
@@ -54,31 +49,25 @@ func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken str
 		Method:        http.MethodPost,
 		Path:          "/orgs/{slug}/invitations",
 		Summary:       "Invite someone to an organization by email or username",
-		Description:   "Adds an existing Flagon user directly, or creates a pending invitation for an email that has no account yet. The response says which happened; for an invitation it returns a single-use token for the invite link.",
+		Description:   "Adds an existing Flagon user directly, or creates a pending invitation for an email that has no account yet. The response says which happened; for an invitation it emails the invitee the accept link (reported in email_sent) and also returns the single-use token for the invite link.",
 		DefaultStatus: http.StatusCreated,
-		Middlewares:   huma.Middlewares{auth},
+		Middlewares:   huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *InviteMemberInput) (*InviteMemberOutput, error) {
-		actorID, _ := identity(ctx)
-		role := in.Body.Role
-		if role == "" {
-			role = db.RoleMember
-		}
-		res, err := store.InviteMember(ctx, actorID, in.Slug, strings.TrimSpace(in.Body.Login), role)
+		res, err := d.svc.InviteMember(ctx, actor(ctx), in.Slug, in.Body.Login, in.Body.Role)
 		if err != nil {
-			return nil, inviteErr(err, "could not invite member")
+			return nil, apiErr(err, "could not invite member")
 		}
 		out := &InviteMemberOutput{}
 		out.Body.Status = res.Status
 		if res.Status == "added" {
 			out.Body.UserID = res.UserID
-			// Welcome the new member (best-effort), same as add-member.
-			_ = store.CreateNotification(ctx, res.UserID, nil, "org.member_added",
-				"You were added to "+res.OrgName, "You now have access to "+res.OrgName+".", "/"+in.Slug)
 		} else {
 			out.Body.Email = res.Email
 			out.Body.Token = res.Token
 			out.Body.Invitation = &res.Invite
 			out.Body.OrgName = res.OrgName
+			sent := res.EmailSent
+			out.Body.EmailSent = &sent
 		}
 		return out, nil
 	})
@@ -88,15 +77,12 @@ func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken str
 		Method:      http.MethodDelete,
 		Path:        "/orgs/{slug}/invitations/{id}",
 		Summary:     "Revoke a pending invitation",
-		Middlewares: huma.Middlewares{auth},
+		Middlewares: huma.Middlewares{d.auth},
 	}, func(ctx context.Context, in *RevokeInvitationInput) (*OKOutput, error) {
-		actorID, _ := identity(ctx)
-		if err := store.RevokeInvitation(ctx, actorID, in.Slug, in.ID); err != nil {
-			return nil, inviteErr(err, "could not revoke invitation")
+		if err := d.svc.RevokeInvitation(ctx, actor(ctx), in.Slug, in.ID); err != nil {
+			return nil, apiErr(err, "could not revoke invitation")
 		}
-		out := &OKOutput{}
-		out.Body.OK = true
-		return out, nil
+		return okOutput(), nil
 	})
 
 	// Public (no auth): look up an invitation by its token for the landing page.
@@ -108,9 +94,9 @@ func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken str
 		Path:        "/invitations/{token}",
 		Summary:     "Look up an invitation by token",
 	}, func(ctx context.Context, in *GetInvitationInput) (*InviteLookupOutput, error) {
-		l, err := store.InvitationByToken(ctx, in.Token)
+		l, err := d.svc.InvitationByToken(ctx, in.Token)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("could not load invitation", err)
+			return nil, apiErr(err, "could not load invitation")
 		}
 		if l == nil {
 			return nil, huma.Error404NotFound("invitation not found")
@@ -127,55 +113,17 @@ func registerInvitationsAPI(api huma.API, store IdentityStore, internalToken str
 		Method:      http.MethodPost,
 		Path:        "/invitations/{token}/accept",
 		Summary:     "Accept an invitation (internal)",
-		Middlewares: huma.Middlewares{internalAuth(api, internalToken)},
+		Middlewares: huma.Middlewares{d.internal},
 	}, func(ctx context.Context, in *AcceptInvitationInput) (*AcceptInvitationOutput, error) {
-		userID, email := identity(ctx)
-		slug, name, invitedBy, err := store.AcceptInvitation(ctx, userID, email, in.Token)
+		slug, name, err := d.svc.AcceptInvitation(ctx, actor(ctx), in.Token)
 		if err != nil {
-			return nil, inviteErr(err, "could not accept invitation")
-		}
-		// Let the inviter know their invitation was accepted (best-effort).
-		if invitedBy != "" {
-			_ = store.CreateNotification(ctx, invitedBy, nil, "org.invite_accepted",
-				email+" joined "+name, email+" accepted your invitation to "+name+".",
-				"/"+slug+"/people")
+			return nil, apiErr(err, "could not accept invitation")
 		}
 		out := &AcceptInvitationOutput{}
 		out.Body.OrgSlug = slug
 		out.Body.OrgName = name
 		return out, nil
 	})
-}
-
-// inviteErr maps the invitation store errors to HTTP statuses.
-func inviteErr(err error, fallback string) error {
-	if e := cursorHTTPErr(err); e != nil {
-		return e
-	}
-	switch {
-	case errors.Is(err, db.ErrNotMember):
-		return huma.Error404NotFound("organization not found")
-	case errors.Is(err, db.ErrForbidden):
-		return huma.Error403Forbidden("you don't have permission to do that")
-	case errors.Is(err, db.ErrUserNotFound):
-		return huma.Error422UnprocessableEntity("enter an email address to invite, or the username of an existing user")
-	case errors.Is(err, db.ErrAlreadyMember):
-		return huma.Error409Conflict("that user is already a member")
-	case errors.Is(err, db.ErrInviteExists):
-		return huma.Error409Conflict("a pending invitation already exists for that email")
-	case errors.Is(err, db.ErrInvalidRole):
-		return huma.Error422UnprocessableEntity("invalid role")
-	case errors.Is(err, db.ErrInviteNotFound):
-		return huma.Error404NotFound("invitation not found")
-	case errors.Is(err, db.ErrInviteNotPending):
-		return huma.Error409Conflict("this invitation is no longer valid")
-	case errors.Is(err, db.ErrInviteExpired):
-		return huma.Error410Gone("this invitation has expired")
-	case errors.Is(err, db.ErrInviteEmailMismatch):
-		return huma.Error403Forbidden("this invitation was sent to a different email address")
-	default:
-		return huma.Error500InternalServerError(fallback, err)
-	}
 }
 
 // InvitationsInput lists an org's pending invitations (GET; search + keyset via
@@ -218,8 +166,9 @@ type InviteMemberOutput struct {
 		UserID     string         `json:"user_id,omitempty"`
 		Email      string         `json:"email,omitempty"`
 		OrgName    string         `json:"org_name,omitempty"`
-		Token      string         `json:"token,omitempty" doc:"Single-use invite token for the link (invited only)"`
+		Token      string         `json:"token,omitempty" doc:"Single-use invite token for the link (invited only). The API emails the link itself; the token is for callers that also deliver it another way"`
 		Invitation *db.Invitation `json:"invitation,omitempty"`
+		EmailSent  *bool          `json:"email_sent,omitempty" doc:"Whether the invitation email was handed to a mail provider that delivers (invited only). False when no provider is configured, the server only logs email (the log mail provider), or delivery failed; the invitation still exists and its link can be shared another way"`
 	}
 }
 

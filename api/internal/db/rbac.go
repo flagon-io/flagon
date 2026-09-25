@@ -52,8 +52,8 @@ const (
 
 // Can reports whether a role holds a capability. This is the single source of
 // truth for "who can do what" at the org level.
-func Can(role string, cap Capability) bool {
-	switch cap {
+func Can(role string, capability Capability) bool {
+	switch capability {
 	case CapRead:
 		return roleRank(role) >= roleRank(RoleViewer)
 	case CapWrite:
@@ -93,39 +93,43 @@ type Member struct {
 // ordered by email), but only when the caller is a member (the SECURITY DEFINER
 // helper gates on that). Returns the items plus the opaque next cursor.
 func (d *DB) ListMembers(ctx context.Context, actorID, slug string, q paginate.Query) ([]Member, string, error) {
-	if d == nil || d.pool == nil {
-		return nil, "", ErrUnavailable
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	cur, err := cursorArg(q, 2)
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := d.pool.Query(ctx,
-		`SELECT user_id, name, email, username, avatar_url, role, joined_at, sort_key
-		 FROM flagon.org_members($1, $2, $3, $4, $5)`, actorID, slug, q.Q, q.Clamp()+1, cur)
+	var members []Member
+	var next string
+	// Runs as the actor (RLS user bound): the definer window checks the caller
+	// against the transaction's bound user, not just the p_actor argument.
+	err = d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx,
+			`SELECT user_id, name, email, username, avatar_url, role, joined_at, sort_key
+			 FROM flagon.org_members($1, $2, $3, $4, $5)`, actorID, slug, q.Q, q.Clamp()+1, cur)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		members = []Member{}
+		keys := [][]string{}
+		for rows.Next() {
+			var m Member
+			var sk []string
+			if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.JoinedAt, &sk); err != nil {
+				return err
+			}
+			members = append(members, m)
+			keys = append(keys, sk)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		members, next = paginate.SliceKeyed(members, keys, q.Clamp())
+		return nil
+	})
 	if err != nil {
 		return nil, "", err
 	}
-	defer rows.Close()
-
-	members := []Member{}
-	keys := [][]string{}
-	for rows.Next() {
-		var m Member
-		var sk []string
-		if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Username, &m.AvatarURL, &m.Role, &m.JoinedAt, &sk); err != nil {
-			return nil, "", err
-		}
-		members = append(members, m)
-		keys = append(keys, sk)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", err
-	}
-	members, next := paginate.SliceKeyed(members, keys, q.Clamp())
 	return members, next, nil
 }
 

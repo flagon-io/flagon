@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError, badRequest } from "@/lib/route-error";
 import { createOrg } from "@/lib/flagon-api";
 
 // Thin proxy: the browser posts here, and the server-side gateway forwards to
@@ -11,18 +12,17 @@ export async function POST(request: Request) {
     name = typeof body.name === "string" ? body.name : "";
     slug = typeof body.slug === "string" && body.slug ? body.slug : undefined;
   } catch {
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+    return badRequest("Invalid request.");
   }
 
   if (!name.trim()) {
-    return NextResponse.json({ error: "Organization name is required." }, { status: 400 });
+    return badRequest("Organization name is required.");
   }
 
   try {
     const org = await createOrg(name.trim(), slug);
     return NextResponse.json({ org }, { status: 201 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not create organization.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not create organization.");
   }
 }

@@ -21,6 +21,7 @@ import {
   Textarea,
 } from "@flagon-io/ui";
 import { authClient } from "@/lib/auth-client";
+import { initials } from "@/lib/initials";
 
 const NONE = "__none__";
 const PRONOUN_PRESETS = ["he/him", "she/her", "they/them"];
@@ -301,11 +302,4 @@ function SocialIcon({ url }: { url: string }) {
   if (u.includes("gitlab.")) return <SiGitlab size={16} color="currentColor" className={cls} />;
   if (u.includes("x.com") || u.includes("twitter.")) return <SiX size={16} color="currentColor" className={cls} />;
   return <Globe className={cls} />;
-}
-
-function initials(a: Account): string {
-  const base = (a.name || a.username || a.email || "").trim();
-  const parts = base.split(/\s+/);
-  if (parts.length >= 2 && parts[0] && parts[1]) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return base.slice(0, 2).toUpperCase() || "?";
 }

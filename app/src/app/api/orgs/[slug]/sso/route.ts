@@ -1,57 +1,83 @@
 import { NextResponse } from "next/server";
 import { getMe } from "@/lib/flagon-api";
+import { badRequest, routeError } from "@/lib/route-error";
 import {
-  listOrgProviders,
-  registerProvider,
-  deleteProvider,
-  type RegisterProviderInput,
-} from "@/lib/sso-admin";
+  createSSOProvider,
+  deleteSSOProvider,
+  listSSOProviders,
+  updateSSOProvider,
+} from "@/lib/api/sso";
+import type { CreateSSOProviderBody, UpdateSSOProviderBody } from "@/lib/api/sso-types";
+import { syncSSOProviders } from "@/lib/sso-sync";
 
-// SSO provider management is owners/admins only. The BetterAuth SSO plugin's own
-// org gate targets its organization plugin (which we don't use), so we enforce the
-// Flagon org role here before touching the provider registry.
-async function requireAdminOrg(slug: string) {
-  const me = await getMe().catch(() => null);
-  const org = me?.orgs.find((o) => o.slug === slug);
-  if (!me || !org) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) } as const;
-  if (org.role !== "owner" && org.role !== "admin") {
-    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) } as const;
+// SSO providers are managed through the Flagon API, which enforces owner/admin
+// access, validates the configuration, masks secrets and audits every change.
+// This route is a thin gateway; after a change it re-syncs the auth layer's
+// provider cache for the org so the change takes effect at once (every SSO
+// sign-in re-syncs on its own too, which is how agent/MCP changes land).
+
+async function refreshCache(slug: string) {
+  try {
+    const org = (await getMe())?.orgs.find((o) => o.slug === slug);
+    if (org) await syncSSOProviders({ orgId: org.id });
+  } catch (e) {
+    // The API change committed; the next SSO sign-in re-syncs regardless.
+    console.error("[sso] cache refresh after a provider change failed", e);
   }
-  return { org } as const;
+}
+
+async function listResponse(slug: string) {
+  return NextResponse.json({ providers: await listSSOProviders(slug) });
 }
 
 export async function GET(_request: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
-  const gate = await requireAdminOrg(slug);
-  if ("error" in gate) return gate.error;
-  return NextResponse.json({ providers: await listOrgProviders(gate.org.id) });
+  try {
+    return await listResponse(slug);
+  } catch (e) {
+    return routeError(e, "Could not load the providers.");
+  }
 }
 
 export async function POST(request: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
-  const gate = await requireAdminOrg(slug);
-  if ("error" in gate) return gate.error;
-  const input = (await request.json().catch(() => null)) as RegisterProviderInput | null;
-  if (!input || (input.protocol !== "oidc" && input.protocol !== "saml") || !input.providerId) {
-    return NextResponse.json({ error: "Invalid provider details." }, { status: 400 });
+  const body = (await request.json().catch(() => null)) as CreateSSOProviderBody | null;
+  if (!body || (body.type !== "oidc" && body.type !== "saml") || !body.provider_id) {
+    return badRequest("Invalid provider details.");
   }
   try {
-    await registerProvider(gate.org.id, input);
-    return NextResponse.json({ ok: true, providers: await listOrgProviders(gate.org.id) });
+    await createSSOProvider(slug, body);
+    await refreshCache(slug);
+    return await listResponse(slug);
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Could not register the provider." },
-      { status: 400 },
-    );
+    return routeError(e, "Could not add the provider.");
+  }
+}
+
+export async function PATCH(request: Request, ctx: { params: Promise<{ slug: string }> }) {
+  const { slug } = await ctx.params;
+  const providerId = new URL(request.url).searchParams.get("providerId") ?? "";
+  if (!providerId) return badRequest("Missing providerId.");
+  const body = (await request.json().catch(() => null)) as UpdateSSOProviderBody | null;
+  if (!body) return badRequest("Invalid provider details.");
+  try {
+    await updateSSOProvider(slug, providerId, body);
+    await refreshCache(slug);
+    return await listResponse(slug);
+  } catch (e) {
+    return routeError(e, "Could not update the provider.");
   }
 }
 
 export async function DELETE(request: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
-  const gate = await requireAdminOrg(slug);
-  if ("error" in gate) return gate.error;
   const providerId = new URL(request.url).searchParams.get("providerId") ?? "";
-  if (!providerId) return NextResponse.json({ error: "Missing providerId." }, { status: 400 });
-  await deleteProvider(gate.org.id, providerId);
-  return NextResponse.json({ ok: true, providers: await listOrgProviders(gate.org.id) });
+  if (!providerId) return badRequest("Missing providerId.");
+  try {
+    await deleteSSOProvider(slug, providerId);
+    await refreshCache(slug);
+    return await listResponse(slug);
+  } catch (e) {
+    return routeError(e, "Could not remove the provider.");
+  }
 }

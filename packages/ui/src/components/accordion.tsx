@@ -4,6 +4,7 @@ import * as AccordionPrimitive from "@radix-ui/react-accordion";
 import { ChevronDown } from "lucide-react";
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/control";
 
 /** Stacked, individually collapsible sections. Compose Item > Trigger + Content. */
 export function Accordion(props: ComponentProps<typeof AccordionPrimitive.Root>) {
@@ -26,12 +27,13 @@ export function AccordionTrigger({
   ...props
 }: ComponentProps<typeof AccordionPrimitive.Trigger>) {
   return (
-    <AccordionPrimitive.Header className="flex">
+    <AccordionPrimitive.Header data-slot="accordion-header" className="flex">
       <AccordionPrimitive.Trigger
         data-slot="accordion-trigger"
         className={cn(
           "flex flex-1 items-center justify-between gap-4 py-4 text-left text-sm font-medium text-foreground outline-none transition",
-          "hover:underline focus-visible:ring-2 focus-visible:ring-ring [&[data-state=open]>svg]:rotate-180",
+          focusRing,
+          "rounded-sm hover:underline [&[data-state=open]>svg]:rotate-180",
           className,
         )}
         {...props}

@@ -26,23 +26,12 @@ var TeamRoles = []string{TeamRoleMaintainer, TeamRoleMember}
 
 func validTeamRole(role string) bool { return role == TeamRoleMaintainer || role == TeamRoleMember }
 
-// Owner principal kinds for project ownership.
-const (
-	OwnerTypeUser = "user"
-	OwnerTypeTeam = "team"
-)
-
 // Team-related errors.
 var (
 	ErrTeamNotFound      = errors.New("team not found")
 	ErrTeamSlugTaken     = errors.New("a team with that slug already exists")
 	ErrAlreadyTeamMember = errors.New("that user is already on this team")
 	ErrNotTeamMember     = errors.New("that user is not on this team")
-	ErrAlreadyTeamGrant  = errors.New("that team already has a role on this project")
-	ErrNotTeamGrant      = errors.New("that team has no role on this project")
-	ErrAlreadyOwner      = errors.New("that principal already owns this project")
-	ErrNotOwner          = errors.New("that principal does not own this project")
-	ErrInvalidOwnerType  = errors.New("owner type must be user or team")
 )
 
 // Team is a named group of org members. MemberCount is populated by the listing
@@ -83,15 +72,6 @@ type TeamMember struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ProjectTeam is a team's role grant on a project, with the team's details.
-type ProjectTeam struct {
-	TeamID    string    `json:"team_id"`
-	Name      string    `json:"name"`
-	Slug      string    `json:"slug"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 // TeamProject is a project a team has access to, with the granted role (the
 // inverse of ProjectTeam, for a team's Projects tab).
 type TeamProject struct {
@@ -100,19 +80,6 @@ type TeamProject struct {
 	Slug      string    `json:"slug"`
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
-}
-
-// ProjectOwner is one owner of a project - an individual user or a team. OwnerType
-// distinguishes them; team rows carry TeamSlug, user rows the profile fields.
-type ProjectOwner struct {
-	OwnerType   string    `json:"owner_type"`
-	PrincipalID string    `json:"principal_id"`
-	Name        *string   `json:"name"`
-	Email       *string   `json:"email"`
-	Username    *string   `json:"username"`
-	AvatarURL   *string   `json:"avatar_url"`
-	TeamSlug    *string   `json:"team_slug"`
-	CreatedAt   time.Time `json:"created_at"`
 }
 
 // ListTeams returns an org's teams with member counts. Any org member may view
@@ -324,7 +291,8 @@ func (d *DB) ListTeamMembers(ctx context.Context, actorID, orgSlug, teamSlug str
 }
 
 // ListTeamProjects returns the projects a team has access to and the granted
-// role (the team's Projects tab). Any org member may view them.
+// role (the team's Projects tab). Any org member may view the team, but only the
+// projects the CALLER can view are listed (flagon.team_projects, migration 0034).
 func (d *DB) ListTeamProjects(ctx context.Context, actorID, orgSlug, teamSlug string, q paginate.Query) ([]TeamProject, string, error) {
 	var projects []TeamProject
 	var next string
@@ -439,250 +407,6 @@ func (d *DB) RemoveTeamMember(ctx context.Context, actorID, orgSlug, teamSlug, t
 		}
 		return recordAudit(ctx, tx, orgID, actorID, audit.ActionTeamMemberRemoved, "team", teamSlug,
 			"removed a member from team "+teamSlug)
-	})
-}
-
-// ListProjectTeams returns the teams granted a role on a project (any org member).
-func (d *DB) ListProjectTeams(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]ProjectTeam, string, error) {
-	var teams []ProjectTeam
-	var next string
-	err := d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
-		orgID, _, err := resolveOrg(ctx, tx, orgSlug)
-		if err != nil {
-			return err
-		}
-		if _, err := resolveProject(ctx, tx, orgID, projectSlug); err != nil {
-			return err
-		}
-		cur, err := cursorArg(q, 2)
-		if err != nil {
-			return err
-		}
-		rows, err := tx.Query(ctx,
-			`SELECT team_id, name, slug, role, created_at, sort_key
-			 FROM flagon.project_teams($1, $2, $3, $4, $5, $6)`, actorID, orgSlug, projectSlug, q.Q, q.Clamp()+1, cur)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		teams = []ProjectTeam{}
-		keys := [][]string{}
-		for rows.Next() {
-			var t ProjectTeam
-			var sk []string
-			if err := rows.Scan(&t.TeamID, &t.Name, &t.Slug, &t.Role, &t.CreatedAt, &sk); err != nil {
-				return err
-			}
-			teams = append(teams, t)
-			keys = append(keys, sk)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		teams, next = paginate.SliceKeyed(teams, keys, q.Clamp())
-		return nil
-	})
-	return teams, next, err
-}
-
-// AddProjectTeam grants a team a repository-style role on a project. The actor
-// must be able to administer the project's access (effective admin or owner).
-func (d *DB) AddProjectTeam(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug, role string) error {
-	if !validProjectRole(role) {
-		return ErrInvalidRole
-	}
-	return d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
-		orgID, projectID, err := d.resolveOrgProjectAsAdmin(ctx, tx, actorID, orgSlug, projectSlug)
-		if err != nil {
-			return err
-		}
-		teamID, err := resolveTeam(ctx, tx, orgID, teamSlug)
-		if err != nil {
-			return err
-		}
-		ct, err := tx.Exec(ctx,
-			`INSERT INTO public.project_team_members (project_id, team_id, role, created_by)
-			 VALUES ($1, $2, $3, $4)
-			 ON CONFLICT (project_id, team_id) DO NOTHING`, projectID, teamID, role, actorID)
-		if err != nil {
-			return err
-		}
-		if ct.RowsAffected() == 0 {
-			return ErrAlreadyTeamGrant
-		}
-		return recordAudit(ctx, tx, orgID, actorID, audit.ActionProjectTeamGranted, "project", projectSlug,
-			fmt.Sprintf("granted team %s %s on %s", teamSlug, role, projectSlug))
-	})
-}
-
-// SetProjectTeamRole changes a team's role on a project.
-func (d *DB) SetProjectTeamRole(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug, role string) error {
-	if !validProjectRole(role) {
-		return ErrInvalidRole
-	}
-	return d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
-		orgID, projectID, err := d.resolveOrgProjectAsAdmin(ctx, tx, actorID, orgSlug, projectSlug)
-		if err != nil {
-			return err
-		}
-		teamID, err := resolveTeam(ctx, tx, orgID, teamSlug)
-		if err != nil {
-			return err
-		}
-		ct, err := tx.Exec(ctx,
-			`UPDATE public.project_team_members SET role = $3, updated_at = now()
-			 WHERE project_id = $1 AND team_id = $2`, projectID, teamID, role)
-		if err != nil {
-			return err
-		}
-		if ct.RowsAffected() == 0 {
-			return ErrNotTeamGrant
-		}
-		return recordAudit(ctx, tx, orgID, actorID, audit.ActionProjectTeamChanged, "project", projectSlug,
-			fmt.Sprintf("changed team %s's role to %s on %s", teamSlug, role, projectSlug))
-	})
-}
-
-// RemoveProjectTeam revokes a team's role on a project.
-func (d *DB) RemoveProjectTeam(ctx context.Context, actorID, orgSlug, projectSlug, teamSlug string) error {
-	return d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
-		orgID, projectID, err := d.resolveOrgProjectAsAdmin(ctx, tx, actorID, orgSlug, projectSlug)
-		if err != nil {
-			return err
-		}
-		teamID, err := resolveTeam(ctx, tx, orgID, teamSlug)
-		if err != nil {
-			return err
-		}
-		ct, err := tx.Exec(ctx,
-			`DELETE FROM public.project_team_members WHERE project_id = $1 AND team_id = $2`, projectID, teamID)
-		if err != nil {
-			return err
-		}
-		if ct.RowsAffected() == 0 {
-			return ErrNotTeamGrant
-		}
-		return recordAudit(ctx, tx, orgID, actorID, audit.ActionProjectTeamRevoked, "project", projectSlug,
-			fmt.Sprintf("revoked team %s's access to %s", teamSlug, projectSlug))
-	})
-}
-
-// ListProjectOwners returns a project's owners (users and teams). Any org member.
-func (d *DB) ListProjectOwners(ctx context.Context, actorID, orgSlug, projectSlug string, q paginate.Query) ([]ProjectOwner, string, error) {
-	var owners []ProjectOwner
-	var next string
-	err := d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
-		orgID, _, err := resolveOrg(ctx, tx, orgSlug)
-		if err != nil {
-			return err
-		}
-		if _, err := resolveProject(ctx, tx, orgID, projectSlug); err != nil {
-			return err
-		}
-		cur, err := cursorArg(q, 3)
-		if err != nil {
-			return err
-		}
-		rows, err := tx.Query(ctx,
-			`SELECT owner_type, principal_id, name, email, username, avatar_url, team_slug, created_at, sort_key
-			 FROM flagon.project_owners($1, $2, $3, $4, $5, $6)`, actorID, orgSlug, projectSlug, q.Q, q.Clamp()+1, cur)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		owners = []ProjectOwner{}
-		keys := [][]string{}
-		for rows.Next() {
-			var o ProjectOwner
-			var sk []string
-			if err := rows.Scan(&o.OwnerType, &o.PrincipalID, &o.Name, &o.Email, &o.Username, &o.AvatarURL, &o.TeamSlug, &o.CreatedAt, &sk); err != nil {
-				return err
-			}
-			owners = append(owners, o)
-			keys = append(keys, sk)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		owners, next = paginate.SliceKeyed(owners, keys, q.Clamp())
-		return nil
-	})
-	return owners, next, err
-}
-
-// AddProjectOwner makes a user or a team an owner of a project. Owner-tier: the
-// actor must already own the project (directly, via a team, or as an org
-// owner/admin). For a user owner, login is an email/username of an org member; for
-// a team owner, login is the team slug. Returns the added principal's id.
-func (d *DB) AddProjectOwner(ctx context.Context, actorID, orgSlug, projectSlug, ownerType, login string) (principalID string, err error) {
-	if ownerType != OwnerTypeUser && ownerType != OwnerTypeTeam {
-		return "", ErrInvalidOwnerType
-	}
-	err = d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
-		orgID, projectID, _, err := d.resolveOrgProjectAuthority(ctx, tx, actorID, orgSlug, projectSlug, ProjCapOwn)
-		if err != nil {
-			return err
-		}
-		var ct pgconn.CommandTag
-		var summary string
-		if ownerType == OwnerTypeUser {
-			principalID, err = requireOrgMemberByLogin(ctx, tx, orgID, login)
-			if err != nil {
-				return err
-			}
-			ct, err = tx.Exec(ctx,
-				`INSERT INTO public.project_owners (project_id, owner_user_id, created_by)
-				 VALUES ($1, $2, $3) ON CONFLICT (project_id, owner_user_id) DO NOTHING`,
-				projectID, principalID, actorID)
-			summary = fmt.Sprintf("made %s an owner of %s", login, projectSlug)
-		} else {
-			principalID, err = resolveTeam(ctx, tx, orgID, login)
-			if err != nil {
-				return err
-			}
-			ct, err = tx.Exec(ctx,
-				`INSERT INTO public.project_owners (project_id, owner_team_id, created_by)
-				 VALUES ($1, $2, $3) ON CONFLICT (project_id, owner_team_id) DO NOTHING`,
-				projectID, principalID, actorID)
-			summary = fmt.Sprintf("made team %s an owner of %s", login, projectSlug)
-		}
-		if err != nil {
-			return err
-		}
-		if ct.RowsAffected() == 0 {
-			return ErrAlreadyOwner
-		}
-		return recordAudit(ctx, tx, orgID, actorID, audit.ActionProjectOwnerAdded, "project", projectSlug, summary)
-	})
-	return principalID, err
-}
-
-// RemoveProjectOwner removes a user or team owner from a project. Owner-tier.
-// principalID is the user id or team id (from ListProjectOwners).
-func (d *DB) RemoveProjectOwner(ctx context.Context, actorID, orgSlug, projectSlug, ownerType, principalID string) error {
-	if ownerType != OwnerTypeUser && ownerType != OwnerTypeTeam {
-		return ErrInvalidOwnerType
-	}
-	return d.inUserTx(ctx, actorID, func(ctx context.Context, tx pgx.Tx) error {
-		orgID, projectID, _, err := d.resolveOrgProjectAuthority(ctx, tx, actorID, orgSlug, projectSlug, ProjCapOwn)
-		if err != nil {
-			return err
-		}
-		col := "owner_user_id"
-		if ownerType == OwnerTypeTeam {
-			col = "owner_team_id"
-		}
-		ct, err := tx.Exec(ctx,
-			`DELETE FROM public.project_owners WHERE project_id = $1 AND `+col+` = $2`,
-			projectID, principalID)
-		if err != nil {
-			return err
-		}
-		if ct.RowsAffected() == 0 {
-			return ErrNotOwner
-		}
-		return recordAudit(ctx, tx, orgID, actorID, audit.ActionProjectOwnerRemove, "project", projectSlug,
-			"removed an owner from "+projectSlug)
 	})
 }
 

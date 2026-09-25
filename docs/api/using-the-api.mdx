@@ -1,35 +1,176 @@
 ---
 title: Using the API
-description: The base URL, how requests authenticate, and the live OpenAPI reference.
-order: 1
+description: The base URL, authentication, request and response conventions, errors, pagination, and where the generated OpenAPI spec lives.
 ---
 
-Flagon is API-first: every capability in the product is an HTTP API operation
-first, so anything you can do in the dashboard you can do over the API.
+Flagon is API-first: every capability in the product is an HTTP operation in the
+Go API before it is anything else. The dashboard, the in-product assistant, and
+the MCP server are all clients of the same operations, so anything you can do by
+clicking you can also do with `curl`, a script, or a generated client.
+
+This page is the overview. Each convention links to a page with the details.
 
 ## Base URL
 
-All requests go to `https://api.flagon.io`. Most resources are org-scoped, for
-example `GET /orgs/<org>/projects`.
+The hosted API is served at `https://api.flagon.io`. A self-hosted deployment
+serves the same API from wherever you run `flagon-server serve` (port `8080` by
+default; see [Configuration](/docs/reference/configuration)).
 
-## Authentication
+Paths are not versioned: there is no `/v1` prefix. Most resources live under an
+organization, addressed by its slug:
 
-Requests authenticate with a bearer token that carries a set of scopes:
+```text
+https://api.flagon.io/orgs/<org>/projects
+https://api.flagon.io/orgs/<org>/projects/<project>/members
+```
+
+`GET /` returns a JSON index of every documented operation, keyed as
+`<operation_id>_url` (for example `list_projects_url`), plus `openapi_url` and
+`openapi_yaml_url`. Two probes sit outside the spec: `GET /healthz` (the process
+is up) and `GET /readyz` (the database is reachable; `503` with the reason when
+it is not).
+
+## Make your first request
+
+Create a personal access token in the dashboard under **Settings > Personal
+access tokens**, export it, and ask the API who you are:
 
 ```bash
-curl https://api.flagon.io/orgs/<org>/projects \
+export FLAGON_TOKEN=flagon_pat_...
+
+curl https://api.flagon.io/me \
   -H "Authorization: Bearer $FLAGON_TOKEN"
 ```
 
-See [Authentication and scopes](/docs/api/authentication) for how tokens are
-minted and how scopes gate each operation.
+```json
+{
+  "$schema": "https://api.flagon.io/schemas/MeOutputBody.json",
+  "user": {
+    "id": "b5e00dae-b1b8-4e4b-9f75-b4afd5b16a4f",
+    "email": "you@example.com",
+    "created_at": "2026-09-17T16:11:37.91393Z",
+    "two_factor_enabled": true
+  },
+  "orgs": [
+    {
+      "id": "fcda53fb-3ab8-4b53-9f7f-fca413901062",
+      "name": "Acme",
+      "slug": "acme",
+      "role": "owner",
+      "enforce_two_factor": false,
+      "require_sso": false,
+      "created_at": "2026-09-17T16:14:22.59927Z"
+    }
+  ]
+}
+```
 
-## The reference is generated from the code
+Then list the projects in one of those organizations:
 
-The OpenAPI document is generated from the API's source, never hand-written, so
-it always matches what the API actually does. It is served live at
-`https://api.flagon.io/openapi.json`, and the interactive reference lives at
-[/docs/api](/docs/api).
+```bash
+curl "https://api.flagon.io/orgs/acme/projects?limit=20" \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
 
-Because the spec is generated, new endpoints and fields appear in the reference
-the moment they ship.
+## Authentication
+
+Every operation except two public reads needs a bearer token. Access tokens
+start with `flagon_pat_` (personal, acts as you) or `flagon_oat_`
+(organization, acts as a service principal inside one org), and each carries
+either full access or a set of [scopes](/docs/reference/scopes). A token can
+never exceed what its principal's role allows.
+
+Some operations are never reachable with an access token: minting, listing, and
+revoking tokens, and the assistant's own endpoints (`/ai/*`). Those are called
+only by the dashboard, so a leaked token cannot mint more tokens. See
+[Authentication and scopes](/docs/api/authentication).
+
+## Requests
+
+- **JSON in, JSON out.** Send bodies as `Content-Type: application/json`. Field
+  names are `snake_case` (`repository_url`, `expires_in_days`).
+- **Resources are addressed by slug** where they have one: `/orgs/acme`,
+  `/projects/billing-api`, `/teams/platform`. Members and collaborators are
+  addressed by user id (`/members/<userId>`). A deleted organization is restored
+  by id (`POST /deleted-orgs/<id>/restore`), because its old slug may belong to
+  a new organization by then.
+- **Slugs are derived when omitted.** Create operations that take a `slug`
+  (organizations, projects, teams) derive it from `name` when you leave it out:
+  lowercased, with every run of other characters collapsed to one hyphen.
+- **`PATCH` is partial.** Fields you omit are left unchanged; sending `slug`
+  renames the resource.
+- **Timestamps** are RFC 3339 strings, in requests (`expires_at`) and responses.
+- **Bodies are capped.** API operations accept up to 1 MiB, and the server
+  caps every route at 4 MiB by default (`FLAGON_MAX_BODY_BYTES`). A larger body
+  is rejected with `413`.
+- **Request ids.** You may send your own `X-Request-Id` (8 to 128 characters of
+  letters, digits, `.`, `_`, and `-`) to correlate a request with your logs;
+  otherwise the API generates one.
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Billing API", "description": "Subscriptions and invoices"}'
+```
+
+The response is `201 Created` with the new project, whose slug is `billing-api`.
+
+## Responses
+
+- **Status codes.** Creates return `201`; everything else that succeeds returns
+  `200`, including deletes.
+- **Single objects are returned bare**, for example a project's fields at the
+  top level. **Lists are wrapped** in an object keyed by the resource:
+  `{"projects": [...]}`, `{"members": [...]}`, `{"events": [...]}`.
+- **Deletes return a body**: the deleted resource (projects, organizations) or
+  `{"ok": true}`.
+- **Every response carries an `X-Request-Id` header.** Quote it when you
+  report a failure; the server logs the underlying cause of any `5xx` under that
+  id, and never puts internal error text in the response body.
+- **Every JSON body carries a `$schema` link** to the JSON Schema that describes
+  it, and the response has a matching `Link: <...>; rel="describedBy"` header.
+  Ignore both if you do not need them.
+- **References, not embedded objects.** A project carries `org_id`, not the
+  organization. Ask for the object inline with
+  [`expand[]`](/docs/api/expanding-responses).
+
+## Errors
+
+Failures are RFC 9457 problem details (`application/problem+json`) with
+`title`, `status`, `detail`, and, for validation failures, an `errors` list.
+Resources you cannot see return `404`, never `403`, so the API does not confirm
+that something exists outside your reach; `403` means you can see the resource
+but are not allowed to do that to it. See [Errors](/docs/api/errors).
+
+## Rate limits
+
+Each principal (a signed-in user, an access token, or the client IP for
+unauthenticated requests) may make 50 requests per second sustained, in bursts of
+up to 300, on each API instance. Over that, the API answers `429 Too Many
+Requests` with a `Retry-After` header in seconds; wait and retry. Self-hosted
+deployments tune this with `FLAGON_RATE_LIMIT` and `FLAGON_RATE_BURST`. The
+assistant also has a separate per-organization daily allowance, which returns
+`429` without `Retry-After`. See [Limits](/docs/reference/limits).
+
+## Lists and pagination
+
+Every paginated list takes `q` (search), `limit` (1 to 100, default 30), and an
+opaque `cursor`, and returns the next page's URL in a `Link: <...>; rel="next"`
+header. The same lists also accept the HTTP `QUERY` method with those fields in
+a JSON body. See [Pagination and search](/docs/api/pagination).
+
+## The spec is generated from the code
+
+The OpenAPI 3.1 document is generated from the Go handlers, never written by
+hand, and served live at `https://api.flagon.io/openapi.json` and
+`/openapi.yaml`. Generate typed clients from it; see
+[OpenAPI and clients](/docs/api/openapi).
+
+## Related
+
+- [Authentication and scopes](/docs/api/authentication)
+- [Errors](/docs/api/errors)
+- [OpenAPI and clients](/docs/api/openapi)
+- [Scopes reference](/docs/reference/scopes)
+- [Limits](/docs/reference/limits)

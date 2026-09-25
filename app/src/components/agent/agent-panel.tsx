@@ -342,7 +342,7 @@ function PanelBody({
             )}
           </div>
         </div>
-        <p className="mt-2 text-center text-[11px] text-muted-foreground">
+        <p className="mt-2 text-center text-2xs text-muted-foreground">
           The assistant can make mistakes.{" "}
           {mode === "ask" ? "It confirms before changing anything." : "It edits automatically."}
         </p>

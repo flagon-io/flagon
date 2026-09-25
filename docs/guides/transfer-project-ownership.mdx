@@ -1,0 +1,173 @@
+---
+title: Transfer project ownership
+description: Hand a project to a new person or team by adding them as an owner and removing the old one, and hand over an organization the same way.
+---
+
+**Project ownership** is a tier above the `admin` project role. An owner can do everything an
+admin can, plus the destructive and structural actions: delete and restore the project, and add
+or remove its owners. An owner can be an individual organization member or a **team**, in which
+case every member of that team is an owner.
+
+There is no single "transfer" operation. You transfer ownership in two moves: **add the new
+owner, then remove the old one**. Doing it in that order means the project always has someone
+with owner powers.
+
+By the end of this guide the project will be owned by the right person or team, and the previous
+owner will hold only the access you choose to leave them.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** the owner tier on the project. That means an organization **owner** or **admin**, a
+  direct project owner, or a member of a team that owns the project.
+- **New owner:** must be an organization member (for a user) or an existing team in the
+  organization.
+- **API token scopes:** `read:project` to list owners, `admin:project` to add or remove them.
+
+</Callout>
+
+## Who holds the owner tier
+
+| Principal | Owner tier on a project? |
+| --- | --- |
+| Organization owner or admin | Always, on every project in the organization. |
+| A user listed as an owner of the project | Yes. |
+| A member (any team role) of a team listed as an owner | Yes. |
+| A project `admin` who is not an owner | No. They can manage access but not delete, restore, or change owners. |
+
+Creating a project does not add you as an owner. A project can have no explicit owners at all,
+in which case only organization owners and admins hold the owner tier on it.
+
+## Steps
+
+<Steps>
+
+<Step title="Add the new owner">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open the project, then **Settings > Access**.
+2. In the owners section, select **Add owner**.
+3. Choose a user (enter their **Email or username**) or a **Team**, and select **Add owner**.
+
+</Tab>
+
+<Tab title="API">
+
+For a user, `login` is their email or username. For a team, `login` is the team slug:
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects/checkout/owners \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"type": "team", "login": "payments"}'
+```
+
+A `201` returns `{"ok": true}`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Make the payments team the owner of the checkout project.
+
+The assistant first proposes **Confirm: Make team "payments" an owner of project "checkout" in
+"acme"**. Confirm it, then ask it to remove the old owner (next step).
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Remove the previous owner">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+In the same owners list, remove the previous owner from their row.
+
+</Tab>
+
+<Tab title="API">
+
+Owners are removed by type and principal id. Look the id up first; for a team owner it is the
+team's id, not its slug:
+
+```bash
+curl https://api.flagon.io/orgs/acme/projects/checkout/owners \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+# {"owners": [{"owner_type": "user", "principal_id": "u_123", "email": "sam@example.com", ...},
+#             {"owner_type": "team", "principal_id": "3f7d...", "team_slug": "payments", ...}]}
+
+curl -X DELETE https://api.flagon.io/orgs/acme/projects/checkout/owners/user/u_123 \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Remove sam@example.com as an owner of checkout.
+
+The assistant looks up the principal id with `list_project_owners` and proposes
+**Confirm: Remove user owner "u_123" from project "checkout" in "acme"**.
+
+</Tab>
+
+</Tabs>
+
+Removing ownership does not remove other access. The previous owner keeps whatever their
+organization role, base permission, direct grant, and team grants give them. Revoke those too if
+they should lose access; see [Manage project access](/docs/guides/manage-project-access).
+
+</Step>
+
+<Step title="Verify it worked">
+
+- The owners list on **Settings > Access** shows only the new owner.
+- The audit log records `project.owner_added` and `project.owner_removed`.
+- `GET /orgs/acme/projects/checkout/owners` returns only the new owner. The server checks the
+  owner tier whenever someone uses **Delete project** in the project's **Settings > General**,
+  so the previous owner (unless they are an organization owner or admin) now gets `403`.
+
+</Step>
+
+</Steps>
+
+## Hand over an organization
+
+Organizations follow the same add-then-remove pattern, with organization roles:
+
+1. An **owner** changes the new person's role to `owner` on **People** (or
+   `PUT /orgs/acme/members/{userId}/role` with `{"role": "owner"}`, `write:org`). Only owners
+   can grant or remove the owner role.
+2. The new owner changes the previous owner's role (for example to `admin`), or the previous
+   owner leaves with **Leave** in personal **Settings > Organizations** (or
+   `POST /orgs/acme/leave`, `admin:org`).
+
+You can't change your own role, and the last owner can't be demoted or leave. An organization
+always has at least one owner.
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `409` | `that principal already owns this project` | They are already an owner. |
+| `404` | `that principal does not own this project` | Check `owner_type` and `principal_id` from the owners list. |
+| `422` | `owner type must be user or team` | Use `user` or `team`. |
+| `409` | `that user must be an organization member first` | Invite the person to the organization first. |
+| `404` | `team not found` | Check the team slug. |
+| `403` | `you don't have permission to do that` | You need the owner tier on this project. A project `admin` is not enough. |
+| `409` | `an organization must always have an owner` | Promote someone else to owner before demoting the last one. |
+| `409` | `you're the only owner; transfer ownership or delete the organization first` | Returned when the last owner tries to leave. |
+| `409` | `you can't change your own membership here; use Leave instead` | Another owner has to change your role, or you leave. |
+
+## Related
+
+- [Project access](/docs/platform/project-access)
+- [Manage project access](/docs/guides/manage-project-access)
+- [Delete and restore](/docs/guides/delete-and-restore)
+- [Roles](/docs/platform/roles)

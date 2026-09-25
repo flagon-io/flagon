@@ -44,9 +44,13 @@ type Query struct {
 }
 
 // Clamp returns the effective page size, within [1, MaxLimit], defaulting when the
-// caller left Limit unset or out of range.
-func (q Query) Clamp() int {
-	n := q.Limit
+// caller left Limit unset and capping (never resetting) a limit above MaxLimit.
+func (q Query) Clamp() int { return ClampLimit(q.Limit) }
+
+// ClampLimit is Clamp for a bare page size: <= 0 is DefaultLimit, above MaxLimit
+// is MaxLimit. Every list (paginated or a plain "most recent N") uses it, so a
+// large limit means "as many as allowed" everywhere.
+func ClampLimit(n int) int {
 	if n <= 0 {
 		return DefaultLimit
 	}

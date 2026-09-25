@@ -4,6 +4,7 @@ import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
 import { Check } from "lucide-react";
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/control";
 
 export function Checkbox({ className, ...props }: ComponentProps<typeof CheckboxPrimitive.Root>) {
   return (
@@ -11,7 +12,7 @@ export function Checkbox({ className, ...props }: ComponentProps<typeof Checkbox
       data-slot="checkbox"
       className={cn(
         "peer size-4 shrink-0 rounded border border-input outline-none transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        focusRing,
         "disabled:cursor-not-allowed disabled:opacity-50",
         "data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
         className,

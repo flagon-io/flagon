@@ -52,7 +52,12 @@ func TestOrgSecurityPolicy(t *testing.T) {
 		t.Fatalf("default base_permission = %q, want read", s.BasePermission)
 	}
 
-	// Owner enables 2FA and raises the base permission to write.
+	// Owner enables 2FA and raises the base permission to write. The self-lockout
+	// guard needs the owner's own 2FA on first (see TestOrgAccessEnforcement).
+	on := true
+	if err := d.SetUserAuthState(ctx, owner, ownerEmail, &on, nil); err != nil {
+		t.Fatalf("SetUserAuthState: %v", err)
+	}
 	if err := d.SetOrgSecurity(ctx, owner, slug, OrgSecurity{EnforceTwoFactor: true, BasePermission: "write"}); err != nil {
 		t.Fatalf("SetOrgSecurity: %v", err)
 	}

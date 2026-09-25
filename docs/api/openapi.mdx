@@ -1,0 +1,144 @@
+---
+title: OpenAPI and clients
+description: Where to get Flagon's generated OpenAPI 3.1 spec, how to regenerate it from the code, how to build a typed client, and which routes are deliberately outside it.
+---
+
+Flagon's OpenAPI document is generated from the Go source, never written by
+hand. Every operation is registered with [huma](https://huma.rocks) in
+`api/internal/server`, and huma derives the paths, parameters, request bodies,
+response schemas, and error model from those registrations. The spec cannot
+describe an endpoint that does not exist, and a new endpoint appears in it the
+moment it is registered.
+
+## Get the spec
+
+The running API serves the spec live, with no authentication:
+
+| URL | Format |
+| --- | --- |
+| `https://api.flagon.io/openapi.json` | OpenAPI 3.1, JSON |
+| `https://api.flagon.io/openapi.yaml` | OpenAPI 3.1, YAML (`application/openapi+yaml`) |
+
+```bash
+curl -s https://api.flagon.io/openapi.json | jq '.paths | keys'
+```
+
+`GET /` on the API also returns both URLs (`openapi_url`, `openapi_yaml_url`)
+alongside a `<operation_id>_url` entry for every documented operation. A
+self-hosted deployment serves the same routes from its own origin.
+
+The document's `info` block is `{"title": "Flagon API", "version": "0.0.0"}`.
+Every operation has a stable `operationId` (`list-projects`, `create-project`,
+`get-project`, ...), which is also the name the [scopes reference](/docs/reference/scopes)
+uses.
+
+## Regenerate it from the code
+
+In a checkout of the repository:
+
+```bash
+make openapi
+# which runs: cd api && go run ./cmd/genspec
+```
+
+This writes `openapi/openapi.json` at the repo root. The file is gitignored: it
+is a build artifact, and the committed source of truth is the Go code. Pass
+`-out` to `genspec` to write somewhere else.
+
+`genspec` builds the spec with no database attached (`server.Spec()` in
+`api/internal/server`), and every operation is registered whether or not its
+backing store is configured, so the offline file and the live `/openapi.json`
+describe the same operations. An operation whose store is missing on a given
+deployment answers `503` at request time instead of disappearing from the spec.
+
+## Generate a typed client
+
+Because the spec is exact, generate clients from it rather than hand-writing
+request and response types. The Flagon dashboard does exactly this with
+[openapi-typescript](https://openapi-ts.dev): its API types in
+`app/src/lib/api/schema.gen.ts` are generated from the spec, and every shape the
+app uses is an alias of a generated schema, so a renamed or removed field is a
+type error in the app.
+
+```bash
+make api-types
+# which runs make openapi, then (in app/):
+#   openapi-typescript ../openapi/openapi.json -o src/lib/api/schema.gen.ts
+```
+
+CI regenerates the spec and the types on every change and fails if the
+committed `schema.gen.ts` differs, so the dashboard can never drift from the
+API.
+
+For your own TypeScript client, point openapi-typescript at the live spec:
+
+```bash
+npx openapi-typescript https://api.flagon.io/openapi.json -o flagon.gen.ts
+```
+
+```ts
+import type { components, paths } from "./flagon.gen";
+
+type Project = components["schemas"]["Project"];
+type ListProjects =
+  paths["/orgs/{slug}/projects"]["get"]["responses"]["200"]["content"]["application/json"];
+```
+
+Any OpenAPI 3.1 generator works the same way for other languages.
+
+## What the spec does and does not tell you
+
+- **Authentication is not declared in the spec.** It has no security schemes, so
+  generated clients will not add a header for you. Send
+  `Authorization: Bearer <token>` yourself on every call. See
+  [Authentication and scopes](/docs/api/authentication).
+- **Some documented operations are not reachable with an access token.** The
+  spec lists every registered operation, including those only the dashboard can
+  call: token management (`/me/tokens`, `/orgs/<org>/tokens`), the assistant
+  (`/ai/messages`, `/ai/actions/execute`), invitation acceptance
+  (`/invitations/<token>/accept`), and the internal routes under `/internal/`,
+  `/me/profile`, and `/me/deleted`. An access token, even a full-access one, gets `401` on
+  these. The
+  [scopes reference](/docs/reference/scopes) lists exactly which operations a
+  token can reach.
+- **`QUERY` list operations are not in the spec.** Every paginated list also
+  accepts the HTTP `QUERY` method at the same path (`query-projects`,
+  `query-members`, ...). OpenAPI 3.1 has no field for `QUERY`, so these are
+  registered as hidden operations: routed, validated, and scope-checked, but not
+  documented in the spec. See [Pagination and search](/docs/api/pagination).
+
+## Routes deliberately outside the spec
+
+The spec is the product's **operational** contract: operations on your Flagon
+resources. Content about Flagon and infrastructure probes are served by the same
+process but registered directly on the router, so they never appear in it:
+
+| Route | What it is |
+| --- | --- |
+| `GET /` | The JSON index of operation URLs. |
+| `GET /healthz` | Liveness: `200` whenever the process is up. |
+| `GET /readyz` | Readiness: `200` when Postgres is reachable, `503` with the reason otherwise. |
+| `GET /internal/rls-check` | The tenant-isolation self-test: `200` when row-level security holds, `503` otherwise. |
+| `GET /docs` | Every public documentation page. |
+| `GET /docs/nav` | The docs navigation compiled from the `meta.json` files. |
+| `GET /docs/search?q=&limit=` | Ranked search over public pages (`limit` defaults to 5). |
+| `GET /docs/page?slug=` | One public page by slug, for example `slug=api/openapi`. |
+| `GET /roadmap` | The public roadmap: items, stages, and teams. |
+| `GET /changelog` | Every changelog entry, newest first. |
+| `POST /mcp` | The [MCP server](/docs/ai/mcp) (JSON-RPC). On the dedicated MCP host it is served at `/`. |
+
+The content routes are public, return plain JSON (not problem details), and
+answer `503` when their corpus failed to load. They still carry an
+`X-Request-Id` header and count toward the rate limit; only `/healthz` and
+`/readyz` are exempt from it. They serve only public pages:
+internal documentation never leaves the API through them. Prometheus metrics are
+served on a separate private port (`METRICS_PORT`, default `9091`) at
+`/metrics`, never on the public listener.
+
+## Related
+
+- [Using the API](/docs/api/using-the-api)
+- [Scopes reference](/docs/reference/scopes)
+- [Pagination and search](/docs/api/pagination)
+- [MCP server](/docs/ai/mcp)
+- [Content corpora](/docs/architecture/content-corpora)

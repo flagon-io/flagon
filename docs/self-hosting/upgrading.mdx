@@ -1,0 +1,130 @@
+---
+title: Upgrading
+description: How to move a self-hosted instance to a newer version - back up, upgrade the API (which migrates itself), migrate and rebuild the app - and why there is no rollback of the schema.
+---
+
+Upgrading Flagon means running newer code against your existing databases. The
+API carries its schema migrations inside the binary and applies them when it
+boots, so most upgrades are "back up, deploy the new API, deploy the new app".
+This page explains the order, what can go wrong, and why a schema change cannot
+be undone by redeploying an older version.
+
+## How schema changes ship
+
+- **Embedded.** The API's migrations are SQL files in
+  `api/internal/db/migrations/`, compiled into the binary. Upgrading the binary
+  upgrades the migrations with it.
+- **Forward-only.** There are no down migrations. Each release only ever adds
+  new files.
+- **Immutable once applied.** The API records a SHA-256 checksum of every
+  migration it applies in `public.schema_migrations`. If a shipped migration file
+  is later edited, the next boot stops with
+  `migrations are immutable once shipped` rather than guessing what the schema
+  looks like. Fixes to a shipped migration always arrive as a new migration.
+- **All or nothing.** Pending migrations run in one transaction. If any of them
+  fails, none are applied and the database is left exactly as it was.
+
+The app's auth schema is managed by BetterAuth and upgraded by the app's own
+migration script (`npm run db:migrate --workspace app`), which only creates
+missing tables and adds missing columns.
+
+## Upgrade steps
+
+<Steps>
+
+<Step title="Read the changelog">
+
+Check the [changelog](https://flagon.io/changelog) for the versions between yours
+and the target, and look for anything that needs action beyond these steps.
+
+</Step>
+
+<Step title="Back up both databases">
+
+Take a backup of `flagon_api` and `flagon_app` (a `pg_dump` of each, or your
+provider's snapshots) before anything else. Because migrations are forward-only,
+the backup is your rollback plan.
+
+</Step>
+
+<Step title="Upgrade the API">
+
+Build or pull the new version and restart the API. On boot it takes the
+migration advisory lock, applies the new migrations, and starts serving. If you
+run several instances, they can restart in any order: the first one to boot
+applies the migrations, and the others wait for it and find nothing left to do.
+
+To apply migrations as a separate step first (for example, to watch the output
+before shifting traffic), run the new binary with `migrate`:
+
+```bash
+flagon-server migrate
+# or, with the image: docker run --rm -e DATABASE_URL=... -e FLAGON_APP_DATABASE_URL=... flagon-api migrate
+```
+
+Then confirm the new version is healthy: `/readyz` returns `200` and
+`/internal/rls-check` returns `"enforced":true`.
+
+<Callout type="warn" title="Check for new required settings">
+
+A newer API can require settings an older one did not, and a production API
+refuses to start without them. For example, versions that encrypt SSO secrets at
+rest need `FLAGON_SECRETS_KEY`, and versions with the development/production mode
+split need `FLAGON_INTERNAL_TOKEN`, `DATABASE_URL`, and `FLAGON_APP_DATABASE_URL`
+set explicitly. Set them before you restart. On its first boot with a secrets key,
+the API encrypts any SSO secrets still stored in plaintext and logs
+`encrypted stored credentials at rest under the current key` with the number of
+rows. See
+[Configuration](/docs/self-hosting/configuration).
+
+</Callout>
+
+</Step>
+
+<Step title="Migrate and rebuild the app">
+
+From the new version's checkout:
+
+```bash
+npm ci
+npm run db:migrate --workspace app
+npm run build
+```
+
+Then restart the app. Upgrade the API before the app: the app is a client of the
+API, and a newer app may call operations an older API does not have yet.
+
+</Step>
+
+</Steps>
+
+## If a migration fails
+
+When the database is reachable but a migration fails, the API refuses to start.
+It exits with a non-zero status and logs `flagon exited with error`, with an
+`err` field of the form
+`database migration failed; refusing to start against a broken schema: apply migration <name>: <postgres error>`.
+Because the run is a single transaction, nothing from that run was applied. Keep (or roll back to) the
+previous version while you investigate; the previous version keeps working
+against the unchanged schema. [Self-hosting issues](/docs/troubleshooting/self-hosting-issues#migration-errors)
+covers the common causes.
+
+## Rolling back
+
+Redeploying an older API does **not** undo migrations. The older binary only
+knows about the migrations it shipped with; it will start against the newer
+schema, but that combination was never tested and may fail in ways that are hard
+to diagnose. To truly go back:
+
+1. Stop the API and the app.
+2. Restore both databases from the backups you took before upgrading.
+3. Deploy the previous versions of both.
+
+Anything written after the backup is lost, which is why the backup comes first.
+
+## Related
+
+- [Database](/docs/self-hosting/database)
+- [Production](/docs/self-hosting/production)
+- [Installation](/docs/self-hosting/installation)
+- [Self-hosting issues](/docs/troubleshooting/self-hosting-issues)

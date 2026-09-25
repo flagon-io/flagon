@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/session";
 import { getInvitation } from "@/lib/flagon-api";
 import { AuthCard } from "@/components/auth/auth-card";
 import { InviteFlow } from "./invite-flow";
@@ -11,8 +10,9 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   const { token } = await params;
 
   const [invite, session] = await Promise.all([
-    getInvitation(token).catch(() => null),
-    auth.api.getSession({ headers: await headers() }),
+    // null only on 404; any other failure throws rather than reading as "invalid".
+    getInvitation(token),
+    getSession(),
   ]);
 
   if (!invite) {

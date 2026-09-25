@@ -16,6 +16,8 @@ import {
 } from "@flagon-io/ui";
 import { type Notification, notificationMeta, timeAgo } from "@/lib/notifications";
 import { NotificationDialog } from "@/components/notifications/notification-dialog";
+import { errorMessage, fetchJson, messageOf } from "@/lib/client-fetch";
+import { ListError } from "@/components/shared/list-states";
 
 type Filter = "all" | "unread";
 
@@ -23,19 +25,23 @@ export function NotificationsFeed() {
   const router = useRouter();
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    const res = await fetch("/api/notifications?limit=50");
-    if (res.ok) {
-      const d = await res.json();
+    setLoadError(null);
+    try {
+      const d = await fetchJson<{ notifications?: Notification[] | null }>(
+        "/api/notifications?limit=50",
+        undefined,
+        "Couldn't load your notifications.",
+      );
       setItems(d.notifications ?? []);
-    } else {
-      setError("Couldn't load your notifications. Try refreshing the page.");
+    } catch (e) {
+      setLoadError(messageOf(e, "Couldn't load your notifications."));
     }
     setLoading(false);
   }, []);
@@ -46,17 +52,36 @@ export function NotificationsFeed() {
     })();
   }, [load]);
 
-  const markRead = useCallback(async (id: string) => {
-    setItems((prev) =>
-      prev.map((x) => (x.id === id && !x.read_at ? { ...x, read_at: new Date().toISOString() } : x)),
-    );
-    await fetch(`/api/notifications/${id}/read`, { method: "POST" });
-  }, []);
+  // Read-state changes are optimistic; a failed write reports why and reloads the
+  // real state rather than leaving the list lying about what was saved.
+  const post = useCallback(
+    async (url: string, fallback: string) => {
+      setError(null);
+      const res = await fetch(url, { method: "POST" }).catch(() => null);
+      if (res?.ok) return;
+      setError(res ? await errorMessage(res, fallback) : fallback);
+      await load();
+    },
+    [load],
+  );
 
-  const markUnread = useCallback(async (id: string) => {
-    setItems((prev) => prev.map((x) => (x.id === id && x.read_at ? { ...x, read_at: null } : x)));
-    await fetch(`/api/notifications/${id}/unread`, { method: "POST" });
-  }, []);
+  const markRead = useCallback(
+    async (id: string) => {
+      setItems((prev) =>
+        prev.map((x) => (x.id === id && !x.read_at ? { ...x, read_at: new Date().toISOString() } : x)),
+      );
+      await post(`/api/notifications/${id}/read`, "Couldn't mark the notification as read.");
+    },
+    [post],
+  );
+
+  const markUnread = useCallback(
+    async (id: string) => {
+      setItems((prev) => prev.map((x) => (x.id === id && x.read_at ? { ...x, read_at: null } : x)));
+      await post(`/api/notifications/${id}/unread`, "Couldn't mark the notification as unread.");
+    },
+    [post],
+  );
 
   // Opening a notification shows its detail and marks it read; the detail view
   // is where the user follows the link or flips it back to unread.
@@ -79,7 +104,7 @@ export function NotificationsFeed() {
 
   async function markAll() {
     setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
-    await fetch("/api/notifications/read-all", { method: "POST" });
+    await post("/api/notifications/read-all", "Couldn't mark all notifications as read.");
   }
 
   const unreadCount = useMemo(() => items.filter((x) => !x.read_at).length, [items]);
@@ -101,6 +126,12 @@ export function NotificationsFeed() {
           </div>
         ))}
       </Card>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ListError title="Couldn't load notifications" message={loadError} onRetry={() => void load()} />
     );
   }
 

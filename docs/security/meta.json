@@ -1,0 +1,4 @@
+{
+  "title": "Security",
+  "pages": ["overview", "tenant-isolation", "authentication", "tokens-and-scopes", "secrets", "ai-safety"]
+}

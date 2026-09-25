@@ -135,7 +135,7 @@ export const components: ComponentMeta[] = [
   // --- Layout ---------------------------------------------------------------
   { name: "Aspect Ratio", slug: "aspect-ratio", category: "layout", status: "stable", description: "Constrain content to a fixed width/height ratio.", dependencies: ["@radix-ui/react-aspect-ratio"], radix: "https://www.radix-ui.com/primitives/docs/components/aspect-ratio", shadcn: sc("aspect-ratio") },
   { name: "Resizable", slug: "resizable", category: "layout", status: "stable", description: "Draggable, resizable panel groups.", dependencies: ["react-resizable-panels"], shadcn: sc("resizable") },
-  { name: "Scroll Area", slug: "scroll-area", category: "layout", status: "stable", description: "A custom-styled, cross-browser scroll container.", dependencies: ["@radix-ui/react-scroll-area"], radix: "https://www.radix-ui.com/primitives/docs/components/scroll-area", shadcn: sc("scroll-area") },
+  { name: "Scroll Area", slug: "scroll-area", category: "layout", status: "stable", description: "A token-styled scroll container with a native, frame-accurate scrollbar.", shadcn: sc("scroll-area") },
 ];
 
 export function getComponent(slug: string): ComponentMeta | undefined {

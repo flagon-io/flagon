@@ -45,13 +45,13 @@ func Setup(ctx context.Context, cfg Config) error {
 
 	conn, err := connectWithRetry(ctx, cfg.MigratorURL)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 
 	role, password, roleErr := appRoleCredentials(cfg.AppURL)
 	if cfg.AppURL == "" {
-		slog.Warn("FLAGON_APP_DATABASE_URL not set; skipping app-role provisioning, runtime falls back to the migrator role with NO tenant isolation")
+		slog.Warn("FLAGON_APP_DATABASE_URL not set; skipping app-role provisioning and grants (the runtime never falls back to the migrator role, so serving requires it)")
 	} else if roleErr != nil {
 		slog.Warn("cannot provision app role from FLAGON_APP_DATABASE_URL", "err", roleErr)
 	} else if err := provisionAppRole(ctx, conn, role, password); err != nil {

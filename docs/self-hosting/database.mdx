@@ -1,0 +1,197 @@
+---
+title: Database
+description: The two Postgres databases, the migrator and NOBYPASSRLS app roles, how the API provisions them on boot, and notes for managed Postgres and pgbouncer.
+---
+
+Flagon stores everything in Postgres. The API owns one database and the app owns
+another, and the API talks to its database through two different roles. This
+split is the foundation of tenant isolation, so it is worth understanding before
+you point Flagon at a managed database.
+
+## Two databases
+
+| Database | Connection setting | Owner | Contents |
+| --- | --- | --- | --- |
+| `flagon_api` | the API's `DATABASE_URL` and `FLAGON_APP_DATABASE_URL` | the API | All domain data: organizations, members, invitations, teams, projects and their access, access tokens, the audit log, notifications, SSO provider configuration, and AI usage records. |
+| `flagon_app` | the app's `DATABASE_URL` | the app | BetterAuth's tables (`users`, `sessions`, `accounts`, `verifications`, `two_factors`, `rateLimit`), a cache of SSO providers (`sso_providers`), and `user_emails`. |
+
+The two are never queried together. The app reaches domain data only through the
+API. You can put both databases in one Postgres server (the local compose file
+does) or in two separate servers (Flagon's hosted instance does); the data
+boundary is the same.
+
+<Callout type="note" title="Same variable name, different databases">
+
+Both processes read a variable called `DATABASE_URL`. On the API it is the
+migrator connection to `flagon_api`; on the app it is the connection to
+`flagon_app`. If you run both on one machine, set each in its own environment.
+
+</Callout>
+
+## Two roles for the API
+
+The API never runs requests with the role that owns its schema:
+
+| Role | Setting | Used for | Attributes |
+| --- | --- | --- | --- |
+| **Migrator** | `DATABASE_URL` | Boot only: provisioning the app role, applying migrations, granting privileges. | Owns the schema. Must be able to create and alter roles, unless your platform manages roles (below). |
+| **App** | `FLAGON_APP_DATABASE_URL` | Every runtime query. | `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`. |
+
+Tenant tables have row-level security (RLS) enabled. Each request runs in a
+transaction that binds the acting user, and the policies only return rows from
+organizations that user belongs to. Because the app role is `NOBYPASSRLS` and does
+not own the tables, that holds even if a query in the Go code forgets to filter by
+organization. (The policies are enabled rather than forced, which exempts only the
+table owner, the migrator, and the migrator never serves requests.) See
+[Multi-tenancy](/docs/architecture/multi-tenancy) for how the policies work.
+
+### How the API provisions the app role
+
+Every time the API boots (and whenever you run `flagon-server migrate`), the
+setup step in `api/internal/db/setup.go` does the following as the migrator:
+
+1. Reads the role name and password from `FLAGON_APP_DATABASE_URL`. The name
+   must be a plain SQL identifier (letters, digits, underscores, at most 63
+   characters) and the URL must include a password; otherwise provisioning is
+   skipped with a warning.
+2. Creates the role if it does not exist, then sets its password to the one in
+   the URL and pins its attributes (`NOSUPERUSER NOCREATEDB NOCREATEROLE
+   NOBYPASSRLS`). The URL is the single place the credential lives, so rotating
+   the password is a config change plus a restart.
+3. Applies pending migrations (below).
+4. Grants the role `USAGE` on every user schema, `SELECT, INSERT, UPDATE, DELETE`
+   on all tables, `USAGE, SELECT` on all sequences, and matching default
+   privileges so tables created by later migrations are covered automatically.
+
+Provisioning and grants are best-effort: a failure is logged but does not stop
+the boot, because readiness and the RLS self-check surface the consequence. A
+migration failure is different (see below).
+
+<Callout type="warn" title="Use a separate role for the app">
+
+`FLAGON_APP_DATABASE_URL` must name a different role from `DATABASE_URL`. Setup
+pins the app role to `NOSUPERUSER NOBYPASSRLS`, which is only correct for a role
+that exists solely to serve requests.
+
+</Callout>
+
+In production mode, `flagon-server serve` refuses to start when
+`FLAGON_APP_DATABASE_URL` is empty ("FLAGON_APP_DATABASE_URL is required in
+production: runtime queries must use the NOBYPASSRLS app role, never the
+migrator"), so a production API can never serve requests as the migrator. In
+development mode an unset value defaults to the local compose app role
+(`postgres://flagon_app:flagon_app@localhost:5432/flagon_api`). See
+[Configuration](/docs/self-hosting/configuration) for how the mode is chosen.
+
+`flagon-server migrate` does not require the setting. Without it, the migrator
+still applies migrations but skips provisioning the app role, and logs
+`FLAGON_APP_DATABASE_URL not set; skipping app-role provisioning and grants (the runtime never falls back to the migrator role, so serving requires it)`.
+
+### Checking isolation
+
+The API exposes a self-test at `GET /internal/rls-check`. It runs as the app role
+against a fixture table seeded by the migrations: with organization A bound it
+must see only A's row, with B only B's, and with nothing bound, nothing at all.
+
+```bash
+curl http://localhost:8080/internal/rls-check
+```
+
+```json
+{"enforced":true,"org_a":["org-a"],"org_b":["org-b"],"no_org":null}
+```
+
+A `503` with `"enforced":false` means the runtime role can see across tenants
+(typically because it is a superuser or has `BYPASSRLS`); fix the role before
+serving users.
+
+## Migrations
+
+The API's schema lives in `api/internal/db/migrations/*.sql`, embedded into the
+binary at build time. There is no separate migration tool and no files to ship
+next to the binary.
+
+- **Applied on boot.** `flagon-server serve` migrates before it starts
+  listening. `flagon-server migrate` does the same and exits, for running it by
+  hand.
+- **In order, all or nothing.** Pending files are applied in filename order
+  inside a single transaction, so either every pending migration applies or none
+  does.
+- **Safe with many instances.** The run takes a transaction-scoped Postgres
+  advisory lock first, so several API instances booting at once serialize: the
+  first applies, the rest wait and then find nothing to do.
+- **Recorded and checksummed.** Each applied file is recorded in
+  `public.schema_migrations` with a SHA-256 checksum. If a file that was already
+  applied has changed, the run stops with
+  `migrations are immutable once shipped`.
+- **Forward-only.** There are no down migrations. See
+  [Upgrading](/docs/self-hosting/upgrading).
+
+### Why migrations run on boot
+
+Running migrations from the serving process means a deploy is just "start the
+new binary": there is no release step to forget, and the schema can never lag
+the code that needs it. It also works on platforms where a one-off release
+machine cannot reach the database; Fly Managed Postgres, which Flagon's hosted
+instance uses, is one example.
+
+The boot is deliberately asymmetric about failure:
+
+| Situation | What the API does |
+| --- | --- |
+| Postgres unreachable (after 6 connection attempts, 2 seconds apart) | Starts **degraded**: serves, logs a warning, and `/readyz` returns `503` until the database answers. A database blip never blocks a deploy. |
+| Postgres reachable but a migration fails, or an applied migration was modified | **Refuses to start**, so a broken or unknown schema is never served. |
+
+The app's database is migrated separately by the app's own scripts
+(`npm run db:migrate --workspace app`), which apply BetterAuth's schema with the
+installed BetterAuth version. Flagon's hosted build runs them during the app's
+build and fails the deploy if they fail.
+
+## Managed Postgres and pgbouncer
+
+Flagon works with managed Postgres, including providers that put a
+transaction-pooling pgbouncer in front of the database. The code accounts for
+it in three places:
+
+- **Simple protocol for migrations.** The migrator connection uses pgx's simple
+  query protocol, which avoids prepared statements. Transaction-pooling
+  pgbouncer does not tolerate the extended protocol for DDL, and a migration can
+  hang without this.
+- **Transaction-scoped locks and settings.** The migration advisory lock
+  (`pg_advisory_xact_lock`) and the per-request tenant binding
+  (`set_config(..., true)`) are both transaction-local, so they behave correctly
+  when consecutive statements land on different server connections.
+- **Platform-managed roles.** Some providers manage roles themselves and reject
+  `ALTER ROLE` or `GRANT` with `insufficient_privilege`. The API treats that as
+  expected: it logs that the role is managed by the database and leaves it
+  alone. In that case, create the app role through your provider with
+  `NOBYPASSRLS`, give it read and write access to the `flagon_api` tables, and
+  put its credentials in `FLAGON_APP_DATABASE_URL`. Then confirm with
+  `/internal/rls-check`.
+
+### TLS
+
+The API passes its URLs to pgx, which follows the usual libpq `sslmode`
+parameter. The app handles `sslmode` itself: `sslmode=disable` turns TLS off, and
+**any other value** (or none) connects with full certificate verification. If
+your database presents a certificate your Node runtime does not trust, the app
+cannot connect until the certificate chain is trusted.
+
+## Backups
+
+Back up both databases. `flagon_api` holds all domain data; `flagon_app` holds
+accounts, password hashes, two-factor secrets, and sessions. A `pg_dump` of each
+(or your provider's snapshots) is enough. Two-factor secrets in `flagon_app` are
+encrypted with the app's `BETTER_AUTH_SECRET`, and SSO client secrets and SAML
+keys in `flagon_api` are encrypted with the API's `FLAGON_SECRETS_KEY`, so keep
+both keys (separately from the dumps) with your backups. The app's own SSO
+provider cache in `flagon_app` holds those credentials in plaintext, so protect
+its backups accordingly.
+
+## Related
+
+- [Upgrading](/docs/self-hosting/upgrading)
+- [Production](/docs/self-hosting/production)
+- [Multi-tenancy](/docs/architecture/multi-tenancy)
+- [Tenant isolation](/docs/security/tenant-isolation)
+- [Self-hosting issues](/docs/troubleshooting/self-hosting-issues)

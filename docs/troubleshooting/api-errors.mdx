@@ -1,0 +1,224 @@
+---
+title: API errors
+description: Every error status the Flagon API returns, the real messages behind each one, what causes them, and how to fix them.
+---
+
+Every Flagon API error is a problem-details object with a `status` and a
+`detail` message (see [Errors](/docs/api/errors) for the shape). This page is the
+other half: for each status, the messages you will actually see, what causes
+them, and what to change. The same condition produces the same status whether
+you call the REST API, confirm an assistant action, or call a tool over MCP.
+
+Branch your code on the **status**. Use the **message** to understand a specific
+failure; wording can improve over time. Every response, success or failure,
+carries an `X-Request-Id` header; keep it when you log a failure, because it is
+how a failure is found in the API's log.
+
+## 400 Bad Request
+
+The request could not be read at all: the body is not valid JSON, or a required
+body is missing. Check that you send `Content-Type: application/json` and a
+well-formed body.
+
+Confirming an assistant action with a tool that does not exist, or one that is
+not a confirmable change, returns `400` with
+`unknown or non-executable tool: <name>`.
+
+## 401 Unauthorized
+
+Flagon could not establish who you are.
+
+| Message | Cause | Fix |
+| --- | --- | --- |
+| `invalid or expired token` | The `flagon_` access token is unknown, revoked, or past its expiry, or it is an organization token whose organization was deleted. | Create a new token. Check for stray whitespace or a truncated value in your secret store. |
+| `invalid internal token` | A request without a `flagon_` token was checked against the app's internal token and did not match. From your own code, this almost always means the token is missing or does not start with `flagon_`. | Send `Authorization: Bearer flagon_...`. On a self-hosted instance where the **app** gets this, the app's and API's `FLAGON_INTERNAL_TOKEN` differ. |
+| `missing user identity` | The internal token was valid but no user was named. Only the app uses the internal path. | Self-hosted: make sure requests to the API go through the app's gateway, not directly with the internal token. |
+
+## 402 Payment Required
+
+`the free plan includes one organization; add a payment method to create more`
+
+You already own an organization, and the free plan includes one. Restoring a
+deleted organization counts too, and fails with
+`the free plan includes one organization; add a payment method to restore another`.
+Organizations you are a member of but do not own do not count, and neither do
+deleted ones. Delete or transfer ownership of an organization you own, or ask
+someone else to create the new one and invite you.
+
+<Callout type="warn" title="Not available yet">
+
+Paid plans and payment methods are not built yet, so there is currently no way
+to raise this limit on the hosted service.
+
+</Callout>
+
+## 403 Forbidden
+
+You are authenticated but not allowed. Several checks produce it:
+
+- `this token is missing the scope required for this operation` means your
+  **token** lacks the operation's scope. Create a token with that scope. See the
+  [scopes reference](/docs/reference/scopes).
+- `you don't have permission to do that` means your **role** does not allow the
+  action. Ask an owner or admin for more access.
+- `this organization requires two-factor authentication; enable it on your account to continue`
+  means the organization requires 2FA and your account does not have it. Enable
+  it, and the same token works again.
+- `this organization requires single sign-on; sign in through the organization's identity provider to continue`
+  (dashboard sessions) or
+  `this organization requires single sign-on; sign in through the organization's identity provider at least once before using a personal access token with it`
+  (personal access tokens) means the organization requires SSO. Sign in through
+  its identity provider.
+- `this operation requires a user; organization access tokens can't perform it`
+  means an organization access token called an operation that needs a person:
+  creating, leaving, listing deleted, or restoring organizations, or mirroring a
+  profile.
+
+Other `403` messages name the rule directly, for example
+`only an organization owner can delete it`,
+`only organization owners and admins can do that` (the audit log), or
+`this invitation was sent to a different email address` (sign in as the invited
+address to accept). [Access and permissions](/docs/troubleshooting/access-and-permissions#403-is-it-the-token-or-the-role)
+covers how to tell the two apart.
+
+## 404 Not Found
+
+The resource does not exist, or you can't see it. Flagon does not distinguish
+the two, so it never confirms something exists outside your reach.
+
+| Message | Common causes |
+| --- | --- |
+| `organization not found` | Wrong slug, you are not a member, the organization was deleted, or you are using another organization's access token. |
+| `project not found` | Wrong project slug, the project was deleted, or your effective role on it is below `read`. |
+| `team not found` | Wrong team slug. |
+| `invitation not found` | The invitation was revoked or already used. |
+| `that user is not a member` | Managing a member who isn't in the organization. |
+| `that user has no role on this project` / `that team has no role on this project` | Removing a project grant that doesn't exist. |
+| `no restorable organization with that id` | The organization's 30-day restore window passed, or you were not an owner. |
+| `no restorable project with that slug` | The project's 30-day restore window passed, or it is not deleted. |
+
+See [Access and permissions](/docs/troubleshooting/access-and-permissions#an-organization-returns-404-not-403).
+
+## 409 Conflict
+
+The request is valid but conflicts with the current state.
+
+| Message | Fix |
+| --- | --- |
+| `that org slug is already taken` | Choose another slug. Slugs are unique across the whole instance, and a deleted organization frees its slug. |
+| `a project with that slug already exists` | Choose another slug. |
+| `that project slug is now taken; restore it under a new slug` | Pass a new `slug` in the restore body, or rename the project that took the slug. |
+| `a team with that slug already exists` | Choose another team slug. |
+| `that username is already taken` | Choose another username. |
+| `that org slug is now taken; restore it under a new slug` | Pass a new `slug` in the restore body. |
+| `that user is already a member` | Nothing to do, or change their role instead. |
+| `a pending invitation already exists for that email` | Resend or revoke the existing invitation. |
+| `this invitation is no longer valid` | It was accepted or revoked; ask for a new one. |
+| `an organization must always have an owner` | Promote another member to owner before demoting or removing the last one. |
+| `you're the only owner; transfer ownership or delete the organization first` | The sole owner can't leave; promote someone or delete the organization. |
+| `you can't change your own membership here; use Leave instead` | Use **Leave** to remove yourself. |
+| `that user must be an organization member first` | Invite the person to the organization before granting project access. |
+| `that user already has a role on this project` / `that team already has a role on this project` | Change the existing grant instead of adding one. |
+
+## 410 Gone
+
+`this invitation has expired`. Invitations are valid for seven days. Ask an
+owner or admin to send a new one.
+
+## 413 Request Entity Too Large
+
+The request body is over a size limit. Two limits apply:
+
+| Message | Limit |
+| --- | --- |
+| `request body is too large limit=1048576 bytes` | The per-operation limit on REST operations, 1 MiB. |
+| `request body is too large` | The API-wide cap on every route, including MCP: `FLAGON_MAX_BODY_BYTES`, 4 MiB by default. |
+
+Send less data per request, for example a shorter README or fewer items at once.
+
+## 422 Unprocessable Entity
+
+The request was readable but not valid. Two kinds:
+
+**Schema validation.** `detail` is `validation failed`, and the `errors` list
+names each problem with its `location` (such as `body.name`) and `value`:
+
+```json
+{
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "validation failed",
+  "errors": [
+    { "message": "expected required property name to be present", "location": "body", "value": {} }
+  ]
+}
+```
+
+**Domain rules.** A single message says what is wrong. Common ones:
+
+| Message | Fix |
+| --- | --- |
+| `name is required` | Send a non-empty `name`. |
+| `slug must contain a letter or digit` | Slugs are normalized to lowercase letters, digits, and hyphens; send one with at least one letter or digit. |
+| `invalid role` | Use a role from the [roles matrix](/docs/reference/roles-matrix). |
+| `invalid base permission` | Use `none`, `read`, `triage`, `write`, `maintain`, or `admin`. |
+| `a name is required` | Tokens need a name. |
+| `select at least one scope, or choose full access` | Pass `scopes`, or `full: true`. |
+| `unknown scope: <scope>` | Check the spelling against the [scopes reference](/docs/reference/scopes). |
+| `expiration must be in the future` | Pick a later expiry. |
+| `invalid pagination cursor` | Pass the cursor from the previous page's `Link: rel="next"` header unchanged, and use it only with the same list and filters. See [Pagination](/docs/api/pagination). |
+| `enter an email address to invite, or the username of an existing user` | The invitee must be an email or a registered username. |
+
+## 429 Too Many Requests
+
+Two different limits return `429`.
+
+**`rate limit exceeded; retry after <n>s`** comes from the API's request rate
+limiter. Each principal (a signed-in user, an access token, or an anonymous
+client IP) may make 50 requests per second sustained, with bursts of up to 300,
+by default. The response carries a `Retry-After` header with the number of
+seconds to wait. Back off for at least that long, and spread bulk work out rather
+than firing requests in parallel. Each access token has its own budget, counted
+separately on each API machine. On a self-hosted instance the limits are
+`FLAGON_RATE_LIMIT` and `FLAGON_RATE_BURST`; `/healthz` and `/readyz` are never
+limited.
+
+**`AI usage limit reached for this organization`** means the organization used
+its daily allowance of assistant calls (100 per rolling 24 hours by default),
+counting both turns and confirmed actions. Only the assistant is limited: the
+dashboard, REST API, and MCP keep working. Capacity returns gradually as older
+calls age out of the window. See [Usage and AI limits](/docs/platform/usage).
+
+Sign-in pages have their own rate limits, which also return `429`; see
+[Sign-in and SSO](/docs/troubleshooting/sign-in-and-sso#too-many-requests-please-try-again-later).
+
+## 500 Internal Server Error
+
+Something failed that Flagon did not expect. The `detail` is a generic line for
+the operation, such as `could not create token` or `agent error`. The underlying
+cause is never included in the response: the API logs it together with the
+request id. Retry; if it keeps happening, report it with the time, the request,
+the response body, and the `X-Request-Id` response header (see
+[Troubleshooting](/docs/troubleshooting/overview#still-stuck)). On a self-hosted
+instance, search the API's log for that id. An `agent error` usually means the AI
+provider call failed; see
+[Assistant and MCP](/docs/troubleshooting/assistant-and-mcp).
+
+## 503 Service Unavailable
+
+A dependency the request needs is not available right now.
+
+| Message | Where | Cause and fix |
+| --- | --- | --- |
+| `The Flagon API is unreachable right now. Try again shortly.` | The dashboard | The app could not connect to the API at all. Usually brief. Self-hosted: see [the app can't reach the API](/docs/troubleshooting/self-hosting-issues#the-app-cant-reach-the-api). |
+| `AI usage could not be recorded; please try again` | The assistant | The turn ran but its usage could not be saved, so Flagon failed it rather than leave it unmetered. Retry. |
+| `the AI agent is not configured` | The assistant | The API has no usable model: the provider key is missing, or the provider rejected it (`401` or `403` upstream). Self-hosted: check `ANTHROPIC_API_KEY` or `FLAGON_AI_API_KEY`. See [Assistant and MCP](/docs/troubleshooting/assistant-and-mcp). |
+| `Single sign-on is temporarily unavailable. Try again shortly.` | SSO sign-in | The app could not load the SSO provider from the API. Retry; self-hosted, check the app-to-API connection. |
+| `identity API is not configured` | Self-hosted API | The API has no internal token, so it rejects the app's calls. A current API refuses to start in production without `FLAGON_INTERNAL_TOKEN`, so this points at an embedded or custom build. Set the token on both sides. |
+
+## Related
+
+- [Errors](/docs/api/errors)
+- [Access and permissions](/docs/troubleshooting/access-and-permissions)
+- [Assistant and MCP](/docs/troubleshooting/assistant-and-mcp)
+- [Scopes reference](/docs/reference/scopes)

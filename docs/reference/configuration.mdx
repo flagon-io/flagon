@@ -1,0 +1,229 @@
+---
+title: Configuration
+description: Every flag and environment variable of the API server (flagon-server) and every environment variable the web app and its scripts read, with defaults and what production requires.
+---
+
+Flagon runs as two services, and each is configured entirely through its
+environment: the **API server** (`flagon-server`, Go, in `api/`) and the **web
+app** (Next.js, in `app/`). This page lists every setting each one reads,
+generated from `api/cmd/flagon-server/main.go` and every `process.env` read in
+`app/`. For how to put them together on a real deployment, see
+[Self-hosting](/docs/self-hosting/configuration).
+
+<Callout type="warn" title="Set these in production">
+The API: `DATABASE_URL`, `FLAGON_APP_DATABASE_URL`, `FLAGON_INTERNAL_TOKEN`, and
+`FLAGON_SECRETS_KEY`. In production mode the server refuses to start without
+them (and refuses the public development token). Set `RESEND_API_KEY` too, or
+invitation emails are only logged. The app: `BETTER_AUTH_SECRET`,
+`BETTER_AUTH_URL`, `DATABASE_URL`, `FLAGON_API_URL`, `FLAGON_INTERNAL_TOKEN`
+(the same value as the API's), and `RESEND_API_KEY`. Each is marked **Required
+in production** below.
+</Callout>
+
+## API server: `flagon-server`
+
+`flagon-server` has two commands:
+
+- `flagon-server serve` applies pending migrations, then serves the HTTP API.
+- `flagon-server migrate` provisions the runtime database role and applies
+  migrations, then exits.
+
+Every setting is a command-line flag backed by an environment variable. On
+startup the server also loads `.env.local` and then `.env` from its working
+directory if they exist. A variable that is already set is never overridden, so
+the precedence is: real environment, then `.env.local`, then `.env`, then the
+flag default. A flag given on the command line wins over all of them.
+
+### Development and production mode
+
+The server runs in one of two modes, and production mode refuses the insecure
+conveniences that make a fresh checkout work with zero setup.
+
+| Flag | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `--environment` (`serve` only) | `FLAGON_ENV` | empty | `development` (or `dev`) or `production` (or `prod`). When unset, the server is in **production** mode when it runs on Fly.io (`FLY_APP_NAME` is set) or binds any non-loopback interface (such as `FLAGON_HOST=0.0.0.0`, which the container image sets), and in **development** mode when bound to loopback (`127.0.0.1`, `::1`, or `localhost`), which is the default off Fly. `migrate` reads `FLAGON_ENV` and `FLAGON_HOST` from the environment to decide the same way. |
+
+In development mode:
+
+- `DATABASE_URL` and `FLAGON_APP_DATABASE_URL` fall back to the local Docker
+  Compose Postgres (the migrator and the app role). Runtime queries still use
+  the app role; the server never runs them as the migrator, in any mode.
+- `FLAGON_INTERNAL_TOKEN` falls back to the public value `dev-internal-token`,
+  with a warning.
+- `FLAGON_SECRETS_KEY` falls back to a fixed, publicly known key, with a
+  warning.
+- Links in emails default to `http://localhost:3000`.
+
+In production mode, a missing `DATABASE_URL`, `FLAGON_APP_DATABASE_URL`,
+`FLAGON_INTERNAL_TOKEN`, or `FLAGON_SECRETS_KEY`, or an internal token equal to
+`dev-internal-token`, stops the server at startup with an error that names the
+variable. The Docker Compose file sets `FLAGON_ENV=development` for its API
+service, because the container binds all interfaces.
+
+A bare `flagon-server serve` with no configuration binds `127.0.0.1` and runs
+in development mode, so a fresh checkout works with zero setup. If you run the
+binary directly on a server behind a reverse proxy on the same machine, it is
+still bound to loopback, so set `FLAGON_ENV=production` explicitly.
+
+### Database (both commands)
+
+These are global flags, shared by `serve` and `migrate`. The API uses two
+Postgres roles on purpose: a schema owner that only migrates, and a runtime role
+without `BYPASSRLS` that every request uses, so row-level security always
+applies. See [Multi-tenancy](/docs/architecture/multi-tenancy).
+
+| Flag | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `--database-url` | `DATABASE_URL` | Development only: `postgres://flagon:flagon@localhost:5432/flagon_api?sslmode=disable` | The migrator (schema owner) connection. Used only to run migrations and provision the runtime role. **Required in production.** |
+| `--app-database-url` | `FLAGON_APP_DATABASE_URL` | Development only: `postgres://flagon_app:flagon_app@localhost:5432/flagon_api?sslmode=disable` | The runtime connection, as the `NOBYPASSRLS` app role, used for every request. **Required in production** for `serve`: the server never runs runtime queries as the migrator there. |
+
+### Server (`serve`)
+
+| Flag | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `--internal-token` | `FLAGON_INTERNAL_TOKEN` | Development only: `dev-internal-token` | The shared secret the web app authenticates to the API with. Must match the app's `FLAGON_INTERNAL_TOKEN`. **Required in production**: use a long random value; the public development value is refused. |
+| `--secrets-key` | `FLAGON_SECRETS_KEY` | Development only: a fixed public key | Base64-encoded 32-byte AES-256 key that encrypts stored credentials (SSO client secrets and SAML keys) at rest. Generate one with `openssl rand -base64 32`. On every boot the server encrypts any stored credential still in plaintext or under a retired key. **Required in production.** |
+| `--secrets-keys-retired` | `FLAGON_SECRETS_KEYS_RETIRED` | empty | Comma-separated base64 keys that used to be `FLAGON_SECRETS_KEY`, kept only to decrypt during a rotation. On boot every stored credential sealed under one of them is re-sealed under the current key. Remove them once the boot log reports nothing left to re-seal. See [Secrets](/docs/security/secrets#rotating-the-encryption-key). |
+| `--host` | `FLAGON_HOST` | `127.0.0.1` off Fly; all interfaces on Fly | The interface to bind, for both the API and metrics listeners. The default binds loopback only, which also selects development mode when `FLAGON_ENV` is unset. Containers set `0.0.0.0` (all interfaces; the API image does this for you), which selects production mode. |
+| `--port` | `PORT` | `8080` | The public HTTP API port. |
+| `--metrics-port` | `METRICS_PORT` | `9091` | The private Prometheus port (`/metrics`). Never expose it publicly. |
+| `--mcp-host` | `FLAGON_MCP_HOST` | empty | A hostname dedicated to the MCP server (the hosted service uses `mcp.flagon.io`). On that host the MCP endpoint is served at `/` and every other path returns `404`. Empty means MCP is served only at `/mcp`. |
+| `--app-url` | `FLAGON_APP_URL` | `https://app.flagon.io` in production, `http://localhost:3000` in development | Public base URL of the web app, used for links in emails the API sends (invitation accept links). Set it when you self-host. |
+
+### Request limits (`serve`)
+
+| Flag | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `--max-body-bytes` | `FLAGON_MAX_BODY_BYTES` | `4194304` (4 MiB) | Maximum request body, in bytes, on every route including the MCP endpoint. A larger body gets `413`. API operations also keep their own 1 MiB limit. |
+| `--rate-limit` | `FLAGON_RATE_LIMIT` | `50` | Sustained requests per second per principal: each signed-in user, each access token, or each client IP for unauthenticated callers. `0` disables rate limiting. The limiter is in memory and per instance, so N API machines allow up to N times this. Over the limit, requests get `429` with `Retry-After`. |
+| `--rate-burst` | `FLAGON_RATE_BURST` | `300` | How many requests a principal may make at once before the sustained rate applies. |
+| `--client-ip-header` | `FLAGON_CLIENT_IP_HEADER` | empty | A proxy header that carries the real client IP, such as `Fly-Client-IP` (the hosted service sets this). Used to rate limit unauthenticated callers and as the IP the audit log records for access token and MCP callers. Empty means only the TCP peer address is trusted. Set it only when every request reaches the API through a proxy that overwrites the header, or callers can spoof their IP. |
+
+`GET /healthz` and `GET /readyz` are never rate limited. See
+[Limits](/docs/reference/limits).
+
+### Email (`serve`)
+
+The API sends invitation emails itself, for every front door (dashboard, REST,
+assistant, and MCP).
+
+| Flag | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `--mail-provider` | `FLAGON_MAIL_PROVIDER` | empty (same as `auto`) | `auto`, `resend`, or `log`. `auto` uses Resend when `RESEND_API_KEY` is set, otherwise the log mailer, which writes each email to the server log and delivers nothing (the server warns about this in production). With the log mailer an invitation reports `email_sent: false`, so the inviter is shown the link to share. `resend` without a key, or an unknown value, stops the server at startup. |
+| `--resend-api-key` | `RESEND_API_KEY` | empty | Resend API key for transactional email. Set it in production, or invitation emails are not delivered. |
+| `--mail-from` | `FLAGON_MAIL_FROM`, then `RESEND_FROM` | `Flagon <onboarding@resend.dev>` | The sender address, such as `Flagon <hello@example.com>`. |
+
+### AI assistant (`serve`)
+
+The assistant always runs: with no model configured it falls back to an offline
+mock, so you can use Flagon with no AI keys at all. See
+[AI runtime](/docs/architecture/ai-runtime).
+
+| Flag | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `--ai-provider` | `FLAGON_AI_PROVIDER` | empty (same as `auto`) | `auto`, `anthropic`, `openai`, or `mock`. `auto` uses Anthropic when `ANTHROPIC_API_KEY` is set, else an OpenAI-compatible endpoint when `FLAGON_AI_API_KEY` or `FLAGON_AI_BASE_URL` is set, else the mock. Pinning `anthropic` without `ANTHROPIC_API_KEY`, pinning `openai` with neither an API key nor a base URL, or an unknown value stops the server at startup. |
+| `--anthropic-api-key` | `ANTHROPIC_API_KEY` | empty | Anthropic API key. |
+| `--anthropic-workspace-id` | `ANTHROPIC_WORKSPACE_ID` | empty | Optional Anthropic workspace the usage is attributed to. |
+| `--ai-base-url` | `FLAGON_AI_BASE_URL`, then `OPENAI_BASE_URL` | empty (`https://api.openai.com/v1` when the OpenAI-compatible provider is used) | Base URL of any OpenAI-compatible Chat Completions endpoint: OpenAI, OpenRouter, Together, Groq, vLLM, or Ollama at `http://localhost:11434/v1`. |
+| `--ai-api-key` | `FLAGON_AI_API_KEY`, then `OPENAI_API_KEY` | empty | Key for the OpenAI-compatible endpoint. Leave empty for keyless local servers such as Ollama. |
+| `--ai-model` | `FLAGON_AI_MODEL` | empty (provider default) | The model id. Defaults: `claude-haiku-4-5` for Anthropic, `gpt-4o-mini` for OpenAI-compatible, `mock` for the mock. |
+| `--ai-system-prompt-file` | `FLAGON_AI_SYSTEM_PROMPT_FILE` | empty (built-in prompt) | Path to a file that replaces the built-in system prompt. If it cannot be read, the server logs a warning and keeps the built-in prompt. |
+| `--ai-daily-limit` | `FLAGON_AI_DAILY_LIMIT` | `100` | Maximum assistant calls per organization per rolling 24 hours. `0` means unlimited; do not use `0` in production. See [Limits](/docs/reference/limits). |
+
+When two environment variables are listed, the first one that is set wins. If a
+configured provider rejects its key at request time (a `401` or `403` from the
+provider), or the Anthropic provider has no key, the assistant answers `503` with
+`the AI agent is not configured`.
+
+### Not configurable
+
+The documentation, roadmap, and changelog corpora are compiled into the binary,
+so there is nothing to configure for them. Server timeouts (a 10-second limit
+for request headers, a 5-second budget per database query) are constants in the
+code; see [Limits](/docs/reference/limits).
+
+## Web app
+
+The app reads its environment at runtime (server side) and, for a few values,
+at build time. In development, `app/.env.local` is loaded automatically;
+`app/.env.example` is the template.
+
+### Auth
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BETTER_AUTH_SECRET` | none | The secret the sign-in service signs sessions with. Generate one with `openssl rand -base64 32`. **Required in production.** |
+| `BETTER_AUTH_URL` | `http://localhost:3000` where a fallback exists | The app's public origin, such as `https://app.flagon.io`. Used as the sign-in service's base URL, for SSO callback URLs, and for the copyable invitation link the dashboard shows when an invitation email was not delivered. **Required in production.** |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | none | Enable Google sign-in when both are set. |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | none | Enable GitHub sign-in when both are set. |
+
+The social sign-in buttons are always shown, and are disabled until their
+provider is configured. The app derives `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED` and
+`NEXT_PUBLIC_GITHUB_AUTH_ENABLED` from the variables above at build time; do not
+set those yourself.
+
+### Database
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | none | The app's own Postgres database, which holds accounts, sessions, and sign-in data (separate from the API's domain database; locally it is `flagon_app` on the same Postgres). SSL certificate verification is on unless the URL has `sslmode=disable`. **Required in production.** Auth pages load without it, but every sign-in fails. |
+
+### API gateway
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FLAGON_API_URL` | `http://localhost:8080` | Base URL of the API server. **Required in production.** |
+| `FLAGON_INTERNAL_TOKEN` | Development only: `dev-internal-token` | The shared secret the app sends to the API. Must equal the API's `FLAGON_INTERNAL_TOKEN`. Outside production it falls back to the same public development value the API uses; in production an unset token makes every call to the API fail with an error. **Required in production.** |
+
+### Email
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `RESEND_API_KEY` | none | Key for sending the app's own transactional email (sign-in codes, email verification, password reset) through Resend. Invitation emails are sent by the API, which reads its own `RESEND_API_KEY` (see above). Without it, development logs each email to the console, and production refuses to send, so the flow that needed the email fails loudly. **Required in production.** |
+| `RESEND_FROM` | `Flagon <onboarding@resend.dev>` | The sender address for the app's emails. |
+
+### Build and runtime
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `NODE_ENV` | set by Next.js | `production` switches on secure cross-site session cookies, requires `RESEND_API_KEY` and `FLAGON_INTERNAL_TOKEN`, and turns off development helpers (the demo login prefill, the dev email endpoint, and returning the invitation link even when the email was sent). |
+| `NEXT_BUILD_STANDALONE` | unset | Set to `1` to build Next.js's standalone output, used by the self-host Docker image. |
+| `CI` | unset | Set by CI; makes the Playwright end-to-end tests run against a production build with retries. |
+
+### Scripts
+
+These are read only by the scripts in `app/scripts/`, never by the running app.
+The scripts also read `DATABASE_URL`, `FLAGON_API_URL`, and
+`FLAGON_INTERNAL_TOKEN` as above.
+
+| Variable | Used by | Default | Meaning |
+| --- | --- | --- | --- |
+| `SEED_EMAIL` | `npm run db:seed` | `demo@flagon.dev` | Demo user email. Also the login the development sign-in page pre-fills. |
+| `SEED_USERNAME` | `npm run db:seed` | `demo` | Demo user username. |
+| `SEED_PASSWORD` | `npm run db:seed` | `password12345` | Demo user password. Also pre-filled in development. |
+| `SEED_NAME` | `npm run db:seed` | `Demo User` | Demo user display name. |
+| `SEED_ORG_NAME` | `npm run db:seed` | `Demo Org` | Name of the baseline organization the seed creates through the API. |
+| `SEED_ORG_SLUG` | `npm run db:seed` | `demo` | Its slug. |
+| `SEED_SKIP_ORG` | `npm run db:seed` | unset | Set to skip creating the organization. |
+| `SEED_ALLOW_PROD` | `npm run db:seed` | unset | The seed refuses to run when `NODE_ENV=production` unless this is set. |
+| `RESTORE_LOGIN` | `npm run restore-user` | none | The email or username of a soft-deleted account to restore, when not passed as an argument. |
+
+### End-to-end tests
+
+Read only by the Playwright product suite in `app/tests/product/`, which also
+reads `SEED_EMAIL`, `SEED_USERNAME`, `SEED_PASSWORD`, and `SEED_ORG_SLUG` to sign
+in as the demo user.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `E2E_OWNER_EMAIL` | `owner@flagon.dev` | Email of a second seeded user who owns no organization, for tests that create and delete a whole organization (seed it with `SEED_SKIP_ORG=1`). |
+| `E2E_OWNER_USERNAME` | `e2e-owner` | Its username. |
+| `E2E_OWNER_PASSWORD` | `password12345` | Its password. |
+| `E2E_AI_PROVIDER` | unset | Set to `mock` when the API runs with `FLAGON_AI_PROVIDER=mock`. The assistant test is skipped otherwise, because a real model is not deterministic. |
+
+## Related
+
+- [Self-hosting configuration](/docs/self-hosting/configuration)
+- [Limits](/docs/reference/limits)
+- [Secrets](/docs/security/secrets)
+- [Deployment topology](/docs/architecture/deployment-topology)

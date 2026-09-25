@@ -1,0 +1,270 @@
+---
+title: Delete and restore
+description: Soft-delete a project or an organization, restore it later, and handle a slug that was taken while it was gone.
+---
+
+Deleting in Flagon is a **soft delete**: the project or organization disappears from every list
+and URL straight away, but its data, settings, and access grants are kept so it can be restored.
+Its slug is freed immediately, so you can reuse the name for something new. That last point is
+why restores sometimes need a decision: if a new project or organization took the slug in the
+meantime, the old one comes back under a new slug you choose. Both projects and organizations
+can be restored for **30 days** after they are deleted.
+
+By the end of this guide you will be able to delete a project or an organization, bring it back,
+and resolve the slug conflicts and plan limits that can block a restore.
+
+<Callout type="info" title="Before you start">
+
+- **Projects:** the owner tier on the project: an organization **owner** or **admin**, a project
+  owner, or a member of a team that owns it. Token scope `admin:project`.
+- **Organizations:** organization **owner** only. Token scope `admin:org`.
+
+</Callout>
+
+## Projects
+
+<Steps>
+
+<Step title="Delete the project">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open the project, then **Settings > General**.
+2. In **Danger zone**, select **Delete project**.
+3. Type the project's slug to confirm, and select **Delete project**.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X DELETE https://api.flagon.io/orgs/acme/projects/checkout \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+The response is the project as it was deleted.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Delete the checkout project.
+
+The assistant proposes **Confirm: Delete project "checkout" in "acme"**.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Restore it">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Open organization **Settings > Deleted projects** (under **Archive**; owners and admins), find
+the project, and select **Restore**. Each row shows how many days it stays restorable. It comes
+back with its settings and access intact.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+# List deleted projects (paginated; organization owners and admins)
+curl https://api.flagon.io/orgs/acme/deleted-projects \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+# {"projects": [{"slug": "checkout", ..., "deleted_at": "...", "purge_at": "..."}]}
+
+# Restore by slug
+curl -X POST https://api.flagon.io/orgs/acme/projects/checkout/restore \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+`purge_at` is when the project stops being restorable (30 days after `deleted_at`). If several
+deleted projects share the slug (it was reused and deleted again), restore brings back the most
+recently deleted one. The list is limited to organization owners and admins; a project owner who
+is neither can still restore by slug.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Restore the checkout project.
+
+The assistant can look it up with `list_deleted_projects` and proposes
+**Confirm: Restore project "checkout" in "acme"** (with `as "checkout-2"` added when it restores
+under a new slug).
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="If the slug was taken">
+
+A restore under the old slug fails with `409` and
+`that project slug is now taken; restore it under a new slug` when a live project now uses the
+slug. Restore it under a different slug instead:
+
+- **Dashboard:** after **Restore**, a dialog asks for a **New slug** (it suggests
+  `<slug>-2`). Links to the old slug won't reach the restored project.
+- **API:** send the new slug in the optional request body.
+- **Assistant:** ask it to restore the project under a new slug; the `restore_project` tool
+  takes a `new_slug`.
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects/checkout/restore \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "checkout-2"}'
+```
+
+</Step>
+
+</Steps>
+
+After 30 days a deleted project is no longer listed and can't be restored: restore returns
+`404` with `no restorable project with that slug`.
+
+## Organizations
+
+<Steps>
+
+<Step title="Delete the organization">
+
+Deleting an organization removes it for **every member at once**, stops its projects being
+reachable, stops its organization access tokens from authenticating, and frees its slug. Every
+member is notified. An owner can restore it for **30 days**.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open organization **Settings > General**. The **Danger zone** appears only for owners.
+2. Select **Delete organization**.
+3. Type the organization's slug to confirm, and select **Delete organization**.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X DELETE https://api.flagon.io/orgs/acme \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+Use a personal access token: organization access tokens can't hold the owner role.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Delete the acme organization.
+
+The assistant proposes **Confirm: Delete organization "acme" (restorable by an owner for 30
+days)**.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Restore it within 30 days">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open your personal **Settings > Organizations**. The **Recently deleted** table lists
+   organizations you owned, with how long each stays restorable.
+2. Select **Restore**.
+3. If the old slug was taken meanwhile, a dialog asks for a **New slug**. Enter one and select
+   **Restore organization**. Links to the old slug won't reach the restored organization.
+
+</Tab>
+
+<Tab title="API">
+
+The archive and restore address an organization by **id**, because its old slug may now belong
+to someone else:
+
+```bash
+curl https://api.flagon.io/deleted-orgs \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+# {"orgs": [{"id": "6f1c...", "name": "Acme Inc", "slug": "acme",
+#            "deleted_at": "...", "purge_at": "..."}]}
+
+curl -X POST https://api.flagon.io/deleted-orgs/6f1c.../restore \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "acme-2"}'
+```
+
+The body is optional; send `slug` only when the old one is taken. `purge_at` is when the
+organization stops being restorable.
+
+</Tab>
+
+<Tab title="Assistant">
+
+The in-product assistant can list your deleted organizations with `list_deleted_organizations`,
+but it refuses to restore one: each conversation is scoped to a single organization, and a
+deleted organization is addressed by id from outside it. Restore from the dashboard or the API.
+
+An external agent connected over [MCP](/docs/guides/connect-an-mcp-client) with a personal
+access token that has `admin:org` can call `restore_organization` with the `id` (and a new
+`slug` if needed).
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Check the plan limit">
+
+A deleted organization does not count toward the free plan's one owned organization, which is
+why you could create a new one after deleting. Restoring counts it again: if you already own a
+live organization, the restore fails with `402`. Delete or hand over the other organization
+first; paid plans are not available yet.
+
+</Step>
+
+</Steps>
+
+## Verify it worked
+
+- A deleted project or organization no longer appears in lists, and its URLs return a not-found
+  page.
+- A restored one reappears at its slug (or its new slug) with its members, projects, teams, and
+  grants as they were.
+- The audit log records `project.deleted` and `project.restored`, or `organization.deleted` and
+  `organization.restored`.
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `403` | `only an organization owner can delete it` | Ask an owner. |
+| `403` | `only an organization owner can restore it` | Ask an owner. |
+| `404` | `no restorable organization with that id` | The id is wrong, you did not own it, or the 30 days have passed. |
+| `409` | `that org slug is now taken; restore it under a new slug` | Send a new `slug` in the restore body. |
+| `402` | `the free plan includes one organization; add a payment method to restore another` | You already own a live organization. |
+| `409` | `that project slug is now taken; restore it under a new slug` | Send a new `slug` in the restore body. |
+| `404` | `no restorable project with that slug` | No project with that slug was deleted in this organization in the last 30 days. |
+| `404` | `project not found` | Deleting: the slug is wrong, or you can't see the project. |
+| `403` | `you don't have permission to do that` | Deleting and restoring a project needs the owner tier. Listing deleted projects needs the organization owner or admin role. |
+
+## Related
+
+- [Organizations](/docs/platform/organizations)
+- [Projects](/docs/platform/projects)
+- [Transfer project ownership](/docs/guides/transfer-project-ownership)
+- [Review the audit log](/docs/guides/review-the-audit-log)

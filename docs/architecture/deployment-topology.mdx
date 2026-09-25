@@ -1,0 +1,225 @@
+---
+title: Deployment topology
+description: Where each part of Flagon runs - the app on Vercel, the API and the MCP host on one Fly.io app, the domain database on Fly Managed Postgres, a separate auth database - how a push to main deploys it, why migrations run on boot, and how the same shape runs locally.
+---
+
+Flagon's hosted service runs the three deployables from
+[Architecture overview](/docs/architecture/overview) on two platforms, backed by two
+Postgres databases. This page describes that production layout, the local
+development layout that mirrors it, and what changes when you run Flagon yourself.
+
+```text
+       app.flagon.io           api.flagon.io         mcp.flagon.io
+       ui.flagon.io                  │                     │
+             │                       │                     │
+ ┌───────────▼──────────┐   ┌────────▼─────────────────────▼─────┐
+ │ Vercel               │   │ Fly.io app flagon-api              │
+ │ Next.js app (app/)   │   │ flagon-server serve   :8080        │
+ │ BetterAuth           ├──►│ mcp.flagon.io host: MCP only       │
+ │ gateway to the API   │   │ /metrics on :9091 (private)        │
+ │                      │   │ migrations run on boot             │
+ └───────────┬──────────┘   └────────┬───────────────────────────┘
+             │ DATABASE_URL          │ DATABASE_URL, FLAGON_APP_DATABASE_URL
+ ┌───────────▼──────────┐   ┌────────▼───────────────────────────┐
+ │ Auth DB              │   │ Domain DB                          │
+ │ separate Postgres    │   │ Fly Managed Postgres               │
+ │ instance             │   │ migrator role + NOBYPASSRLS role   │
+ └──────────────────────┘   └────────────────────────────────────┘
+```
+
+## The app on Vercel
+
+`app.flagon.io` is the Next.js app in `app/`, deployed to Vercel. The root
+`vercel.json` installs the npm workspaces with `npm ci` and builds with
+`npm run vercel-build --workspace app`, which:
+
+1. builds the `@flagon-io/ui` component registry (`app/scripts/build-registry.mjs`);
+2. migrates the auth database (`app/scripts/deploy-migrate.mjs`), skipping with a
+   warning when `DATABASE_URL` is not set, as on a preview without a database;
+3. runs `next build`.
+
+A failed migration fails the build, so a broken auth schema never reaches traffic.
+
+The same deployment answers `ui.flagon.io`. `app/src/proxy.ts` rewrites that host
+onto the `/ui` component catalog, leaving the shadcn registry under `/r` reachable
+directly.
+
+The app's core server-side settings are `DATABASE_URL` (its auth database),
+`BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` (BetterAuth), and `FLAGON_API_URL` plus
+`FLAGON_INTERNAL_TOKEN` (the gateway). The internal token must match the API's; a
+production build has no fallback for it, and the first call that needs it fails
+if it is unset. See [Configuration](/docs/reference/configuration).
+
+## The API and MCP on Fly.io
+
+`api.flagon.io` is the Go server built from `api/Dockerfile`'s final stage: a
+static `flagon-server` binary on Alpine, running as a non-root user, with
+`ENTRYPOINT ["/usr/local/bin/flagon-server"]` and `CMD ["serve"]`. `api/fly.toml`
+configures the Fly app `flagon-api`:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `primary_region` | `iad` | Where machines start by default |
+| `internal_port` | `8080` | The public HTTP API |
+| `force_https` | `true` | Plain HTTP is redirected |
+| `min_machines_running` | `1` | One machine always warm, no cold start on the common path |
+| `auto_stop_machines` / `auto_start_machines` | `stop` / `true` | Extra machines stop when idle and start under load |
+| `concurrency` | soft 100, hard 200 requests | Fly's proxy routes to or starts another machine past the soft limit |
+| Health check | `GET /healthz` every 15s | Liveness only |
+| `[metrics]` | port `9091`, `/metrics` | Prometheus scrape, never on the public service |
+| VM | shared CPU, 1 vCPU, 256 MB | Per machine; scale out by count |
+
+`/healthz` answers `200` whenever the process is up and never touches the database,
+so a database outage cannot make Fly kill or refuse to start a machine.
+`/readyz` is where an outage shows: `503` with the reason.
+
+**`mcp.flagon.io` is the same Fly app.** It shares the machines and IP addresses of
+`api.flagon.io`. `fly.toml` sets `FLAGON_MCP_HOST = 'mcp.flagon.io'`, which makes
+`api/internal/server` install `mcpHostGate` before any route. On that hostname the
+MCP endpoint is served at `/` and `/mcp`, and every other path is a `404`, so the
+public MCP host never exposes the rest of the API (the index, the OpenAPI spec, or
+the docs routes). On `api.flagon.io` the gate is a pass-through and `/mcp` works
+alongside every other route. See [MCP](/docs/ai/mcp).
+
+`fly.toml` also sets `FLAGON_CLIENT_IP_HEADER = 'Fly-Client-IP'`. Fly's edge
+overwrites that header on every request, so the API can trust it as the caller's
+real address for the rate limiter and the audit log; without it every caller
+would appear as Fly's proxy.
+
+Non-secret AI settings live in `fly.toml` too. `FLAGON_AI_PROVIDER = 'anthropic'`
+pins the provider, so a missing key stops the boot with a clear error instead of
+silently falling back to the offline mock, and a key the provider rejects turns
+agent requests into `503` ("the AI agent is not configured"). The key itself,
+`ANTHROPIC_API_KEY`, is a Fly secret, as are the database URLs,
+`FLAGON_INTERNAL_TOKEN`, and `FLAGON_SECRETS_KEY`.
+
+**Production is the default on Fly.** With `FLAGON_ENV` unset, the server treats
+itself as production whenever `FLY_APP_NAME` is set (or it binds a non-loopback
+address, as the image's `FLAGON_HOST=0.0.0.0` does), and `fly.toml` also pins
+`FLAGON_ENV = 'production'`. In production it refuses to start without `DATABASE_URL`, `FLAGON_APP_DATABASE_URL`, a
+real `FLAGON_INTERNAL_TOKEN` (not the public development value), and
+`FLAGON_SECRETS_KEY`. A misconfigured machine fails its deploy instead of serving
+with a development fallback.
+
+## The databases
+
+**The domain database** is Fly Managed Postgres, attached to `flagon-api`. The API
+connects with two roles: `DATABASE_URL` is the migrator that owns the schema, and
+`FLAGON_APP_DATABASE_URL` is the `NOBYPASSRLS` runtime role. Fly Managed Postgres
+manages its own roles, so the API's boot-time attempt to set the app role's
+attributes and grants is refused with `insufficient_privilege`; `db.Setup` treats
+that as expected, logs it, and relies on the platform's role model. Connections go
+through the platform's transaction-pooling pgbouncer, which is why migrations use
+Postgres's simple query protocol and a transaction-scoped advisory lock.
+
+**The auth database** is a separate Postgres instance that only the app connects
+to. Locally both databases share one Postgres process; in production they are
+independent instances, so the data boundary described in
+[Data ownership](/docs/architecture/data-ownership) is also a network boundary.
+
+## How a change ships
+
+A push to `main` deploys both services. Neither deploy is a CI job:
+`.github/workflows/ci.yml` only builds and tests (Go tests with a real Postgres,
+lint, the docs, roadmap, and changelog drift checks, the API contract check, and
+the Playwright suite). Vercel and Fly each deploy `main` through their own Git
+integration. Because both deploy from the same push, the app and the API move
+together.
+
+### Why migrations run on boot
+
+The API migrates the domain database every time `flagon-server serve` starts,
+before it opens its listener. The more common pattern, a Fly `release_command`,
+does not work here: the machine Fly starts for a release command cannot reach Fly
+Managed Postgres, so a migration run there hangs on connect. Serving machines reach
+it fine.
+
+Running on boot is safe because of how `db.Setup` runs migrations:
+
+- all pending files apply in one transaction under
+  `pg_advisory_xact_lock(4972011)`, so when several machines boot at once one
+  applies and the others wait, then find nothing to do;
+- each connection attempt is bounded (10 seconds, up to 6 attempts two seconds
+  apart) so a black-holed database fails fast;
+- an unreachable database starts the server degraded, with `/readyz` reporting it,
+  while a reachable database with a failing or edited migration stops the boot.
+
+After migrating, the same boot seals any SSO credential still stored in plaintext
+with the secrets key (`db.SealStoredSecrets`, run as the migrator). It is
+idempotent, and a failure is logged and retried on the next boot.
+
+To migrate by hand, run the same binary with the `migrate` subcommand (for example
+`fly machine run <image> migrate`); it applies migrations and exits non-zero on any
+failure.
+
+## Local development
+
+Local development keeps the same shape on one machine. `compose.yml` runs one
+`postgres:17-alpine` container that holds both databases: `POSTGRES_DB` creates
+`flagon_api`, and `.docker/postgres/01-create-app-db.sql` creates `flagon_app` on
+first start. They stay separate databases, so the boundary matches production.
+
+The base `compose.yml` publishes no host ports. Copy
+`compose.override.example.yml` to `compose.override.yml` (gitignored) to publish
+them:
+
+| Service | Host port | Native alternative |
+| --- | --- | --- |
+| `postgres` | `5432` | Always from Docker |
+| `api` | `8080` | `cd api && go run ./cmd/flagon-server serve` (port `8080`) |
+| `app` | `4000` (container `3000`) | `cd app && npm run dev` (port `3000`) |
+
+In Docker, the `api` service uses the Dockerfile's `dev` target, which rebuilds on
+source changes with air, and sets `FLAGON_ENV=development`: the image sets
+`FLAGON_HOST=0.0.0.0` so the container binds all interfaces, which the server
+would otherwise treat as production. The `app` image
+builds from the repo root (`docker build -f app/Dockerfile .`), because the npm
+workspace shares one lockfile there.
+
+Run natively, `flagon-server` needs no setup: with `FLAGON_HOST` unset (and off
+Fly) it binds `127.0.0.1`, and a loopback bind counts as development (it also
+avoids a firewall prompt). In development its defaults point at the compose
+Postgres (`flagon` as migrator, `flagon_app` as the app role), the internal token
+falls back to the public `dev-internal-token`, and the secrets key falls back to a
+fixed, public development key, each with a warning. A native run with
+`FLAGON_HOST=0.0.0.0` counts as production and refuses to start without real
+values unless `FLAGON_ENV=development` is also set. It loads `.env` and
+`.env.local` from its working directory, with real environment variables taking
+precedence. With no AI keys set, the assistant uses the offline mock provider, and
+with no `RESEND_API_KEY` invitation emails are written to the server log.
+
+`npm run db:migrate` in `app/` migrates the auth database, and `npm run db:seed`
+creates the demo user (`demo@flagon.dev`, password `password12345`) and a `demo`
+org through the API, so the API must be running.
+
+## Self-hosting
+
+Nothing in the topology is specific to Vercel or Fly. A self-hosted Flagon needs:
+
+- the API container (`api/Dockerfile`, final stage) with `DATABASE_URL`,
+  `FLAGON_APP_DATABASE_URL`, `FLAGON_INTERNAL_TOKEN`, and `FLAGON_SECRETS_KEY`
+  (all four are required in production), plus `RESEND_API_KEY` and `FLAGON_APP_URL`
+  if invitation emails should be delivered with working links;
+- the app (`app/Dockerfile`, built from the repo root, or any Node host) with its
+  auth `DATABASE_URL`, BetterAuth settings, `FLAGON_API_URL`, and the same internal
+  token;
+- Postgres for both databases, as two databases on one server or two servers.
+
+If a proxy or load balancer sits in front of the API, set `FLAGON_CLIENT_IP_HEADER`
+to the header it overwrites with the client address, and only then: a header any
+caller can set would let them spoof the IP that the rate limiter keys on and the
+audit log records. The rate limiter is in-memory per instance, so with several API
+instances the effective per-principal ceiling is the configured rate times the
+instance count.
+
+Leave `FLAGON_MCP_HOST` empty to serve MCP only at `/mcp` on the API's host, or set
+it to a dedicated hostname. See [Self-hosting](/docs/self-hosting/overview),
+[Database](/docs/self-hosting/database), and
+[Production](/docs/self-hosting/production).
+
+## Related
+
+- [Architecture overview](/docs/architecture/overview)
+- [Data ownership](/docs/architecture/data-ownership)
+- [Multi-tenancy](/docs/architecture/multi-tenancy)
+- [Configuration reference](/docs/reference/configuration)

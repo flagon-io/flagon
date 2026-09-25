@@ -1,0 +1,154 @@
+---
+title: Configuration
+description: The settings every self-hosted Flagon instance needs, how the API and the app read them, and where the full list lives.
+---
+
+Flagon is configured entirely through environment variables. The API also
+accepts each setting as a command-line flag. This page lists the essentials you
+need to get an instance running and keep it safe; every setting, with its flag
+name and default, is in the [configuration reference](/docs/reference/configuration).
+
+## How the API reads configuration
+
+The API server (`flagon-server`, built with urfave/cli) resolves every setting in
+this order, first match wins:
+
+1. A command-line flag, such as `--port 9000`.
+2. A real environment variable, such as `PORT=9000`.
+3. `.env.local`, then `.env`, in the directory you run the binary from (both are
+   gitignored; `api/` when you run it from source).
+4. The built-in default.
+
+List everything the running binary accepts with:
+
+```bash
+cd api
+go run ./cmd/flagon-server serve --help
+```
+
+The database URLs are global flags shared by `serve` and `migrate`; everything
+else belongs to `serve`.
+
+## Development and production mode
+
+The API runs in one of two modes, and the mode decides whether it may fall back to
+public development values:
+
+| `FLAGON_ENV` | Mode |
+| --- | --- |
+| `development` (or `dev`) | Development. |
+| `production` (or `prod`) | Production. |
+| unset | Production when running on Fly.io (`FLY_APP_NAME` is set) or when the server binds anything other than a loopback address (such as `FLAGON_HOST=0.0.0.0`). Development when it binds loopback (`127.0.0.1`, `::1`, or `localhost`). |
+
+Off Fly, the default `FLAGON_HOST` is `127.0.0.1`, so a bare `flagon-server serve`
+on your own machine binds loopback only and runs in development mode with zero
+setup. A container must bind every interface to be reachable, so the API image
+sets `FLAGON_HOST=0.0.0.0`, and a container with no `FLAGON_ENV` is in production
+mode. That is deliberate: a server reachable from a network fails closed.
+
+If you run the binary directly on a host (for example under systemd) behind a
+reverse proxy on the same machine, it binds loopback and would otherwise count as
+development, so set `FLAGON_ENV=production` explicitly. Setting it on every
+production deployment is the safest habit.
+
+In **development**, unset settings fall back to the local compose Postgres, the
+public internal token `dev-internal-token`, and a public encryption key, each with
+a warning in the log. In **production** the API refuses to start instead:
+
+| Missing or wrong | Startup error |
+| --- | --- |
+| `DATABASE_URL` | `DATABASE_URL is required in production (set FLAGON_ENV=development for local development)` |
+| `FLAGON_APP_DATABASE_URL` | `FLAGON_APP_DATABASE_URL is required in production: runtime queries must use the NOBYPASSRLS app role, never the migrator (set FLAGON_ENV=development for local development)` |
+| `FLAGON_INTERNAL_TOKEN` | `FLAGON_INTERNAL_TOKEN is required in production: set a long random secret shared with the app (set FLAGON_ENV=development for local development)` |
+| `FLAGON_INTERNAL_TOKEN=dev-internal-token` | `FLAGON_INTERNAL_TOKEN is set to the public development value; set a real secret in production` |
+| `FLAGON_SECRETS_KEY` | `FLAGON_SECRETS_KEY is required in production: set a base64-encoded 32-byte key (openssl rand -base64 32)` |
+
+The `migrate` command needs only `DATABASE_URL`. Production mode also changes two
+defaults: `FLAGON_APP_URL` becomes `https://app.flagon.io` instead of
+`http://localhost:3000`, and the log mail sender is reported as a warning because
+invitation emails are not delivered.
+
+## How the app reads configuration
+
+The app reads plain environment variables. In development, `next dev` and the
+app's scripts (`db:migrate`, `db:seed`) also load `app/.env.local`;
+`app/.env.example` lists the variables with comments. A few values are read at
+**build** time (see [Installation](/docs/self-hosting/installation#run-the-app-for-production-with-node)),
+so set them before `npm run build`.
+
+## The essentials
+
+### API
+
+| Variable | Default | Why it matters |
+| --- | --- | --- |
+| `FLAGON_ENV` | empty (decided by the bind address) | `development` or `production`. See the mode table above. |
+| `DATABASE_URL` | development: `postgres://flagon:flagon@localhost:5432/flagon_api?sslmode=disable`; production: required | The **migrator** role: owns the schema, runs migrations, and provisions the app role. Used only at boot. |
+| `FLAGON_APP_DATABASE_URL` | development: `postgres://flagon_app:flagon_app@localhost:5432/flagon_api?sslmode=disable`; production: required | The **app** role used for every request. Row-level security is enforced against it. Change the password in production. |
+| `FLAGON_INTERNAL_TOKEN` | development: `dev-internal-token`; production: required | The shared secret the app authenticates to the API with. Must match the app's value. |
+| `FLAGON_SECRETS_KEY` | development: a public key; production: required | A base64-encoded 32-byte key that encrypts stored SSO client secrets and SAML keys. Generate with `openssl rand -base64 32` and back it up: a key cannot open values sealed with another one. To rotate, see `FLAGON_SECRETS_KEYS_RETIRED`. |
+| `FLAGON_SECRETS_KEYS_RETIRED` | empty | Comma-separated former `FLAGON_SECRETS_KEY` values, used only to decrypt. On boot the API re-seals everything still under one of them with the current key. See [Rotating the encryption key](/docs/security/secrets#rotating-the-encryption-key). |
+| `PORT` | `8080` | The public HTTP port. |
+| `FLAGON_HOST` | `127.0.0.1` off Fly (all interfaces on Fly) | The interface to bind. The default is loopback only, which selects development mode when `FLAGON_ENV` is unset. The API container image sets `0.0.0.0` (all interfaces), which selects production mode. |
+| `METRICS_PORT` | `9091` | The private port that serves Prometheus metrics at `/metrics`. |
+| `FLAGON_MCP_HOST` | empty | A dedicated host name for the MCP endpoint, such as `mcp.example.com`. See [Production](/docs/self-hosting/production#a-dedicated-mcp-host). |
+| `FLAGON_CLIENT_IP_HEADER` | empty | A proxy header that carries the real client IP, such as `Fly-Client-IP`. Empty trusts only the TCP peer address. Set it only when every request reaches the API through a proxy that overwrites the header, or callers can spoof their IP in the audit log and the rate limiter. |
+| `FLAGON_MAX_BODY_BYTES` | `4194304` (4 MiB) | Largest accepted request body, on every route including MCP. Larger bodies get `413`. |
+| `FLAGON_RATE_LIMIT` | `50` | Sustained requests per second per principal (a user, an access token, or an anonymous client IP). `0` disables. Counted in memory on each API machine. |
+| `FLAGON_RATE_BURST` | `300` | Requests a principal may make at once before the sustained rate applies. |
+
+### Email
+
+The API sends invitation emails itself, whichever front door created the
+invitation.
+
+| Variable | Default | Why it matters |
+| --- | --- | --- |
+| `FLAGON_MAIL_PROVIDER` | `auto` | `resend`, `log`, or `auto`, which uses Resend when `RESEND_API_KEY` is set and otherwise writes emails to the server log. Pinning `resend` without a key fails at startup. |
+| `RESEND_API_KEY` | empty | The API's Resend key. Without it, nobody receives invitation emails. |
+| `FLAGON_MAIL_FROM` | `Flagon <onboarding@resend.dev>` | The sender address. `RESEND_FROM` is also accepted. |
+| `FLAGON_APP_URL` | `https://app.flagon.io` in production, `http://localhost:3000` otherwise | The app's public URL, used for the accept link in invitation emails. Self-hosters must set it. |
+
+### AI
+
+| Variable | Default | Why it matters |
+| --- | --- | --- |
+| `FLAGON_AI_PROVIDER` | `auto` | `anthropic`, `openai` (any OpenAI-compatible endpoint), `mock`, or `auto`, which picks Anthropic if a key is set, then an OpenAI-compatible endpoint, then the offline mock. Pinning a provider without its credentials, or naming an unknown one, fails at startup. |
+| `ANTHROPIC_API_KEY` | empty | Enables the Anthropic provider. |
+| `FLAGON_AI_BASE_URL` | empty | Base URL of an OpenAI-compatible endpoint, for example `http://localhost:11434/v1` for Ollama. `OPENAI_BASE_URL` is also accepted. |
+| `FLAGON_AI_API_KEY` | empty | Key for that endpoint; leave empty for keyless local servers. `OPENAI_API_KEY` is also accepted. |
+| `FLAGON_AI_MODEL` | provider default | The model the assistant runs. |
+| `FLAGON_AI_DAILY_LIMIT` | `100` | Maximum AI calls per organization per rolling 24 hours. `0` means unlimited. |
+
+### App
+
+| Variable | Required | Why it matters |
+| --- | --- | --- |
+| `BETTER_AUTH_SECRET` | yes | The auth layer's signing and encryption key. It also encrypts stored two-factor secrets, so keep it stable: changing it breaks existing sessions and enrolled authenticators. Generate with `openssl rand -base64 32`. |
+| `BETTER_AUTH_URL` | yes | The app's public URL, such as `https://flagon.example.com`. Used for callbacks and email links. |
+| `DATABASE_URL` | yes | The app's own database (`flagon_app`). Not the API's. |
+| `FLAGON_API_URL` | yes | Where the app reaches the API, server-side. Defaults to `http://localhost:8080`. |
+| `FLAGON_INTERNAL_TOKEN` | yes | Must equal the API's `FLAGON_INTERNAL_TOKEN`. In development an unset value falls back to `dev-internal-token`, matching the API's development default. In production (`NODE_ENV=production`) there is no default: the app throws "FLAGON_INTERNAL_TOKEN is required in production" on its first API call. |
+| `RESEND_API_KEY` | in production | Sends the app's email (verification codes and password resets) through Resend. In production the app refuses to drop an email when this is missing. Invitation emails come from the API and need the API's own `RESEND_API_KEY`. |
+| `RESEND_FROM` | no | The sender address. Defaults to `Flagon <onboarding@resend.dev>`. |
+
+Google and GitHub sign-in are optional: set `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET`, or `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, before
+building the app. Without them the buttons stay visible but disabled.
+
+<Callout type="danger" title="Never force development mode on a reachable server">
+
+The development fallbacks are well-known values. Anyone who can reach an API
+running with `dev-internal-token` can act as any user through the internal path.
+Production mode refuses those values, so do not set `FLAGON_ENV=development` on a
+server others can reach. Set a long random `FLAGON_INTERNAL_TOKEN`, a real
+`FLAGON_SECRETS_KEY`, and a real app-role password instead.
+
+</Callout>
+
+## Related
+
+- [Configuration reference](/docs/reference/configuration)
+- [Installation](/docs/self-hosting/installation)
+- [Production](/docs/self-hosting/production)
+- [Usage and AI limits](/docs/platform/usage)

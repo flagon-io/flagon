@@ -43,6 +43,15 @@ jobs:
           go-version-file: api/go.mod
       - run: go build ./...
       - run: go vet ./...
+      # golangci-lint with api/.golangci.yml. Keep `version` in step with the
+      # locally installed one. goinstall builds it with the Go from setup-go, since
+      # golangci-lint refuses to lint a module targeting a newer Go than it was
+      # built with, and the prebuilt binaries can trail our go.mod.
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+          install-mode: goinstall
+          working-directory: api
       # -race catches data races (the API is heavily concurrent: HTTP handlers,
       # the agent, background workers); -shuffle=on stops tests depending on order.
       - run: go test -race -shuffle=on ./...
@@ -76,14 +85,64 @@ jobs:
       # it with a clean from-scratch resolve (run `scripts/relock.sh`).
       - run: npm ci
       - run: npm run lint
+      # The design system has no lint script of its own (the app's eslint covers
+      # its consumers); typecheck it directly so a type error in packages/ui fails
+      # here rather than surfacing later in the app build.
+      - run: npm run typecheck --workspace @flagon-io/ui
       # Unit tests for the design system's pure logic + component render smokes
       # (Vitest in packages/ui). Integration behavior is covered by the e2e job.
       - run: npm run test:unit
       - run: npm run build
 
+  # Known-vulnerability scan of the Go module and its dependencies. govulncheck
+  # reports only vulnerabilities in code the API actually calls, so a finding here
+  # is reachable and worth fixing, not noise.
+  govulncheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: api/go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  # API contract drift: the OpenAPI spec is generated from the Go handlers, and
+  # the app's TypeScript API types are generated from that spec and committed.
+  # Regenerate both and fail on any difference, so a handler change that skipped
+  # `make api-types` (or a hand edit to the generated file) never lands on main.
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: api/go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: make openapi
+      - run: npm run gen:api-types --workspace app
+      # openapi/openapi.json itself is gitignored; what must match is the
+      # committed generated types. --porcelain also catches a newly created file.
+      - name: Fail if generated API types are stale
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            git --no-pager diff
+            echo "::error::Generated API types are stale. Run 'make api-types' and commit the result."
+            exit 1
+          fi
+
   # Real integration tests: Playwright drives a production build of the app and
   # exercises the component library through its live /ui docs. Every new component
-  # gets a spec here (see app/tests) so the library stays provably stable.
+  # gets a spec here (see app/tests) so the library stays provably stable. These
+  # need no API or database; the product flows run in e2e-product below.
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -97,7 +156,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
         working-directory: app
       - run: npm run build
-      - run: npm run test:e2e
+      - run: npm run test:e2e:components
         working-directory: app
         env:
           CI: "true"
@@ -105,5 +164,109 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: playwright-report
+          path: app/playwright-report/
+          retention-days: 7
+
+  # Product end to end: the real stack, wired the way production is. Postgres
+  # holds both databases (flagon_api for the Go API, flagon_app for the app's
+  # auth), the Go API runs on the offline MOCK AI provider so the agent is
+  # deterministic, the app's auth tables are migrated and the demo user + org
+  # seeded through the API, then Playwright drives a production build of the app
+  # (gateway -> API -> Postgres) signed in as that user (app/tests/product).
+  e2e-product:
+    runs-on: ubuntu-latest
+    env:
+      # App side. The API's own database env is set only on its step, because
+      # both processes read DATABASE_URL.
+      DATABASE_URL: postgres://flagon:flagon@localhost:5432/flagon_app?sslmode=disable
+      BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production-use
+      FLAGON_API_URL: http://localhost:8080
+      FLAGON_INTERNAL_TOKEN: ci-internal-token
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: flagon
+          POSTGRES_PASSWORD: flagon
+          POSTGRES_DB: flagon_api
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: api/go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      # POSTGRES_DB made flagon_api; add the app's database alongside it, as
+      # .docker/postgres/01-create-app-db.sql does for local compose.
+      - name: Create the app database
+        run: psql "postgres://flagon:flagon@localhost:5432/flagon_api" -c "CREATE DATABASE flagon_app"
+      - name: Build the API
+        working-directory: api
+        run: go build -o "$RUNNER_TEMP/flagon-server" ./cmd/flagon-server
+      # serve migrates on boot (and provisions the NOBYPASSRLS app role) before
+      # it listens, so health means the schema is ready.
+      - name: Start the API
+        env:
+          DATABASE_URL: postgres://flagon:flagon@localhost:5432/flagon_api?sslmode=disable
+          FLAGON_APP_DATABASE_URL: postgres://flagon_app:flagon_app@localhost:5432/flagon_api?sslmode=disable
+          FLAGON_AI_PROVIDER: mock
+          # Off Fly and bound to all interfaces, the server would otherwise run as
+          # production and refuse development fallbacks (e.g. the secrets key).
+          FLAGON_ENV: development
+        run: |
+          nohup "$RUNNER_TEMP/flagon-server" serve > "$RUNNER_TEMP/api.log" 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/healthz > /dev/null; then
+              echo "API is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/api.log"
+          echo "::error::The API did not become healthy."
+          exit 1
+      - run: npm ci
+      - run: npm run db:migrate --workspace app
+      # The seed treats a failed org create as non-fatal (local convenience);
+      # here the demo org is required, so check it actually landed.
+      - name: Seed the demo user and org
+        run: |
+          npm run db:seed --workspace app | tee "$RUNNER_TEMP/seed.log"
+          grep -Eq "Seeded demo org|Demo org already exists" "$RUNNER_TEMP/seed.log"
+      # A second user with no org, for the org delete/restore spec (the demo user
+      # already owns their one free org, so they can't create another).
+      - name: Seed the org-owner user
+        run: npm run db:seed --workspace app
+        env:
+          SEED_EMAIL: owner@flagon.dev
+          SEED_USERNAME: e2e-owner
+          SEED_NAME: E2E Owner
+          SEED_SKIP_ORG: "1"
+      - run: npx playwright install --with-deps chromium
+        working-directory: app
+      - run: npm run build
+      - run: npm run test:e2e:product
+        working-directory: app
+        env:
+          CI: "true"
+          # Tells the agent spec the API is on the deterministic mock provider.
+          E2E_AI_PROVIDER: mock
+      - name: API log
+        if: ${{ failure() }}
+        run: cat "$RUNNER_TEMP/api.log"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-product
           path: app/playwright-report/
           retention-days: 7

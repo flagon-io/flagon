@@ -1,0 +1,148 @@
+---
+title: Set base permissions
+description: Choose the default project access every organization member gets, and understand how it combines with direct and team grants.
+---
+
+The **base permission** is the project role every organization member gets on every project in
+the organization, without anyone granting it project by project. It is a floor, not a ceiling:
+a direct grant or a team grant can raise a member above it on a specific project, but nothing
+lowers a member below it. New organizations start at `read`, so members can see every project
+until you decide otherwise.
+
+By the end of this guide your organization's base permission will match how open you want
+projects to be, and you will know how to check what a given member can actually do.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** organization **owner** or **admin**.
+- **API token scopes:** `read:org` to read the setting, `write:org` to change it.
+
+</Callout>
+
+## How effective access is computed
+
+A person's effective role on a project is the **highest** of three sources:
+
+| Source | What it grants |
+| --- | --- |
+| Organization role | Owners and admins get `admin` on every project, plus the owner tier (delete, restore, manage owners). Members get the base permission. |
+| Direct project grant | A role given to that person on that project. |
+| Team grants | The highest role held by any team the person belongs to on that project. |
+
+The project role ladder, lowest to highest, is `read`, `triage`, `write`, `maintain`, `admin`.
+What each level lets you do on a project:
+
+| Effective role | Allows |
+| --- | --- |
+| none | Nothing. The project is invisible: requests for it return `404`. |
+| `read` | View the project, its README, collaborators, teams, and owners. |
+| `write` | Edit the project's name, description, README, and repository URL. |
+| `maintain` | Rename the project's slug (which changes its URL), plus project settings as they are added. |
+| `admin` | Grant, change, and revoke collaborator and team access. |
+
+A project you can see but lack the role for answers `403`. `triage` sits between `read` and
+`write` and currently grants the same as `read`. The API checks these roles on every project
+operation, and Postgres row-level security enforces them again underneath. Deleting,
+restoring, and managing owners need the owner tier above `admin`; see
+[Transfer project ownership](/docs/guides/transfer-project-ownership).
+
+## Choose a level
+
+| Base permission | Use it when |
+| --- | --- |
+| `none` | Projects are private by default. Members see only projects they, or a team they're on, have been granted. |
+| `read` (default) | Everyone can see everything; changes need an explicit grant. |
+| `write` | Small, high-trust organizations where every member edits every project. |
+| `admin` | Every member can manage access on every project. Rarely what you want. |
+
+The dashboard offers these four. The API and assistant also accept `triage` and `maintain`.
+
+## Steps
+
+<Steps>
+
+<Step title="Change the base permission">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open **Settings** in the sidebar, then **Member privileges** (under **Access**).
+2. In **Base permission**, pick **No access**, **Read**, **Write**, or **Admin**.
+
+The change saves as soon as you pick a value. If it fails, the selection reverts and an error
+appears under the card.
+
+</Tab>
+
+<Tab title="API">
+
+The base permission lives in the organization's security policy, alongside the 2FA and SSO
+requirements. `PUT` replaces the whole policy, so read it first and send all three fields back:
+
+```bash
+curl https://api.flagon.io/orgs/acme/security \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+# {"enforce_two_factor": false, "require_sso": false, "base_permission": "read"}
+
+curl -X PUT https://api.flagon.io/orgs/acme/security \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"enforce_two_factor": false, "require_sso": false, "base_permission": "none"}'
+```
+
+<Callout type="warn" title="Don't drop the other fields">
+
+Sending only `base_permission` fails validation, and sending stale values for
+`enforce_two_factor` or `require_sso` turns those requirements off. Always start from a fresh
+`GET`.
+
+</Callout>
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Set the base permission in acme to none.
+
+The assistant proposes **Confirm: Update security policy for "acme"**. Its tool changes only
+the fields you mention, so the 2FA and SSO requirements are left as they are.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Grant access where the base is not enough">
+
+With a base of `none` or `read`, give specific people or teams more on the projects they work
+on. See [Manage project access](/docs/guides/manage-project-access) and
+[Organize with teams](/docs/guides/organize-with-teams).
+
+</Step>
+
+<Step title="Verify it worked">
+
+- The organization's [audit log](/docs/guides/review-the-audit-log) records
+  `organization.security_changed` with the summary `set the base member permission to none`.
+- Ask a member to open **Projects**. With a base of `none`, they see only projects where they
+  hold a direct or team grant; other project URLs return a not-found page.
+
+</Step>
+
+</Steps>
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `403` | `you don't have permission to do that` | Only owners and admins can read or change the security policy. |
+| `422` | `validation failed` | A field is missing or `base_permission` is not one of `none`, `read`, `triage`, `write`, `maintain`, `admin`. The `errors` array names the field. The assistant reports the same problem as `invalid base permission`. |
+
+## Related
+
+- [Roles](/docs/platform/roles)
+- [Project access](/docs/platform/project-access)
+- [Manage project access](/docs/guides/manage-project-access)
+- [Require two-factor authentication](/docs/guides/require-two-factor)

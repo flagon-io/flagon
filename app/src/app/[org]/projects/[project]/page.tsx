@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { headers } from "next/headers";
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import {
   Code2,
   FileText,
@@ -12,8 +11,7 @@ import {
   Tag,
   type LucideIcon,
 } from "lucide-react";
-import { auth } from "@/lib/auth";
-import { getMe, getProject } from "@/lib/flagon-api";
+import { getProject, projectCan } from "@/lib/flagon-api";
 import { Badge, Card } from "@flagon-io/ui";
 import { Markdown } from "@/components/markdown";
 import { PageBody } from "@/components/shell/page-header";
@@ -36,14 +34,11 @@ export default async function ProjectPage({
 }) {
   const { org: slug, project: projectSlug } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
-
-  const project = await getProject(slug, projectSlug).catch(() => null);
+  const project = await getProject(slug, projectSlug);
   if (!project) notFound();
 
-  const me = await getMe().catch(() => null);
-  const canManage = (me?.orgs.find((o) => o.slug === slug)?.role ?? "viewer") !== "viewer";
+  // README and About edits need write on this project (not just org membership).
+  const canManage = projectCan(project, "project:write");
   const editHref = `/${slug}/projects/${project.slug}/edit`;
   const hasReadme = project.readme.trim().length > 0;
   const host = repoHost(project.repository_url);
@@ -86,7 +81,7 @@ export default async function ProjectPage({
                   {canManage && (
                     <Link
                       href={editHref}
-                      className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand/90"
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90"
                     >
                       <Plus className="size-4" />
                       Add a README
@@ -98,7 +93,7 @@ export default async function ProjectPage({
           </Card>
         </div>
 
-        {/* GitHub-style "About" rail. Real bits (description, linked repo) are live;
+        {/* The "About" rail. Real bits (description, linked repo) are live;
             the rest is a preview of what we'll surface from the linked repository. */}
         <aside className="space-y-4">
           <div>

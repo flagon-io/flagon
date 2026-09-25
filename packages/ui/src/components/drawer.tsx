@@ -3,29 +3,38 @@
 import { Drawer as DrawerPrimitive } from "vaul";
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { overlayClasses } from "../lib/overlay";
 
 /** A sheet that drags from an edge, great on touch (vaul). Compose Drawer > Trigger + Content. */
 export function Drawer(props: ComponentProps<typeof DrawerPrimitive.Root>) {
   return <DrawerPrimitive.Root data-slot="drawer" {...props} />;
 }
-export const DrawerTrigger = DrawerPrimitive.Trigger;
+export function DrawerTrigger(props: ComponentProps<typeof DrawerPrimitive.Trigger>) {
+  return <DrawerPrimitive.Trigger data-slot="drawer-trigger" {...props} />;
+}
 export const DrawerPortal = DrawerPrimitive.Portal;
-export const DrawerClose = DrawerPrimitive.Close;
-
-export function DrawerOverlay({ className, ...props }: ComponentProps<typeof DrawerPrimitive.Overlay>) {
-  return (
-    <DrawerPrimitive.Overlay
-      className={cn("fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px]", className)}
-      {...props}
-    />
-  );
+export function DrawerClose(props: ComponentProps<typeof DrawerPrimitive.Close>) {
+  return <DrawerPrimitive.Close data-slot="drawer-close" {...props} />;
 }
 
-export function DrawerContent({ className, children, ...props }: ComponentProps<typeof DrawerPrimitive.Content>) {
+export function DrawerOverlay({ className, ...props }: ComponentProps<typeof DrawerPrimitive.Overlay>) {
+  return <DrawerPrimitive.Overlay data-slot="drawer-overlay" className={cn(overlayClasses, className)} {...props} />;
+}
+
+export function DrawerContent({
+  className,
+  overlayClassName,
+  children,
+  ...props
+}: ComponentProps<typeof DrawerPrimitive.Content> & {
+  /** Extra classes for this drawer's backdrop (merged over the shared overlay). */
+  overlayClassName?: string;
+}) {
   return (
     <DrawerPortal>
-      <DrawerOverlay />
+      <DrawerOverlay className={overlayClassName} />
       <DrawerPrimitive.Content
+        data-slot="drawer-content"
         className={cn(
           "group/drawer-content fixed z-50 flex h-auto flex-col border-hairline bg-popover text-popover-foreground",
           // Bottom (default): full width, rounded top, grab handle.
@@ -37,7 +46,10 @@ export function DrawerContent({ className, children, ...props }: ComponentProps<
         )}
         {...props}
       >
-        <div className="mx-auto mt-3 hidden h-1.5 w-12 shrink-0 rounded-full bg-hairline group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
+        <div
+          data-slot="drawer-handle"
+          className="mx-auto mt-3 hidden h-1.5 w-12 shrink-0 rounded-full bg-hairline group-data-[vaul-drawer-direction=bottom]/drawer-content:block"
+        />
         {children}
       </DrawerPrimitive.Content>
     </DrawerPortal>
@@ -45,14 +57,32 @@ export function DrawerContent({ className, children, ...props }: ComponentProps<
 }
 
 export function DrawerHeader({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("flex flex-col gap-1 p-4 text-center sm:text-left", className)} {...props} />;
+  return (
+    <div
+      data-slot="drawer-header"
+      className={cn("flex flex-col gap-1 p-4 text-center sm:text-left", className)}
+      {...props}
+    />
+  );
 }
 export function DrawerFooter({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("mt-auto flex flex-col gap-2 p-4", className)} {...props} />;
+  return <div data-slot="drawer-footer" className={cn("mt-auto flex flex-col gap-2 p-4", className)} {...props} />;
 }
 export function DrawerTitle({ className, ...props }: ComponentProps<typeof DrawerPrimitive.Title>) {
-  return <DrawerPrimitive.Title className={cn("text-base font-semibold text-foreground", className)} {...props} />;
+  return (
+    <DrawerPrimitive.Title
+      data-slot="drawer-title"
+      className={cn("text-base font-semibold text-foreground", className)}
+      {...props}
+    />
+  );
 }
 export function DrawerDescription({ className, ...props }: ComponentProps<typeof DrawerPrimitive.Description>) {
-  return <DrawerPrimitive.Description className={cn("text-sm text-muted-foreground", className)} {...props} />;
+  return (
+    <DrawerPrimitive.Description
+      data-slot="drawer-description"
+      className={cn("text-sm text-muted-foreground", className)}
+      {...props}
+    />
+  );
 }

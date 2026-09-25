@@ -1,0 +1,247 @@
+---
+title: Authentication
+description: How Flagon proves who you are - dashboard sessions, two-factor authentication, organization SSO, access tokens, and the internal token that carries your identity from the app to the API.
+---
+
+Authentication is the question every request answers first: who is this? Flagon
+splits the answer across its two services on purpose. The **app** (the Next.js
+dashboard) signs people in and holds their session. The **API** never sees a
+password or a session cookie; it accepts either an access token or a request from
+the app that vouches for an already verified user. This page covers each way in
+and the boundary between the two services.
+
+For what happens after identity is known, see
+[Permissions model](/docs/architecture/permissions-model).
+
+```text
+           Browser                  Script, CI, MCP client
+               │ session cookie                │ Bearer flagon_pat_...
+               ▼                               │     or flagon_oat_...
+ ┌─────────────────────────────┐               │
+ │ app (Next.js, BetterAuth)   │               │
+ │ password, 2FA, SSO session  │               │
+ └─────────────┬───────────────┘               │
+               │ Bearer <internal token>       │
+               │ X-Flagon-User-Id              │
+               ▼                               ▼
+ ┌────────────────────────────────────────────────────────────┐
+ │ API: combinedAuth                                          │
+ │   flagon_ prefix  -> resolve the token, check its scope    │
+ │   anything else   -> internal token + X-Flagon-User-Id     │
+ └─────────────────────────────┬──────────────────────────────┘
+                               ▼
+             acts as the user or the service principal
+```
+
+## The ways in
+
+| Caller | Sends | Checked by | Acts as |
+| --- | --- | --- | --- |
+| Dashboard (browser) | Session cookie to the app | BetterAuth in the app | The signed-in user, with no scope limit |
+| App to API | Internal token plus identity headers | `combinedAuth` or `internalAuth` in the API | The user the app names |
+| Scripts, CI, MCP clients | `Authorization: Bearer flagon_...` | `combinedAuth` in the API | The token's principal, limited by its scopes |
+| Anyone | Nothing | Public routes only | Nobody |
+
+## Dashboard sign-in
+
+The app runs [BetterAuth](https://www.better-auth.com) (`app/src/lib/auth.ts`)
+against its own database, separate from the API's. It supports:
+
+- **Email and password**, with email verification required before first use. The
+  verification email carries a one-time code and a link that contains it.
+- **Usernames** alongside email addresses.
+- **Password reset** by emailed link, valid for one hour.
+- **Google and GitHub sign-in**, each enabled only when its client id and secret
+  are configured.
+- **Organization SSO** over OIDC or SAML, described below.
+
+A successful sign-in creates a BetterAuth session held in a cookie. In production
+the cookie is `SameSite=None; Secure` so a SAML assertion posted back from an
+identity provider still carries it; cross-site request forgery is covered by
+BetterAuth's origin checks rather than by `SameSite`. In local development it is
+`SameSite=Lax`.
+
+Every sign-in path creates a session, and a hook on session creation blocks it for
+a soft-deleted account.
+
+### Rate limits on sign-in
+
+Authentication endpoints are rate limited, with counters stored in the app's
+database so the limit holds across every server instance:
+
+| Endpoint | Limit per 60 seconds |
+| --- | --- |
+| Sign up with email | 5 |
+| Send a verification code | 3 |
+| Verify an email code | 10 |
+| Request a password reset | 3 |
+| Reset a password | 10 |
+| Everything else under the auth routes | 20 |
+
+## Two-factor authentication
+
+Users can enroll a TOTP authenticator app (issuer "Flagon") with backup codes.
+Once enrolled, sign-in asks for a code as a second step. See
+[Two-factor authentication](/docs/platform/two-factor).
+
+An organization owner or admin can **require** two-factor authentication for the
+organization (`enforce_two_factor` on `PUT /orgs/{slug}/security`). When it is on,
+the organization layout in the dashboard sends any member without two-factor
+enabled to a `/2fa-required` page instead of the organization.
+
+The **API** enforces the requirement too (`CheckOrgAccess` in
+`api/internal/service/access.go`), so it holds for every way in, not only the
+dashboard. It runs on every `/orgs/{slug}/...` operation except leaving the
+organization, on every assistant and MCP tool call that names the organization,
+and on the assistant's own endpoints. The app mirrors each user's two-factor state
+to the API so it can decide. A member without two-factor authentication gets
+`403` with the detail "this organization requires two-factor authentication;
+enable it on your account to continue", whether they use the dashboard or a
+personal access token.
+
+Two details:
+
+- **Organization access tokens are exempt.** Their principal is a service account
+  that never signs in interactively, and it is created by an owner or admin who is
+  subject to the policy when they create it.
+- **You cannot lock yourself out.** Turning the requirement on without two-factor
+  on your own account is refused with `403` "enable two-factor authentication on
+  your own account before requiring it for the organization".
+
+## Organization SSO
+
+Each organization can configure its own identity providers, OIDC or SAML, so
+organization A can use Okta while organization B uses Microsoft Entra ID. The
+configuration belongs to the **API**: it is created and edited through
+`/orgs/{slug}/sso/providers` (owners and admins, scope `write:org`), the matching
+assistant and MCP tools, or the settings page, and every change is audited.
+
+The protocol flow (redirects, assertion validation, cryptography) runs in the app
+through BetterAuth's SSO plugin. The plugin's own provider-management endpoints are
+switched off. Instead, before any SSO request runs, the app re-syncs the provider
+it is about to use from the API (`app/src/lib/sso-hook.ts`), so a change or a
+deletion in the API takes effect on the next sign-in. If the API cannot answer, SSO
+fails closed with "Single sign-on is temporarily unavailable".
+
+After BetterAuth verifies an assertion, the app calls the API's internal
+`POST /internal/sso/provision-member` to make the user a member of the provider's
+organization (as `member` by default). This runs on every SSO sign-in, and a first
+join is recorded in the audit log as "joined via single sign-on".
+
+Account linking follows two rules. If you are already signed in when you go
+through an organization's SSO, the SSO identity is linked to your current account,
+whatever email the identity provider asserts. If nobody is signed in, nothing is
+linked automatically by matching email addresses.
+
+An owner or admin can also **require** SSO (`require_sso`). Members and admins who
+have not signed in through the organization's provider are sent to an
+`/sso-required` page. Owners are exempt, so an owner can always reach settings to
+fix a broken provider. Like the 2FA requirement, the API enforces it on every way
+in:
+
+- **Dashboard sessions.** The app records which SSO provider, if any, the current
+  session was established through and sends it to the API as
+  `X-Flagon-Auth-Sso-Provider`. The API trusts that header only alongside the
+  internal token. If the session did not come through one of the organization's
+  live providers, the answer is `403` "this organization requires single sign-on;
+  sign in through the organization's identity provider to continue".
+- **Personal access tokens.** A token carries no session, so the rule is that its
+  owner must have signed in through one of the organization's providers at least
+  once (a linked SSO identity, mirrored from the app). Otherwise the answer is
+  `403` "this organization requires single sign-on; sign in through the
+  organization's identity provider at least once before using a personal access
+  token with it".
+- **Organization access tokens** are exempt, as for two-factor authentication.
+
+Turning the requirement on without having signed in through one of the
+organization's providers yourself is refused with `403` "sign in through one of the
+organization's SSO providers before requiring single sign-on". See
+[SSO](/docs/platform/sso).
+
+<Callout type="info" title="Email domains are not verified">
+A provider may name an email domain so that "sign in with SSO" routes addresses at
+that domain to it. Flagon ensures each domain belongs to at most one live provider,
+but it does not verify that the organization controls the domain.
+</Callout>
+
+## The app-to-API boundary
+
+When the dashboard needs data, a server-side route in the app calls the API
+through one function, `send` in `app/src/lib/api/client.ts`. It adds:
+
+- `Authorization: Bearer <FLAGON_INTERNAL_TOKEN>`
+- `X-Flagon-User-Id` and `X-Flagon-User-Email`, from the verified session
+- `X-Flagon-Client-Ip`, `X-Flagon-Client-Country`, and `X-Flagon-Client-Ua`, from
+  the browser's request, for the audit log
+
+The API trusts the identity headers **only** alongside a valid internal token,
+compared in constant time. The browser never holds the internal token and never
+talks to the API directly for domain data.
+
+The API has two gates (`api/internal/server/identity.go`):
+
+- **`combinedAuth`** guards ordinary operations. A bearer value starting with
+  `flagon_` is treated as an access token, resolved, and checked against the
+  operation's scope. Anything else must equal the internal token, and then
+  `X-Flagon-User-Id` must be present.
+- **`internalAuth`** accepts only the internal token. It guards what only the app
+  may do: managing access tokens, the assistant's endpoints, SSO provisioning and
+  the SSO configuration read, invitation acceptance, and the profile and account
+  soft-delete mirrors. The profile mirror (`PUT /me/profile`) carries the
+  username and the two-factor and SSO state, all owned by the app's auth layer,
+  so no access token can write it.
+
+Both fail closed: a wrong token is `401` "invalid internal token", and a missing
+user id is `401` "missing user identity". A production API refuses to start
+without an internal token at all; if one is somehow missing at request time, the
+endpoints answer `503` "identity API is not configured".
+
+Before either gate runs, every request passes the API's request limits: bodies
+over `FLAGON_MAX_BODY_BYTES` (4 MiB by default) get `413`, and each
+principal (a signed-in user, an access token, or an anonymous client IP) has a
+token-bucket rate limit, 50 requests per second sustained with bursts of 300 by
+default, beyond which the API answers `429` with a `Retry-After` header. See
+[Configuration](/docs/reference/configuration).
+
+<Callout type="danger" title="The internal token can act as any user">
+Whoever holds the internal token can call the API as any user id they choose. Keep
+it secret, identical on the app and the API, and unique per deployment. The
+development value `dev-internal-token` is used only in development mode, by both
+the API and the app. In production the API refuses to start without
+`FLAGON_INTERNAL_TOKEN` or with that public value, and the app throws on its first
+API call if the variable is unset. See [Secrets](/docs/security/secrets).
+</Callout>
+
+## Access tokens
+
+Scripts, CI jobs, and MCP clients authenticate with personal or organization
+access tokens sent as `Authorization: Bearer flagon_pat_...` or
+`flagon_oat_...`. On the REST API an invalid, expired, or revoked token is `401`
+"invalid or expired token". If the API cannot check the token at all (for
+example, its database is unavailable), it answers `503` instead, with the cause
+logged against the request id, so a good token is never reported as invalid. MCP answers with a JSON-RPC error instead of
+downgrading the caller to anonymous. Formats, storage, and scopes are on
+[Tokens and scopes](/docs/security/tokens-and-scopes).
+
+## What needs no authentication
+
+Some routes are public by design:
+
+- `GET /users/{username}`: a public profile, through a function that returns only
+  public fields.
+- `GET /invitations/{token}`: the invitation landing page; the unguessable token is
+  the credential.
+- `GET /docs`, `/docs/nav`, `/docs/search`, `/docs/page`, `/roadmap`, `/changelog`:
+  public content.
+- `POST /mcp` without a token: the public documentation tools only.
+- `GET /openapi.json` and `/openapi.yaml`, `GET /healthz`, `GET /readyz`, and
+  `GET /internal/rls-check`.
+
+## Related
+
+<Cards>
+  <Card title="Tokens and scopes" href="/docs/security/tokens-and-scopes" description="Token formats, hashing, expiry, revocation, and least privilege." />
+  <Card title="Identity and auth" href="/docs/architecture/identity-and-auth" description="The architecture view of accounts, sessions, and identity mirroring." />
+  <Card title="Set up SSO with OIDC" href="/docs/guides/set-up-sso-oidc" description="Connect an OIDC identity provider step by step." />
+  <Card title="Require two-factor" href="/docs/guides/require-two-factor" description="Turn on the organization 2FA requirement." />
+</Cards>

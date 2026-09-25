@@ -1,20 +1,16 @@
-import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import Link from "next/link";
-import { auth } from "@/lib/auth";
-import { getMe } from "@/lib/flagon-api";
+import { requireMe } from "@/lib/org-context";
 import { Card } from "@flagon-io/ui";
 import { Logo } from "@/components/logo";
 import { NewOrgForm } from "@/components/orgs/new-org-form";
 
 export default async function NewOrgPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
-
-  const me = await getMe().catch(() => null);
-  const hasOrgs = (me?.orgs.length ?? 0) > 0;
+  // An API failure throws (to the error boundary) rather than reading as "no
+  // orgs", which would wrongly offer to create one past the free-plan limit.
+  const { me } = await requireMe();
+  const hasOrgs = me.orgs.length > 0;
   // Free plan includes one OWNED org; more need a payment method (billing TBD).
-  const ownedCount = me?.orgs.filter((o) => o.role === "owner").length ?? 0;
+  const ownedCount = me.orgs.filter((o) => o.role === "owner").length;
   const atLimit = ownedCount >= 1;
 
   return (
@@ -46,7 +42,7 @@ export default async function NewOrgPage() {
           </Card>
         )}
 
-        {hasOrgs && me && (
+        {hasOrgs && (
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Or go back to{" "}
             <Link href={`/${me.orgs[0].slug}`} className="font-medium text-link underline">

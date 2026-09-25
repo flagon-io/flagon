@@ -84,7 +84,7 @@ type antResponse struct {
 
 func (a *Anthropic) Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error) {
 	if a.apiKey == "" {
-		return CompleteResponse{}, fmt.Errorf("anthropic: no API key configured")
+		return CompleteResponse{}, fmt.Errorf("anthropic: no API key configured: %w", ErrNotConfigured)
 	}
 
 	model := req.Model
@@ -120,7 +120,7 @@ func (a *Anthropic) Complete(ctx context.Context, req CompleteRequest) (Complete
 	if err != nil {
 		return CompleteResponse{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	var parsed antResponse
@@ -131,6 +131,9 @@ func (a *Anthropic) Complete(ctx context.Context, req CompleteRequest) (Complete
 		msg := "unexpected status"
 		if parsed.Error != nil {
 			msg = parsed.Error.Message
+		}
+		if unauthorized(resp.StatusCode) {
+			return CompleteResponse{}, fmt.Errorf("anthropic: %s (status %d): %w", msg, resp.StatusCode, ErrNotConfigured)
 		}
 		return CompleteResponse{}, fmt.Errorf("anthropic: %s (status %d)", msg, resp.StatusCode)
 	}

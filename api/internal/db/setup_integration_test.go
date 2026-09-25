@@ -58,7 +58,7 @@ func TestSetupProvisionsMigratesAndEnforcesRLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect migrator: %v", err)
 	}
-	defer migrator.Close(ctx)
+	defer func() { _ = migrator.Close(ctx) }()
 	// Mirror how Setup runs migrations, so the fixture table lands in public.
 	if _, err := migrator.Exec(ctx, "SET search_path TO public"); err != nil {
 		t.Fatalf("set search_path: %v", err)
@@ -91,7 +91,11 @@ func TestSetupProvisionsMigratesAndEnforcesRLS(t *testing.T) {
 	orgA := "00000000-0000-0000-0000-00000000000a"
 	orgB := "00000000-0000-0000-0000-00000000000b"
 	setupRLSFixture(t, ctx, migrator, orgA, orgB)
-	defer migrator.Exec(ctx, `DROP TABLE IF EXISTS rls_probe`)
+	defer func() {
+		if _, err := migrator.Exec(ctx, `DROP TABLE IF EXISTS rls_probe`); err != nil {
+			t.Errorf("drop rls_probe: %v", err)
+		}
+	}()
 
 	// Re-grant so the freshly created table is visible to the app role (in real
 	// life this table would arrive via a migration, before Setup's grant step).
@@ -103,7 +107,7 @@ func TestSetupProvisionsMigratesAndEnforcesRLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect app role: %v", err)
 	}
-	defer app.Close(ctx)
+	defer func() { _ = app.Close(ctx) }()
 
 	if got := visibleRows(t, ctx, app, orgA); got != 1 {
 		t.Errorf("org A sees %d rows, want 1 (RLS not enforced)", got)
@@ -153,14 +157,18 @@ func TestMigrationsAreImmutableOnceApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 
 	// Simulate a shipped migration being edited after the fact by corrupting
 	// its recorded checksum, then confirm the runner refuses to proceed.
 	if _, err := conn.Exec(ctx, `UPDATE schema_migrations SET checksum = 'tampered' WHERE version = '0001_tenant_context'`); err != nil {
 		t.Fatalf("corrupt checksum: %v", err)
 	}
-	defer conn.Exec(ctx, `DELETE FROM schema_migrations WHERE checksum = 'tampered'`)
+	defer func() {
+		if _, err := conn.Exec(ctx, `DELETE FROM schema_migrations WHERE checksum = 'tampered'`); err != nil {
+			t.Errorf("restore tampered migration: %v", err)
+		}
+	}()
 
 	if err := runMigrations(ctx, conn); err == nil {
 		t.Fatal("expected runMigrations to fail on modified migration, got nil")

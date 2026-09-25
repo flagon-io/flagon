@@ -1,50 +1,155 @@
 ---
 title: Members and invitations
-description: Add teammates to an organization, by existing account or by email invitation.
-section: platform
+description: Add teammates to an organization by existing account or by email invitation, and manage their organization roles.
 visibility: public
-order: 2
 ---
 
-Everything in Flagon happens inside an **organization**, and an organization has
-**members**. Each member has a role that sets what they can do:
+Everything in Flagon happens inside an [organization](/docs/platform/organizations),
+and the people in it are its **members**. Each member has exactly one
+**organization role**, which sets what they can do across the whole org. Owners
+and admins manage the roster from **People** (`app.flagon.io/<org>/people`), which
+has a **Members** tab and a **Pending invitations** tab.
 
-- **Owner** - full control, including billing and deleting the organization.
-- **Admin** - manage members, tokens, and settings.
-- **Member** - create and manage projects.
-- **Viewer** - read-only access.
+## Organization roles
 
-Owners and admins manage the roster from **Settings -> Members**.
+| Role | What it can do |
+| --- | --- |
+| **Owner** | Everything, including deleting the organization. An organization always has at least one owner. |
+| **Admin** | Manage members, invitations, teams, organization tokens, and settings. Admin on every project. |
+| **Member** | The default. Can create projects. Access to existing projects comes from the base permission, raised by per-project grants and teams. |
+
+Read-only access is not a separate role for people: it is a member in an
+organization whose base permission is `read`. (The API still accepts a legacy
+`viewer` role, which is read-only and cannot create projects; the dashboard
+only shows it for members who already hold it.) See
+[Roles & permissions](/docs/platform/roles) for the full model.
+
+Rules that always hold:
+
+- An **admin** can manage members below them (members), but not other admins or
+  owners.
+- Only an **owner** can grant or remove the owner role.
+- The **last owner** can never be demoted or removed (`409 Conflict`).
+- You cannot change your own membership from **People**; use **Leave** under
+  **Settings > Organizations** instead.
 
 ## Adding people
 
 You add people by email or username, and Flagon does the right thing for each:
 
 - If the person **already has a Flagon account**, they are added to the
-  organization straight away and see it the next time they load the app.
-- If the email **has no account yet**, Flagon sends them an **invitation**: an
-  email with a link to register and join in one step.
+  organization straight away and see it the next time they load the app. They get
+  a notification.
+- If the email **has no account yet**, Flagon creates an **invitation** and the
+  API emails the person a link to register and join in one step. The API sends
+  that email itself, whichever front door you used (dashboard, API, assistant,
+  or MCP).
 
-You can enter several people at once and give each their own role.
+<Tabs>
+
+<Tab title="Dashboard">
+
+On **People**, choose **Invite people** to open the invite dialog. Add one
+row per person (email or username) and pick each person's role (Member or
+Admin). If an invitation email was not sent (no mail provider is configured, the
+server only logs email, or delivery failed), the dialog lists that invitation's
+link with a **Copy** button so you can send it yourself.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/invitations \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"login": "dev@example.com", "role": "member"}'
+```
+
+The response's `status` is `added` (an existing user joined directly) or
+`invited` (a pending invitation was created). For `invited`, the response also
+carries `email_sent` (whether the invitation email was handed to a mail
+provider that delivers; always `false` with the log mailer) and a single-use
+`token` for the invitation link, in case you also
+want to deliver the link another way (`https://app.flagon.io/invite/<token>`).
+The invitation exists even when `email_sent` is `false`. A `login` that is
+neither an email address nor an existing username returns `422`.
+
+To add only existing users, use `POST /orgs/{slug}/members` with `login` and an
+optional `role`; it returns `404` if no user matches. Both require `write:org`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+Ask: "Invite dev@example.com to acme as a member." The assistant proposes
+`invite_member`, which adds the person directly if they already have an account
+and emails an invitation otherwise. The result says whether the email was sent
+(`email_sent`); the invitation token itself is never shown to the model.
+
+</Tab>
+
+</Tabs>
+
+An invitation can grant `admin` or `member` (the default), and you can never
+grant a role above your own, so an admin can invite only members. `owner`
+can't be granted through an invitation at all: an owner grants it by promoting
+a member, or by adding an existing Flagon user directly with
+`POST /orgs/{slug}/members`.
+
+A self-hosted API sends mail through Resend when `RESEND_API_KEY` is set and
+otherwise only writes the message to its log; see
+[Configuration](/docs/reference/configuration).
+
+For a walkthrough, see [Invite your team](/docs/guides/invite-your-team).
 
 ## How invitations work
 
 A pending invitation is addressed to an email and carries the role you chose. It
-shows up under the **Pending invitations** tab until it is accepted, and an owner
-or admin can revoke it at any time. Invitations expire after seven days.
+shows under **Pending invitations** until it is accepted, and an owner or admin
+can revoke it at any time. Invitations **expire after seven days**; an expired
+link returns `410 Gone`. Only one pending invitation can exist per email
+(`409 Conflict` otherwise).
 
-When the invited person opens the link, they land on a page that already knows
-which organization invited them. If they do not have an account, they set a name,
-username, and password and are dropped straight into the organization. If they
-are already signed in with the invited email, they just confirm.
+When the invited person opens the link, the page already knows which organization
+invited them. Without an account, they set a name, username, and password and
+land in the organization. If they are already signed in with the invited email,
+they just confirm. A signed-in user with a different email is refused.
 
-The invitation link is proof that the person controls that mailbox, so accepting
-it **doubles as email verification** - there is no separate code to enter. The
-email on the new account is fixed to the address that was invited.
+The invitation link proves the person controls that mailbox, so accepting it
+**doubles as email verification**: there is no separate code to enter. The email
+on the new account is fixed to the invited address. Accepting is recorded in the
+audit log (`invitation.accepted`) and notifies the person who invited them.
 
-## Permissions
+## Changing roles and removing members
 
-Inviting and revoking require the `write:org` scope (owners and admins). Listing
-members and pending invitations requires `read:org`. As everywhere in Flagon, the
-agent and API act with your identity, so they can only invite people if you
-could, and tenant isolation is enforced in the database.
+Owners and admins change a member's role from the role picker on **People**, and
+remove members from the same row. Removing someone ends their access to the
+organization immediately, including through their personal access tokens. The
+person is notified of role changes and removals, and every change is audited
+(`member.added`, `member.role_changed`, `member.removed`).
+
+## Operations
+
+| Operation | API | Tool | Scope |
+| --- | --- | --- | --- |
+| List members | `GET /orgs/{slug}/members` | `list_members` | `read:org` |
+| Add an existing user | `POST /orgs/{slug}/members` | `add_member` | `write:org` |
+| Change a member's role | `PUT /orgs/{slug}/members/{userId}/role` | `set_member_role` | `write:org` |
+| Remove a member | `DELETE /orgs/{slug}/members/{userId}` | `remove_member` | `write:org` |
+| List pending invitations | `GET /orgs/{slug}/invitations` | `list_invitations` | `read:org` |
+| Invite by email | `POST /orgs/{slug}/invitations` | `invite_member` | `write:org` |
+| Revoke an invitation | `DELETE /orgs/{slug}/invitations/{id}` | `revoke_invitation` | `write:org` |
+
+Beyond the scope, every write needs an owner or admin role. The member list
+never includes the service principals behind
+[organization access tokens](/docs/platform/access-tokens). The agent and API act
+with your identity, so they can only invite people if you could, and tenant
+isolation is enforced in the database.
+
+## Related
+
+- [Invite your team](/docs/guides/invite-your-team)
+- [Roles & permissions](/docs/platform/roles)
+- [Teams](/docs/platform/teams)
+- [Single sign-on](/docs/platform/sso) (members can also join by signing in through your IdP)

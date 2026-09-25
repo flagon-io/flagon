@@ -1,0 +1,202 @@
+---
+title: Review the audit log
+description: Find out who changed what in your organization, filter and page through events, and decide whether actor IP addresses are shown.
+---
+
+The **audit log** is an append-only record of every change to your organization's state:
+projects created and deleted, members added and removed, roles and grants changed, tokens
+created and revoked, security settings and SSO providers changed. Each entry is written in the
+same database transaction as the change it describes, so a change without its audit entry can't
+happen. Entries can't be edited or deleted.
+
+By the end of this guide you will be able to answer "who did what, where, and when" for your
+organization from the dashboard, the API, or the assistant, and control whether IP addresses
+are visible.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** organization **owner** or **admin**. Members can't read the audit log.
+- **API token scopes:** `read:org` to read the log and its settings, `write:org` to change
+  IP disclosure.
+
+</Callout>
+
+## What an event contains
+
+| Field | Meaning |
+| --- | --- |
+| `action` | A stable key such as `project.deleted` or `member.role_changed`. |
+| `summary` | A human sentence, for example `deleted project Checkout Service`. |
+| `actor_id`, `actor_name`, `actor_email`, `actor_username` | Who did it. |
+| `target_type`, `target_id` | What it was done to, for example `project` and the project slug. |
+| `actor_country`, `actor_user_agent` | Where the request came from. |
+| `actor_ip` | The client IP address. Always recorded; returned only when IP disclosure is on, otherwise `null`. |
+| `created_at` | When it happened. |
+
+The [Audit actions reference](/docs/reference/audit-actions) lists every action key.
+
+## Steps
+
+<Steps>
+
+<Step title="Open the log">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Open organization **Settings > Audit log** (under **Logs**). The **Events** tab lists entries
+newest first. Expand a row to see every field, including the event id and client. Select
+**Load more** at the bottom for older entries.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -i https://api.flagon.io/orgs/acme/audit \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+The body is `{"events": [...]}`. When there are more, the response carries a `Link` header
+with `rel="next"`; follow that URL to get the next page. `limit` sets the page size (default
+30, maximum 100).
+
+</Tab>
+
+<Tab title="Assistant">
+
+> What changed in acme this week?
+
+The assistant reads recent entries with `list_audit_events` and summarizes them. Reading never
+needs confirmation.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Search and filter">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Type in **Search audit logs...** to match summaries, actions, actors, and locations. Use
+**Filter by action** to pick one or more actions, and **Clear filters** to reset.
+
+</Tab>
+
+<Tab title="API">
+
+| Query parameter | Effect |
+| --- | --- |
+| `q` | Free-text search across summary, action, actor, and location (and the IP address, only while IP disclosure is on). |
+| `action` | Only these action keys. Repeat it for several. |
+| `actor` | Only events by this user id. |
+| `limit` | Page size, 1 to 100. |
+| `cursor` | The opaque cursor from a previous `Link` header. |
+
+```bash
+curl -G https://api.flagon.io/orgs/acme/audit \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  --data-urlencode "action=project.deleted" \
+  --data-urlencode "action=project.restored" \
+  --data-urlencode "limit=50"
+```
+
+The `Link` header keeps your filters, so following it pages through the same filtered view.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Who deleted projects in acme recently?
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Decide on IP disclosure">
+
+IP addresses are always recorded. **IP disclosure** only controls whether owners and admins can
+see them in the log. It is off by default. Because it exposes members' IP addresses, review it
+with whoever handles privacy in your organization before turning it on.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+On **Settings > Audit log**, open the **Settings** tab, check **Enable source IP disclosure**,
+and select **Save**.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X PUT https://api.flagon.io/orgs/acme/audit/config \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"ip_disclosure": true}'
+```
+
+Read the current value with `GET /orgs/acme/audit/config`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Turn on IP disclosure for the acme audit log.
+
+The assistant proposes the change for you to confirm.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Verify it worked">
+
+- Changing IP disclosure is itself audited as `organization.audit_config_changed`.
+- With disclosure on, `actor_ip` is filled in on events (including past ones, since the IP was
+  always recorded). With it off, `actor_ip` is `null`.
+
+</Step>
+
+</Steps>
+
+## Things to know
+
+- **Requests through a token are audited too.** An organization access token acts as its own
+  service principal, so its changes show that token's name as the actor. A personal access
+  token's changes show you.
+- **Where comes from the request.** For dashboard actions, including changes you confirm in
+  the assistant, Flagon records the end user's IP, country, and browser, which the dashboard
+  forwards; the API trusts those forwarded values only from the dashboard itself. For direct API
+  and MCP calls with a token it records the calling client's own IP (on the hosted service, from
+  the `Fly-Client-IP` header; self-hosted, the header named by `FLAGON_CLIENT_IP_HEADER`, or else
+  the connection's address) and its `User-Agent`, so give your scripts a descriptive
+  `User-Agent`.
+- **The audit log is not notifications.** Notifications tell a person about something that
+  affects them; the audit log is the organization's record for admins.
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `403` | `only organization owners and admins can do that` | You are a member. Only owners and admins can read the log. |
+| `404` | `organization not found` | The slug is wrong, or you are not a member of the organization. |
+| `403` | `you don't have permission to do that` | Reading or changing IP disclosure needs owner or admin. |
+| `422` | `invalid pagination cursor` | Use the cursor from the latest `Link` header unchanged. |
+
+## Related
+
+- [Audit log](/docs/platform/audit-log)
+- [Audit actions reference](/docs/reference/audit-actions)
+- [Pagination](/docs/api/pagination)
+- [Notifications](/docs/platform/notifications)

@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { KeyRound } from "lucide-react";
 import { buttonClasses } from "@flagon-io/ui";
-import { getMe } from "@/lib/flagon-api";
-import { listOrgProviders } from "@/lib/sso-admin";
+import { requireMe } from "@/lib/org-context";
+import { orgProviderIds } from "@/lib/sso-admin";
 import { SsoContinue } from "@/components/auth/sso-continue";
 
 export const metadata = { title: "Single sign-on required - Flagon" };
@@ -16,14 +15,13 @@ export default async function SSORequiredPage({
 }: {
   searchParams: Promise<{ org?: string }>;
 }) {
-  const me = await getMe();
-  if (!me) redirect("/login");
+  const { me } = await requireMe();
 
   const { org: slug } = await searchParams;
   const org = slug ? me.orgs.find((o) => o.slug === slug) : undefined;
   const orgName = org?.name ?? "This organization";
-  const providers = org ? await listOrgProviders(org.id).catch(() => []) : [];
-  const providerId = providers[0]?.providerId;
+  // No fallback: a failed lookup must not read as "no provider configured".
+  const providerId = org ? (await orgProviderIds(org.id))[0] : undefined;
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center px-4 text-center">

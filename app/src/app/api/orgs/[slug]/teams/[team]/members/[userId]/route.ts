@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError } from "@/lib/route-error";
 import { removeTeamMember } from "@/lib/flagon-api";
 
 export async function DELETE(
@@ -9,8 +10,7 @@ export async function DELETE(
   try {
     await removeTeamMember(slug, team, userId);
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not remove team member.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not remove team member.");
   }
 }

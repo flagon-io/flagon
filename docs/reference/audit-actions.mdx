@@ -1,0 +1,132 @@
+---
+title: Audit actions
+description: Every action key the organization audit log records, what triggers it, and the target type and id it points at.
+---
+
+Every change to an organization's state writes one entry to its **audit log**,
+in the same database transaction as the change, so an entry exists exactly when
+the change committed. Each entry has a stable, dotted **action key**
+(`resource.verb`), a **target** (a type and an id), a human-readable
+**summary**, the actor, and where the request came from. This page lists every
+action key, generated from the `Action` constants in `api/internal/audit` and
+the call sites that record them.
+
+Use the keys to filter the log: `GET /orgs/<org>/audit?action=project.deleted`
+(repeat `action` for several), or the **Action** filter in the dashboard. Only
+organization owners and admins can read the log; a plain member gets `403` and a
+non-member gets `404`. See
+[Audit log](/docs/platform/audit-log).
+
+## Projects
+
+Project entries target the project by **slug** (`target_type` is `project`),
+including the access and ownership entries.
+
+| Action | Recorded when | Target | Example summary |
+| --- | --- | --- | --- |
+| `project.created` | A project is created. | `project`, slug | `created project Billing API` |
+| `project.updated` | A project's name, slug, description, README, or repository URL changes. The target is the slug after the update. | `project`, slug | `updated project Billing API` |
+| `project.deleted` | A project is soft-deleted. | `project`, slug | `deleted project Billing API` |
+| `project.restored` | A deleted project is restored. The target is the slug it was restored under. | `project`, slug | `restored project Billing API`, `restored project Billing API as billing-api-v2` |
+| `project.access_granted` | A user is granted a role on a project. Also recorded when a member who is not an organization owner or admin creates a project and is granted `admin` on it automatically. | `project`, slug | `granted ana write on billing-api`, `granted the creator admin on billing-api` |
+| `project.access_changed` | A collaborator's project role changes. | `project`, slug | `changed a collaborator's role to maintain on billing-api` |
+| `project.access_revoked` | A collaborator's grant is removed. | `project`, slug | `revoked a collaborator's access to billing-api` |
+| `project.team_access_granted` | A team is granted a role on a project. | `project`, slug | `granted team platform write on billing-api` |
+| `project.team_access_changed` | A team's project role changes. | `project`, slug | `changed team platform's role to admin on billing-api` |
+| `project.team_access_revoked` | A team's project grant is removed. | `project`, slug | `revoked team platform's access to billing-api` |
+| `project.owner_added` | A user or team becomes a project owner. | `project`, slug | `made ana an owner of billing-api`, `made team platform an owner of billing-api` |
+| `project.owner_removed` | A project owner is removed. | `project`, slug | `removed an owner from billing-api` |
+
+## Teams
+
+Team entries target the team by **slug** (`target_type` is `team`).
+
+| Action | Recorded when | Target | Example summary |
+| --- | --- | --- | --- |
+| `team.created` | A team is created. | `team`, slug | `created team Platform` |
+| `team.updated` | A team's name, slug, or description changes. | `team`, slug | `updated team Platform` |
+| `team.deleted` | A team is deleted. | `team`, slug | `deleted team platform` |
+| `team.member_added` | A user is added to a team. | `team`, slug | `added ana to team platform as member` |
+| `team.member_role_changed` | A team member's role changes. | `team`, slug | `changed a member's role to maintainer on team platform` |
+| `team.member_removed` | A user is removed from a team. | `team`, slug | `removed a member from team platform` |
+
+## Members and invitations
+
+| Action | Recorded when | Target | Example summary |
+| --- | --- | --- | --- |
+| `member.added` | An existing user is added to the organization (directly, or by inviting their email or username), or a user joins for the first time through the organization's SSO. | `member`, user id | `added ana@example.com as member`, `joined via single sign-on` |
+| `member.role_changed` | A member's organization role changes. | `member`, user id | `changed a member's role to admin` |
+| `member.removed` | An owner or admin removes a member. | `member`, user id | `removed a member` |
+| `member.left` | A member leaves the organization. | `member`, user id | `left the organization` |
+| `invitation.sent` | An email invitation is sent to someone who does not have an account yet. | `invitation`, invitation id | `invited ana@example.com as member` |
+| `invitation.revoked` | A pending invitation is revoked. | `invitation`, invitation id | `revoked an invitation` |
+| `invitation.accepted` | An invitee accepts and joins. The actor is the new member. | `member`, user id | `ana@example.com accepted an invitation and joined the organization` |
+
+## Organization
+
+Organization entries target the organization by **id** (`target_type` is
+`organization`).
+
+| Action | Recorded when | Target | Example summary |
+| --- | --- | --- | --- |
+| `organization.created` | The organization is created. | `organization`, id | `created organization Acme` |
+| `organization.updated` | The organization is renamed. | `organization`, id | `renamed the organization to Acme Inc` |
+| `organization.audit_config_changed` | Actor IP disclosure in the audit log is turned on or off. | `organization`, id | `enabled actor IP disclosure in the audit log` |
+| `organization.security_changed` | The security policy changes. One entry per setting that changed: the two-factor requirement, the SSO requirement, or the base permission. | `organization`, id | `enabled the two-factor authentication requirement`, `disabled the single sign-on requirement`, `set the base member permission to write` |
+| `organization.deleted` | The organization is soft-deleted. | `organization`, id | `deleted the organization Acme` |
+| `organization.restored` | A deleted organization is restored. | `organization`, id | `restored the organization Acme` |
+
+## Access tokens
+
+Only **organization** access tokens are audited, because the log belongs to an
+organization. Personal access tokens are not recorded here.
+
+| Action | Recorded when | Target | Example summary |
+| --- | --- | --- | --- |
+| `token.created` | An organization access token is created. | `token`, token id | `created organization token deploy-bot` |
+| `token.revoked` | An organization access token is revoked. | `token`, token id | `revoked organization token deploy-bot` |
+
+## Single sign-on
+
+SSO entries target the provider by its **provider id** (`target_type` is
+`sso_provider`).
+
+| Action | Recorded when | Target | Example summary |
+| --- | --- | --- | --- |
+| `sso_provider.created` | An OIDC or SAML provider is added. Also recorded, with no actor, when a provider registered before the API owned SSO configuration is imported. | `sso_provider`, provider id | `added OIDC single sign-on provider acme-okta`, `imported SAML single sign-on provider acme-entra from the sign-in service` |
+| `sso_provider.updated` | A provider's configuration changes. | `sso_provider`, provider id | `updated single sign-on provider acme-okta`, `updated single sign-on provider acme-okta (credentials changed)` |
+| `sso_provider.deleted` | A provider is removed. | `sso_provider`, provider id | `removed single sign-on provider acme-okta` |
+
+## The shape of an event
+
+`GET /orgs/<org>/audit` returns `{"events": [...]}`, newest first, 30 per page by
+default (`limit` up to 100). When there are more, the response carries a `Link`
+header with `rel="next"`; follow it (it holds an opaque `cursor`). Filter with
+`q` (search), `action` (repeatable), and `actor` (a user id). Each event:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | The entry's id. |
+| `action` | One of the keys above. |
+| `target_type`, `target_id` | What the change was made to, as listed per action. |
+| `summary` | The human-readable predicate shown in the dashboard. |
+| `actor_id`, `actor_name`, `actor_email`, `actor_username`, `actor_avatar_url` | Who did it. For an organization access token, the actor is the token's service user and the name is the token's name. |
+| `actor_ip` | The client IP, or `null` unless the organization has turned on IP disclosure (owners and admins, under the audit log settings). |
+| `actor_country`, `actor_user_agent` | Where the request came from. Always shown when known. |
+
+The IP and user agent come from the request itself. For requests the dashboard
+forwards, the API trusts the client details the dashboard passes along; for
+access token and MCP callers it uses the connection's peer address, or the
+header named by `FLAGON_CLIENT_IP_HEADER` when the API sits behind a proxy (see
+[Configuration](/docs/reference/configuration)). Assistant actions record the IP
+and user agent of the person who confirmed them.
+| `created_at` | When the change committed. |
+
+The log is append-only: there is no operation to edit or delete an entry.
+
+## Related
+
+- [Audit log](/docs/platform/audit-log)
+- [Review the audit log](/docs/guides/review-the-audit-log)
+- [Pagination and search](/docs/api/pagination)
+- [Auditing and notifications](/docs/architecture/auditing-and-notifications)

@@ -140,7 +140,7 @@ func (o *OpenAI) Complete(ctx context.Context, req CompleteRequest) (CompleteRes
 	if err != nil {
 		return CompleteResponse{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	var parsed oaiResponse
@@ -151,6 +151,9 @@ func (o *OpenAI) Complete(ctx context.Context, req CompleteRequest) (CompleteRes
 		msg := "unexpected status"
 		if parsed.Error != nil {
 			msg = parsed.Error.Message
+		}
+		if unauthorized(resp.StatusCode) {
+			return CompleteResponse{}, fmt.Errorf("openai: %s (status %d): %w", msg, resp.StatusCode, ErrNotConfigured)
 		}
 		return CompleteResponse{}, fmt.Errorf("openai: %s (status %d)", msg, resp.StatusCode)
 	}

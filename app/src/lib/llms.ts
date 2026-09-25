@@ -82,7 +82,7 @@ export function llmsText(origin: string, full: boolean): string {
       if (full && c.status === "stable") {
         const extra: string[] = [`registry: ${origin}/r/${c.slug}.json`];
         if (c.dependencies?.length) extra.push(`deps: ${c.dependencies.join(", ")}`);
-        line += ` — ${extra.join("; ")}`;
+        line += ` - ${extra.join("; ")}`;
       }
       push(line);
     }

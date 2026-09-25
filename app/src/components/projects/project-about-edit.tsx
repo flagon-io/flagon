@@ -13,8 +13,9 @@ import {
   Input,
   Label,
 } from "@flagon-io/ui";
+import { errorMessage } from "@/lib/client-fetch";
 
-// The gear on the project's About box, GitHub-style: opens a modal to edit the
+// The gear on the project's About box: opens a modal to edit the
 // project's description and linked repository. Uses the same update-project API
 // as the Settings tab.
 export function ProjectAboutEdit({
@@ -53,8 +54,7 @@ export function ProjectAboutEdit({
     );
     if (!res.ok) {
       setSaving(false);
-      const d = await res.json().catch(() => ({}));
-      setError(d.error ?? "Couldn't save your changes.");
+      setError(await errorMessage(res, "Couldn't save your changes."));
       return;
     }
     setSaving(false);

@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+
+	"github.com/flagon-io/flagon/api/internal/service"
 )
 
 // Proposal is a mutating action the agent wants to take, held for the user to
@@ -31,6 +34,15 @@ type Meter interface {
 
 // ErrRateLimited is returned when the org is over its AI usage cap.
 var ErrRateLimited = errors.New("ai usage limit reached for this organization")
+
+// ErrMeteringFailed is returned when a completed turn's usage could not be
+// recorded. The turn fails closed: an unrecorded turn would not count against
+// the org's quota, and unmetered AI is exactly what the quota exists to prevent.
+var ErrMeteringFailed = errors.New("ai usage could not be recorded")
+
+// ErrUnknownTool is returned by Execute for a tool that does not exist or is not
+// a confirmable (Mutating) action.
+var ErrUnknownTool = errors.New("unknown or non-executable tool")
 
 // DefaultSystemPrompt is the built-in "SKILL" the agent runs with. It is a plain
 // document on purpose: it can be swapped for a file at startup (WithSystemPrompt)
@@ -136,6 +148,12 @@ func (a *Agent) Run(ctx context.Context, tc ToolContext, history []Message) (Res
 				results = append(results, Block{Type: "tool_result", ToolUseID: b.ID, Content: "unknown tool", IsError: true})
 				continue
 			}
+			// A conversation is scoped (and metered) to one org: a call naming
+			// another is refused before it is run or proposed.
+			if err := tc.CheckOrgScope(tool, b.Input); err != nil {
+				results = append(results, Block{Type: "tool_result", ToolUseID: b.ID, Content: "error: " + service.PublicMessage(err), IsError: true})
+				continue
+			}
 			if tool.Mutating {
 				summary := b.Name
 				if tool.Summarize != nil {
@@ -151,7 +169,7 @@ func (a *Agent) Run(ctx context.Context, tc ToolContext, history []Message) (Res
 			}
 			out, err := tool.Run(ctx, tc, b.Input)
 			if err != nil {
-				results = append(results, Block{Type: "tool_result", ToolUseID: b.ID, Content: "error: " + err.Error(), IsError: true})
+				results = append(results, Block{Type: "tool_result", ToolUseID: b.ID, Content: "error: " + toolErrorText(ctx, b.Name, err), IsError: true})
 				continue
 			}
 			j, _ := json.Marshal(out)
@@ -161,21 +179,58 @@ func (a *Agent) Run(ctx context.Context, tc ToolContext, history []Message) (Res
 	}
 
 	if a.meter != nil {
-		_ = a.meter.Record(ctx, tc.UserID, tc.OrgID, a.model, total.InputTokens, total.OutputTokens)
+		if err := a.meter.Record(ctx, tc.UserID, tc.OrgID, a.model, total.InputTokens, total.OutputTokens); err != nil {
+			slog.ErrorContext(ctx, "could not record AI usage; failing the turn closed",
+				"org_id", tc.OrgID, "user_id", tc.UserID, "err", err)
+			return Result{}, fmt.Errorf("%w: %w", ErrMeteringFailed, err)
+		}
 	}
 	return Result{Reply: reply, Proposals: proposals, Usage: total}, nil
 }
 
 // Execute runs a confirmed mutating tool directly (the HITL confirm step). It
-// only runs tools flagged Mutating, and acts as the requesting user.
+// only runs tools flagged Mutating, and acts as the requesting user, confined to
+// the conversation's org (tc.ConfineOrg) when one is set. The org's quota is
+// checked BEFORE the action runs (ErrRateLimited when exhausted), exactly like a
+// turn. The action is metered after it succeeds; a metering failure is logged
+// loudly but does not fail the response, because the mutation has already
+// committed and reporting it as failed would invite a duplicate retry.
 func (a *Agent) Execute(ctx context.Context, tc ToolContext, toolName string, input json.RawMessage) (any, error) {
 	tool, ok := a.registry.Get(toolName)
 	if !ok || !tool.Mutating {
-		return nil, fmt.Errorf("unknown or non-executable tool: %s", toolName)
+		return nil, fmt.Errorf("%w: %s", ErrUnknownTool, toolName)
+	}
+	if err := tc.CheckOrgScope(tool, input); err != nil {
+		return nil, err
+	}
+	if a.meter != nil {
+		allowed, err := a.meter.Allowed(ctx, tc.UserID, tc.OrgID)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, ErrRateLimited
+		}
 	}
 	out, err := tool.Run(ctx, tc, input)
-	if err == nil && a.meter != nil {
-		_ = a.meter.Record(ctx, tc.UserID, tc.OrgID, "action:"+toolName, 0, 0)
+	if err != nil {
+		return nil, err
 	}
-	return out, err
+	if a.meter != nil {
+		if rerr := a.meter.Record(ctx, tc.UserID, tc.OrgID, "action:"+toolName, 0, 0); rerr != nil {
+			slog.ErrorContext(ctx, "could not record AI action usage",
+				"tool", toolName, "org_id", tc.OrgID, "user_id", tc.UserID, "err", rerr)
+		}
+	}
+	return out, nil
+}
+
+// toolErrorText is what the model sees when a tool fails: the caller-safe
+// message for a classified domain error, or a generic line for an internal
+// fault (whose detail is logged, never handed to the model).
+func toolErrorText(ctx context.Context, tool string, err error) string {
+	if _, ok := service.Classify(err); !ok {
+		slog.ErrorContext(ctx, "agent tool failed", "tool", tool, "err", err)
+	}
+	return service.PublicMessage(err)
 }

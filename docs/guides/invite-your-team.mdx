@@ -1,0 +1,212 @@
+---
+title: Invite your team
+description: Add existing Flagon users to your organization and email invitations to people who don't have an account yet, then track and revoke pending invitations.
+---
+
+Inviting is how people join an organization. Flagon handles two cases with one action: if the
+email or username you enter belongs to an existing Flagon user, they are **added right away**;
+if it is an email address with no account, Flagon creates a **pending invitation** and emails a
+single-use link. That link doubles as email verification, so the invitee registers and joins in
+one step.
+
+By the end of this guide your teammates will be members of your organization with the role you
+chose, and you will know how to see and revoke invitations that haven't been accepted.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** organization **owner** or **admin**. You can invite as `member` or `admin` (never
+  above your own role). An invitation cannot grant `owner`: an owner promotes someone to owner
+  from the member list after they join.
+- **API token scope:** `write:org` to invite and revoke, `read:org` to list invitations.
+
+</Callout>
+
+## Organization roles at a glance
+
+| Role | What it's for |
+| --- | --- |
+| `owner` | Full control, including deleting the organization. Only owners can grant or remove the owner role. |
+| `admin` | Manages members, invitations, teams, tokens, and settings. Has owner-tier control of every project. |
+| `member` | Creates projects. Access to each existing project starts from the organization's [base permission](/docs/guides/set-base-permissions) and can be raised per project. |
+
+See [Roles](/docs/platform/roles) for the full model.
+
+## Steps
+
+<Steps>
+
+<Step title="Send the invitations">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Open **People** in the sidebar.
+2. Select **Invite people**.
+3. For each person, enter an **Email or username** and pick a **Role** (Member or Admin).
+   Select **Add more** to invite several people at once.
+4. Select **Send invites**.
+
+Existing users join immediately and get a notification. Everyone else receives an email, sent
+by the Flagon API, with a link to `app.flagon.io/invite/<token>`. If a row fails (for example, the person is already a
+member), it stays in the form with the reason so you can fix it and resend just that row. If an
+invitation was created but its email was not sent, the dialog shows that invitation's link with a
+**Copy** button, so you can deliver it yourself.
+
+Owners can't be invited. To make someone an owner, invite them as a member, then promote them.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/invitations \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"login": "dana@example.com", "role": "member"}'
+```
+
+`login` is an email address, or the email or username of an existing user. `role` is `admin`,
+`member`, or `viewer` and defaults to `member`. The `201` response says which case happened:
+
+```json
+{ "status": "added", "user_id": "u_123" }
+```
+
+or, for an email with no account:
+
+```json
+{
+  "status": "invited",
+  "email": "dana@example.com",
+  "org_name": "Acme Inc",
+  "token": "flagon_inv_...",
+  "invitation": { "id": "8b2e...", "email": "dana@example.com", "role": "member", "status": "pending", "inviter": null, "expires_at": "...", "created_at": "..." },
+  "email_sent": true
+}
+```
+
+The API emails the invite link itself, the same way for every front door (dashboard, API,
+assistant, and MCP). `email_sent` reports whether the email was handed to a mail provider that
+delivers; when it is `false` (no provider, the log mailer, or delivery failed), the invitation still exists and you can deliver the link
+yourself: `https://app.flagon.io/invite/` followed by the returned `token`. The token is
+returned only once and only its hash is stored.
+
+<Callout type="note" title="Self-hosted mail">
+
+On a self-hosted API, invitation email goes out through Resend when `RESEND_API_KEY` is set
+(or `FLAGON_MAIL_PROVIDER=resend`). Otherwise the API uses the log mailer, which writes the
+email to the server log instead of sending it, and reports `email_sent: false`. See
+[Configuration](/docs/reference/configuration).
+
+</Callout>
+
+</Tab>
+
+<Tab title="Assistant">
+
+In **Ask AI**, ask:
+
+> Invite dana@example.com to acme as a member.
+
+The assistant proposes **Confirm: Invite "dana@example.com" to "acme" as member** and runs it
+only after you select **Confirm**. An existing user is added directly. For someone without an
+account, the API emails the invite link, and the assistant reports whether the email was sent.
+The invite token itself never enters the conversation.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="What the invitee sees">
+
+The link opens a **Join** page showing who invited them, the organization, and the role.
+
+- **Not signed in:** they fill in a name, username, and password. The email field is fixed to
+  the invited address and needs no verification code, because the invitation proves they
+  control it. Submitting creates the account and joins the organization.
+- **Signed in with the invited email:** they select **Join** and land in the organization.
+- **Signed in with a different email:** the page explains the mismatch and offers **Sign out**,
+  so they can continue with the invited address.
+
+An invitation is valid for **7 days** and can be used once.
+
+</Step>
+
+<Step title="Track and revoke pending invitations">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+On **People**, open the **Pending invitations** tab. Each row shows the email, role, inviter,
+and expiry. Select **Revoke** to cancel one; the link stops working immediately.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+# List pending invitations (paginated, see the Link header)
+curl https://api.flagon.io/orgs/acme/invitations \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+
+# Revoke one by id
+curl -X DELETE https://api.flagon.io/orgs/acme/invitations/8b2e... \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Show me pending invitations in acme.
+
+Then:
+
+> Revoke the invitation for dana@example.com.
+
+The assistant looks up the invitation id with `list_invitations` and proposes
+`revoke_invitation` for you to confirm.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Verify it worked">
+
+The person appears on the **Members** tab of **People** with the role you chose, and the
+organization's [audit log](/docs/guides/review-the-audit-log) records `invitation.sent` and then
+`invitation.accepted` (or `member.added` for an existing user who was added directly). You also
+get a notification when an invitee accepts.
+
+From the API, `GET /orgs/acme/members` returns `{"members": [...]}` with their `user_id` and
+`role`.
+
+</Step>
+
+</Steps>
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `409` | `that user is already a member` | Nothing to do; they are already in the organization. |
+| `409` | `a pending invitation already exists for that email` | Revoke the existing invitation first if you need to change its role, then invite again. |
+| `422` | `enter an email address to invite, or the username of an existing user` | The login is neither an email address nor an existing username. |
+| `403` | `you don't have permission to do that` | You are not an owner or admin, or you tried to grant a role above your own. |
+| `422` | `invalid role` (assistant and MCP) or a request validation error (REST) | The role is not `admin`, `member`, or `viewer`. Invitations cannot grant `owner`. |
+| `410` | `this invitation has expired` | The invitee used a link older than 7 days. Invite them again. |
+| `409` | `this invitation is no longer valid` | The link was already accepted or was revoked. |
+| `403` | `this invitation was sent to a different email address` | The invitee accepted while signed in as someone else. They should sign out and use the invited email. |
+
+## Related
+
+- [Members](/docs/platform/members)
+- [Roles](/docs/platform/roles)
+- [Organize with teams](/docs/guides/organize-with-teams)
+- [Set base permissions](/docs/guides/set-base-permissions)

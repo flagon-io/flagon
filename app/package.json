@@ -11,11 +11,15 @@
     "start": "next start",
     "lint": "eslint",
     "registry": "node scripts/build-registry.mjs",
+    "gen:api-types": "openapi-typescript ../openapi/openapi.json -o src/lib/api/schema.gen.ts",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/rename-auth-tables.mjs && node --env-file-if-exists=.env.local --import tsx scripts/auth-migrate.ts && node --env-file-if-exists=.env.local scripts/migrate-user-emails.mjs",
     "db:seed": "node --env-file-if-exists=.env.local scripts/seed.mjs",
     "restore-user": "node --env-file-if-exists=.env.local scripts/restore-user.mjs",
+    "sso:backfill": "node --env-file-if-exists=.env.local --import tsx scripts/sso-backfill.ts",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:components": "playwright test --project=chromium",
+    "test:e2e:product": "playwright test --project=product"
   },
   "dependencies": {
     "@better-auth/sso": "^1.7.5",
@@ -46,6 +50,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
     "typescript": "^5"

@@ -47,6 +47,42 @@ describe("brandCss", () => {
   });
 });
 
+describe("status + overlay tokens", () => {
+  it("compiles the status, destructive-foreground, and overlay colors to their CSS vars", () => {
+    const css = brandCss(
+      {
+        name: "Status",
+        light: {
+          success: "#047857",
+          successForeground: "#ffffff",
+          warning: "#b45309",
+          warningForeground: "#ffffff",
+          destructiveForeground: "#fafafa",
+          overlay: "rgba(0,0,0,0.4)",
+        },
+        dark: { success: "#34d399", warningForeground: "#1f1300" },
+      },
+      ".s",
+    );
+    expect(css).toContain("--success: #047857;");
+    expect(css).toContain("--success-foreground: #ffffff;");
+    expect(css).toContain("--warning: #b45309;");
+    expect(css).toContain("--warning-foreground: #ffffff;");
+    expect(css).toContain("--destructive-foreground: #fafafa;");
+    expect(css).toContain("--overlay: rgba(0,0,0,0.4);");
+    // The dark block carries only the dark values.
+    const dark = css.slice(css.indexOf(".dark .s"));
+    expect(dark).toContain("--success: #34d399;");
+    expect(dark).toContain("--warning-foreground: #1f1300;");
+    expect(dark).not.toContain("#047857");
+  });
+
+  it("round-trips the new tokens through serialize/parse", () => {
+    const b = { name: "RT", light: { success: "#047857", overlay: "rgba(9,9,11,0.5)" } };
+    expect(parseBrand(serializeBrand(b))).toEqual(b);
+  });
+});
+
 describe("densityScales", () => {
   it("exposes the three named scales with sm/md/lg heights", () => {
     for (const key of ["compact", "comfortable", "spacious"] as const) {

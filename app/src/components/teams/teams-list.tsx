@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Plus, Search, UsersRound } from "lucide-react";
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -12,15 +11,9 @@ import {
   Kbd,
   Skeleton,
 } from "@flagon-io/ui";
-
-type Team = {
-  id: string;
-  name: string;
-  slug: string;
-  description: string;
-  member_count: number;
-  created_at: string;
-};
+import type { Page, Team } from "@/lib/api/types";
+import { fetchJson, messageOf } from "@/lib/client-fetch";
+import { ListError } from "@/components/shared/list-states";
 
 export function TeamsList({
   slug,
@@ -35,6 +28,7 @@ export function TeamsList({
   const [searching, setSearching] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const filterRef = useRef<HTMLInputElement>(null);
   const firstRender = useRef(true);
@@ -45,32 +39,44 @@ export function TeamsList({
       const params = new URLSearchParams();
       if (q) params.set("q", q);
       if (cursor) params.set("cursor", cursor);
-      const res = await fetch(
+      return fetchJson<Page<Team>>(
         `/api/orgs/${encodeURIComponent(slug)}/teams?${params.toString()}`,
         { signal },
+        "Couldn't load teams.",
       );
-      if (!res.ok) throw new Error(`teams ${res.status}`);
-      return (await res.json()) as { items: Team[]; next: string | null };
     },
     [slug],
+  );
+
+  // Load page 1 for a search term. A failure is an error state, never "no teams".
+  const load = useCallback(
+    async (q: string) => {
+      try {
+        const data = await fetchPage(q, null);
+        setTeams(data.items);
+        setNext(data.next);
+        setError(null);
+      } catch (e) {
+        setError(messageOf(e, "Couldn't load teams."));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [fetchPage],
   );
 
   // Initial load of the first page.
   useEffect(() => {
     void (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await fetchPage("", null);
-        setTeams(data.items);
-        setNext(data.next);
-      } catch {
-        setError("Couldn't load teams. Try refreshing the page.");
-      } finally {
-        setLoading(false);
-      }
+      await load("");
     })();
-  }, [fetchPage]);
+  }, [load]);
+
+  function retry() {
+    setLoading(true);
+    setError(null);
+    void load(query.trim());
+  }
 
   // Debounced server-side search. The initial load above covers the first render.
   useEffect(() => {
@@ -86,9 +92,11 @@ export function TeamsList({
         if (!controller.signal.aborted) {
           setTeams(data.items);
           setNext(data.next);
+          setError(null);
         }
-      } catch {
-        /* aborted or failed - leave the current list in place */
+      } catch (e) {
+        // An aborted search was superseded by a newer one; anything else failed.
+        if (!controller.signal.aborted) setError(messageOf(e, "Couldn't load teams."));
       } finally {
         if (!controller.signal.aborted) setSearching(false);
       }
@@ -106,8 +114,9 @@ export function TeamsList({
       const data = await fetchPage(query.trim(), next);
       setTeams((prev) => [...prev, ...data.items]);
       setNext(data.next);
-    } catch {
-      /* leave the list as-is on failure */
+      setLoadMoreError(null);
+    } catch (e) {
+      setLoadMoreError(messageOf(e, "Couldn't load more teams."));
     } finally {
       setLoadingMore(false);
     }
@@ -134,7 +143,6 @@ export function TeamsList({
 
   return (
     <div className="space-y-4">
-      {error && <Alert variant="destructive">{error}</Alert>}
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-56 flex-1">
@@ -173,6 +181,8 @@ export function TeamsList({
             </div>
           ))}
         </Card>
+      ) : error ? (
+        <ListError title="Couldn't load teams" message={error} onRetry={retry} />
       ) : rows.length === 0 ? (
         searching ? (
           <Card className="px-4 py-12 text-center text-sm text-muted-foreground">
@@ -228,7 +238,9 @@ export function TeamsList({
         </Card>
       )}
 
-      {next && (
+      {loadMoreError && !error && <p className="text-sm text-destructive">{loadMoreError}</p>}
+
+      {next && !error && (
         <div className="flex justify-center">
           <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
             {loadingMore ? "Loading..." : "Load more"}
@@ -236,7 +248,7 @@ export function TeamsList({
         </div>
       )}
 
-      {!loading && teams.length > 0 && (
+      {!loading && !error && teams.length > 0 && (
         <p className="text-xs text-muted-foreground">
           {teams.length} {teams.length === 1 ? "team" : "teams"}
           {next ? " loaded" : ""}

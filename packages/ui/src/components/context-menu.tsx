@@ -6,8 +6,12 @@ import { cn } from "../lib/cn";
 
 /** A right-click menu of contextual actions. Wrap a Trigger, then Content > Item. */
 export const ContextMenu = ContextMenuPrimitive.Root;
-export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
-export const ContextMenuGroup = ContextMenuPrimitive.Group;
+export function ContextMenuTrigger(props: ComponentProps<typeof ContextMenuPrimitive.Trigger>) {
+  return <ContextMenuPrimitive.Trigger data-slot="context-menu-trigger" {...props} />;
+}
+export function ContextMenuGroup(props: ComponentProps<typeof ContextMenuPrimitive.Group>) {
+  return <ContextMenuPrimitive.Group data-slot="context-menu-group" {...props} />;
+}
 
 export function ContextMenuContent({ className, ...props }: ComponentProps<typeof ContextMenuPrimitive.Content>) {
   return (
@@ -44,12 +48,12 @@ export function ContextMenuItem({
 }
 export function ContextMenuLabel({ className, ...props }: ComponentProps<typeof ContextMenuPrimitive.Label>) {
   return (
-    <ContextMenuPrimitive.Label className={cn("px-2.5 py-1.5 text-xs font-medium text-muted-foreground", className)} {...props} />
+    <ContextMenuPrimitive.Label data-slot="context-menu-label" className={cn("px-2.5 py-1.5 text-xs font-medium text-muted-foreground", className)} {...props} />
   );
 }
 export function ContextMenuSeparator({ className, ...props }: ComponentProps<typeof ContextMenuPrimitive.Separator>) {
-  return <ContextMenuPrimitive.Separator className={cn("-mx-1 my-1 h-px bg-hairline", className)} {...props} />;
+  return <ContextMenuPrimitive.Separator data-slot="context-menu-separator" className={cn("-mx-1 my-1 h-px bg-hairline", className)} {...props} />;
 }
 export function ContextMenuShortcut({ className, ...props }: ComponentProps<"span">) {
-  return <span className={cn("ml-auto text-xs tracking-widest text-muted-foreground", className)} {...props} />;
+  return <span data-slot="context-menu-shortcut" className={cn("ml-auto text-xs tracking-widest text-muted-foreground", className)} {...props} />;
 }

@@ -52,19 +52,26 @@ const (
 	ActionTeamMemberRoleChange Action = "team.member_role_changed"
 	ActionTeamMemberRemoved    Action = "team.member_removed"
 
-	ActionMemberAdded      Action = "member.added"
-	ActionMemberRoleChange Action = "member.role_changed"
-	ActionMemberRemoved    Action = "member.removed"
-	ActionMemberLeft       Action = "member.left"
-	ActionInvitationSent   Action = "invitation.sent"
-	ActionInvitationRevoke Action = "invitation.revoked"
-	ActionOrgCreated       Action = "organization.created"
-	ActionOrgUpdated       Action = "organization.updated"
-	ActionOrgAuditConfig   Action = "organization.audit_config_changed"
-	ActionOrgSecurity      Action = "organization.security_changed"
+	ActionMemberAdded        Action = "member.added"
+	ActionMemberRoleChange   Action = "member.role_changed"
+	ActionMemberRemoved      Action = "member.removed"
+	ActionMemberLeft         Action = "member.left"
+	ActionInvitationSent     Action = "invitation.sent"
+	ActionInvitationRevoke   Action = "invitation.revoked"
+	ActionInvitationAccepted Action = "invitation.accepted"
+	ActionOrgCreated         Action = "organization.created"
+	ActionOrgUpdated         Action = "organization.updated"
+	ActionOrgAuditConfig     Action = "organization.audit_config_changed"
+	ActionOrgSecurity        Action = "organization.security_changed"
+	ActionOrgDeleted         Action = "organization.deleted"
+	ActionOrgRestored        Action = "organization.restored"
 
 	ActionTokenCreated Action = "token.created"
 	ActionTokenRevoked Action = "token.revoked"
+
+	ActionSSOProviderCreated Action = "sso_provider.created"
+	ActionSSOProviderUpdated Action = "sso_provider.updated"
+	ActionSSOProviderDeleted Action = "sso_provider.deleted"
 )
 
 // Actions is the full set, in a sensible display order, for the filter UI and
@@ -77,9 +84,10 @@ var Actions = []Action{
 	ActionTeamCreated, ActionTeamUpdated, ActionTeamDeleted,
 	ActionTeamMemberAdded, ActionTeamMemberRoleChange, ActionTeamMemberRemoved,
 	ActionMemberAdded, ActionMemberRoleChange, ActionMemberRemoved, ActionMemberLeft,
-	ActionInvitationSent, ActionInvitationRevoke,
+	ActionInvitationSent, ActionInvitationRevoke, ActionInvitationAccepted,
 	ActionTokenCreated, ActionTokenRevoked,
-	ActionOrgCreated, ActionOrgUpdated, ActionOrgAuditConfig, ActionOrgSecurity,
+	ActionOrgCreated, ActionOrgUpdated, ActionOrgAuditConfig, ActionOrgSecurity, ActionOrgDeleted, ActionOrgRestored,
+	ActionSSOProviderCreated, ActionSSOProviderUpdated, ActionSSOProviderDeleted,
 }
 
 // Entry is one append to the log (the write shape). The "where" (IP/country/UA)

@@ -1,0 +1,223 @@
+---
+title: Multi-tenancy
+description: How Flagon isolates organizations inside one Postgres database - row-level security, a runtime role that cannot bypass it, a user bound to every transaction, membership predicates, SECURITY DEFINER windows bound to the caller, and the tests that prove it.
+---
+
+Flagon serves every organization from one domain database. An **organization** is
+the tenant: projects, teams, tokens, invitations, the audit log, and AI usage all
+carry an `org_id`, and what you can see follows from which organizations you are a
+member of. The job of this layer is to make sure no request ever reads or changes
+another tenant's rows, even when application code has a bug.
+
+Flagon does that inside Postgres, with **row-level security** (RLS): per-table
+policies that Postgres applies to every query before returning or accepting a row.
+
+```text
+   Request acting as user u_123 (from the gateway or a token)
+          │
+  ┌───────▼──────────────────────────────────────────────────────┐
+  │ inUserTx  (api/internal/db/identity.go)                      │
+  │   BEGIN                                                      │
+  │   SELECT set_config('flagon.user_id', 'u_123', true)         │
+  │   ...every query for this operation...                       │
+  │   recordAudit(...)   COMMIT  (binding ends with the tx)      │
+  └───────┬──────────────────────────────────────────────────────┘
+          │ runs as the app role (FLAGON_APP_DATABASE_URL): NOBYPASSRLS
+  ┌───────▼──────────────────────────────────────────────────────┐
+  │ Postgres (domain DB)                                         │
+  │                                                              │
+  │  RLS policy on each tenant table, for example teams:         │
+  │    EXISTS (membership WHERE user_id = current_user_id())     │
+  │                                                              │
+  │  membership predicates    flagon.org_member_role(org, user)  │
+  │                           flagon.org_is_live(org)            │
+  │  project access (0034)    flagon.project_permits(...)        │
+  │                                                              │
+  │  SECURITY DEFINER windows run as the owner, past RLS;        │
+  │  those that act for a caller also require                    │
+  │    p_actor = flagon.current_user_id()      (0030)            │
+  └──────────────────────────────────────────────────────────────┘
+
+   Migrator role (DATABASE_URL): owns the schema, used only at boot
+```
+
+## Why RLS instead of WHERE clauses
+
+The usual way to scope data is to add `WHERE org_id = ?` to every query. It works
+until one query forgets it, and that query leaks every tenant's rows. There is
+nothing to catch it: the query is valid and returns data.
+
+RLS inverts the default. The isolation rule is written once per table, in a
+migration, and Postgres applies it to every statement the runtime role sends. A
+query that forgets to scope itself returns only the caller's rows, and a query run
+with no user bound returns nothing. The Go code still filters and checks roles, so
+it can answer `403` or `404` precisely, but it is a second line of defense, not the
+only one.
+
+## Two roles
+
+The API connects with two Postgres roles, configured in `api/internal/db/db.go`:
+
+| Role | Configured by | Used for | Subject to RLS |
+| --- | --- | --- | --- |
+| Migrator | `DATABASE_URL` | Boot only: provisioning the app role and running migrations | No; it owns the tables |
+| App role | `FLAGON_APP_DATABASE_URL` | Every runtime query | Yes, always |
+
+At boot, `db.Setup` provisions the app role from `FLAGON_APP_DATABASE_URL`:
+`LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`. `NOBYPASSRLS` is the
+load-bearing attribute; it guarantees the runtime role is always filtered by the
+policies, even on tables it has full privileges on. It then grants the role
+`SELECT, INSERT, UPDATE, DELETE` on the tables, never ownership.
+
+Tenant tables use `ENABLE ROW LEVEL SECURITY`, not `FORCE`. Postgres exempts a
+table's owner from non-forced policies, and the owner is the migrator, which the
+server never uses for requests. Leaving the owner exempt lets migrations and the
+`SECURITY DEFINER` helpers below work, while the runtime role stays fully isolated.
+Two tables, the `rls_selfcheck` fixture and `ai_usage`, are forced as well.
+
+<Callout type="danger" title="The runtime never runs as the migrator in production">
+
+A production API (`FLAGON_ENV=production`, or unset on Fly or on any non-loopback
+bind address) refuses to start without `FLAGON_APP_DATABASE_URL`, because running
+requests as the migrator would bypass every policy on this page. In development an
+unset value defaults to the local compose app role (`flagon_app`). `db.Open` never
+falls back to the migrator in any mode: with no app URL it starts degraded (no
+database) and logs why. Never run a shared instance in development mode.
+See [Configuration](/docs/reference/configuration).
+
+</Callout>
+
+## Binding the user to each transaction
+
+Every request-scoped query runs inside `inUserTx` (`api/internal/db/identity.go`).
+It opens a transaction on the app role's pool and runs:
+
+```sql
+SELECT set_config('flagon.user_id', $1, true);
+```
+
+The third argument, `true`, makes the setting local to the transaction. It
+disappears on commit or rollback, so it can never leak to the next request that
+borrows the same connection, and it works through a transaction-pooling proxy such
+as pgbouncer, where session state would not survive between statements.
+
+Policies read the binding through `flagon.current_user_id()` (migration `0003`),
+which returns `NULL` when nothing is bound. Because `NULL` never equals a user id,
+a policy that compares against it matches no rows. Forgetting to bind the user
+fails closed. A sibling function, `flagon.current_org()` (migration `0001`), reads
+an org binding the same way; the self-check fixture uses it.
+
+The user id comes from the auth middleware: the gateway's verified
+`X-Flagon-User-Id`, or the principal of a resolved access token. See
+[Identity and authentication](/docs/architecture/identity-and-auth).
+
+## Membership predicates
+
+Most policies ask one question: is the bound user a member of this row's org? The
+`teams` read policy, for example, checks
+`EXISTS (SELECT 1 FROM memberships m WHERE m.org_id = teams.org_id AND m.user_id = flagon.current_user_id())`.
+That subquery itself runs under the `memberships` policy, which lets a user see
+only their own membership rows.
+
+Role-gated policies go through `flagon.org_member_role(org_id, user_id)`, which
+returns the user's role in a live org or `NULL`. SSO provider configuration, for
+example, is visible only when that function returns `owner` or `admin`, and org
+access tokens follow the same rule.
+
+These helpers are `SECURITY DEFINER` so a policy on one table can consult another
+without recursing through that table's own policies. They are the root that every
+tenancy decision builds on, which is what makes the next section possible.
+
+Projects add a finer layer: per-project roles, team grants, ownership, and the
+org's base permission decide who can see and edit each project. That rule is
+enforced twice. The Go database layer resolves the caller's effective project role
+and answers `404` for a project the caller cannot view, and since migration `0034`
+the `projects` read and update policies (and the project access lists) call
+`flagon.project_permits`, the same rule written in SQL. A missed check in Go still
+cannot leak a project. See
+[Permissions model](/docs/architecture/permissions-model).
+
+## Deleted organizations vanish at the root
+
+Migration `0031` added organization soft delete without touching every query. It
+changed the two predicates everything else depends on:
+
+- `flagon.org_is_live(org_id)` reports whether an org exists and is not deleted.
+- The `memberships_self` policy now requires `flagon.org_is_live(org_id)`, and
+  `flagon.org_member_role` joins only live orgs.
+
+The moment `deleted_at` is stamped, every membership in that org stops existing as
+far as the runtime role can tell. Every `EXISTS (membership ...)` policy fails, so
+the org's projects, members, teams, invitations, tokens, and audit log all read as
+not found. `flagon.resolve_access_token` stops resolving the org's access tokens, so
+they get `401`. Restoring the org clears `deleted_at` and everything returns
+unchanged.
+
+## SECURITY DEFINER windows
+
+Some legitimate reads and writes cross what RLS allows the caller to see directly.
+Flagon handles each one with a narrow `SECURITY DEFINER` function, a "window" that
+runs as the table owner, returns only the columns it needs, and pins
+`SET search_path = public`:
+
+| Need | Why RLS alone cannot do it | Window |
+| --- | --- | --- |
+| List an org's members | A user sees only their own membership row | `flagon.org_members` |
+| Stop the last owner leaving | Counting owners needs other members' rows | `flagon.org_owner_count` |
+| Append an audit entry | `audit_logs` has no insert policy, by design | `flagon.record_audit` |
+| Notify another user | `notifications` has no insert policy | `flagon.create_notification` |
+| Read the audit log | `audit_logs` rows are for owners and admins, joined with other users' profiles | `flagon.org_audit` |
+| Decide the org 2FA and SSO policy | Members cannot read the org's `sso_providers` rows | `flagon.org_access_state` |
+| Resolve a bearer token | The request is not authenticated yet | `flagon.resolve_access_token` |
+| Read a public profile | The reader may not be signed in | `public.user_profile` |
+
+A window that acts for a caller takes the caller's id as an argument. Before
+migration `0030`, the membership check trusted that argument alone, so a Go bug that
+passed the wrong id would have read another tenant's data. Migration `0030` made
+`flagon.org_members`, `flagon.org_invitations`, and `flagon.accept_invitation`
+also require `p_actor = flagon.current_user_id()`, and their Go callers now run
+inside `inUserTx`. Migration `0034` did the same for the project access windows
+(`flagon.project_members`, `flagon.project_teams`, `flagon.project_owners`,
+`flagon.team_projects`), which now also require the caller to be able to view the
+project, migration `0037` bound the team lists (`flagon.teams`,
+`flagon.team_members`), and migration `0036` bound `flagon.org_audit`, whose Go reader
+(`audit.Store.List`) binds the user in its own read-only transaction first.
+`flagon.org_access_state` (`0035`) is bound the same way and returns only the
+policy facts the check needs, never provider configuration or secrets. The window
+and RLS must agree on who is asking; an unbound or mismatched call sees nothing.
+
+A few windows deliberately run with no user bound because they happen before
+sign-in: token resolution, the invitation lookup by token, and the SSO
+configuration read that only the app's internal token can reach.
+
+## How it is tested
+
+Isolation is verified against a real Postgres, not mocks.
+
+- **Integration tests** in `api/internal/db/*_integration_test.go` run `db.Setup`
+  against the database named by `FLAGON_TEST_DATABASE_URL`, then act as different
+  users through the real app role. `TestSetupProvisionsMigratesAndEnforcesRLS`
+  checks that the app role is not a superuser and cannot bypass RLS, and that the
+  self-check passes. `TestIdentityOrgsAreTenantIsolated`,
+  `TestAuditRecordsOrgMutationsAndIsIsolated`,
+  `TestAcceptInvitationIsAuditedAndDefinersBindTheCaller`, and
+  `TestOrgSoftDeleteHidesEverythingAndRestoreBringsItBack` cover cross-tenant reads,
+  definer binding, and deleted orgs. `TestProjectAccessEnforcement` and
+  `TestProjectAccessSQLMatchesGo` drive a matrix of org roles, base permissions,
+  grants, and ownership through both the Go check and `flagon.project_permits` and
+  require them to agree; `TestOrgAccessEnforcement` covers the 2FA and SSO policy,
+  and `TestAuditReadHardening` the bound audit window. Without the variable the
+  tests skip; CI sets it and runs them against a `postgres:17` service on every pull
+  request and every push to `main`.
+- **A live self-check.** `GET /internal/rls-check` runs `db.CheckRLS` as the app
+  role against the two-row `rls_selfcheck` fixture: bound to org A it must see only
+  A's row, bound to B only B's, and unbound nothing. It answers `200` when isolation
+  holds and `503` when it does not, with no credentials required, so you can probe a
+  running deployment.
+
+## Related
+
+- [Permissions model](/docs/architecture/permissions-model)
+- [Data ownership](/docs/architecture/data-ownership)
+- [Request lifecycle](/docs/architecture/request-lifecycle)
+- [Tenant isolation](/docs/security/tenant-isolation)

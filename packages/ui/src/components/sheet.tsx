@@ -3,12 +3,23 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
+import { overlayClasses } from "../lib/overlay";
 
+/** Sheet root (no DOM of its own). Compose Sheet > Trigger + Content. */
 export const Sheet = DialogPrimitive.Root;
-export const SheetTrigger = DialogPrimitive.Trigger;
-export const SheetClose = DialogPrimitive.Close;
-export const SheetTitle = DialogPrimitive.Title;
-export const SheetDescription = DialogPrimitive.Description;
+
+export function SheetTrigger(props: ComponentProps<typeof DialogPrimitive.Trigger>) {
+  return <DialogPrimitive.Trigger data-slot="sheet-trigger" {...props} />;
+}
+export function SheetClose(props: ComponentProps<typeof DialogPrimitive.Close>) {
+  return <DialogPrimitive.Close data-slot="sheet-close" {...props} />;
+}
+export function SheetTitle(props: ComponentProps<typeof DialogPrimitive.Title>) {
+  return <DialogPrimitive.Title data-slot="sheet-title" {...props} />;
+}
+export function SheetDescription(props: ComponentProps<typeof DialogPrimitive.Description>) {
+  return <DialogPrimitive.Description data-slot="sheet-description" {...props} />;
+}
 
 type Side = "top" | "right" | "bottom" | "left";
 
@@ -25,14 +36,21 @@ export function SheetContent({
   className,
   children,
   side = "left",
+  overlayClassName,
   ...props
-}: ComponentProps<typeof DialogPrimitive.Content> & { side?: Side }) {
+}: ComponentProps<typeof DialogPrimitive.Content> & {
+  side?: Side;
+  /** Extra classes for this sheet's backdrop (merged over the shared overlay). */
+  overlayClassName?: string;
+}) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
-        className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] data-[state=closed]:opacity-0"
+        data-slot="sheet-overlay"
+        className={cn(overlayClasses, "data-[state=closed]:opacity-0", overlayClassName)}
       />
       <DialogPrimitive.Content
+        data-slot="sheet-content"
         data-side={side}
         className={cn(
           "fixed z-50 flex flex-col border-hairline bg-card shadow-xl outline-none",

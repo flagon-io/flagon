@@ -28,9 +28,10 @@ services:
       context: ./api
       target: dev
     environment:
-      # Migrator/owner role: used by `api migrate` to run migrations + provision
-      # the app role. In production this runs as Fly's release_command; locally
-      # the command below runs it once before the live-reload server starts.
+      # Migrator/owner role: the server uses it to run migrations + provision the
+      # app role. `flagon-server serve` does this on boot (here and in
+      # production alike), before it starts serving; air (api/.air.toml) runs
+      # `serve` on every rebuild. `flagon-server migrate` does the same and exits.
       DATABASE_URL: postgres://flagon:flagon@postgres:5432/flagon_api?sslmode=disable
       # App role: RLS-enforced (NOBYPASSRLS) runtime login. `api migrate`
       # provisions this role (creates it, sets this password) from the migrator
@@ -38,6 +39,9 @@ services:
       FLAGON_APP_DATABASE_URL: postgres://flagon_app:flagon_app@postgres:5432/flagon_api?sslmode=disable
       # Shared secret the app authenticates to the API with (app<->API trust).
       FLAGON_INTERNAL_TOKEN: dev-internal-token
+      # A container binds all interfaces, which the server would otherwise treat
+      # as production (refusing development values like the token above).
+      FLAGON_ENV: development
     volumes:
       - ./api:/src
     depends_on:
@@ -46,7 +50,10 @@ services:
 
   app:
     build:
-      context: ./app
+      # The npm workspace (app + packages/*) shares one lockfile at the repo
+      # root, so the app image builds from the root.
+      context: .
+      dockerfile: app/Dockerfile
       target: dev
     environment:
       NEXT_PUBLIC_API_URL: http://api:8080
@@ -58,9 +65,14 @@ services:
       BETTER_AUTH_SECRET: dev-only-secret-change-me-32-characters-min
       BETTER_AUTH_URL: http://localhost:4000
     volumes:
-      - ./app:/src
+      - ./app:/src/app
+      - ./packages:/src/packages
+      # Keep the container's own (Linux) installs and build output, never the host's.
       - /src/node_modules
-      - /src/.next
+      - /src/app/node_modules
+      - /src/app/.next
+      - /src/packages/ui/node_modules
+      - /src/packages/ui/dist
     depends_on:
       postgres:
         condition: service_healthy

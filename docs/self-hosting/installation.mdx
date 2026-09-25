@@ -1,0 +1,338 @@
+---
+title: Installation
+description: Install Flagon from source or with the Docker images, migrate both databases, seed a demo user, and sign in.
+---
+
+This page brings up a working Flagon instance: Postgres, the API, and the app,
+with a demo account you can sign in with. It covers running both from source,
+running the whole stack with Docker Compose, and building the API and app
+images.
+For what each piece does, read the [overview](/docs/self-hosting/overview) first.
+
+The steps below target a local machine. The same commands work on a server; the
+[production](/docs/self-hosting/production) page covers what changes when real
+users depend on the instance (secrets, TLS, email, health checks).
+
+## Prerequisites
+
+| Tool | Version | Used for |
+| --- | --- | --- |
+| Git | any | Cloning the repository. |
+| Go | 1.27.1 or newer (from `api/go.mod`) | Building and running the API from source. Not needed if you use the API's Docker image. |
+| Node.js and npm | Node 24 or newer (CI runs 24; the app's Dockerfile uses 26) | Installing dependencies, building and running the app, and the app's migration and seed scripts. |
+| Docker | any recent version with Compose | Running Postgres locally, and optionally the API image. |
+| Postgres | 17 (the version the compose file and CI use) | Both databases. The compose file provides one. |
+
+## Install from source
+
+<Steps>
+
+<Step title="Clone the repository">
+
+```bash
+git clone https://github.com/flagon-io/flagon.git
+cd flagon
+```
+
+The repository is an npm workspaces monorepo plus a Go module: `app/` is the web
+app, `api/` is the Go API, and `packages/ui/` is the design system the app is
+built with.
+
+</Step>
+
+<Step title="Start Postgres">
+
+The base `compose.yml` publishes no host ports, so it never collides with
+servers you run natively. Copy the override once to publish Postgres on
+`localhost:5432`, then start it:
+
+```bash
+cp compose.override.example.yml compose.override.yml
+docker compose up -d postgres
+```
+
+This starts one `postgres:17-alpine` instance with the user `flagon` (password
+`flagon`) and two databases: `flagon_api` for the API and `flagon_app` for the
+app. The second database is created by `.docker/postgres/01-create-app-db.sql`
+the first time the volume initializes.
+
+To use your own Postgres instead, create the two databases yourself and point
+the connection strings in the next steps at it. The API's migrator role must be
+able to create roles; see [Database](/docs/self-hosting/database).
+
+</Step>
+
+<Step title="Check the API's mode">
+
+The API chooses between **development** and **production** mode at startup.
+Production refuses to start without real secrets. Unless `FLAGON_ENV` says
+otherwise, a server that binds a network-reachable interface (such as
+`FLAGON_HOST=0.0.0.0`) or runs on Fly.io is production, and a server bound to
+loopback is development.
+
+Run from a checkout with no configuration, the API binds `127.0.0.1`, so it is in
+development mode and there is nothing to set. Every setting has a default that
+points at the compose Postgres (`postgres://flagon:flagon@localhost:5432/flagon_api`
+for the migrator, `postgres://flagon_app:flagon_app@localhost:5432/flagon_api` for
+the runtime role), the internal token defaults to the public value
+`dev-internal-token`, and stored credentials are encrypted with a public
+development key. The API logs a warning for each of these. Binding to loopback
+also avoids the Windows Firewall prompt.
+
+For local overrides, put them in `api/.env`, which the API loads at startup and
+git ignores. If you set `FLAGON_HOST=0.0.0.0` there, also set
+`FLAGON_ENV=development`, or `make api` exits with "DATABASE_URL is required in
+production (set FLAGON_ENV=development for local development)".
+
+</Step>
+
+<Step title="Configure the app">
+
+The app reads `app/.env.local`. Start from the example file:
+
+```bash
+cp app/.env.example app/.env.local
+```
+
+Then fill in at least these values:
+
+```bash
+# app/.env.local
+BETTER_AUTH_SECRET=<output of: openssl rand -base64 32>
+BETTER_AUTH_URL=http://localhost:3000
+DATABASE_URL=postgres://flagon:flagon@localhost:5432/flagon_app?sslmode=disable
+FLAGON_API_URL=http://localhost:8080
+FLAGON_INTERNAL_TOKEN=dev-internal-token
+```
+
+`FLAGON_INTERNAL_TOKEN` must match the API's value. In development both the API
+and the app fall back to `dev-internal-token` when it is unset, so you can also
+leave it blank; setting it explicitly makes the pairing obvious. If the two values
+differ, every request from the app fails with `401` "invalid internal token".
+
+Without `RESEND_API_KEY`, the app prints its emails (verification codes and
+password resets) to its console instead of sending them, and the API writes
+invitation emails, accept link included, to its log as
+`[email] not sent (log mailer)`. Such an invitation reports `email_sent: false`,
+and the dashboard's invite dialog shows the link with a copy button so you can
+share it.
+
+</Step>
+
+<Step title="Install dependencies">
+
+Run this from the repository root. The single `package-lock.json` and
+`node_modules` live there, and `app` plus `packages/*` are workspaces:
+
+```bash
+npm install
+```
+
+</Step>
+
+<Step title="Start the API">
+
+```bash
+make api
+# same as: cd api && go run ./cmd/flagon-server serve
+```
+
+On boot the API connects to `flagon_api` as the migrator role, provisions the
+`flagon_app` runtime role, applies every pending migration, and then serves on
+`http://localhost:8080`. Check it:
+
+```bash
+curl -i http://localhost:8080/healthz   # 200 when the process is up
+curl http://localhost:8080/readyz       # {"database":"ok","status":"ok"}
+```
+
+</Step>
+
+<Step title="Migrate the app's database">
+
+The app's auth tables are migrated separately, by the app's own scripts:
+
+```bash
+npm run db:migrate --workspace app
+```
+
+This renames any legacy BetterAuth tables to the plural names Flagon uses,
+applies BetterAuth's schema with the installed version, and creates the
+`user_emails` table. It is idempotent, so running it again is safe.
+
+</Step>
+
+<Step title="Start the app">
+
+```bash
+make app
+# same as: npm run dev   (builds @flagon-io/ui, then runs next dev)
+```
+
+The app serves on `http://localhost:3000`. `make dev` does this step and the
+previous API step together: it starts Postgres, then runs the API and the app in
+parallel in one terminal.
+
+</Step>
+
+<Step title="Seed a demo user and sign in">
+
+With the API running, create the demo account and its organization:
+
+```bash
+make seed
+# same as: npm run db:seed --workspace app
+```
+
+The seed writes a pre-verified user with a static password straight into
+`flagon_app`, then creates the organization through the API's `POST /orgs`, so
+it exercises the real creation path. It is idempotent: re-running it resets the
+password and re-verifies the email.
+
+| Field | Value |
+| --- | --- |
+| Email | `demo@flagon.dev` |
+| Username | `demo` |
+| Password | `password12345` |
+| Organization | `Demo Org` at `/demo` |
+
+Open `http://localhost:3000` and sign in; in development the login form
+pre-fills the demo credentials. Override any value with `SEED_EMAIL`,
+`SEED_USERNAME`, `SEED_PASSWORD`, `SEED_NAME`, `SEED_ORG_NAME`, or
+`SEED_ORG_SLUG`, and set `SEED_SKIP_ORG=1` to create only the user.
+
+<Callout type="warn" title="Development only">
+
+The seed refuses to run when `NODE_ENV=production` unless `SEED_ALLOW_PROD=1` is
+set. Never seed a static-password account into an instance other people use.
+
+</Callout>
+
+</Step>
+
+</Steps>
+
+## Run everything with Docker Compose
+
+The compose file can run the whole stack, not only Postgres. With the override
+copied (it publishes Postgres on `5432`, the API on `8080`, and the app on
+`4000`):
+
+```bash
+docker compose up --build
+```
+
+This builds the `dev` targets of both Dockerfiles: the API live-reloads through
+`air`, and the app runs `next dev`. The compose file sets development values on
+both services (`FLAGON_INTERNAL_TOKEN: dev-internal-token`, a development
+`BETTER_AUTH_SECRET`) and sets `FLAGON_ENV: development` on the API, because a
+container binds all interfaces and would otherwise start in production mode and
+refuse those values. Migrate the app's database and seed the demo user as in the
+steps above. Use this stack for local work only.
+
+## Run the API with Docker
+
+The API ships a multi-stage Dockerfile at `api/Dockerfile`. Its final stage is a
+small Alpine image that runs `flagon-server serve` as a non-root user, listens on
+port 8080, and declares a `HEALTHCHECK` against `/healthz`.
+
+```bash
+docker build -t flagon-api -f api/Dockerfile api
+# or: make api-docker-build
+```
+
+The image sets `FLAGON_HOST=0.0.0.0` so the container binds all interfaces, and
+so it runs in production mode unless you set `FLAGON_ENV=development`. Run it with the two database URLs, the internal
+token, and the secrets key; without any one of them it exits at startup. The API
+reaches Postgres from inside the container, so use a host name the container can
+resolve (a compose service name, a Docker network alias, or your database
+server's address), not `localhost`:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e DATABASE_URL='postgres://flagon:flagon@db.internal:5432/flagon_api?sslmode=disable' \
+  -e FLAGON_APP_DATABASE_URL='postgres://flagon_app:<app-role-password>@db.internal:5432/flagon_api?sslmode=disable' \
+  -e FLAGON_INTERNAL_TOKEN='<a long random secret>' \
+  -e FLAGON_SECRETS_KEY='<output of: openssl rand -base64 32>' \
+  flagon-api
+```
+
+The image's default command is `serve`. Pass `migrate` instead to provision the
+app role and apply migrations, then exit:
+
+```bash
+docker run --rm -e DATABASE_URL=... -e FLAGON_APP_DATABASE_URL=... flagon-api migrate
+```
+
+The `migrate` command needs only `DATABASE_URL` in production;
+`FLAGON_APP_DATABASE_URL` tells it which runtime role to provision.
+
+## Run the app with Docker
+
+The app's Dockerfile builds from the **repository root**, because the npm
+workspace (the app plus `packages/ui`) shares one lockfile there:
+
+```bash
+docker build -t flagon-app -f app/Dockerfile .
+```
+
+The final stage runs Next.js's standalone server (`node app/server.js`) as the
+`node` user on port 3000, with `NODE_ENV=production`. Pass the app's settings at
+`docker run`; in production the app requires `FLAGON_INTERNAL_TOKEN` and throws on
+its first API call without it:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e DATABASE_URL='postgres://flagon:flagon@db.internal:5432/flagon_app' \
+  -e BETTER_AUTH_SECRET='<output of: openssl rand -base64 32>' \
+  -e BETTER_AUTH_URL='https://app.example.com' \
+  -e FLAGON_API_URL='http://api.internal:8080' \
+  -e FLAGON_INTERNAL_TOKEN='<the same secret as the API>' \
+  flagon-app
+```
+
+The Dockerfile passes no build arguments, so an image built this way has the
+Google and GitHub sign-in buttons disabled: that choice is made at build time (see
+the Node section below). The image does not migrate the app's database. Run
+`npm run db:migrate --workspace app` against it from a checkout (with the same
+`DATABASE_URL`) before the first start and after upgrades.
+
+## Run the app for production with Node
+
+The app is a standard Next.js application. From the repository root:
+
+```bash
+npm ci
+npm run db:migrate --workspace app   # needs DATABASE_URL (and the auth env)
+npm run build                        # builds @flagon-io/ui, then the app
+npm run start --workspace app        # next start, port 3000
+```
+
+Set the app's environment before `npm run build`, not only before `start`:
+whether the Google and GitHub sign-in buttons are enabled is decided at build time
+(in `app/next.config.ts`) from `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and
+`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`.
+
+The app also deploys to any Next.js host. Flagon's own instance builds on Vercel
+with `npm run vercel-build --workspace app`, which runs the same auth migrations
+during the build and fails the deploy if a migration fails.
+
+## Verify the install
+
+- `GET /healthz` on the API returns `200`.
+- `GET /readyz` returns `200` with `"database":"ok"`. A `503` with
+  `"status":"degraded"` means the API is up but cannot reach Postgres.
+- `GET /internal/rls-check` returns `200` with `"enforced":true`, which proves
+  the runtime role cannot see rows outside the organization bound to its
+  transaction.
+- You can sign in to the app, and the dashboard lists your organization.
+
+If any of these fail, see [Self-hosting issues](/docs/troubleshooting/self-hosting-issues).
+
+## Related
+
+- [Self-hosting overview](/docs/self-hosting/overview)
+- [Configuration](/docs/self-hosting/configuration)
+- [Database](/docs/self-hosting/database)
+- [Production](/docs/self-hosting/production)
+- [Self-hosting issues](/docs/troubleshooting/self-hosting-issues)

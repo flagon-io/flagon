@@ -27,7 +27,7 @@ export function BrandProvider({
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: css }} />
-      <div data-brand={id} className={className}>
+      <div data-slot="brand-provider" data-brand={id} className={className}>
         {children}
       </div>
     </>

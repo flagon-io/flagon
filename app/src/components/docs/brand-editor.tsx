@@ -68,6 +68,13 @@ const COLOR_GROUPS: { group: string; fields: { key: keyof BrandColors; label: st
       { key: "secondary", label: "Secondary" },
       { key: "accent", label: "Accent" },
       { key: "ring", label: "Focus ring" },
+    ],
+  },
+  {
+    group: "Status",
+    fields: [
+      { key: "success", label: "Success" },
+      { key: "warning", label: "Warning" },
       { key: "destructive", label: "Destructive" },
     ],
   },
@@ -85,6 +92,8 @@ const DEFAULT_COLORS: Record<string, string> = {
   accent: "#f1f2f3",
   ring: "#0d9488",
   destructive: "#d83a40",
+  success: "#047857",
+  warning: "#b45309",
 };
 
 type EditorState = {
@@ -104,6 +113,7 @@ function toBrand(s: EditorState): Brand {
     ...(c as Partial<BrandColors>),
     brand: c.primary,
     brandBright: c.primary,
+    brandForeground: c.primaryForeground,
     link: c.primary,
     // Buttons/inputs read --input and --hairline; mirror the edited Border into
     // them so the preview's borders track the picker (and don't vanish against a
@@ -118,6 +128,7 @@ function toBrand(s: EditorState): Brand {
     ring: c.ring,
     brand: c.primary,
     brandBright: c.primary,
+    brandForeground: c.primaryForeground,
     link: c.primary,
     chart: s.chart,
   };

@@ -1,0 +1,12 @@
+{
+  "title": "API",
+  "pages": [
+    "using-the-api",
+    "authentication",
+    "errors",
+    "---Conventions---",
+    "pagination",
+    "expanding-responses",
+    "openapi"
+  ]
+}

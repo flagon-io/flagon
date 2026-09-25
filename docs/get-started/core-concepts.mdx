@@ -1,34 +1,206 @@
 ---
 title: Core concepts
-description: Organizations, projects, members, and how access works across Flagon.
-order: 2
+description: The vocabulary the rest of the docs use, from organizations and project roles to tokens, scopes, the audit log, and the assistant.
 ---
 
-A quick map of the pieces you will work with. Each has its own page under
-[Platform](/docs/platform/projects); this is the overview.
+This page defines the terms you meet everywhere else in Flagon, one short section each, with a link
+to the page that covers the concept in depth. Most of them are about one question: who can do what,
+where. Once you know how an organization, its members and teams, and its projects relate, the rest
+of the platform reads easily.
 
-## Organizations
+## How the pieces fit
 
-The **organization** is the top-level container. Your projects, members, tokens,
-and settings all live inside one, and URLs are org-scoped
-(`app.flagon.io/<org>/...`). Your personal account settings at `/settings` are
-the one exception.
+```text
+ ┌───────────────────── Organization (the tenant) ──────────────────────┐
+ │                                                                      │
+ │  Members ─────── join ──────► Teams                                  │
+ │  owner, admin, member         maintainer, member                     │
+ │    │                            │                                    │
+ │    │ base permission            │ team grants                        │
+ │    │ and direct grants          │                                    │
+ │    ▼                            ▼                                    │
+ │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                │
+ │  │  Project A   │  │  Project B   │  │  Project C   │                │
+ │  └──────────────┘  └──────────────┘  └──────────────┘                │
+ │  effective project role: read < triage < write < maintain < admin    │
+ │  project owners (users or teams) sit one tier above admin            │
+ │                                                                      │
+ │  Also held by the org: access tokens, 2FA and SSO policy, audit log  │
+ │                                                                      │
+ └──────────────────────────────────────────────────────────────────────┘
+```
 
-## Projects
+An organization contains everything. Members get access to projects three ways: the org's base
+permission, a direct grant on a project, and grants made to a team they belong to. Their
+**effective** role on a project is the highest of those.
 
-A **project** is a deployable app, the core unit you build on. There is no
-separate "app" layer above it. See [Projects](/docs/platform/projects).
+## Organization
 
-## Members and access
+An **organization** (org) is the top-level container and the unit of tenant isolation. Projects,
+members, teams, tokens, security settings, and the audit log all belong to an org, not to a person.
+Dashboard URLs are org-scoped (`app.flagon.io/<org>/...`); your personal settings at `/settings`
+are the only exception. Tenant isolation is enforced by Postgres row-level security, so a query
+running for one org cannot read another org's rows.
 
-People join an organization as **members** with roles, and access is
-**permission-scoped** from day one. A token or an agent can only ever do what the
-person behind it is allowed to do, and tenant isolation is enforced in the
-database, so one organization can never see another's data.
+You can belong to many orgs. The free plan lets you **own** one; creating another returns
+`402 Payment Required`. Deleting an org is a soft delete that owners can undo within 30 days. See
+[Organizations](/docs/platform/organizations) and [Multi-tenancy](/docs/architecture/multi-tenancy).
 
-## One set of capabilities, three front doors
+## Member and org role
 
-The dashboard, the [assistant](/docs/ai/assistant), and the
-[API](/docs/api/using-the-api) (and [MCP](/docs/ai/mcp)) all drive the same
-permission-checked operations. Whatever you learn one way carries over to the
-others.
+A **member** is a user who belongs to an org. Each member holds one **org role**:
+
+| Org role | What it allows |
+| --- | --- |
+| Owner | Everything, including deleting the org. An org always has at least one owner. |
+| Admin | Manage members, invitations, teams, settings, security, and org access tokens. Read the audit log. |
+| Member | Use the org and create projects. Project access beyond that comes from the base permission and grants. |
+
+Owners and admins are admins on every project and are treated as owners of every project, so the
+org can never lock itself out of its own work. People join by invitation: an existing Flagon user is
+added right away, and anyone else gets an email link to register and join. See
+[Members](/docs/platform/members) and [Roles](/docs/platform/roles).
+
+## Base permission
+
+The **base permission** is the project role every plain member gets on every project in the org,
+before any explicit grant. It defaults to `read`, and `none` gives members no project role unless
+they are granted one. Owners and admins set it under **Settings > Member privileges** (the dashboard
+offers No access, Read, Write, and Admin; the API also accepts `triage` and `maintain`). See
+[Set base permissions](/docs/guides/set-base-permissions).
+
+## Team
+
+A **team** is a named group of members. Inside a team, a **maintainer** can manage the team's
+membership and a **member** simply belongs. A team can be granted a project role on a project, and
+every team member receives it. Owners and admins create teams. See [Teams](/docs/platform/teams).
+
+## Project
+
+A **project** is a deployable app and the core unit of work. It has a name, a slug that is unique
+within the org, a description, a Markdown README, and a repository URL. There is no separate app
+layer above it. Deleting a project is a soft delete: it moves to **Settings > Deleted projects**
+and project owners can restore it within 30 days. If another project took its slug in the
+meantime, you restore it under a new slug. See [Projects](/docs/platform/projects).
+
+## Project role
+
+A **project role** sets what someone can do on one project. The roles form a ladder, and each role
+includes everything below it:
+
+`read < triage < write < maintain < admin`
+
+The API enforces the ladder on every project operation, and Postgres row-level security enforces
+it again underneath:
+
+| To | You need |
+| --- | --- |
+| See the project, its collaborators, teams, and owners | `read` |
+| Edit its name, description, README, or repository URL | `write` |
+| Rename its slug (which changes its URL) | `maintain` |
+| Grant, change, and revoke roles for people and teams | `admin` |
+| Delete or restore it, or add and remove owners | ownership |
+
+A project you can't see answers `404`, as if it didn't exist; a project you can see but lack the
+role for answers `403`. `triage` has no distinct power yet: it is defined so that grants you make
+now keep their meaning when the features it will gate arrive.
+
+<Callout type="note" title="Creating a project">
+
+Any member can create a project (a legacy viewer cannot). If you are not an org owner or admin,
+Flagon grants you `admin` on the project you create, so you can manage it even when the base
+permission is `read` or `none`. Creating a project does not make you its owner.
+
+</Callout>
+
+See [Project access](/docs/platform/project-access).
+
+## Project ownership
+
+**Ownership** is a separate tier above `admin`. A project owner can be a user or a team, and org
+owners and admins are implicitly owners of every project. Only owners can delete and restore a
+project and add or remove its owners. Creating a project does not make you its owner. See
+[Transfer project ownership](/docs/guides/transfer-project-ownership).
+
+## Effective permission
+
+Your **effective** project role is the highest of three sources: the org's base permission (or
+`admin`, if you are an org owner or admin), any role granted to you directly on the project, and any
+role granted to a team you are in. A grant can raise your access but never lower it below the base
+permission. The check runs in the API, so it applies the same way whether a request arrives from
+the dashboard, the API, or the assistant. See [Permissions model](/docs/architecture/permissions-model) and the
+[Roles matrix](/docs/reference/roles-matrix).
+
+## Access token and scope
+
+An **access token** lets a script, CI job, or external agent call the API and MCP server without a
+browser session. There are two kinds:
+
+| Kind | Prefix | Acts as | Created at |
+| --- | --- | --- | --- |
+| Personal access token (PAT) | `flagon_pat_` | You | `/settings/tokens` |
+| Organization access token (OAT) | `flagon_oat_` | A service identity in the org with a chosen role (admin, member, or viewer) | `/<org>/settings/tokens`, by owners and admins |
+
+A **scope** limits what a token can reach, such as `read:project` or `write:org`. Scopes are
+hierarchical (`admin:org` implies `write:org`, which implies `read:org`) and fail closed: an
+operation a token's scopes do not cover returns `403`. Scopes only ever narrow access; a token can
+never do more than its user or role allows. A token created with **Full access** has no scope
+limit but is still bounded by that role. Tokens cannot create or manage other tokens. See
+[Access tokens](/docs/platform/access-tokens) and the [Scopes reference](/docs/reference/scopes).
+
+## Audit log
+
+The **audit log** is an append-only record of every change to an org's state: who did it, what
+changed, which object, when, and from where. Each entry is written in the same database transaction
+as the change, so a change cannot happen without its entry. Only owners and admins can read it, at
+**Settings > Audit log**. See [Audit log](/docs/platform/audit-log) and the
+[audit actions reference](/docs/reference/audit-actions).
+
+## Notification
+
+A **notification** is a message to one person about something that happened to them, such as being
+added to an org, having a role changed, or being granted access to a project. Notifications appear
+under the bell in the top bar and at `/settings/notifications`. They are separate from the audit
+log, which is the org's record rather than a personal inbox. See
+[Notifications](/docs/platform/notifications).
+
+## The assistant and human in the loop
+
+The **assistant** is the AI agent built into the dashboard (the **Ask AI** panel). It operates
+Flagon on your behalf, using your identity and your permissions, and it is confined to Flagon: it
+declines unrelated requests. Read operations run immediately. Any change is **human in the loop**:
+the assistant proposes the action, and nothing happens until you select **Confirm**. It works
+inside the organization you opened it in: a tool call that names another organization is refused
+with `403`. AI usage is
+metered per org and capped by a daily limit. See [The assistant](/docs/ai/assistant).
+
+## MCP server
+
+The **MCP server** exposes Flagon's operations to external agents, such as Claude Desktop or
+Cursor, over the Model Context Protocol at `https://mcp.flagon.io`. Without a token it offers only
+the read-only documentation tools. With a Flagon access token it offers the tools that token's
+scopes allow, acting as the token's user. The MCP server runs a tool when the client calls it, so
+confirming a change is up to your MCP client. See [MCP server](/docs/ai/mcp).
+
+## Tool registry
+
+The assistant, the MCP server, and the REST API share one **tool registry**: every user-facing API
+operation has a matching tool with the same scope, and tools that change data are marked as
+mutating. That is why anything you can do in the dashboard, you can also ask for. See
+[Tools](/docs/ai/tools) and [Tool registry](/docs/architecture/tool-registry).
+
+## Docs as a corpus
+
+These docs are compiled into a **corpus** that the API embeds and serves at `/docs`. The website
+renders it, and the assistant and MCP server search it with the `search_docs` and `get_doc` tools.
+Each page is either `public` or `internal` (no page is internal today). Internal pages are
+readable through the in-product assistant or an authenticated MCP connection. They never leave
+through the public `/docs` routes or the anonymous MCP server. See [Content corpora](/docs/architecture/content-corpora).
+
+## Related
+
+- [Quickstart](/docs/get-started/quickstart)
+- [Roles matrix](/docs/reference/roles-matrix)
+- [Scopes reference](/docs/reference/scopes)
+- [Glossary](/docs/reference/glossary)
+- [Architecture overview](/docs/architecture/overview)

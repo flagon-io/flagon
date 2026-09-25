@@ -1,0 +1,224 @@
+---
+title: Connect an MCP client
+description: Point Claude Code, Claude Desktop, Cursor, or any other MCP client at mcp.flagon.io, authenticate with an access token, and check which tools it can use.
+---
+
+Flagon runs a **Model Context Protocol (MCP)** server, so an AI agent outside Flagon, such as the
+assistant in your editor, can read Flagon's documentation and operate your organizations. It
+exposes the same tool registry as the in-product assistant, and every tool calls the same
+permission-checked operation as the REST API, so an MCP client can never do more than you could
+in the dashboard.
+
+By the end of this guide your MCP client will list Flagon's tools, and you will be able to ask
+it things like "list the projects in acme" and have it act as you.
+
+<Callout type="info" title="Before you start">
+
+- **An MCP client** that can connect to a remote HTTP server, or can run the `mcp-remote` bridge
+  with Node.js.
+- **An access token** for anything beyond the docs. A personal access token acts as you across
+  your organizations; an organization token reaches only its organization. See
+  [Automate with access tokens](/docs/guides/automate-with-access-tokens).
+
+</Callout>
+
+## What the server speaks
+
+| | |
+| --- | --- |
+| URL | `https://mcp.flagon.io/mcp` (the root, `https://mcp.flagon.io`, serves the same endpoint) |
+| Transport | Streamable HTTP, `POST` only. Each JSON-RPC 2.0 request gets a single JSON response; the server does not open a server-sent events stream, and `GET` returns `405`. |
+| Protocol version | `2024-11-05`, returned by `initialize` |
+| Methods | `initialize`, `ping`, `tools/list`, `tools/call` |
+| Auth | Optional `Authorization: Bearer flagon_...` header |
+
+## What you can reach
+
+| Caller | Tools |
+| --- | --- |
+| No token | `search_docs` and `get_doc` only, over public documentation. |
+| Token with full access | Every tool, bounded by the token's role. |
+| Scoped token | The docs tools, plus each tool whose scope the token holds. Tools it can't use are not listed. |
+
+Internal documentation pages (none today) are returned to any caller with a valid token, and
+never to an anonymous one. The [tool reference](/docs/ai/tools) lists each tool with its scope.
+
+A tool call that names an organization also passes that organization's security policy: with a
+personal access token, an organization that requires two-factor authentication or SSO refuses
+the call (as a tool result with `"isError": true`) until the token's user meets the requirement.
+Organization access tokens are exempt. Changes made over MCP are recorded in the audit log with
+your client's IP address and `User-Agent`.
+
+<Callout type="warn" title="Mutations run when your client calls them">
+
+In the dashboard, the assistant proposes every change and waits for you to confirm. Over MCP,
+Flagon runs a tool as soon as the client calls it; any confirmation step is your MCP client's
+own tool-approval prompt. Keep your client's approval prompts on for Flagon, and use a scoped,
+read-only token (for example `read:org` and `read:project`) when you only need answers.
+
+</Callout>
+
+## Steps
+
+<Steps>
+
+<Step title="Create a token">
+
+In personal **Settings > Personal access tokens**, generate a token. For a read-only agent,
+check `read:org`, `read:project`, and `read:team`. Copy the secret and export it in your shell:
+
+```bash
+export FLAGON_TOKEN=flagon_pat_...
+```
+
+</Step>
+
+<Step title="Add Flagon to your client">
+
+<Tabs>
+
+<Tab title="Claude Code">
+
+```bash
+claude mcp add --transport http flagon https://mcp.flagon.io/mcp \
+  --header "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+Run `/mcp` inside Claude Code to confirm `flagon` is connected.
+
+</Tab>
+
+<Tab title="Claude Desktop">
+
+Claude Desktop's config file launches local servers, so use the `mcp-remote` bridge (requires
+Node.js). Edit `claude_desktop_config.json` (**Settings > Developer > Edit Config**):
+
+```json
+{
+  "mcpServers": {
+    "flagon": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.flagon.io/mcp",
+        "--header",
+        "Authorization:${FLAGON_AUTH}"
+      ],
+      "env": {
+        "FLAGON_AUTH": "Bearer flagon_pat_..."
+      }
+    }
+  }
+}
+```
+
+The header is passed through an environment variable, with no space after the colon, so the
+space inside `Bearer flagon_...` doesn't break argument parsing. Restart Claude Desktop after
+saving.
+
+</Tab>
+
+<Tab title="Cursor">
+
+Add Flagon to `~/.cursor/mcp.json` (all projects) or `.cursor/mcp.json` (one project):
+
+```json
+{
+  "mcpServers": {
+    "flagon": {
+      "url": "https://mcp.flagon.io/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:FLAGON_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+`${env:FLAGON_TOKEN}` reads the token from your environment, so it stays out of the file. Check
+the server's status under Cursor's MCP settings.
+
+</Tab>
+
+<Tab title="Other clients">
+
+Any client that supports remote Streamable HTTP servers needs the URL
+`https://mcp.flagon.io/mcp` and the header `Authorization: Bearer <your token>`. A generic
+configuration usually looks like:
+
+```json
+{
+  "mcpServers": {
+    "flagon": {
+      "type": "http",
+      "url": "https://mcp.flagon.io/mcp",
+      "headers": { "Authorization": "Bearer flagon_pat_..." }
+    }
+  }
+}
+```
+
+Field names vary by client (`type`, `transport`, `serverUrl`); check its documentation. Clients
+that only speak stdio can use the `mcp-remote` bridge shown in the Claude Desktop tab.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Verify the connection">
+
+Ask your client "which Flagon tools do you have?", or call the server directly:
+
+```bash
+curl -sS https://mcp.flagon.io/mcp \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}' \
+  | jq '.result.tools[].name'
+```
+
+Without the header you should see only `search_docs` and `get_doc`. Then try a real call:
+
+```bash
+curl -sS https://mcp.flagon.io/mcp \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+       "params": {"name": "list_projects", "arguments": {"org": "acme"}}}'
+```
+
+The result is a single text block containing JSON. Organization-scoped tools take the
+organization slug as `org`.
+
+</Step>
+
+</Steps>
+
+## Errors
+
+MCP errors arrive as JSON-RPC errors in an HTTP `200` response, or as a tool result with
+`"isError": true`:
+
+| Code or result | Message | Meaning |
+| --- | --- | --- |
+| `-32001` | `invalid or expired token` | The token didn't resolve. Flagon rejects it rather than silently treating you as anonymous. |
+| `-32003` | `this token is missing the scope required for <tool>` | Use a token with that tool's scope. |
+| `-32602` | `unknown tool: <name>` | The tool doesn't exist, or you're anonymous and it needs a token. |
+| `-32602` | `invalid params` | The `tools/call` params are malformed. |
+| `-32601` | `method not found: <method>` | The server implements only the methods listed above. |
+| `-32700` | `parse error` | The request body isn't valid JSON. |
+| `"isError": true` | For example `project not found` | The operation failed with the same message the REST API returns. |
+
+HTTP `405` means the client sent a `GET`; this server only accepts `POST`. HTTP `413` means the
+request body was over the API's size cap, and HTTP `429` (with a `Retry-After` header) means the
+token sent requests faster than the per-token rate limit.
+
+## Related
+
+- [MCP server](/docs/ai/mcp)
+- [Tool reference](/docs/ai/tools)
+- [Automate with access tokens](/docs/guides/automate-with-access-tokens)
+- [Troubleshooting the assistant and MCP](/docs/troubleshooting/assistant-and-mcp)

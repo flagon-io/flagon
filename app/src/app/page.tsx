@@ -1,19 +1,12 @@
 import { redirect } from "next/navigation";
-import { getMe, type Me } from "@/lib/flagon-api";
+import { requireMe } from "@/lib/org-context";
 
+// The entry resolver. Signed out -> /login (inside requireMe). An API outage is
+// NOT treated as "signed out": it throws to the root error boundary, so a
+// signed-in user sees a retryable error instead of being bounced to a login
+// page that can't help them.
 export default async function Home() {
-  const me = await getMeSafely();
-  if (!me) redirect("/login");
+  const { me } = await requireMe();
   if (me.orgs.length === 0) redirect("/new");
   redirect(`/${me.orgs[0].slug}`);
-}
-
-// Fail closed to "not logged in" on any backend error (e.g. the API/database
-// isn't reachable yet) rather than crashing the entry point with a 500.
-async function getMeSafely(): Promise<Me | null> {
-  try {
-    return await getMe();
-  } catch {
-    return null;
-  }
 }

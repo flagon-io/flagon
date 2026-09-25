@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Monitor } from "lucide-react";
-import { Alert, Badge, Button, Card, Skeleton } from "@flagon-io/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@flagon-io/ui";
+import { ListError, ListSkeleton, TableShell } from "@/components/shared/list-states";
 import { authClient, useSession } from "@/lib/auth-client";
 
 type Session = {
@@ -22,13 +33,23 @@ export function SessionsList() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const { data, error: err } = await authClient.listSessions();
-    if (err) setError(err.message ?? "Couldn't load your sessions.");
-    else setSessions((data as Session[]) ?? []);
+    if (err) {
+      setLoadError(err.message || "Couldn't load your sessions.");
+    } else {
+      setLoadError(null);
+      setSessions((data as Session[]) ?? []);
+    }
     setLoading(false);
   }, []);
+
+  const retry = useCallback(() => {
+    setLoading(true);
+    void refresh();
+  }, [refresh]);
 
   useEffect(() => {
     (async () => {
@@ -54,20 +75,10 @@ export function SessionsList() {
     setBusy(null);
   }
 
-  if (loading) {
-    return (
-      <Card className="divide-y divide-hairline">
-        {[0, 1].map((i) => (
-          <div key={i} className="flex items-center gap-3 px-4 py-3.5">
-            <Skeleton className="size-9 rounded-full" />
-            <div className="flex-1 space-y-1.5">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-3 w-56" />
-            </div>
-          </div>
-        ))}
-      </Card>
-    );
+  if (loading) return <ListSkeleton />;
+
+  if (loadError) {
+    return <ListError title="Couldn't load sessions" message={loadError} onRetry={retry} />;
   }
 
   const others = sessions.filter((s) => s.token !== currentToken).length;
@@ -76,43 +87,62 @@ export function SessionsList() {
     <div className="space-y-4">
       {error && <Alert variant="destructive">{error}</Alert>}
 
-      <Card>
-        <ul className="divide-y divide-hairline">
-          {sessions.map((s) => {
-            const isCurrent = s.token === currentToken;
-            return (
-              <li key={s.id} className="flex items-center gap-3 px-4 py-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                  <Monitor className="size-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    {describeAgent(s.userAgent)}
-                    {isCurrent && (
-                      <Badge variant="brand" className="normal-case tracking-normal">
-                        This device
-                      </Badge>
+      <TableShell>
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="pl-4">Device</TableHead>
+              <TableHead>IP address</TableHead>
+              <TableHead>Last active</TableHead>
+              <TableHead className="pr-4 text-right">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sessions.map((s) => {
+              const isCurrent = s.token === currentToken;
+              return (
+                <TableRow key={s.id}>
+                  <TableCell className="pl-4">
+                    <div className="flex items-center gap-3">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                        <Monitor className="size-4" />
+                      </span>
+                      <span className="flex items-center gap-2 font-medium text-foreground">
+                        {describeAgent(s.userAgent)}
+                        {isCurrent && (
+                          <Badge variant="brand" className="normal-case tracking-normal">
+                            This device
+                          </Badge>
+                        )}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {s.ipAddress || "Unknown IP"}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                    {formatWhen(s.updatedAt)}
+                  </TableCell>
+                  <TableCell className="pr-4 text-right">
+                    {!isCurrent && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => revoke(s.token)}
+                        disabled={busy !== null}
+                      >
+                        {busy === s.token ? "Revoking..." : "Revoke"}
+                      </Button>
                     )}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {s.ipAddress || "Unknown IP"} · Last active {formatWhen(s.updatedAt)}
-                  </p>
-                </div>
-                {!isCurrent && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => revoke(s.token)}
-                    disabled={busy !== null}
-                  >
-                    {busy === s.token ? "Revoking..." : "Revoke"}
-                  </Button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </Card>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableShell>
 
       {sessions.length > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -157,10 +187,10 @@ function describeAgent(ua?: string | null): string {
 
 function formatWhen(d: string | Date): string {
   const date = typeof d === "string" ? new Date(d) : d;
-  if (Number.isNaN(date.getTime())) return "recently";
+  if (Number.isNaN(date.getTime())) return "Recently";
   const diffMs = Date.now() - date.getTime();
   const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return "just now";
+  if (mins < 1) return "Just now";
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.round(mins / 60);
   if (hours < 24) return `${hours}h ago`;

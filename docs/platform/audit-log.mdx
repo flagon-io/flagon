@@ -1,40 +1,129 @@
 ---
 title: Audit log
-description: An immutable, org-scoped record of who changed what in your organization.
+description: An immutable, organization-scoped record of who changed what, where, and when.
 visibility: public
-order: 4
 ---
 
 Every organization has an **audit log**: an append-only record of the changes
-made to it. It answers "who did what, and when" for the things that matter -
-projects created, updated, deleted, and restored; members added, removed, and
-re-roled; invitations sent and revoked; and organization settings changed.
+made to it. It answers "who did what, where, and when" for the things that
+matter: projects created and deleted, access granted, members added and removed,
+tokens minted, security settings changed.
 
-It lives under the organization's **Settings** and is visible to **owners and
-admins only** (following GitHub) - it is not shown to regular members. It is also
-**separate from notifications**: notifications are personal (they belong to a
-user, who marks them read); the audit log belongs to the **organization**.
+The audit log belongs to the **organization** and is readable by **owners and
+admins only**. It is separate from [notifications](/docs/platform/notifications),
+which are personal (they belong to a user, who marks them read).
 
-## What's recorded
+## What is recorded
 
-Each entry captures **who** (the actor), **what** (an action like
-`project.created`, the target, and a short summary), **where** (the actor's
-country and client, and their IP when disclosure is enabled), and **when**.
-Entries are written in the same database transaction as the change they describe,
-so the log never drifts from reality, and it is **immutable** - no one, including
-admins, can edit or delete history.
+Each entry captures:
 
-Actor **IP disclosure is opt-in and off by default** (following GitHub): IPs are
-always recorded, but only revealed in the log once an owner or admin enables it
-under **Settings -> Audit log -> Settings**. Enabling or disabling it is itself
-an audited event.
+- **who**: the actor (a person, or the service principal behind an organization
+  access token);
+- **what**: an action key such as `project.created`, the target, and a short
+  human summary such as "created project Billing API";
+- **where**: the actor's IP address, country, and client (user agent). The IP is
+  shown only when IP disclosure is on (see below);
+- **when**: the time of the change.
 
-## Reading it
+Entries are written **in the same database transaction** as the change they
+describe, so a change and its audit entry commit together or not at all: the log
+cannot drift from reality. The log is **immutable**: there is no operation to
+edit or delete an entry, for anyone.
 
-Owners and admins read the full log from **Settings -> Audit log**, with search,
-action filters, and pagination; recent activity also surfaces on the dashboard.
-You can ask the assistant ("what changed in this org this week?") or read it over
-the API - `GET /orgs/{slug}/audit` supports `q`, `action`, `actor`, and
-cursor-based pagination via the standard `Link` header (`rel="next"`). Reading
-requires the `read:org` scope **and** an owner/admin role; like everything in
-Flagon it is tenant-isolated, so one organization can never see another's history.
+Where the "where" comes from depends on the front door:
+
+| Front door | IP address | Country | User agent |
+| --- | --- | --- | --- |
+| Dashboard and in-product assistant | Your browser's address, forwarded by the app | Forwarded by the app | Your browser |
+| API with an access token | The connection's address, or the proxy header the API is configured to trust (`FLAGON_CLIENT_IP_HEADER`, `Fly-Client-IP` on the hosted service) | Not recorded | Your client |
+| MCP with an access token | The connection's address, as for the API | Not recorded | Your MCP client |
+
+The API trusts forwarded client headers only from the app gateway (requests
+authenticated with Flagon's internal credential), so a token holder cannot forge
+the IP address or location their entries record.
+
+Recorded actions include:
+
+| Area | Actions |
+| --- | --- |
+| Organization | `organization.created`, `organization.updated`, `organization.deleted`, `organization.restored`, `organization.security_changed`, `organization.audit_config_changed` |
+| Members | `member.added`, `member.role_changed`, `member.removed`, `member.left`, `invitation.sent`, `invitation.revoked`, `invitation.accepted` |
+| Projects | `project.created`, `project.updated`, `project.deleted`, `project.restored` |
+| Project access | `project.access_granted`, `project.access_changed`, `project.access_revoked`, `project.team_access_granted`, `project.team_access_changed`, `project.team_access_revoked`, `project.owner_added`, `project.owner_removed` |
+| Teams | `team.created`, `team.updated`, `team.deleted`, `team.member_added`, `team.member_role_changed`, `team.member_removed` |
+| Tokens | `token.created`, `token.revoked` (organization access tokens) |
+| SSO | `sso_provider.created`, `sso_provider.updated`, `sso_provider.deleted` |
+
+The [audit actions reference](/docs/reference/audit-actions) describes each key.
+
+## IP disclosure
+
+Actor IP addresses are always recorded, but they are **hidden by default**. An
+owner or admin can reveal them in the log under **Settings > Audit log >
+Settings**. While disclosure is off, the API returns no IP address on entries
+and search does not match on IP addresses, so an undisclosed address can't be
+probed by searching for it. Turning disclosure on or off is itself an audited
+event (`organization.audit_config_changed`).
+
+## Reading the log
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Open the org's **Settings > Audit log**. The **Events** tab lists entries newest
+first, with search and a filter by action.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl "https://api.flagon.io/orgs/acme/audit?q=billing&action=project.deleted" \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+- `q` searches across the summary, action, actor, and location (including the IP
+  address only while IP disclosure is on).
+- `action` filters to one action key; repeat it for several.
+- `actor` filters to one actor's user id.
+- `limit` sets the page size (default 30, max 100). The next page's URL comes
+  back in the `Link` header with `rel="next"`; see
+  [Pagination](/docs/api/pagination).
+
+Requires `read:org` and an owner or admin role. A plain member gets
+`403 Forbidden`; someone outside the organization gets `404 Not Found`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+Ask: "What changed in acme this week?" The assistant reads the log with
+`list_audit_events` and summarizes it. This works only for owners and admins.
+
+</Tab>
+
+</Tabs>
+
+For a walkthrough of common investigations, see
+[Review the audit log](/docs/guides/review-the-audit-log).
+
+## Operations
+
+| Operation | API | Tool | Scope |
+| --- | --- | --- | --- |
+| Read the log | `GET /orgs/{slug}/audit` | `list_audit_events` | `read:org` |
+| Read the IP disclosure setting | `GET /orgs/{slug}/audit/config` | `get_audit_config` | `read:org` |
+| Change the IP disclosure setting | `PUT /orgs/{slug}/audit/config` | `set_audit_config` | `write:org` |
+
+Every operation also requires an owner or admin role. The log is tenant-isolated
+like everything else, so one organization can never see another's history. The
+[auditing architecture](/docs/architecture/auditing-and-notifications) page
+explains how entries are written.
+
+## Related
+
+- [Review the audit log](/docs/guides/review-the-audit-log)
+- [Audit actions reference](/docs/reference/audit-actions)
+- [Notifications](/docs/platform/notifications)
+- [Auditing and notifications](/docs/architecture/auditing-and-notifications)

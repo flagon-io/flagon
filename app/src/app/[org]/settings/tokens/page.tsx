@@ -1,19 +1,12 @@
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { getMe } from "@/lib/flagon-api";
+import { getOrgContext, isOrgAdmin } from "@/lib/org-context";
 import { TokensList } from "@/components/settings/tokens-list";
 import { PageBody } from "@/components/shell/page-header";
 
 export default async function OrgApiTokensPage({ params }: { params: Promise<{ org: string }> }) {
   const { org: slug } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
-
-  const me = await getMe().catch(() => null);
-  const role = me?.orgs.find((o) => o.slug === slug)?.role ?? "member";
-  const canManage = role === "owner" || role === "admin";
+  const { role } = await getOrgContext(slug);
+  const canManage = isOrgAdmin(role);
 
   return (
     <PageBody>

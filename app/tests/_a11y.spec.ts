@@ -34,7 +34,15 @@ type Node = { target: string; ratio?: number; fg?: string; bg?: string };
 type Violation = { rule: string; impact: string; nodes: Node[] };
 
 async function axeViolations(page: import("@playwright/test").Page): Promise<Violation[]> {
+  // A late client navigation (dev-server HMR, a redirect) can swap the document
+  // after injection and drop the global, so make sure axe is present right
+  // before running it, re-injecting once if the page moved underneath us.
   await page.addScriptTag({ path: axePath });
+  // @ts-expect-error injected global
+  if (!(await page.evaluate(() => typeof window.axe?.run === "function"))) {
+    await page.waitForLoadState("networkidle");
+    await page.addScriptTag({ path: axePath });
+  }
   return page.evaluate(async () => {
     // @ts-expect-error injected global
     const results = await window.axe.run(document, {

@@ -49,7 +49,7 @@ func runMigrations(ctx context.Context, conn *pgx.Conn) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }() // no-op (ErrTxClosed) after Commit
 
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationAdvisoryLock); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)

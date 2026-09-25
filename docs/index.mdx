@@ -1,0 +1,56 @@
+---
+title: Flagon documentation
+description: Run your organization, projects, and people in Flagon from the dashboard, the API, or an AI assistant.
+---
+
+Flagon is a self-hostable developer platform for operating your engineering system. Today you use it
+to run **organizations**, the **projects** inside them, and the **people and teams** who work on
+them, with access control, single sign-on, and an audit log built in. Every capability works three
+ways: in the dashboard at [app.flagon.io](https://app.flagon.io), over the REST API at
+`https://api.flagon.io`, and through an AI assistant (in the product or over MCP) that acts as you
+and asks before it changes anything.
+
+## Start here
+
+<Cards>
+  <Card title="Quickstart" href="/docs/get-started/quickstart" description="Create an organization and a project, invite a teammate, and make your first API call." />
+  <Card title="Core concepts" href="/docs/get-started/core-concepts" description="Organizations, projects, roles, tokens, and how access adds up." />
+  <Card title="Use the API" href="/docs/api/using-the-api" description="Authenticate with a token and call the same operations the dashboard uses." />
+  <Card title="Connect an MCP client" href="/docs/guides/connect-an-mcp-client" description="Point an external agent at mcp.flagon.io to read the docs and operate Flagon." />
+  <Card title="Self-host Flagon" href="/docs/self-hosting/overview" description="Run the API, the app, and Postgres on your own infrastructure." />
+</Cards>
+
+## Find a task
+
+| Task | Read |
+| --- | --- |
+| Create an organization | [Create an organization](/docs/guides/create-an-organization) |
+| Invite people and group them into teams | [Invite your team](/docs/guides/invite-your-team), [Organize with teams](/docs/guides/organize-with-teams) |
+| Set the default project role for members | [Set base permissions](/docs/guides/set-base-permissions) |
+| Create a project and control who can change it | [Create a project](/docs/guides/create-a-project), [Manage project access](/docs/guides/manage-project-access) |
+| Delete or restore a project | [Delete and restore](/docs/guides/delete-and-restore) |
+| Require two-factor or set up SSO | [Require two-factor](/docs/guides/require-two-factor), [SSO with OIDC](/docs/guides/set-up-sso-oidc), [SSO with SAML](/docs/guides/set-up-sso-saml) |
+| See who changed what | [Review the audit log](/docs/guides/review-the-audit-log) |
+| Script Flagon or call it from CI | [Automate with access tokens](/docs/guides/automate-with-access-tokens), [Call the API from CI](/docs/guides/call-the-api-from-ci) |
+| Operate Flagon by asking | [Work with the assistant](/docs/guides/work-with-the-assistant) |
+| Look up a scope, role, or error | [Scopes](/docs/reference/scopes), [Roles matrix](/docs/reference/roles-matrix), [Errors](/docs/api/errors) |
+| Understand how Flagon is built | [Architecture overview](/docs/architecture/overview) |
+| Fix a problem | [Troubleshooting](/docs/troubleshooting/overview) |
+
+## Key concepts
+
+An **organization** is the tenant: it owns projects, members, teams, tokens, and settings, and no
+data crosses between organizations. A **project** is a deployable app, the core unit you work on.
+**Members** hold an org role (owner, admin, or member), and each project resolves their effective
+**project role** (read, triage, write, maintain, or admin) from the org's base permission, direct
+grants, and team grants. **Access tokens** let scripts and agents act with a subset of that access,
+limited by **scopes**. Mutations are recorded in the org's **audit log**.
+
+See [Core concepts](/docs/get-started/core-concepts) for every term and how they fit together.
+
+## What's coming
+
+Deployments, logs and observability, connected context across your tools, agents, metrics, reusable
+skills, and governance are planned but not built yet. The **Roadmap** group in the navigation holds a
+page for each, starting with [Deployments](/docs/deploying/deployments), and the
+[Introduction](/docs/get-started/introduction) says exactly what exists today.

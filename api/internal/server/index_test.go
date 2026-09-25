@@ -14,7 +14,7 @@ import (
 func TestIndexServesDiscoveryLinks(t *testing.T) {
 	router, _ := New()
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.Host = "api.flagon.io"
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
@@ -51,7 +51,7 @@ func TestNoInteractiveDocsUI(t *testing.T) {
 	// The OpenAPI spec must always be served.
 	for _, path := range []string{"/openapi.json", "/openapi.yaml"} {
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		router.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200 (spec must stay served)", path, rec.Code)
 		}
@@ -60,7 +60,7 @@ func TestNoInteractiveDocsUI(t *testing.T) {
 	// /docs must not be an HTML docs UI. With no corpus wired it reports 503,
 	// but either way the body is JSON, never a Swagger/Stoplight HTML page.
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/docs", nil))
+	router.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/docs", nil))
 	body := rec.Body.String()
 	if strings.Contains(strings.ToLower(body), "<!doctype") || strings.Contains(strings.ToLower(body), "swagger") {
 		t.Errorf("GET /docs looks like an HTML docs UI, want JSON API: %s", body)
@@ -78,7 +78,7 @@ func TestIndexReflectsRegisteredOperations(t *testing.T) {
 		return &struct{}{}, nil
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.Host = "api.flagon.io"
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
@@ -91,7 +91,7 @@ func TestIndexReflectsRegisteredOperations(t *testing.T) {
 }
 
 func TestBaseURLFallsBackToHTTPWithoutTLS(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.Host = "localhost:8080"
 	if got, want := baseURL(req), "http://localhost:8080"; got != want {
 		t.Errorf("baseURL = %q, want %q", got, want)

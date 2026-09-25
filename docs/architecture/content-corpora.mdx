@@ -1,0 +1,169 @@
+---
+title: Content corpora
+description: How the docs, roadmap, and changelog live as files in the product repo, compile into JSON embedded in the API, and reach the website, the assistant, and MCP from one source.
+---
+
+Flagon's documentation, public roadmap, and changelog are not stored in a content
+management system or on the website. They are Markdown files in the product
+repository, next to the code they describe, and they change in the same pull
+request as that code. A generator compiles each tree into a JSON **corpus** (a
+single file holding every page, pre-processed for serving), the API embeds the
+corpus in its binary, and everything else, including the page you are reading, is
+a client of the API.
+
+The payoff is that documentation cannot drift from the product. A capability and
+its docs ship in one change, CI refuses a stale corpus, and the website, the
+assistant, and external AI clients all read the same text.
+
+```text
+  docs/**.mdx + meta.json   roadmap/*.mdx           changelog/*.md
+           │                       │                       │
+           ▼                       ▼                       ▼
+  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+  │ make docs        │    │ make roadmap     │    │ make changelog   │
+  │ cmd/gendocs      │    │ cmd/genroadmap   │    │ cmd/genchangelog │
+  └────────┬─────────┘    └────────┬─────────┘    └────────┬─────────┘
+           ▼                       ▼                       ▼
+  corpus.gen.json         roadmap.gen.json        changelog.gen.json
+           └───────────────────────┼───────────────────────┘
+                                   ▼ go:embed
+  ┌──────────────────────────────────────────────────────────────────┐
+  │ API binary: internal/docs, internal/roadmap, internal/changelog  │
+  └────────┬───────────────────────┬───────────────────────┬─────────┘
+           ▼                       ▼                       ▼
+  GET /docs, /docs/nav,    search_docs, get_doc     GET /roadmap
+  /docs/search, /docs/page  (assistant + MCP)       GET /changelog
+           └───────────┬───────────┘                       │
+                       ▼                                   ▼
+        website, llms.txt, AI clients                website pages
+```
+
+## Sources: files with frontmatter
+
+Each tree has its own README describing its fields (`docs/README.md`,
+`roadmap/README.md`, `changelog/README.md`). All three use the same shape: a
+Markdown or MDX file that starts with a YAML frontmatter block. A file with no
+frontmatter title is skipped, which is how the READMEs stay out of the corpus.
+
+**Docs** (`docs/`). Frontmatter carries `title`, `description`, and optionally
+`section`, `order`, `status` (`planned` marks a placeholder page), and
+`visibility` (`public` or `internal`). A page's slug is
+`<top-level-folder>/<filename>`: intermediate folders are dropped, so pages can be
+grouped into subfolders without changing their URLs, and leaf names must be unique
+within a top-level folder. `docs/index.mdx` compiles to the slug `index`.
+
+Navigation comes from `meta.json` files. `docs/meta.json` lists groups of
+top-level folders in order and an `exclude` list for folders with their own
+surface (the handbook). Each folder's `meta.json` sets its display title and page
+order, and entries written as `---Label---` start a labelled sub-group. Pages a
+folder forgets to list are appended at the end, and public folders no group names
+land in a trailing "More" group. Listing a page that does not exist, or a folder
+twice, fails the build: a broken sidebar never ships.
+
+**Roadmap** (`roadmap/`). Each item has a `title`, a `stage` of `concept`,
+`alpha`, or `beta`, a `team`, and optionally a `tag` and `order`. An item that
+ships is deleted here and recorded in the changelog in the same change.
+
+**Changelog** (`changelog/`). Each entry has a `title`, a `date` in `YYYY-MM-DD`
+form (a malformed date fails the build), and optionally a `tag` and `area`. Files
+are named `YYYY-MM-DD-slug.md`.
+
+## Generators and the drift gate
+
+Each tree has a generator in `api/cmd`: `gendocs`, `genroadmap`, and
+`genchangelog`. Run them with `make docs`, `make roadmap`, and `make changelog`
+from the repo root. Each writes one file:
+
+| Generator | Output |
+| --- | --- |
+| `cmd/gendocs` | `api/internal/docs/corpus.gen.json` |
+| `cmd/genroadmap` | `api/internal/roadmap/roadmap.gen.json` |
+| `cmd/genchangelog` | `api/internal/changelog/changelog.gen.json` |
+
+The build logic lives in each package's `build.go` (for example
+`docs.BuildFromDir`), shared by the generator and the tests, so generating and
+verifying can never disagree. Output is sorted deterministically so diffs stay
+readable.
+
+Every generator has a `-check` flag that rebuilds the corpus in memory and exits
+non-zero if it differs from the committed file. CI runs all three checks
+(`.github/workflows/ci.yml`), so a pull request that edits a page without
+regenerating fails. You commit the generated JSON along with the source change.
+
+## Embedded in the API
+
+Each package embeds its generated file with `go:embed` and parses it once at
+startup (`docs.Load`, `roadmap.Load`, `changelog.Load`). Content therefore deploys
+atomically with the code: the binary that serves an operation also serves the page
+describing it. A corpus that fails to load is logged and its endpoints answer
+`503`, but the rest of the API keeps serving.
+
+For docs, `NewIndex` precomputes a term-weight table per page. Matches in the
+title count 8, in the description 4, in a heading 4, and in the body 1. Search is
+a static index lookup, not a model call, so it is cheap enough to expose without
+authentication.
+
+## Served as plain routes, outside the OpenAPI spec
+
+The content routes are registered directly on the chi router, like the health
+checks, rather than through huma. They are deliberately **not** in the OpenAPI
+spec: the spec is the contract for operating Flagon, and documentation is content
+about Flagon. All of them are unauthenticated.
+
+| Route | Returns |
+| --- | --- |
+| `GET /docs` | Metadata for every public page, in reading order |
+| `GET /docs/nav` | The compiled navigation: landing page, groups, sections, items |
+| `GET /docs/search?q=...&limit=...` | Ranked public matches with snippets (`q` required, `limit` default 5) |
+| `GET /docs/page?slug=...` | One public page with its body (`404` if unknown) |
+| `GET /roadmap` | Items in stage order, the stage columns, and the teams |
+| `GET /changelog` | Every entry, newest first |
+
+The slug is a query parameter because slugs contain slashes. The website
+(a separate repository) renders its docs, roadmap, and changelog pages entirely
+from these routes and holds no copy of the content, so a change here shows up
+there on the next deploy of the API.
+
+## The same corpus for AI
+
+The docs corpus also backs two tools in the [tool registry](/docs/architecture/tool-registry):
+
+- `search_docs` ranks pages for a query (default 5 results).
+- `get_doc` returns one page in full by slug.
+
+Both are marked `Public`, so the unauthenticated MCP server offers them to any
+client. The in-product assistant's system prompt tells it to answer questions
+about Flagon from these tools rather than from memory. That is why these pages are
+written for two audiences at once: people, and agents reading them through
+`get_doc`.
+
+## Visibility: public and internal
+
+`visibility: internal` keeps a page off the public surfaces:
+
+| Surface | Public pages | Internal pages |
+| --- | --- | --- |
+| `/docs`, `/docs/nav`, `/docs/search`, `/docs/page` | Yes | No |
+| MCP, anonymous | Yes | No |
+| MCP with a Flagon token | Yes | Yes |
+| In-product assistant | Yes | Yes |
+
+The rule needs no configuration. The front door decides and passes the answer to
+the tools as `ToolContext.AllowInternalDocs`: the assistant (always acting for a
+signed-in user) and the authenticated MCP (a valid token) pass `true`; the
+anonymous MCP and the HTTP routes pass `false`. Internal pages are never included
+in the navigation.
+
+<Callout type="info" title="No page is internal today">
+The product docs and the handbook are all public. Mark a page `internal` only when
+it is fine for every authenticated user and token holder to read it.
+</Callout>
+
+## Related
+
+<Cards>
+  <Card title="Tool registry" href="/docs/architecture/tool-registry" description="Where search_docs and get_doc sit among the other tools." />
+  <Card title="OpenAPI" href="/docs/api/openapi" description="The operational spec, and why the content routes are outside it." />
+  <Card title="Contributing" href="/docs/open-source/contributing" description="How to propose a change to the code and its docs." />
+  <Card title="AI safety" href="/docs/security/ai-safety" description="Treating docs content as untrusted input to a model." />
+</Cards>

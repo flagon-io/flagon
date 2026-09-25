@@ -3,19 +3,22 @@
 // the provider's bound organization to the Go API (the single writer of domain
 // data), which idempotently ensures the membership. Best-effort + time-boxed so a
 // domain hiccup never blocks a valid sign-in (provisionUserOnEveryLogin re-syncs).
+import { internalToken } from "@/lib/internal-token";
+
 const API_URL = process.env.FLAGON_API_URL ?? "http://localhost:8080";
-const INTERNAL_TOKEN = process.env.FLAGON_INTERNAL_TOKEN ?? "";
 
 export async function provisionSSOMembership(params: {
   userId: string;
   email: string;
   organizationId?: string | null;
+  /** The SSO provider just signed in through (recorded as a linked identity). */
+  providerId?: string | null;
   role?: string;
 }): Promise<void> {
-  const { userId, email, organizationId, role } = params;
+  const { userId, email, organizationId, providerId, role } = params;
   // No org bound to the provider -> nothing to provision (a provider can exist
-  // without an org, e.g. a personal IdP link). Missing token = misconfig; skip.
-  if (!INTERNAL_TOKEN || !userId || !organizationId) return;
+  // without an org, e.g. a personal IdP link).
+  if (!userId || !organizationId) return;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2500);
@@ -24,11 +27,15 @@ export async function provisionSSOMembership(params: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${INTERNAL_TOKEN}`,
+        Authorization: `Bearer ${internalToken()}`,
         "X-Flagon-User-Id": userId,
         "X-Flagon-User-Email": email,
       },
-      body: JSON.stringify({ org_id: organizationId, role: role ?? "member" }),
+      body: JSON.stringify({
+        org_id: organizationId,
+        role: role ?? "member",
+        ...(providerId ? { provider_id: providerId } : {}),
+      }),
       signal: controller.signal,
     });
     if (!res.ok) console.error("provisionSSOMembership: API returned", res.status);

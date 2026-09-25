@@ -177,7 +177,7 @@ function CommandDialogMenu({
         )}
       </CommandList>
 
-      <div className="flex items-center gap-4 border-t border-hairline px-3 py-2 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-4 border-t border-hairline px-3 py-2 text-2xs text-muted-foreground">
         <span className="flex items-center gap-1">
           <Kbd>{"↑"}</Kbd>
           <Kbd>{"↓"}</Kbd>

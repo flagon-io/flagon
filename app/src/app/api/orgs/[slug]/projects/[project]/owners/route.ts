@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError, badRequest, listOptionsFrom } from "@/lib/route-error";
 import { addProjectOwner, listProjectOwners } from "@/lib/flagon-api";
 
 export async function GET(
@@ -6,17 +7,11 @@ export async function GET(
   ctx: { params: Promise<{ slug: string; project: string }> },
 ) {
   const { slug, project } = await ctx.params;
-  const url = new URL(request.url);
-  const limitParam = url.searchParams.get("limit");
   try {
-    const page = await listProjectOwners(slug, project, {
-      q: url.searchParams.get("q") ?? undefined,
-      cursor: url.searchParams.get("cursor") ?? undefined,
-      limit: limitParam ? Number(limitParam) : undefined,
-    });
+    const page = await listProjectOwners(slug, project, listOptionsFrom(request));
     return NextResponse.json({ items: page.items, next: page.next });
-  } catch {
-    return NextResponse.json({ items: [], next: null });
+  } catch (e) {
+    return routeError(e);
   }
 }
 
@@ -29,16 +24,15 @@ export async function POST(
   const type = body.type === "user" || body.type === "team" ? body.type : "";
   const login = typeof body.login === "string" ? body.login.trim() : "";
   if (!type) {
-    return NextResponse.json({ error: "An owner type is required." }, { status: 400 });
+    return badRequest("An owner type is required.");
   }
   if (!login) {
-    return NextResponse.json({ error: "A user or team is required." }, { status: 400 });
+    return badRequest("A user or team is required.");
   }
   try {
     await addProjectOwner(slug, project, type, login);
     return NextResponse.json({ ok: true }, { status: 201 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not add owner.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not add owner.");
   }
 }

@@ -1,12 +1,11 @@
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/session";
 import { listUserEmails } from "@/lib/user-emails";
 import { SettingsHeader } from "@/components/settings/section";
 import { ProfileForm } from "@/components/settings/profile-form";
 
 export default async function PublicProfilePage() {
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getSession();
   if (!session) redirect("/login");
 
   const u = session.user as {
@@ -25,7 +24,8 @@ export default async function PublicProfilePage() {
     publicEmail?: string | null;
   };
 
-  const emails = await listUserEmails(u.id).catch(() => []);
+  // No fallback: an empty list would silently drop the public-email choices.
+  const emails = await listUserEmails(u.id);
   const verifiedEmails = emails.filter((e) => e.verified).map((e) => e.email);
 
   let social: string[] = [];

@@ -1,0 +1,177 @@
+---
+title: Manage project access
+description: Give people and teams a role on a specific project, change or revoke it, and work out anyone's effective access.
+---
+
+Every organization member starts each project at the organization's
+[base permission](/docs/guides/set-base-permissions). **Project access** is how you go further on
+one project: a **collaborator grant** gives one person a role there, and a **team grant** gives
+every member of a team a role there. Grants only ever raise access; they never lower someone
+below the base permission.
+
+By the end of this guide the right people and teams will hold the right roles on a project, and
+you will be able to explain why anyone has the access they have.
+
+<Callout type="info" title="Before you start">
+
+- **Role:** effective **admin** on the project. Organization owners and admins always have it;
+  anyone else needs an `admin` grant (direct or through a team) or project ownership. A member
+  who created the project was granted `admin` on it automatically.
+- **Who can be granted:** only existing organization members. [Invite them](/docs/guides/invite-your-team) first.
+- **API token scopes:** `read:project` to list grants, `admin:project` to add, change, or revoke them.
+
+</Callout>
+
+## How effective access works
+
+A person's effective role on a project is the **maximum** of:
+
+1. their organization-derived role: `admin` for organization owners and admins; the base
+   permission (default `read`, possibly `none`) for members;
+2. their direct collaborator grant on the project, if any;
+3. the highest grant held by any team they belong to on the project.
+
+The ladder, lowest to highest, is `read`, `triage`, `write`, `maintain`, `admin`:
+
+| Needs at least | To |
+| --- | --- |
+| `read` | See the project at all. Without it, the project returns `404`, as if it did not exist. |
+| `write` | Edit the name, description, README, and repository URL. |
+| `maintain` | Rename the project's slug (which changes its URL), plus project settings as they are added. |
+| `admin` | Manage collaborator and team grants (this guide). |
+| owner tier | Delete, restore, and manage owners. See [Transfer project ownership](/docs/guides/transfer-project-ownership). |
+
+The API checks these roles on every project operation, and Postgres row-level security enforces
+them again underneath. A project you can see but lack the role for answers `403`.
+
+For example, with a base permission of `read`, Dana has a direct `triage` grant and belongs to
+the `platform` team, which holds `write`: her effective role is `write`.
+
+## Steps
+
+<Steps>
+
+<Step title="Open the project's access settings">
+
+In the dashboard, open the project, then **Settings > Access**. The page has three sections:
+collaborators (direct grants), teams, and owners.
+
+</Step>
+
+<Step title="Add a collaborator">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Select **Add collaborator**, enter the person's email or username, and pick a role. Change a
+role from the row's role picker, or revoke it from the same row.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects/checkout/members \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"login": "dana@example.com", "role": "write"}'
+```
+
+List grants with `GET /orgs/acme/projects/checkout/members` (returns `{"members": [...]}` with
+each `user_id`). Change one with
+`PUT /orgs/acme/projects/checkout/members/{userId}/role` and `{"role": "maintain"}`; revoke it
+with `DELETE /orgs/acme/projects/checkout/members/{userId}`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Give dana@example.com write access to the checkout project.
+
+The assistant proposes **Confirm: Grant "dana@example.com" write on project "checkout" in
+"acme"**.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Add a team">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+In the teams section, select **Add team**, pick the **Team**, and choose a **Role**.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs/acme/projects/checkout/teams \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"team": "platform", "role": "write"}'
+```
+
+Change with `PUT /orgs/acme/projects/checkout/teams/platform/role`; revoke with
+`DELETE /orgs/acme/projects/checkout/teams/platform`.
+
+</Tab>
+
+<Tab title="Assistant">
+
+> Give the platform team maintain on checkout.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Verify it worked">
+
+- The grant appears in the project's **Settings > Access** list.
+- The person gets a notification that they were added to the project (or that their role
+  changed).
+- The audit log records `project.access_granted`, `project.access_changed`,
+  `project.access_revoked`, or the `project.team_access_*` equivalents.
+- Ask the person to open the project. If they still can't see it, check the base permission and
+  whether they are a member of the team you granted.
+
+</Step>
+
+</Steps>
+
+## Things to know
+
+- **You can't change your own access** on a project. Ask another project admin, or an
+  organization owner or admin.
+- **Revoking a grant never removes base access.** With a base of `read`, a revoked collaborator
+  can still see the project. Set the base to `none` for private-by-default projects.
+- **Organization owners and admins can't be limited per project.** Their org role already gives
+  them `admin` and the owner tier everywhere.
+- **Team membership changes take effect immediately.** Remove someone from a team and the access
+  that came from that team goes with it.
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `409` | `that user must be an organization member first` | Invite them to the organization, then grant access. |
+| `409` | `that user already has a role on this project` | Change their role instead of adding them again. |
+| `409` | `that team already has a role on this project` | Change the team's role instead. |
+| `409` | `you can't change your own access here` | Someone else has to change your grant. |
+| `404` | `that user has no role on this project` | There is no direct grant to change or revoke; their access comes from the base permission or a team. |
+| `404` | `project not found` | The slug is wrong, or you can't see the project. |
+| `403` | `you don't have permission to do that` | You need effective `admin` on the project. |
+
+## Related
+
+- [Project access](/docs/platform/project-access)
+- [Set base permissions](/docs/guides/set-base-permissions)
+- [Organize with teams](/docs/guides/organize-with-teams)
+- [Transfer project ownership](/docs/guides/transfer-project-ownership)

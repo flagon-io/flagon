@@ -1,14 +1,16 @@
 ---
-title: Access and security
-stage: beta
+title: Provisioning and session controls
+stage: concept
 team: Platform
 order: 2
 ---
 
-Who can do what, proven rather than assumed. Role-based access across the org and each product, backed by tenant isolation and a full audit trail, with the account protections teams expect.
+Single sign-on, required two-factor, scoped tokens, and the audit log have
+shipped. What's left is the lifecycle around them: keeping an organization's
+roster in step with its identity provider automatically, and giving owners
+control over how long, and where, their members stay signed in.
 
-- Org-wide and per-product roles and permissions
-- Single sign-on and two-factor authentication
-- Org security policies and session controls
-- Scoped access tokens for programmatic use
-- An audit log of every sensitive action
+- SCIM provisioning and deprovisioning from your identity provider
+- Org session policies: session lifetime and idle timeouts
+- Sign members out of an organization everywhere, at once
+- Built on the same roles, scopes, and audit trail as the rest of the platform

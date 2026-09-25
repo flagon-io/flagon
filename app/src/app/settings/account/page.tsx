@@ -1,15 +1,11 @@
 import Link from "next/link";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { getMe } from "@/lib/flagon-api";
+import { requireMe } from "@/lib/org-context";
 import { SettingsHeader, SettingsSubheader } from "@/components/settings/section";
 import { UsernameForm } from "@/components/settings/username-form";
 import { DeleteAccountButton } from "@/components/settings/delete-account-button";
 
 export default async function AccountPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
+  const { session, me } = await requireMe();
 
   const u = session.user as {
     email: string;
@@ -18,8 +14,9 @@ export default async function AccountPage() {
   };
   const username = u.displayUsername || u.username || "";
 
-  const me = await getMe().catch(() => null);
-  const ownedCount = me?.orgs.filter((o) => o.role === "owner").length ?? 0;
+  // No fallback: a failed /me must not read as "owns nothing" and offer account
+  // deletion to someone who still owns organizations.
+  const ownedCount = me.orgs.filter((o) => o.role === "owner").length;
 
   return (
     <div>

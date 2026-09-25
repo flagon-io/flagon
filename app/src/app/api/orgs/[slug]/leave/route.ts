@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { routeError } from "@/lib/route-error";
 import { leaveOrg } from "@/lib/flagon-api";
 
 export async function POST(_request: Request, ctx: { params: Promise<{ slug: string }> }) {
@@ -6,8 +7,7 @@ export async function POST(_request: Request, ctx: { params: Promise<{ slug: str
   try {
     await leaveOrg(slug);
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not leave organization.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not leave organization.");
   }
 }

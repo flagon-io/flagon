@@ -1,6 +1,264 @@
 ---
 title: Organizations
-description: Organizations own everything in Flagon: projects, members, tokens, and settings.
-status: planned
-order: 0
+description: Organizations own everything in Flagon (projects, members, teams, tokens, and settings), and are the unit of tenant isolation.
+visibility: public
 ---
+
+An **organization** (org) is the top-level container in Flagon and the unit of
+tenancy. Your projects, members, teams, organization access tokens, security
+policy, and audit log all live inside one, and permissions are always decided
+per organization: being an owner of one org says nothing about your role in
+another. One Flagon account can belong to any number of organizations, and you
+switch between them from the app shell.
+
+Nearly every URL is org-scoped:
+
+```text
+app.flagon.io/<org>                    the org dashboard
+app.flagon.io/<org>/projects/...       projects
+app.flagon.io/<org>/people             members and invitations
+app.flagon.io/<org>/teams              teams
+app.flagon.io/<org>/settings/...       org settings
+```
+
+Your personal settings at `app.flagon.io/settings` are the one area outside any
+organization (see [Profile and account](/docs/platform/account)).
+
+## Tenant isolation
+
+Organizations are isolated from each other in the database itself, with forced
+Postgres row-level security: every query the API runs is scoped to the
+organizations the acting user belongs to, so one org can never read or write
+another's data even if application code forgets a filter. The same rule covers
+every front door: the dashboard, the API, access tokens, the assistant, and MCP.
+See [Tenant isolation](/docs/security/tenant-isolation) for how it works.
+
+If you are not a member of an organization, Flagon behaves as if it does not
+exist: its pages return a 404 and its API operations return `404 Not Found`,
+never a hint that it is there.
+
+## Creating an organization
+
+The person who creates an organization becomes its first **owner**.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Choose **Create organization** from the organization switcher, or **New
+organization** under **Settings > Organizations**. Both open
+`app.flagon.io/new`, where you enter a name and, optionally, a slug.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme", "slug": "acme"}'
+```
+
+Requires the `admin:org` scope and a personal token: an organization access
+token belongs to one organization and gets `403 Forbidden` here.
+
+</Tab>
+
+<Tab title="Assistant">
+
+Ask: "Create an organization called Acme." The assistant proposes
+`create_organization` with the name (and a slug if you gave one), and creates it
+when you confirm.
+
+</Tab>
+
+</Tabs>
+
+- **Name** is the display name shown across Flagon.
+- **Slug** is the org's namespace in URLs and API paths. It is optional; when
+  omitted it is derived from the name (`Acme Corp.` becomes `acme-corp`). Slugs are
+  unique across live organizations, so a taken slug returns `409 Conflict`. A
+  [deleted](#deleting-an-organization) organization's slug is free for anyone to
+  take.
+
+For a step-by-step walkthrough, see
+[Create an organization](/docs/guides/create-an-organization).
+
+### Plan limit
+
+The Free plan includes **one organization you own**. Creating a second owned
+organization returns `402 Payment Required`. Paid plans are not live yet, so for
+now this caps each account at one owned organization. Organizations you are
+*invited to* do not count; you can be a member of as many as you like. Deleted
+organizations do not count either, but [restoring](#restoring-an-organization)
+one does, so a restore that would put you over the limit also returns
+`402 Payment Required`.
+
+## Organization settings
+
+Owners and admins manage the organization from its **Settings**:
+
+| Setting | Where | What it controls |
+| --- | --- | --- |
+| **Name** | Settings > General | The display name. The slug and organization ID are shown here too; the slug cannot be changed yet, since that would break existing links and API references. |
+| **Member privileges** | Settings > Member privileges | The **base permission**: the default project access every member gets. See [Roles & permissions](/docs/platform/roles). |
+| **API tokens** | Settings > API tokens | [Organization access tokens](/docs/platform/access-tokens): credentials owned by the org rather than a person. |
+| **Authentication** | Settings > Authentication | Require [two-factor authentication](/docs/platform/two-factor), and configure and require [single sign-on](/docs/platform/sso). |
+| **Audit log** | Settings > Audit log | The org's immutable [audit log](/docs/platform/audit-log), and whether actor IP addresses are disclosed in it. |
+| **Billing** | Settings > Billing | The org's plan. Every organization is on the Free plan today. |
+| **Deleted projects** | Settings > Deleted projects | Soft-deleted [projects](/docs/platform/projects), which can be restored. |
+
+Renaming the organization is `PATCH /orgs/{slug}` with a new `name`, and requires
+an owner or admin. Every change to an organization's settings is recorded in its
+audit log.
+
+The organization's security policy is enforced by the API itself, not only by
+the dashboard: when the organization requires two-factor authentication or
+single sign-on, every operation under `/orgs/{slug}` (except leaving), every
+assistant message, and every MCP tool call that names the organization returns
+`403 Forbidden` to a member whose sign-in does not satisfy it. See
+[Two-factor authentication](/docs/platform/two-factor) and
+[Single sign-on](/docs/platform/sso).
+
+## Members, roles, and teams
+
+People belong to an organization as **members**, each with one organization role:
+**owner**, **admin**, or **member**. Owners and admins manage the roster from
+**People**, adding existing Flagon users directly or inviting anyone by email. See
+[Members and invitations](/docs/platform/members).
+
+Access to projects is layered on top: the org-wide base permission, per-project
+collaborator roles, **teams** that hold project access for a group, and project
+ownership. [Roles & permissions](/docs/platform/roles) explains how they combine,
+and [Teams](/docs/platform/teams) covers groups.
+
+An organization must always have at least one owner: the last owner cannot be
+demoted or removed.
+
+## Leaving an organization
+
+Any member can leave an organization from **Settings > Organizations** in their
+personal settings, with `POST /orgs/{slug}/leave`, or by asking the assistant.
+Leaving removes your membership immediately and is recorded in the org's audit
+log as `member.left`. If you are the **only owner**, leaving is refused with
+`409 Conflict`: promote another member to owner first, or delete the
+organization. Leaving is exempt from the two-factor and SSO requirements, so
+you can always walk away from an organization whose policy you can't meet.
+Organization access tokens can't leave (`403 Forbidden`); revoke the token
+instead.
+
+## Deleting an organization
+
+Only an **owner** can delete an organization. Anyone else gets `403 Forbidden`.
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+Open **Settings > General**, scroll to the **Danger zone**, and confirm by typing
+the organization's slug.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X DELETE https://api.flagon.io/orgs/acme \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+Requires the `admin:org` scope and an owner role. Organization access tokens can
+never be owners, so only a personal token can do this.
+
+</Tab>
+
+<Tab title="Assistant">
+
+Ask: "Delete the acme organization." The assistant confirms the exact slug with
+you and proposes `delete_organization`; nothing happens until you confirm.
+
+</Tab>
+
+</Tabs>
+
+Deletion is a **soft delete** that takes effect for everyone at once:
+
+- The organization and everything in it (projects, members, teams, invitations,
+  tokens, audit log) behaves as if it does not exist: its pages and API operations
+  return `404 Not Found` for every member, and it drops out of everyone's
+  organization list.
+- Its **organization access tokens stop working** immediately (`401 Unauthorized`). Personal access tokens keep working for your other
+  organizations.
+- Its **slug is freed**, so a new organization can take it right away.
+- Every member is notified, and the deletion is recorded in the org's audit log
+  as `organization.deleted` (readable again after a restore).
+
+Deleting an organization is also how its sole owner winds it down: the only owner
+cannot leave, but can delete it.
+
+## Restoring an organization
+
+A deleted organization stays restorable for **30 days**. Owners see the
+organizations they owned under **Settings > Organizations > Recently deleted**,
+or with `GET /deleted-orgs`, which lists each with its `id` and a `purge_at` time.
+Restoring one (**Restore**, or `POST /deleted-orgs/{id}/restore`) brings
+everything back exactly as it was: members, projects, teams, tokens, and settings.
+
+```bash
+curl -X POST https://api.flagon.io/deleted-orgs/$ORG_ID/restore \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "acme-2"}'
+```
+
+- Restore addresses the organization by **id**, since its old slug may belong to a
+  new organization by now.
+- If the old slug was taken while the organization was deleted, the restore is
+  refused with `409 Conflict`; pass a new `slug` in the body to restore it under
+  that name. The body is optional otherwise.
+- Restoring counts toward the [plan limit](#plan-limit).
+- Listing and restoring deleted organizations needs a personal token or a
+  signed-in session; organization access tokens get `403 Forbidden`. The
+  in-product assistant refuses `restore_organization`, because a conversation is
+  confined to the organization it was started in.
+- After `purge_at` (30 days after deletion) the organization can no longer be
+  restored and restore returns `404 Not Found`.
+
+<Callout type="note" title="Permanent purge">
+
+Past the 30-day window the organization is out of reach for everyone. The job
+that permanently erases expired organizations from the database is not built
+yet.
+
+</Callout>
+
+## Operations
+
+Every organization operation is available on every front door, backed by the same
+permission-checked API operation:
+
+| Operation | API | Tool | Scope |
+| --- | --- | --- | --- |
+| List your organizations | `GET /orgs` (or `GET /me`) | `list_organizations` | `read:org` |
+| Create an organization | `POST /orgs` | `create_organization` | `admin:org` |
+| Rename an organization | `PATCH /orgs/{slug}` | `update_organization` | `write:org` |
+| Leave an organization | `POST /orgs/{slug}/leave` | `leave_organization` | `admin:org` |
+| Delete an organization | `DELETE /orgs/{slug}` | `delete_organization` | `admin:org` |
+| List recently deleted organizations | `GET /deleted-orgs` | `list_deleted_organizations` | `read:org` |
+| Restore a deleted organization | `POST /deleted-orgs/{id}/restore` | `restore_organization` | `admin:org` |
+| Read the security policy | `GET /orgs/{slug}/security` | `get_org_security` | `read:org` |
+| Update the security policy | `PUT /orgs/{slug}/security` | `set_org_security` | `write:org` |
+| Manage SSO providers ([details](/docs/platform/sso)) | `/orgs/{slug}/sso/providers` | `list_sso_providers`, `create_sso_provider`, ... | `read:org` / `write:org` |
+
+Scopes are a ceiling on top of your role: a token or the assistant can never do
+more than you could yourself. See the [Tool reference](/docs/ai/tools) for every
+tool.
+
+## Related
+
+- [Create an organization](/docs/guides/create-an-organization)
+- [Members and invitations](/docs/platform/members)
+- [Roles & permissions](/docs/platform/roles)
+- [Delete and restore](/docs/guides/delete-and-restore)
+- [Multi-tenancy](/docs/architecture/multi-tenancy)

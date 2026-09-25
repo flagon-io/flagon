@@ -1,33 +1,28 @@
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { getMe } from "@/lib/flagon-api";
+import { getOrgContext, isOrgAdmin } from "@/lib/org-context";
 import { TokenCreateForm } from "@/components/settings/token-create-form";
-import { PageHeader, PageBody } from "@/components/shell/page-header";
+import { PageBody } from "@/components/shell/page-header";
 
 export default async function NewOrgTokenPage({ params }: { params: Promise<{ org: string }> }) {
   const { org: slug } = await params;
-
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
-
-  const me = await getMe().catch(() => null);
-  const role = me?.orgs.find((o) => o.slug === slug)?.role ?? "member";
-  if (role !== "owner" && role !== "admin") redirect(`/${slug}/settings/tokens`);
+  const { role } = await getOrgContext(slug);
+  if (!isOrgAdmin(role)) redirect(`/${slug}/settings/tokens`);
 
   return (
-    <>
-      <PageHeader
-        title="New organization access token"
-        description="A machine token for this organization. Pick its role, what it can do, and an expiration."
+    <PageBody>
+      <div className="mb-6 max-w-2xl">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          New organization access token
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          A machine token for this organization. Pick its role, what it can do, and an expiration.
+        </p>
+      </div>
+      <TokenCreateForm
+        basePath={`/api/orgs/${slug}/tokens`}
+        kind="oat"
+        backHref={`/${slug}/settings/tokens`}
       />
-      <PageBody>
-        <TokenCreateForm
-          basePath={`/api/orgs/${slug}/tokens`}
-          kind="oat"
-          backHref={`/${slug}/settings/tokens`}
-        />
-      </PageBody>
-    </>
+    </PageBody>
   );
 }

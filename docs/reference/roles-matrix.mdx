@@ -1,0 +1,204 @@
+---
+title: Roles matrix
+description: Who can do what in Flagon, by organization role, base permission, team role, and project role, derived from the permission checks in the API.
+---
+
+Flagon decides what a person may do from **roles** at three levels: their role
+in the organization, their role on a team, and their effective role on each
+project. This page is the complete matrix, derived from the checks the API
+enforces in `api/internal/db` (`rbac.go`, `project_rbac.go`, `project_owners.go`,
+`teams.go`, `invitations.go`, `org_security.go`) and in Postgres row-level
+security. The dashboard, the assistant, MCP, and access tokens all go through
+the same checks, and an access token's [scopes](/docs/reference/scopes) can only
+narrow them further.
+
+## Organization roles
+
+| Role | Who holds it |
+| --- | --- |
+| `owner` | Full control, including deleting the organization. The creator is the first owner. An organization always has at least one owner. |
+| `admin` | Manages the organization: members, invitations, teams, security, SSO, tokens, and the audit log. Implicitly an owner of every project. |
+| `member` | Works in the organization. Their project access starts from the organization's **base permission**. |
+
+The API still accepts a legacy `viewer` role for compatibility (existing viewer
+memberships were converted to `member`, and the dashboard no longer offers it).
+A viewer gets read access to every project and cannot create or edit projects.
+Organization access tokens can still be created with the `viewer` role.
+
+### Organization actions
+
+| Action | Owner | Admin | Member |
+| --- | --- | --- | --- |
+| See the organization, its members, pending invitations, and teams | Yes | Yes | Yes |
+| Rename the organization | Yes | Yes | No |
+| Add an existing user, or invite by email | Yes | Yes, as `admin` or below | No |
+| Change a member's role | Yes, any role | Only for members below admin, and not to `owner` | No |
+| Remove a member | Yes | Only members below admin | No |
+| Leave the organization | Yes, unless the only owner | Yes | Yes |
+| Read and change the security policy (2FA requirement, SSO requirement, base permission) | Yes | Yes | No |
+| Configure SSO providers | Yes | Yes | No |
+| Read the audit log and change its configuration | Yes | Yes | No (`403`) |
+| Create, list, and revoke organization access tokens | Yes | Yes | No |
+| See the organization's deleted-projects archive | Yes | Yes | No (`403`) |
+| Restore a deleted project (within 30 days) | Yes | Yes | Only as an owner of that project |
+| Delete the organization | Yes | No | No |
+| Restore a deleted organization (within 30 days) | Yes, if you were an owner | No | No |
+
+Rules that apply to every member change:
+
+- **You cannot grant above your own role.** Only an owner can grant or revoke
+  `owner`. Invitations can grant `admin`, `member`, or `viewer`, never `owner`.
+- **Admins manage only roles strictly below their own.** An admin cannot change
+  or remove another admin or an owner.
+- **The last owner is protected.** Demoting or removing the only owner fails with
+  `409`, and the only owner cannot leave.
+- **You cannot change your own membership** through the member endpoints; use
+  **Leave** instead (`409`).
+- **You cannot lock yourself out.** Turning on the 2FA requirement fails with
+  `403` unless your own account has two-factor authentication, and turning on
+  the SSO requirement fails with `403` unless you have signed in through one of
+  the organization's SSO providers at least once.
+
+### Organization security policy
+
+When an organization requires two-factor authentication or single sign-on, the
+API enforces it on every `/orgs/<org>/...` operation (leaving the organization
+is exempt), on every assistant and MCP tool that names the organization, and on
+the assistant endpoints. A member who does not meet the policy gets `403` with a
+message saying what to fix.
+
+| Caller | 2FA requirement | SSO requirement |
+| --- | --- | --- |
+| Signed-in session | Needs 2FA on the account. | The current session must have been established through one of the organization's SSO providers. |
+| Personal access token | Needs 2FA on the token owner's account. | The token owner must have signed in through one of the organization's SSO providers at least once. |
+| Organization access token | Exempt. | Exempt. |
+| Organization `owner` | Applies. | Exempt, so an owner can always reach the settings to fix a broken provider. |
+
+### Organization access tokens
+
+An organization access token acts as a **service principal**: a non-human
+member of one organization with the role chosen when the token was created
+(`admin`, `member`, or `viewer`). Its access to projects follows that role like
+any member's. A few account-level operations need a human and answer `403` for
+a service principal: creating an organization, leaving one, listing your
+recently deleted organizations, restoring an organization, and syncing a
+profile.
+
+## Base permission
+
+The **base permission** is the organization-wide floor of project access that
+every `member` gets on every project, before any explicit grant. Owners and
+admins sit above it. Set it under the organization's **Settings > Member
+privileges**, or with `PUT /orgs/<org>/security` (owners and admins).
+
+| Base permission | Members' access to every project |
+| --- | --- |
+| `none` | None. A member sees only projects they are granted directly or through a team. |
+| `read` (default) | Read. |
+| `triage` | Triage. |
+| `write` | Write. |
+| `maintain` | Maintain. |
+| `admin` | Admin. |
+
+The dashboard offers `none`, `read`, `write`, and `admin`; the API also accepts
+`triage` and `maintain`. A grant can only raise a member above the base
+permission, never lower them below it.
+
+## Project roles
+
+Each project has a ladder of five roles, lowest first. A higher role holds every
+capability of the roles below it.
+
+| Role | Rank |
+| --- | --- |
+| `read` | 1 |
+| `triage` | 2 |
+| `write` | 3 |
+| `maintain` | 4 |
+| `admin` | 5 |
+
+Above the ladder is a separate **owner** tier. A project owner is a user or a
+team added under the project's owners, and every organization owner and admin is
+implicitly an owner of every project, so the organization can never be locked
+out of its own project.
+
+### Effective project role
+
+A person's effective role on a project is the **highest** of:
+
+1. **The organization-derived role**: `admin` for organization owners and
+   admins; the base permission for members (nothing when it is `none`).
+2. **A direct grant** on the project (a collaborator entry).
+3. **Every team grant** for a team they belong to.
+
+Ownership (direct, through a team, or implicit for organization owners and
+admins) is checked separately and grants everything.
+
+### Project actions
+
+| Action | Minimum |
+| --- | --- |
+| See the project, its collaborators, teams, and owners | `read`. A project you cannot read answers `404`, as if it did not exist. |
+| Edit project metadata (name, description, README, repository URL) | `write` |
+| Rename the project's slug (changes its URL) | `maintain` |
+| Add, change, or remove collaborators; grant, change, or revoke team access | `admin` |
+| Delete and restore the project | Owner tier |
+| Add and remove project owners (users or teams) | Owner tier |
+
+A project you can see but lack the role for answers `403`. The dashboard reads
+your access from the `viewer` object on `GET /orgs/<org>/projects/<project>`
+(`role`, `owner`, and `permissions`) and hides controls you cannot use.
+
+`triage` has no distinct powers yet beyond `read`; it is on the ladder so that
+powers can be attached to it later without reshuffling grants.
+
+Creating a project is an organization-level action: any organization member
+with the `owner`, `admin`, or `member` role can create one (a legacy `viewer`
+cannot). The creator is recorded as `created_by`. A creator who is not an
+organization owner or admin is automatically granted `admin` on the new project
+(audited as `project.access_granted`), so they can manage it even when the base
+permission is `read` or `none`. Creating a project does not make you an owner of
+it.
+
+Collaborators must already be organization members: a direct grant raises an
+existing member on one project, and you cannot change your own grant.
+
+### Tokens and project actions
+
+The scope an access token needs lines up with these tiers, but the role check
+still applies: `write:project` covers creating and updating projects,
+`admin:project` covers collaborator, team, and owner management and delete and
+restore. An `admin:project` token held by someone who is not a project owner
+still cannot delete that project.
+
+## Team roles
+
+| Role | Can |
+| --- | --- |
+| `maintainer` | Edit the team's name, slug, and description; add, change, and remove team members. The person who creates a team becomes its first maintainer. |
+| `member` | Belong to the team and inherit its project grants and ownerships. |
+
+| Team action | Org owner or admin | Team maintainer | Anyone else in the org |
+| --- | --- | --- | --- |
+| See teams, their members, and their projects | Yes | Yes | Yes |
+| Create a team | Yes | No | No |
+| Edit a team, manage its members | Yes | Yes | No |
+| Delete a team | Yes | No | No |
+| Grant a team access to a project | Project `admin` or owner tier, as above | | |
+
+Deleting a team removes its project grants and ownerships from effect.
+
+## Personal actions
+
+Every signed-in user can, for themselves: read their account (`GET /me`),
+create, list, and revoke personal access tokens, read and manage their
+notifications, and create organizations (the free plan includes one owned
+organization; see [Limits](/docs/reference/limits)).
+
+## Related
+
+- [Roles](/docs/platform/roles)
+- [Project access](/docs/platform/project-access)
+- [Scopes](/docs/reference/scopes)
+- [Permissions model](/docs/architecture/permissions-model)
+- [Set base permissions](/docs/guides/set-base-permissions)

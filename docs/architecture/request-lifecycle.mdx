@@ -1,0 +1,280 @@
+---
+title: Request lifecycle
+description: Follow one "create a project" request from the browser through the app gateway, the API's request guards, auth and org policy middleware, the service layer, and a row-level-security transaction, then see the same call arrive by token, MCP, and the assistant.
+---
+
+This page follows a single request end to end: a signed-in user creates a project
+called "Checkout" in the `acme` organization from the dashboard. Every other
+dashboard action takes the same path, so once you know this one you can find the
+code for any of them.
+
+The request crosses two services. The **app** (`app/`, Next.js) verifies who you
+are; the **API** (`api/`, Go) decides what you may do and does it. Numbers in the
+diagram match the numbered sections below. "guards" are the router-wide middleware
+every API request passes first; "auth + op" is the matched huma operation with its
+auth and org policy middleware.
+
+```text
+  Browser   app route  client.ts   guards    auth + op   service  internal/db
+    ┬          ┬          ┬          ┬          ┬          ┬          ┬
+    │          │          │          │          │          │          │
+    │─ 1 ─────►│          │          │          │          │          │
+    │          ├─ 2       │          │          │          │          │
+    │          │─ 3 ─────►│          │          │          │          │
+    │          │          │─ 4 ─────►│          │          │          │
+    │          │          │          ├─ 5       │          │          │
+    │          │          │          │─ 6 ─────►│          │          │
+    │          │          │          │          ├─ 7       │          │
+    │          │          │          │          │─ 8 ─────►│          │
+    │          │          │          │          │          │─ 9 ─────►│
+    │          │          │          │          │          │          ├─ 10
+    │          │          │          │          │          │◄─── 11 ──│
+    │          │          │          │          │◄─── 12 ──│          │
+    │          │          │◄─────────┼──── 13 ──│          │          │
+    │          │◄─── 14 ──│          │          │          │          │
+    │◄─── 15 ──│          │          │          │          │          │
+```
+
+## In the app
+
+**1. The browser calls an app route.** Client components never call the API
+directly. They call the app's own route handlers with `fetch` (the helper is
+`app/src/lib/client-fetch.ts`). Creating a project is
+`POST /api/orgs/acme/projects`, handled by
+`app/src/app/api/orgs/[slug]/projects/route.ts`. The BetterAuth session cookie rides
+along automatically.
+
+**2. The route handler checks the request's shape.** It rejects a body with no
+`name` with a `400` before anything leaves the app, trims the optional fields, and
+calls `createProject` from `@/lib/flagon-api`. Route handlers only shape input;
+they make no permission decisions.
+
+**3. The gateway client takes over.** `createProject` is a thin typed wrapper in
+`app/src/lib/api/projects.ts` over `request()` in `app/src/lib/api/client.ts`, the
+one HTTP path from the app to the API. It resolves the signed-in user from the
+BetterAuth session (`currentUser()` in `app/src/lib/session.ts`). With no session it
+throws an `ApiError` with status `401` and never calls the API.
+
+**4. The request crosses to the API.** `client.ts` sends
+`POST {FLAGON_API_URL}/orgs/acme/projects` with these headers:
+
+| Header | Value | Why |
+| --- | --- | --- |
+| `Authorization` | `Bearer <FLAGON_INTERNAL_TOKEN>` | Proves the caller is the app |
+| `X-Flagon-User-Id` | The BetterAuth user id | Who the request acts as |
+| `X-Flagon-User-Email` | The user's email | Identity parity with token callers |
+| `X-Flagon-Client-Ip`, `-Country`, `-Ua` | The end user's IP, country, user agent | The audit log's "where" |
+| `X-Flagon-Auth-Sso-Provider` | The SSO provider the current session was established through, only when it was | Lets the API enforce an org's SSO requirement |
+
+The API trusts the user and client headers only because the internal token
+matched, and only the app holds that token. If the API is unreachable, `client.ts`
+throws a `503` `ApiError` ("The Flagon API is unreachable right now").
+
+## In the API
+
+**5. The request guards run.** Before any route matches, the chi router runs four
+middlewares installed in `New` (`api/internal/server/server.go`), in this order:
+
+1. **Request id** (`withRequestID`, `errors.go`). A well-formed caller-supplied
+   `X-Request-Id` (8 to 128 characters of letters, digits, `.`, `_`, `-`) is kept;
+   otherwise a random one is minted. It is set on the response before anything
+   else runs, so every response, including a middleware's error, carries it.
+2. **Connection address** (`withConnIP`, `limits.go`). The caller's IP is the TCP
+   peer, or the header named by `FLAGON_CLIENT_IP_HEADER` when one is configured
+   (`Fly-Client-IP` in production). The rate limiter and the audit trail for token
+   callers use it. Client-controlled headers are never consulted here.
+3. **Body cap** (`withBodyLimit`). A body larger than `FLAGON_MAX_BODY_BYTES`
+   (default 4 MiB) is refused with `413`. huma operations also keep their own
+   smaller per-operation limit.
+4. **Rate limit** (`withRateLimit`, only when `FLAGON_RATE_LIMIT` is above `0`). A
+   token bucket per principal: default 50 requests per second sustained, burst
+   300. This request carries the internal token, so it draws from the forwarded
+   user's bucket (`X-Flagon-User-Id`); an access token gets a bucket per token, and
+   anything else a bucket per client IP. An empty bucket is `429` with a
+   `Retry-After` header. `/healthz` and `/readyz` are exempt. The limiter is
+   in-memory and per instance, so with several machines the effective ceiling
+   scales with the machine count.
+
+On the dedicated MCP hostname a fifth middleware, the MCP host gate, follows these;
+it is a pass-through on `api.flagon.io`.
+
+**6. Auth middleware binds the caller.** huma matches the operation `create-project`
+(`api/internal/server/projects.go`), which runs behind `combinedAuth` in
+`api/internal/server/identity.go`. `combinedAuth` looks at the bearer value:
+
+- It does not start with `flagon_`, so it must be the internal token. The comparison
+  is constant-time. A wrong token is `401 invalid internal token`; a missing
+  `X-Flagon-User-Id` is `401 missing user identity`; an API with no internal token
+  configured answers `503`. It fails closed in every case. (A production API never
+  gets that far: it refuses to start without `FLAGON_INTERNAL_TOKEN`.)
+- On success it binds the user id, the email, the fact that this is a gateway
+  session, and the forwarded SSO provider to the request context. `withAuditMeta`
+  stores the client IP, country, and user agent for the audit entry, taking them
+  from the `X-Flagon-Client-*` headers because this is a gateway request.
+
+Dashboard sessions carry no scopes, so there is no scope check on this path. For a
+`flagon_` token, the scope check happens here, before anything else (see below).
+
+**7. The org policy check runs.** `combinedAuth` is wrapped by `withOrgPolicy`
+(`api/internal/server/org_policy.go`). For any operation whose path starts with
+`/orgs/{slug}` (except `leave-org`), it calls `service.CheckOrgAccess` for `acme`
+before the handler runs. That reads the org's policy and the caller's mirrored auth
+state through the `flagon.org_access_state` window, then:
+
+- if the org requires two-factor authentication and the user has not enabled it,
+  the request is `403` with a message saying so;
+- if the org requires SSO and the user is not an owner, the session must have been
+  established through one of the org's live SSO providers (the
+  `X-Flagon-Auth-Sso-Provider` value), or the request is `403`;
+- a non-member passes through untouched, so the operation itself answers `404`
+  without the policy leaking anything.
+
+See [Identity and authentication](/docs/architecture/identity-and-auth).
+
+**8. The handler calls the service.** The handler builds a
+`service.CreateProjectInput` and calls `d.svc.CreateProject(ctx, actor(ctx), "acme", ...)`.
+`actor(ctx)` is the authenticated principal. Handlers contain no business logic.
+
+**9. The service validates and calls the store.** `CreateProject` in
+`api/internal/service/projects.go` trims the name, derives the slug with
+`Slugify` ("Checkout" becomes `checkout`), and returns a `422` if neither contains a
+letter or digit. It then calls `store.CreateProject` with the actor's user id.
+
+**10. One transaction, scoped to the user.** `CreateProject` in
+`api/internal/db/projects.go` runs inside `inUserTx`, which:
+
+1. begins a transaction on the pool of the `NOBYPASSRLS` app role, with a 5 second
+   budget;
+2. runs `SELECT set_config('flagon.user_id', $1, true)`, binding the user to this
+   transaction only;
+3. resolves `acme` to an org id. The `orgs` row-level security policy only returns
+   orgs the user belongs to, so a stranger's org reads as `ErrNotMember`;
+4. reads the caller's org role through `flagon.org_member_role` and requires write
+   capability (any member), else `ErrForbidden`;
+5. inserts the project. The `projects_member_insert` policy checks membership again
+   inside Postgres. A unique-slug violation becomes `ErrProjectSlugTaken`;
+6. if the creator is not an org owner or admin, grants them `admin` on the new
+   project (`flagon.grant_project_creator`), so they can see and manage what they
+   just made even when the org's base permission is `none`. The creator is not
+   made a project owner;
+7. calls `recordAudit(..., audit.ActionProjectCreated, "project", "checkout", ...)`
+   in the same transaction, plus `project.access_granted` when the creator grant
+   was added, then commits.
+
+If any step fails, the whole transaction rolls back, audit entries included. A
+change and its audit line always land together or not at all. See
+[Multi-tenancy](/docs/architecture/multi-tenancy) for the RLS details.
+
+**11. The service classifies the result.** Errors pass through `classify`, which
+maps domain sentinels to a status and a caller-safe message using the one table in
+`api/internal/service/errors.go`:
+
+| Sentinel | Status | Message |
+| --- | --- | --- |
+| `db.ErrNotMember` | 404 | organization not found |
+| `db.ErrForbidden` | 403 | you don't have permission to do that |
+| `db.ErrProjectSlugTaken` | 409 | a project with that slug already exists |
+| `service.Invalid(...)` | 422 | the validation message |
+| anything unclassified | 500 | a generic message; the detail stays in server logs |
+
+**12. The handler renders the response.** On success huma answers
+`201 Created` (the operation's `DefaultStatus`) with the project as JSON. On failure
+`apiErr` in `api/internal/server/errors.go`, the only error mapper in the HTTP layer,
+turns the classified error into an RFC 9457 problem document
+(`application/problem+json`) with the same status.
+
+**13. The response leaves the API.** A huma transformer, `redactServerErrors`,
+inspects every problem response on the way out. For any `5xx` it logs the raw
+causes (SQL text, hostnames, provider responses) with the request id and strips
+them from the body, keeping only the title, status, and caller-safe detail. The
+`X-Request-Id` header set in step 5 is on the response, so a user can quote it and
+an operator can find the matching log line.
+
+## Back in the app
+
+**14. The gateway keeps the real status.** If the response is not `2xx`,
+`toApiError` in `client.ts` builds an `ApiError` that carries the upstream status and
+picks a user-facing message in this order: the call site's per-status override
+(`createProject` supplies friendlier text for `403`, `409`, and `422`), then the
+problem's `detail`, then its `title`, then a fallback.
+
+**15. The route handler passes the status through.** `routeError` in
+`app/src/lib/route-error.ts` returns `{ "error": "<message>" }` with the same status
+(any status outside 400 to 599 becomes `502`), so the browser can tell "you can't do
+that" from "the platform is down". On success it returns the project with `201`.
+`fetchJson` in `client-fetch.ts` turns a failed response into an `HttpError` with
+that status and message, and the component shows it.
+
+## The same capability through the other front doors
+
+Steps 8 through 12 are shared. Only the way the caller is identified and checked
+changes. Every path passes the same guards first.
+
+```text
+ Dashboard   ─► app ─► guards ─► combinedAuth, internal token ──► policy ─┐
+ curl or CI  ────────► guards ─► combinedAuth, flagon_ + scope ─► policy ─┤
+ Assistant   ─► app ─► guards ─► /ai/actions/execute ─► tool ───► policy ─┤
+ MCP client  ────────► guards ─► /mcp, flagon_ + scope ─► tool ─► policy ─┤
+                                                                          │
+                                                                          ▼
+                                      service.CreateProject (steps 8 to 12)
+```
+
+**A bearer token.** A script sends `Authorization: Bearer flagon_pat_...` straight
+to `https://api.flagon.io/orgs/acme/projects`. The rate limiter keys it by a hash of
+the token. `combinedAuth` sees the `flagon_` prefix, resolves the token by its
+SHA-256 hash through `flagon.resolve_access_token`, and rejects an unknown, revoked,
+or expired token with `401`. A token with a scope list must hold `write:project`
+(or `admin:project`, which implies it) for `create-project`, or it gets `403`
+before the org policy runs. The audit "where" is the connection address from step 5
+and the request's own `User-Agent`; `X-Flagon-Client-*` headers from a token caller
+are ignored, so a token holder cannot forge the IP its entries record. The org
+policy then applies to the token's user: a personal access token is refused in an
+org that requires 2FA when its owner has not enabled it, and in an org that
+requires SSO unless its owner has signed in through one of that org's providers at
+least once. An organization access token is exempt from both requirements. The
+request then continues at step 8. See
+[Permissions model](/docs/architecture/permissions-model).
+
+**The assistant.** The user asks "create a project called Checkout in acme". The
+browser posts to the app's `/api/ai/messages`, which forwards through `client.ts`
+to `POST /ai/messages` (internal token only). The agent proposes the
+`create_project` tool call instead of running it. When the user confirms, the app
+calls `POST /ai/actions/execute`, which checks that the user belongs to the
+conversation's org and passes its access policy, refuses a call that names a
+different org, checks the org's AI quota, and then runs the tool as the forwarded
+user. The tool runner applies the org policy again for the tool's `org` argument.
+The tool calls the same `service.CreateProject`, and a failure comes back with the
+status from the same error table. See [AI runtime](/docs/architecture/ai-runtime).
+
+**MCP.** An MCP client posts a JSON-RPC `tools/call` for `create_project` to
+`https://mcp.flagon.io` with a `flagon_` token. `authenticateMCP` in
+`api/internal/server/mcp.go` resolves the token the same way `combinedAuth` does,
+checks the tool's scope (`write:project`) with the same `scopeSatisfies` function,
+and stamps the connection address and user agent on the context for the audit
+entry. The tool runner enforces the org policy for `acme` and calls
+`service.CreateProject`. Flagon does not ask for a second confirmation here;
+confirming a tool call is the MCP client's job. See
+[Tool registry](/docs/architecture/tool-registry).
+
+## Why it is built this way
+
+- **One trust boundary.** Only `client.ts` holds the internal token, and it
+  attaches identity only after reading a verified session. There is no second path
+  to audit.
+- **Cheap refusals first.** The guards turn away oversized and runaway requests
+  before any database work, and the scope check turns away an under-scoped token
+  before the org policy or the handler runs.
+- **Authorization lives with the data.** The service shapes requests; the database
+  layer and RLS decide. A bug in a handler or tool cannot widen access, because the
+  query still runs as the caller.
+- **One error table, no leaked internals.** Every surface reports the same failure
+  with the same status and wording, and a `5xx` never carries raw error text, only
+  a request id to look it up by.
+
+## Related
+
+- [Architecture overview](/docs/architecture/overview)
+- [Identity and authentication](/docs/architecture/identity-and-auth)
+- [Multi-tenancy](/docs/architecture/multi-tenancy)
+- [API errors](/docs/api/errors)

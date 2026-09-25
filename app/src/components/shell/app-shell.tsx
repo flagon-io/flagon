@@ -119,7 +119,7 @@ export function AppShell({
               </nav>
             }
           />
-          {/* Full-bleed: pages own their padding via <PageHeader>/<PageBody> so
+          {/* Full-bleed: pages own their padding via <PageBody> so
               headings can span the full width (border included) while content sits
               in a narrower column. The breadcrumb above handles "back". */}
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -248,7 +248,7 @@ function SectionNav({ section, pathname }: { section: OrgSection; pathname: stri
             {group.label && (
               <p
                 className={cn(
-                  "px-2 pt-1 pb-0.5 text-[11px] font-semibold tracking-wider text-muted-foreground/70 uppercase",
+                  "px-2 pt-1 pb-0.5 text-2xs font-semibold tracking-wider text-muted-foreground/70 uppercase",
                   collapseHidden,
                 )}
               >
@@ -258,7 +258,7 @@ function SectionNav({ section, pathname }: { section: OrgSection; pathname: stri
             {group.items.map((item) => {
               const Icon = item.icon;
               if (item.disabled) {
-            // Not-yet-shipped area: shown for wayfinding (GitHub-style) but inert.
+            // Not-yet-shipped area: shown for wayfinding but inert.
             return (
               <div
                 key={item.href}

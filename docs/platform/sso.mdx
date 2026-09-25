@@ -1,106 +1,182 @@
 ---
 title: Single sign-on (SSO)
-description: Connect your identity provider so members sign in to Flagon with OIDC or SAML.
-section: Platform
-order: 30
+description: Connect your identity provider with OIDC or SAML so members sign in to Flagon through it, and optionally require it.
 ---
 
-# Single sign-on (SSO)
+**Single sign-on** (SSO) lets members sign in to Flagon through your company's
+identity provider (IdP), such as Okta, Microsoft Entra ID, or Google Workspace.
+SSO is configured **per organization**, so each org connects its own IdP, and both
+**OIDC** (OpenID Connect) and **SAML 2.0** are supported.
 
-Flagon organizations can require members to sign in through your identity provider
-(IdP). SSO is configured **per organization**, so each org connects its own IdP:
-one org can use Okta, another Azure AD, another Google Workspace. Both **OIDC**
-(OpenID Connect) and **SAML 2.0** are supported.
+When someone signs in through an organization's IdP, Flagon **provisions their
+membership** automatically: they become a member of the organization the provider
+belongs to. You manage who has access in your IdP, and it flows into Flagon.
 
-When a user signs in through your IdP, Flagon **provisions their membership**
-automatically: they become a member of the organization the provider is bound to,
-so you manage access in your IdP and it flows into Flagon.
+Managing SSO providers requires an organization **owner or admin**.
 
 ## Set up a provider
 
-Go to **your org → Settings → Authentication → SSO providers → New provider**. You
-need to be an **owner or admin** of the organization.
+Go to your org's **Settings > Authentication**, find **SSO providers**, and
+choose **New provider**. Every provider has:
 
-### OIDC (OpenID Connect)
+- **Provider ID**: a short lowercase slug (letters, digits, and hyphens, 2 to 63
+  characters, starting with a letter or digit), for example `acme-okta`. It is
+  part of the callback URLs, so it cannot be changed later, and it is unique
+  across Flagon.
+- **Email domain**: your users' email domain, for example `acme.com`. The
+  **Sign in with SSO** flow uses it to route a user to the right provider, and
+  subdomains such as `eng.acme.com` match too. A domain can belong to only one
+  provider (`409 Conflict` otherwise).
 
-1. In your IdP, create an OIDC/OAuth app. Set the **redirect (callback) URI** to:
+For step-by-step setup with a real IdP, see
+[Set up SSO with OIDC](/docs/guides/set-up-sso-oidc) and
+[Set up SSO with SAML](/docs/guides/set-up-sso-saml).
 
-   ```
-   https://app.flagon.io/api/auth/sso/callback/<providerId>
-   ```
+### OIDC
 
-   where `<providerId>` is the id you choose in Flagon (for example `acme-okta`).
-2. In Flagon, choose **OIDC** and fill in:
-   - **Provider ID** - a short slug, e.g. `acme-okta`.
-   - **Email domain** - your users' email domain, e.g. `acme.com`. This is how the
-     "Sign in with SSO" flow routes a user to the right provider.
-   - **Issuer URL** - your IdP's issuer, e.g. `https://acme.okta.com`. Flagon
-     discovers the rest from `<issuer>/.well-known/openid-configuration`.
-   - **Client ID** and **Client secret** from the IdP app.
+1. In your IdP, create an OIDC application and set its **redirect (callback)
+   URI** to:
+
+   ```text https://app.flagon.io/api/auth/sso/callback/<providerId> ```
+
+2. In Flagon, choose **OIDC** and enter the provider ID, email domain, the
+   **Issuer URL** (for example `https://acme.okta.com`; Flagon discovers the rest
+   from `<issuer>/.well-known/openid-configuration`), and the application's
+   **Client ID** and **Client secret**.
 3. Save. Members can now sign in with SSO.
 
 ### SAML 2.0
 
-1. In Flagon, choose **SAML**, set a **Provider ID** and **email domain**, and paste
+1. In Flagon, choose **SAML**, set the provider ID and email domain, and paste
    your IdP's **SSO URL (entry point)** and **signing certificate (PEM)**. The
-   **SP entity ID** is an identifier for this connection (e.g.
-   `https://app.flagon.io/saml/acme`).
-2. Save, then copy the two URLs Flagon shows for the provider into your IdP app:
+   **SP entity ID** is an identifier for this connection, for example
+   `https://app.flagon.io/saml/acme`.
+2. Save, then copy the two URLs Flagon shows for the provider into your IdP:
    - **ACS (Assertion Consumer Service) URL**:
      `https://app.flagon.io/api/auth/sso/saml2/sp/acs/<providerId>`
    - **SP metadata URL** (many IdPs can import this directly):
      `https://app.flagon.io/api/auth/sso/saml2/sp/metadata?providerId=<providerId>`
-
-#### Okta (SAML) example
-
-1. Okta admin → **Applications → Create App Integration → SAML 2.0**.
-2. **Single sign-on URL** = Flagon's ACS URL (above). **Audience URI (SP Entity ID)**
-   = the SP entity ID you set in Flagon.
-3. Map attributes so the assertion includes at least the user's **email** (and name).
-4. Copy Okta's **Identity Provider metadata** (or the SSO URL + signing cert) into
-   Flagon's provider form.
-5. Assign your Okta users/groups to the app.
+3. In the IdP, set the audience (SP entity ID) to the value you entered in
+   Flagon, make sure the assertion includes the user's **email**, and assign the
+   users or groups who should have access.
 
 ## Signing in
 
-On the login page, members choose **Sign in with SSO** and enter their work email.
-Flagon matches the email domain to the provider and redirects to the IdP. On return,
-the member is signed in and their organization membership is ensured automatically.
+On the login page, members choose **Sign in with SSO** and enter their work
+email. Flagon matches the email's domain to a provider and redirects to the IdP.
+On return, the member is signed in and their organization membership is ensured.
+A person with no Flagon account gets one created and is added to the organization
+automatically. The join is recorded in the org's
+[audit log](/docs/platform/audit-log).
+
+### One account, many organizations
+
+You have a single Flagon account, and each organization connects its own IdP.
+When you go through an org's SSO while already signed in, Flagon **links that
+org's SSO identity to your current account**, whatever email the IdP asserts. So
+one account can belong to org A (through Okta), org B (through Microsoft Entra
+ID), and an org with no SSO at all, and a single sign-in reaches all of them.
 
 ## Requiring SSO
 
-Once a provider is configured, an owner/admin can turn on **Require single sign-on**
-under **Settings → Authentication**. When it's on, members and admins who haven't
-signed in through the org's provider are sent to a "single sign-on required" page and
-must continue with SSO before they can access the organization.
+Once a provider is configured, an owner or admin can turn on **Require single
+sign-on** under **Settings > Authentication** (or set `require_sso` with
+`set_org_security`). With it on, members and admins who have not signed in
+through the org's provider are sent to a "single sign-on required" page when they
+open the organization, and must continue with SSO first.
 
-- **Lockout safety:** you can only turn the requirement *on* once you've signed in
-  through the org's SSO yourself - so enabling it can't lock out the person enabling
+The API enforces the same requirement, so it holds on every front door, not just
+in the dashboard:
+
+| Caller | Allowed when SSO is required |
+| --- | --- |
+| Dashboard session (including the assistant) | The current session was established through one of the organization's providers. |
+| Personal access token (API or MCP) | The token's user has signed in through one of the organization's providers at least once. |
+| Organization access token | Always: its service principal never signs in interactively. |
+| Organization owner | Always (see break-glass below). |
+
+Anyone else gets `403 Forbidden` (`this organization requires single sign-on; sign in through the organization's identity provider to continue`) on every
+operation under `/orgs/{slug}` except leaving the organization, on assistant
+messages and confirmed actions, and on MCP tool calls that name the
+organization.
+
+- **Lockout safety**: the API refuses to turn the requirement on
+  (`403 Forbidden`, `sign in through one of the organization's SSO providers before requiring single sign-on`) unless you have signed in through one of the
+  org's providers yourself, whether you use the dashboard, the API, or the
+  assistant.
+- **Owner break-glass**: owners are exempt from the requirement, so an owner can
+  always reach settings to fix or disable SSO even if the IdP is misconfigured.
+
+You can require SSO, [two-factor authentication](/docs/platform/two-factor), or
+both. Changes to the requirement are audited as `organization.security_changed`.
+
+## Manage providers from the API, assistant, or MCP
+
+SSO providers are an ordinary Flagon setting owned by the API. Everything the
+settings page does is also an API operation and a tool:
+
+| Operation | API | Tool | Scope |
+| --- | --- | --- | --- |
+| List providers | `GET /orgs/{slug}/sso/providers` | `list_sso_providers` | `read:org` |
+| Read a provider | `GET /orgs/{slug}/sso/providers/{provider}` | `get_sso_provider` | `read:org` |
+| Add a provider | `POST /orgs/{slug}/sso/providers` | `create_sso_provider` | `write:org` |
+| Update a provider | `PATCH /orgs/{slug}/sso/providers/{provider}` | `update_sso_provider` | `write:org` |
+| Remove a provider | `DELETE /orgs/{slug}/sso/providers/{provider}` | `delete_sso_provider` | `write:org` |
+
+Only organization **owners and admins** can read or change SSO configuration,
+whatever the token's scopes. Changes are audited as `sso_provider.created`,
+`sso_provider.updated`, and `sso_provider.deleted`.
+
+An update is partial: fields you leave out, including secrets, are unchanged. The
+provider ID and protocol cannot be changed; remove the provider and add a new one
+instead. Besides the fields on the settings page, the API and tools accept OIDC
+`scopes`, `pkce`, and `discovery_endpoint`, and SAML `audience`,
+`want_assertions_signed`, `authn_requests_signed`, and a service-provider
+`private_key`.
+
+## How secrets are handled
+
+- The OIDC **client secret** and a SAML **private key** are **write-only**. You
+  send them when you add a provider or rotate them with an update; no read ever
+  returns them. The settings page, the API, and every tool show only whether a
+  secret is set (`client_secret_set`, `private_key_set`).
+- Secrets are stored apart from the rest of the provider's configuration and are
+  **encrypted at rest** with AES-256-GCM under the API's `FLAGON_SECRETS_KEY`
+  (a base64-encoded 32-byte key, required in production). A database dump,
+  backup, or replica alone never yields them. Rows written before encryption
+  existed are encrypted automatically when the API boots.
+- The only path that reads them decrypted is an internal operation reachable
+  solely by the sign-in service with Flagon's internal credential, never by an
+  access token. The sign-in service's own provider cache (in the app's auth
+  database) holds the secret in plaintext, because the OIDC and SAML flows need
   it.
-- **Owner break-glass:** owners are exempt from the redirect, so an owner can always
-  reach settings to fix or disable the requirement even if SSO is misconfigured.
-
-See also [Two-factor authentication](/platform/two-factor) for the 2FA requirement -
-you can require SSO, 2FA, or both.
-
-## One account, many organizations
-
-You have a single Flagon account, and each organization connects its own IdP. When
-you go through an org's SSO while already signed in, Flagon **links that org's SSO
-identity to your current account** - whatever email the IdP asserts - the way GitHub
-does. So one account can belong to org A (via Okta), org B (via Azure AD), and a
-personal org with no SSO at all, and a single sign-in reaches all of them. Each org
-independently decides whether to require SSO; a non-SSO org keeps working normally.
-A brand-new person with no Flagon account who signs in through an org's SSO gets an
-account created and is added to that org automatically.
+- Removing a provider clears its secrets.
 
 ## How it fits together
 
-- The IdP integration (OIDC/SAML, assertion validation, signing) is handled by a
-  battle-tested SSO engine in the app's auth layer. Providers are stored in the
-  app's auth database.
-- Organizations, memberships, and roles remain in Flagon's API (the source of
-  truth). A verified SSO login calls the API across the internal trust boundary to
-  ensure the member exists - so SSO users flow through the same membership, RBAC,
-  and audit paths as everyone else. The join is recorded in the [audit
-  log](/platform/organizations).
+- The **API is the source of truth** for SSO configuration: it stores each
+  provider, validates it, enforces tenant isolation (row-level security, owners
+  and admins only), and audits every change.
+- The IdP protocol work (OIDC and SAML, assertion validation, signing) runs in the
+  app's sign-in service, built on BetterAuth's SSO plugin. It keeps a **cache** of
+  provider configuration, which it refreshes from the API at the start of every
+  SSO sign-in, callback, and SAML request. A change made anywhere applies on the
+  next sign-in, and a removed provider (or a deleted organization) stops working.
+  If the API cannot be reached, SSO sign-in fails closed rather than using a stale
+  provider.
+- Providers registered before the API owned SSO are **adopted** into the API the
+  first time they are used (or when an owner opens the Authentication settings).
+  Operators can adopt them all at once with `npm run sso:backfill` in `app/`; it
+  is idempotent, and a provider removed through the API is never brought back.
+- A verified SSO login calls the API across the internal trust boundary to ensure
+  the member exists, so SSO users flow through the same membership, RBAC, and
+  audit paths as everyone else. See
+  [Identity and auth](/docs/architecture/identity-and-auth).
+
+## Related
+
+- [Set up SSO with OIDC](/docs/guides/set-up-sso-oidc)
+- [Set up SSO with SAML](/docs/guides/set-up-sso-saml)
+- [Two-factor authentication](/docs/platform/two-factor)
+- [SCIM provisioning](/docs/platform/scim)
+- [Sign-in and SSO troubleshooting](/docs/troubleshooting/sign-in-and-sso)

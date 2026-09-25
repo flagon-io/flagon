@@ -1,0 +1,154 @@
+---
+title: Create an organization
+description: Create the organization that holds your projects, teams, and members, from the dashboard, the API, or the assistant.
+---
+
+An **organization** is the workspace everything else in Flagon lives in: projects, teams,
+members, access tokens, security settings, and the audit log. Every dashboard URL starts with
+the organization's slug (`app.flagon.io/acme/...`), and every domain API call names it
+(`/orgs/acme/...`). Your personal account settings at `/settings` are the only thing outside an
+organization.
+
+By the end of this guide you will own a new organization, reachable at
+`app.flagon.io/<slug>`, and know how to confirm it exists from the API.
+
+<Callout type="info" title="Before you start">
+
+- **Account:** a verified Flagon account. Anyone with an account can create an organization;
+  there is no role requirement because you become its **owner**.
+- **Plan limit:** the free plan includes **one organization that you own**. Being a member of
+  other people's organizations is unlimited. Organizations you deleted do not count toward the
+  limit while they sit in your recently deleted archive.
+- **API token (optional):** to create one from the API, a personal access token with the
+  `admin:org` scope (or full access). Organization access tokens cannot create organizations.
+
+</Callout>
+
+## Steps
+
+<Steps>
+
+<Step title="Pick a name and a slug">
+
+The **name** is the display label (`Acme Inc`). The **slug** is the URL segment (`acme-inc`) and
+must be unique across Flagon. Flagon normalizes a slug to lowercase letters, digits, and single
+hyphens: `Acme Inc` becomes `acme-inc`. If you don't give a slug, Flagon derives it from the name.
+
+A name must contain at least one letter or digit, or the request fails with `422` and
+`name is required and must contain a letter or digit`.
+
+</Step>
+
+<Step title="Create the organization">
+
+<Tabs>
+
+<Tab title="Dashboard">
+
+1. Go to [app.flagon.io/new](https://app.flagon.io/new). A new account is sent here
+   automatically after email verification.
+2. Enter an **Organization name**. The form previews the URL it derives, for example
+   `app.flagon.io/acme-inc`.
+3. Select **Create organization**. Flagon opens the new organization's dashboard.
+
+The dashboard derives the slug from the name. To choose a slug that differs from the name, use
+the API or the assistant.
+
+If you already own an organization, this page shows **You've reached the free plan limit**
+instead of the form.
+
+</Tab>
+
+<Tab title="API">
+
+```bash
+curl -X POST https://api.flagon.io/orgs \
+  -H "Authorization: Bearer $FLAGON_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme Inc", "slug": "acme"}'
+```
+
+A `201 Created` response returns the organization, with your role in it:
+
+```json
+{
+  "$schema": "https://api.flagon.io/schemas/Org.json",
+  "id": "6f1c...",
+  "name": "Acme Inc",
+  "slug": "acme",
+  "role": "owner",
+  "enforce_two_factor": false,
+  "require_sso": false,
+  "created_at": "2026-09-25T12:00:00Z"
+}
+```
+
+</Tab>
+
+<Tab title="Assistant">
+
+Open **Ask AI** in any organization you already belong to and ask:
+
+> Create an organization called Acme Inc.
+
+The assistant proposes the change as a card reading
+**Confirm: Create organization "Acme Inc"**. Nothing happens until you select **Confirm**. See
+[Work with the assistant](/docs/guides/work-with-the-assistant) for how proposals work.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+<Step title="Verify it worked">
+
+In the dashboard, the organization switcher in the sidebar now lists the new organization, and
+**Settings > Organizations** (your personal settings) shows it with the **Owner** role.
+
+From the API, list the organizations you belong to:
+
+```bash
+curl https://api.flagon.io/orgs \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+The response is `{"orgs": [...]}` and includes the new slug with `"role": "owner"`. Creating
+the organization also writes an `organization.created` entry to its
+[audit log](/docs/guides/review-the-audit-log) and sends you a welcome notification.
+
+</Step>
+
+<Step title="Set it up">
+
+A new organization has only you in it. Typical next steps:
+
+- [Invite your team](/docs/guides/invite-your-team).
+- [Set base permissions](/docs/guides/set-base-permissions) so members get the right default
+  access to projects.
+- [Create a project](/docs/guides/create-a-project).
+
+To rename the organization later, go to **Settings > General**, or call
+`PATCH /orgs/{slug}` with `{"name": "New name"}` (owners and admins, `write:org` scope). The
+slug cannot be changed after creation.
+
+</Step>
+
+</Steps>
+
+## Common failures
+
+| Status | `detail` | What to do |
+| --- | --- | --- |
+| `402` | `the free plan includes one organization; add a payment method to create more` | You already own one live organization. Paid plans are not available yet, so delete or hand over ownership of the existing one, or ask to be added to someone else's organization. |
+| `409` | `that org slug is already taken` | Pick another slug. Slugs are unique across all of Flagon, not just your account. |
+| `422` | `name is required and must contain a letter or digit` | Send a non-empty `name`. |
+| `403` | `this token is missing the scope required for this operation` | Your token lacks `admin:org`. Create a token with that scope. |
+| `403` | `this operation requires a user; organization access tokens can't perform it` | You used an organization access token. Use a personal access token. |
+
+## Related
+
+- [Organizations](/docs/platform/organizations)
+- [Invite your team](/docs/guides/invite-your-team)
+- [Delete and restore](/docs/guides/delete-and-restore)
+- [Errors](/docs/api/errors)

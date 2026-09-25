@@ -5,8 +5,12 @@ import type { ComponentProps } from "react";
 import { cn } from "../lib/cn";
 
 export const TooltipProvider = TooltipPrimitive.Provider;
+/** Tooltip root (no DOM of its own). Compose Tooltip > Trigger + Content. */
 export const Tooltip = TooltipPrimitive.Root;
-export const TooltipTrigger = TooltipPrimitive.Trigger;
+
+export function TooltipTrigger(props: ComponentProps<typeof TooltipPrimitive.Trigger>) {
+  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+}
 
 export function TooltipContent({
   className,
@@ -16,6 +20,7 @@ export function TooltipContent({
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
+        data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(
           "z-50 overflow-hidden rounded-md border border-hairline bg-popover px-2.5 py-1.5 text-xs font-medium text-popover-foreground shadow-md",

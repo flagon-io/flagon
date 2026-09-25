@@ -5,7 +5,8 @@ import { Calendar as CalendarIcon } from "lucide-react";
 import type { Matcher } from "react-day-picker";
 import { format as formatDate, isValid, parse } from "date-fns";
 import { cn } from "../lib/cn";
-import { controlHeight } from "../lib/control";
+import { controlHeight, focusRing } from "../lib/control";
+import { endOfDay, rangeMatcher, startOfDay, yearsFromNow } from "../lib/date-range";
 import { buttonClasses } from "./button";
 import { Calendar } from "./calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
@@ -145,13 +146,13 @@ export function DateField({
   const parsed = useMemo(() => parseFlexibleDate(text, { dayFirst }), [text, dayFirst]);
   const outOfRange =
     parsed != null &&
-    ((min != null && parsed < startOf(min)) || (max != null && parsed > endOf(max)));
+    ((min != null && parsed < startOfDay(min)) || (max != null && parsed > endOfDay(max)));
   const invalid = text.trim() !== "" && (parsed == null || outOfRange);
 
   function emit(value: string) {
     setText(value);
     const p = parseFlexibleDate(value, { dayFirst });
-    const ok = p != null && !(min != null && p < startOf(min)) && !(max != null && p > endOf(max));
+    const ok = p != null && !(min != null && p < startOfDay(min)) && !(max != null && p > endOfDay(max));
     onChange?.(ok ? p : null);
     if (p) setMonth(p);
   }
@@ -165,7 +166,7 @@ export function DateField({
   }
 
   return (
-    <div className={cn("space-y-1.5", className)}>
+    <div data-slot="date-field" className={cn("space-y-1.5", className)}>
       <div className="relative">
         <input
           id={fieldId}
@@ -181,7 +182,8 @@ export function DateField({
             controlHeight.md,
             "w-full rounded-md border bg-background pr-10 pl-3 text-sm text-foreground",
             "placeholder:text-muted-foreground",
-            "outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            "transition",
+            focusRing,
             "disabled:cursor-not-allowed disabled:opacity-50",
             invalid ? "border-destructive" : "border-input",
           )}
@@ -224,24 +226,3 @@ export function DateField({
   );
 }
 
-// Default calendar bounds so the year dropdown has a useful range even when no
-// explicit min/max is given. Narrowed by min/max when those are provided.
-function yearsFromNow(delta: number): Date {
-  const d = new Date();
-  return new Date(d.getFullYear() + delta, delta < 0 ? 0 : 11, delta < 0 ? 1 : 31);
-}
-
-function startOf(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-}
-function endOf(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
-}
-function rangeMatcher(min?: Date, max?: Date, extra?: Matcher | Matcher[]): Matcher[] | undefined {
-  const m: Matcher[] = [];
-  if (min) m.push({ before: startOf(min) });
-  if (max) m.push({ after: endOf(max) });
-  if (Array.isArray(extra)) m.push(...extra);
-  else if (extra) m.push(extra);
-  return m.length ? m : undefined;
-}

@@ -1,19 +1,14 @@
 import { NextResponse } from "next/server";
+import { routeError, badRequest, listOptionsFrom } from "@/lib/route-error";
 import { createTeam, listTeams } from "@/lib/flagon-api";
 
 export async function GET(request: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
-  const url = new URL(request.url);
-  const limitParam = url.searchParams.get("limit");
   try {
-    const page = await listTeams(slug, {
-      q: url.searchParams.get("q") ?? undefined,
-      cursor: url.searchParams.get("cursor") ?? undefined,
-      limit: limitParam ? Number(limitParam) : undefined,
-    });
+    const page = await listTeams(slug, listOptionsFrom(request));
     return NextResponse.json({ items: page.items, next: page.next });
-  } catch {
-    return NextResponse.json({ items: [], next: null });
+  } catch (e) {
+    return routeError(e);
   }
 }
 
@@ -22,7 +17,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ slug: stri
   const body = await request.json().catch(() => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) {
-    return NextResponse.json({ error: "A team name is required." }, { status: 400 });
+    return badRequest("A team name is required.");
   }
   try {
     const team = await createTeam(slug, {
@@ -31,8 +26,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ slug: stri
       description: typeof body.description === "string" ? body.description : undefined,
     });
     return NextResponse.json(team, { status: 201 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not create team.";
-    return NextResponse.json({ error: message }, { status: 400 });
+  } catch (e) {
+    return routeError(e, "Could not create team.");
   }
 }

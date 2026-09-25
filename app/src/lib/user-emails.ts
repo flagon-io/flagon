@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { pool } from "@/lib/db";
+import { HttpError } from "@/lib/http-error";
 
 export interface UserEmail {
   id: string;
@@ -69,7 +70,7 @@ export async function requestAddUserEmail(userId: string, email: string) {
   );
 
   if (rowCount === 0) {
-    throw new Error("That email is already in use.");
+    throw new HttpError(409, "That email is already in use.");
   }
 
   return otp;
@@ -90,7 +91,7 @@ export async function resendUserEmailOtp(userId: string, email: string) {
   );
 
   if (rows.length === 0) {
-    throw new Error("No pending verification for that email.");
+    throw new HttpError(404, "No pending verification for that email.");
   }
 
   return otp;
@@ -106,7 +107,7 @@ export async function verifyUserEmailOtp(userId: string, email: string, otp: str
   );
 
   if (rows.length === 0) {
-    throw new Error("That code is invalid or has expired.");
+    throw new HttpError(422, "That code is invalid or has expired.");
   }
 }
 
@@ -122,8 +123,8 @@ export async function setPrimaryUserEmail(userId: string, emailId: string) {
       [emailId, userId],
     );
     const target = rows[0];
-    if (!target) throw new Error("Email not found.");
-    if (!target.verified) throw new Error("Verify this email before making it primary.");
+    if (!target) throw new HttpError(404, "Email not found.");
+    if (!target.verified) throw new HttpError(409, "Verify this email before making it primary.");
 
     await client.query(
       `update user_emails set is_primary = false, updated_at = now() where user_id = $1`,
@@ -153,6 +154,6 @@ export async function deleteUserEmail(userId: string, emailId: string) {
     [emailId, userId],
   );
   if (rows.length === 0) {
-    throw new Error("Can't delete the primary email, or email not found.");
+    throw new HttpError(409, "Can't delete the primary email, or email not found.");
   }
 }

@@ -19,7 +19,9 @@ import (
 //
 // A Markdown/MDX file is included only if its frontmatter has a title; files
 // without frontmatter (READMEs, notes) are skipped. Docs are sorted by slug so
-// the output is deterministic and diff-friendly.
+// the output is deterministic and diff-friendly. docs/index.mdx becomes the
+// landing page (slug "index"), and the meta.json files (see applyNav) set
+// section titles and compile the navigation.
 func BuildFromDir(dir string) (Corpus, error) {
 	root := os.DirFS(dir)
 	var docsOut []Doc
@@ -62,7 +64,14 @@ func BuildFromDir(dir string) (Corpus, error) {
 		}
 		seen[d.Slug] = true
 	}
-	return Corpus{Docs: docsOut}, nil
+
+	// Navigation: meta.json files set section titles and page order, and compile
+	// into the grouped nav the website renders.
+	nav, err := applyNav(dir, docsOut)
+	if err != nil {
+		return Corpus{}, err
+	}
+	return Corpus{Docs: docsOut, Nav: nav}, nil
 }
 
 // docFrom assembles a Doc from a file's path, frontmatter, and body.

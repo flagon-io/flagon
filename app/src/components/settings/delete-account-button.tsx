@@ -11,6 +11,7 @@ import {
   Input,
   Label,
 } from "@flagon-io/ui";
+import { errorMessage } from "@/lib/client-fetch";
 
 export function DeleteAccountButton({ confirmWord }: { confirmWord: string }) {
   const [open, setOpen] = useState(false);
@@ -24,10 +25,9 @@ export function DeleteAccountButton({ confirmWord }: { confirmWord: string }) {
     setBusy(true);
     setError(null);
     const res = await fetch("/api/account/delete", { method: "POST" });
-    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setBusy(false);
-      setError(data.error ?? "Couldn't delete your account.");
+      setError(await errorMessage(res, "Couldn't delete your account."));
       return;
     }
     // Sessions are revoked server-side; force a full reload to drop all client

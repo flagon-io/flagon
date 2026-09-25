@@ -1,48 +1,90 @@
 ---
 title: Notifications
-description: Your personal feed of what happened across your organizations, and how Flagon reaches you.
-section: Platform
-order: 5
+description: Your personal feed of what happened to you across your organizations, in the top bar and in settings.
 ---
 
-# Notifications
+**Notifications** are your personal feed of things that happened to you across
+the organizations you belong to: you were added to an org, your role changed,
+someone accepted your invitation, you were given access to a project. They are
+**personal**: a notification belongs to you, not to an organization, and only you
+can see or change it. That makes them separate from the
+[audit log](/docs/platform/audit-log), the organization's shared, immutable
+record of who did what.
 
-Notifications are your personal feed of activity across the organizations you
-belong to - an invite you accepted, a member who joined, a role that changed.
-They are **personal**: a notification belongs to you, not to an organization.
-That makes them separate from the [audit log](/platform/audit-log), which is the
-organization's shared, immutable record of who did what.
+## What you are notified about
+
+| Type | When |
+| --- | --- |
+| `org.created` | You created an organization. |
+| `org.member_added` | Someone added you to an organization (directly, or by inviting an email that already has an account). |
+| `org.role_changed` | Your organization role changed. |
+| `org.member_removed` | You were removed from an organization. |
+| `org.invite_accepted` | Someone accepted an invitation you sent. |
+| `org.deleted` | An organization you belong to was deleted. |
+| `project.access_granted` | You were given a role on a project. |
+| `project.access_changed` | Your role on a project changed. |
+| `team.member_added` | You were added to a team. |
 
 ## Where they show up
 
-- The **bell** in the top bar shows a badge with your unread count and a short
-  feed. The feed is **unread first, then most recent**, so an item you haven't
-  read yet is never buried under newer ones you have - even if it's weeks old.
-- **Settings → Notifications** is the full feed, with **All** and **Unread**
-  filters, plus your delivery preferences. It's a personal surface (your account,
-  spanning every organization you belong to), also reachable from the bell's
-  **View all**.
+- The **bell** in the top bar shows your unread count and a short feed. The feed
+  is **unread first, then newest**, so an unread item is never buried under newer
+  ones you have already read.
+- **Settings > Notifications** (`app.flagon.io/settings/notifications`) is the
+  full feed with **All** and **Unread** tabs. It spans every organization you
+  belong to.
 
 ## Reading a notification
 
 Selecting a notification opens its detail rather than jumping you somewhere:
 
 - It **marks the notification read** (its `read_at` timestamp records when).
-- From the detail you can **mark it unread** again to bring it back to the top of
-  the feed, or **open** its linked page when it has one.
+- From the detail you can **mark it unread** again, or **open** its linked page
+  when it has one.
 - **Mark all as read** clears the whole unread count at once.
 
-Opening a notification never navigates on its own - you follow the link only when
-you choose to, so a click is never a surprise jump.
+A click never navigates on its own; you follow the link only when you choose to.
 
 ## Delivery
 
-Today notifications are delivered **in-product** (the bell and the feed). Email
-delivery is planned.
+Notifications are delivered **in-product** only (the bell and the feed).
+Invitation emails are a separate thing: they go to people who are not members
+yet (see [Members and invitations](/docs/platform/members)).
 
-## With the AI and the API
+<Callout type="warn" title="Not available yet">
 
-Everything above is available through the [API](/api) and to the
-[AI assistant](/ai) and [MCP](/mcp-hub): list your notifications, mark one read
-or unread, or mark them all read. As with every mutation, the in-product agent
-proposes the change and you confirm it.
+Email delivery of notifications is planned. The **Email** switch under
+**Settings > Notifications > Delivery** is shown but disabled, marked
+**Coming soon**.
+
+</Callout>
+
+## Operations
+
+Everything above is available through the API, the
+[assistant](/docs/ai/assistant), and [MCP](/docs/ai/mcp):
+
+| Operation | API | Tool | Scope |
+| --- | --- | --- | --- |
+| List your notifications | `GET /notifications` | `list_notifications` | `notifications` |
+| Count unread | `GET /notifications/unread-count` | `count_unread_notifications` | `notifications` |
+| Mark one read | `POST /notifications/{id}/read` | `mark_notification_read` | `notifications` |
+| Mark one unread | `POST /notifications/{id}/unread` | `mark_notification_unread` | `notifications` |
+| Mark all read | `POST /notifications/read-all` | `mark_all_notifications_read` | `notifications` |
+
+`GET /notifications` returns up to `limit` items, unread first and then newest
+(default 30; a value of 0 or less means 30, and anything above 100 is capped at
+100). The `list_notifications` tool takes the same `limit`. As with every
+change, the in-product assistant proposes marking notifications read and you
+confirm it.
+
+```bash
+curl https://api.flagon.io/notifications/unread-count \
+  -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+## Related
+
+- [Audit log](/docs/platform/audit-log)
+- [Profile and account](/docs/platform/account)
+- [Auditing and notifications](/docs/architecture/auditing-and-notifications)

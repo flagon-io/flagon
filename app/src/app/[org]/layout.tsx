@@ -1,8 +1,8 @@
-import { redirect, notFound } from "next/navigation";
-import { headers, cookies } from "next/headers";
-import { getMe } from "@/lib/flagon-api";
-import { auth } from "@/lib/auth";
-import { userHasSSOForOrg } from "@/lib/sso-admin";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import { getOrgContext } from "@/lib/org-context";
+import { orgProviderIds } from "@/lib/sso-admin";
+import { mirrorUserById } from "@/lib/user-profile";
 import { AppShell } from "@/components/shell/app-shell";
 
 export default async function OrgLayout({
@@ -14,44 +14,45 @@ export default async function OrgLayout({
 }) {
   const { org: slug } = await params;
 
-  const me = await getMe();
-  if (!me) redirect("/login");
+  // Signed out -> /login; not a member of this slug (indistinguishable from the
+  // org not existing at all) -> 404, never a redirect, so we leak nothing about
+  // whether the org is real. That bubbles to the root not-found (the generic
+  // 404), since the shell never renders for a non-member. An API failure throws
+  // to the nearest error boundary instead of being mistaken for either.
+  const { session, me, org } = await getOrgContext(slug);
 
-  const org = me.orgs.find((o) => o.slug === slug);
-  if (!org) {
-    // Not a member of this slug - which is indistinguishable here from the org not
-    // existing at all. 404 (never redirect) so we leak nothing about whether the
-    // org is real. This bubbles to the root not-found (the generic 404), since the
-    // shell never renders for a non-member.
-    notFound();
-  }
-
-  const session = await auth.api.getSession({ headers: await headers() });
-
-  // Org security policy: if this org requires 2FA and the member hasn't enabled it,
-  // send them to the challenge page (which lives OUTSIDE this layout so it can't
-  // loop through the gate). The settings page won't let an owner turn on the
-  // requirement without their own 2FA on, so enabling it can't lock them out.
+  // Org security policy. The API is authoritative (it enforces 2FA/SSO on every
+  // org-scoped request, including tokens and the agent); this gate only turns the
+  // API's 403 into a friendly redirect to a challenge page (which lives OUTSIDE
+  // this layout so it can't loop). The API also refuses to switch a requirement
+  // on for someone who doesn't meet it, so enabling one can't lock you out.
   const twoFactorEnabled = Boolean(
-    (session?.user as { twoFactorEnabled?: boolean } | undefined)?.twoFactorEnabled,
+    (session.user as { twoFactorEnabled?: boolean }).twoFactorEnabled,
   );
+  // Self-heal the API's mirrored 2FA state if it drifted from the auth layer's
+  // (e.g. an account that enabled 2FA before the API tracked it).
+  if (twoFactorEnabled !== Boolean(me.user.two_factor_enabled)) {
+    await mirrorUserById(me.user.id);
+  }
   if (org.enforce_two_factor && !twoFactorEnabled) {
     redirect(`/2fa-required?org=${encodeURIComponent(slug)}`);
   }
 
-  // If this org requires SSO, members and admins must have signed in through its
-  // provider. Owners are exempt (break-glass): SSO linking can fail in ways 2FA
-  // can't, and an owner must always be able to reach settings to fix or disable it.
-  // The settings page only lets you turn the requirement on once your own SSO is
-  // linked, so enabling it can't lock out the person who enabled it.
-  if (org.require_sso && org.role !== "owner" && !(await userHasSSOForOrg(me.user.id, org.id))) {
-    redirect(`/sso-required?org=${encodeURIComponent(slug)}`);
+  // If this org requires SSO, members and admins must be in a session established
+  // through one of its providers (the same rule the API applies). Owners are
+  // exempt (break-glass): SSO can fail in ways 2FA can't, and an owner must always
+  // be able to reach settings to fix or disable it.
+  if (org.require_sso && org.role !== "owner") {
+    const sessionProvider = (session.session as { ssoProviderId?: string | null }).ssoProviderId;
+    if (!sessionProvider || !(await orgProviderIds(org.id)).includes(sessionProvider)) {
+      redirect(`/sso-required?org=${encodeURIComponent(slug)}`);
+    }
   }
 
   const user = {
     email: me.user.email,
-    name: session?.user?.name ?? null,
-    image: session?.user?.image ?? null,
+    name: session.user.name ?? null,
+    image: session.user.image ?? null,
   };
 
   // Persisted sidebar collapse state (the provider writes this cookie on toggle).

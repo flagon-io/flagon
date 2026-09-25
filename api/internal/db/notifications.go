@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/flagon-io/flagon/api/internal/paginate"
 )
 
 // Notification is one item in a user's notification feed.
@@ -24,9 +26,7 @@ type Notification struct {
 // never buried under newer read ones, so a short feed (e.g. the topbar bell)
 // always surfaces what still needs attention.
 func (d *DB) ListNotifications(ctx context.Context, userID string, limit int) ([]Notification, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 30
-	}
+	limit = paginate.ClampLimit(limit)
 	var out []Notification
 	err := d.inUserTx(ctx, userID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
@@ -101,7 +101,7 @@ func (d *DB) CreateNotification(ctx context.Context, userID string, orgID *strin
 	if d == nil || d.pool == nil {
 		return ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := withQueryTimeout(ctx)
 	defer cancel()
 	_, err := d.pool.Exec(ctx,
 		`SELECT flagon.create_notification($1, $2::uuid, $3, $4, $5, $6)`,

@@ -1,0 +1,137 @@
+---
+title: Automate with access tokens
+description: Choose between a personal and an organization access token, pick scopes and an expiry, store the secret safely, and revoke it when you're done.
+---
+
+An **access token** is a long random secret that starts with `flagon_` and authenticates a
+script, CI job, or MCP client to the Flagon API. You send it as a bearer token:
+`Authorization: Bearer flagon_...`. Every token has two limits: the **role** of whoever it acts
+as (a token can never do more than its principal), and optional **scopes** that narrow it
+further to specific kinds of operations.
+
+By the end of this guide you will have a token with only the access your automation needs, a
+way to check what it can do, and a plan for rotating and revoking it.
+
+<Callout type="info" title="Before you start">
+
+- **Personal access token:** any signed-in user.
+- **Organization access token:** organization **owner** or **admin**.
+- **Tokens are managed in the dashboard only.** Creating, listing, and revoking tokens is not
+  available through a token, the assistant, or MCP, so a leaked token can't mint more tokens.
+
+</Callout>
+
+## Personal or organization token?
+
+| | Personal access token (PAT) | Organization access token (OAT) |
+| --- | --- | --- |
+| Prefix | `flagon_pat_` | `flagon_oat_` |
+| Acts as | You | A service principal that belongs to the organization, named after the token |
+| Reaches | Every organization you belong to, with your role in each | Only its own organization |
+| Role | Yours | Chosen at creation: `admin`, `member`, or `viewer` (read-only) |
+| Created in | Personal **Settings > Personal access tokens** | Organization **Settings > API tokens** |
+| When a person leaves | Stops being able to reach that organization | Unaffected; it isn't tied to a person |
+| Audit log actor | You | The token's name |
+
+Use an **organization token** for shared automation such as CI: it survives people changing
+jobs, it can't reach other organizations, and its changes are attributed to the automation.
+Use a **personal token** for your own scripts and your own MCP client.
+
+## Scopes
+
+A token with **Full access** is limited only by its role. Otherwise, pick scopes; a parent scope
+includes its children.
+
+| Group | Scopes, broadest first | Covers |
+| --- | --- | --- |
+| Account | `admin:user` > `user` > `read:user` | Your profile. |
+| Organizations | `admin:org` > `write:org` > `read:org` | `read:org`: organizations, members, invitations, security policy, SSO providers, audit log. `write:org`: manage those. `admin:org`: create, leave, delete, restore organizations. |
+| Projects | `admin:project` > `write:project` > `read:project` | `write:project`: create and edit projects. `admin:project`: delete and restore, and manage collaborators, team grants, and owners. |
+| Teams | `admin:team` > `write:team` > `read:team` | `write:team`: create and edit teams and their members. `admin:team`: delete teams. |
+| Notifications | `notifications` | Your notifications. |
+
+See the [scopes reference](/docs/reference/scopes) for the operation-by-operation map.
+
+## Steps
+
+<Steps>
+
+<Step title="Create the token">
+
+**Personal token:** open personal **Settings > Personal access tokens** and select
+**Generate new token**.
+
+**Organization token:** open organization **Settings > API tokens** (under **Developer**) and
+select **Generate new token**. The button appears only for owners and admins.
+
+On the form:
+
+1. **Token name**: something you'll recognize later, such as `github-actions-deploy`.
+2. **Role** (organization tokens only): `Admin`, `Member`, or `Viewer`. The token can never
+   exceed it.
+3. **Expiration**: **7 days**, **30 days** (the default), **90 days**, **1 year**, **Custom...**
+   (pick a date), or **No expiration**.
+4. **Permissions**: check **Full access**, or check only the scopes you need.
+5. Select **Generate token**.
+
+</Step>
+
+<Step title="Copy the secret once">
+
+The next screen says **Token created. Copy it now.** and shows the full secret with a **Copy**
+button. This is the only time it is shown: Flagon stores only a hash, and lists show just a
+short prefix such as `flagon_pat_ab12cd`. Put it straight into a secret store, such as your CI
+provider's encrypted secrets or a password manager. Never commit it.
+
+</Step>
+
+<Step title="Verify what it can do">
+
+```bash
+export FLAGON_TOKEN=flagon_pat_...
+curl https://api.flagon.io/me -H "Authorization: Bearer $FLAGON_TOKEN"
+```
+
+`GET /me` (needs `read:user`) returns who the token acts as and its organizations. For an
+organization token, that is the service principal and its one organization. Then call an
+endpoint your automation needs, for example `GET /orgs/acme/projects` with `read:project`.
+
+</Step>
+
+<Step title="Rotate and revoke">
+
+Each row in the token list shows its access, **Last used**, and **Expires**. To rotate, create
+a new token, switch your automation to it, then revoke the old one: select **Revoke** on its
+row and confirm with **Revoke token**. Revocation takes effect on the next request. Revoking
+an organization token also removes its service principal from the organization.
+
+An expired token is rejected the same way as a revoked one. Organization tokens also stop
+working when their organization is deleted.
+
+</Step>
+
+</Steps>
+
+## Common failures
+
+| Status | `detail` | Meaning |
+| --- | --- | --- |
+| `401` | `invalid or expired token` | The token is wrong, revoked, or expired, or its organization was deleted. |
+| `403` | `this token is missing the scope required for this operation` | Add the scope (create a new token; scopes can't be edited). |
+| `403` | `you don't have permission to do that` | The scope is there, but the token's role doesn't allow the action. |
+| `403` | `this organization requires two-factor authentication; enable it on your account to continue` | A personal access token whose user has no 2FA, in an organization that requires it. Organization tokens are exempt. |
+| `403` | `this organization requires single sign-on; sign in through the organization's identity provider at least once before using a personal access token with it` | The organization requires SSO and the token's user has never signed in through its provider. Owners and organization tokens are exempt. |
+| `403` | `this operation requires a user; organization access tokens can't perform it` | Organization tokens can't create, leave, or restore organizations, list deleted organizations, or sync a profile. Use a personal token. |
+| `404` | `organization not found` | The token's principal isn't a member of that organization. An organization token can only reach its own. |
+| `422` | `select at least one scope, or choose full access` | Shown on the create form if you pick nothing. |
+| `422` | `expiration must be in the future` | Pick a later custom date. |
+
+Over MCP, the same problems come back as a JSON-RPC error `-32001` (`invalid or expired token`)
+or `-32003` (missing scope).
+
+## Related
+
+- [Access tokens](/docs/platform/access-tokens)
+- [Scopes reference](/docs/reference/scopes)
+- [Call the API from CI](/docs/guides/call-the-api-from-ci)
+- [Tokens and scopes](/docs/security/tokens-and-scopes)
