@@ -52,7 +52,11 @@ export default defineConfig({
   ],
   webServer: {
     command: process.env.CI ? "npm run start" : "npm run dev",
-    url: baseURL,
+    // Wait on a static page, not "/": the root resolves the session, and a
+    // production build with no auth secret (the components CI job has no
+    // database or secrets) answers "/" with a 500, which Playwright treats as
+    // "not ready" until it times out. The /ui docs render with no backend.
+    url: `${baseURL}/ui`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
   },
