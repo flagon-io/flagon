@@ -7,7 +7,17 @@ import { cn } from "../lib/cn";
 /** A custom-styled, cross-browser scroll container. Set a height on it and overflow. */
 export function ScrollArea({ className, children, ...props }: ComponentProps<typeof ScrollAreaPrimitive.Root>) {
   return (
-    <ScrollAreaPrimitive.Root data-slot="scroll-area" className={cn("relative overflow-hidden", className)} {...props}>
+    // `type` defaults to Radix's "hover", which UNMOUNTS the scrollbar whenever the
+    // pointer leaves - so it flickers in and out as you move the mouse and can come
+    // back mid-scroll looking like it jumped. "auto" keeps it mounted for as long as
+    // the content overflows, which is what people expect from a scroll container.
+    // Callers can still override it (the spread wins).
+    <ScrollAreaPrimitive.Root
+      data-slot="scroll-area"
+      type="auto"
+      className={cn("relative overflow-hidden", className)}
+      {...props}
+    >
       {/* tabIndex makes the scroll region keyboard-operable (arrow keys / page keys)
        * for people not using a pointer - Radix leaves the viewport unfocusable. */}
       <ScrollAreaPrimitive.Viewport
