@@ -8,8 +8,11 @@ import type { Team } from "@/lib/teams";
 export type Person = {
   name: string;
   role: string;
-  /** City or "Remote"; whatever's true. */
-  location: string;
+  /**
+   * "State, Country" (e.g. "Utah, USA"), optional. Everyone is remote (there
+   * are no offices), so this says where someone is, never "Remote".
+   */
+  location?: string;
   team: Team;
   /** Path to a square photo in /public; falls back to initials. */
   photo?: string;
@@ -23,7 +26,7 @@ export const PEOPLE: Person[] = [
   {
     name: "Chase Pierce",
     role: "Founder & everything else, for now",
-    location: "Remote",
+    location: "Utah, USA",
     team: "Leadership",
     photo: "/people/chase-pierce.jpg",
     founder: true,

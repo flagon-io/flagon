@@ -80,8 +80,12 @@ function PersonCard({ person }: { person: Person }) {
 
       <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] uppercase tracking-widest text-subtle">
         <span>{person.team}</span>
-        <span aria-hidden>·</span>
-        <span>{person.location}</span>
+        {person.location ? (
+          <>
+            <span aria-hidden>·</span>
+            <span>{person.location}</span>
+          </>
+        ) : null}
       </div>
 
       {person.links?.length ? (

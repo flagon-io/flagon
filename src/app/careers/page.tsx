@@ -11,7 +11,7 @@ import { site } from "@/lib/site";
 export const metadata: Metadata = {
   title: "Careers",
   description:
-    "Work at Flagon. A small crew of misfits, remote-first, paid by a public formula, building software in the open. Here's what it's like and how we hire.",
+    "Work at Flagon. A small crew of misfits, fully remote, paid by a public formula, building software in the open. Here's what it's like and how we hire.",
 };
 
 export default function CareersPage() {
@@ -60,8 +60,9 @@ export default function CareersPage() {
                 The handbook, the reasoning, the decisions. You always know where
                 you stand and why, because it&rsquo;s written down.
               </Perk>
-              <Perk title="Remote-first, for real">
-                Async by default so timezones don&rsquo;t trap anyone. We optimize
+              <Perk title="Fully remote, no offices">
+                There&rsquo;s no HQ to be near. Async by default so timezones
+                don&rsquo;t trap anyone. We optimize
                 for outcomes, not hours or a webcam grid.
               </Perk>
               <Perk title="Paid by a formula">
@@ -89,7 +90,7 @@ export default function CareersPage() {
               </h2>
               <p className="mt-4 text-pretty leading-relaxed text-muted-foreground">
                 Every role is paid by the same published formula, and everyone
-                gets equity. Beyond salary: remote-first, real time off that
+                gets equity. Beyond salary: fully remote, real time off that
                 people actually take, an equipment and learning budget, and a
                 bias toward removing friction over gimmick perks.
               </p>
