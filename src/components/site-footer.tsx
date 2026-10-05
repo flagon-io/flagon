@@ -78,6 +78,9 @@ export function SiteFooter() {
           <FooterLink href={site.links.github} external>
             GitHub
           </FooterLink>
+          <FooterLink href={site.links.g1t} external>
+            Flagon on g1t
+          </FooterLink>
           <FooterLink href={`mailto:${site.links.email}`} external>
             Email
           </FooterLink>

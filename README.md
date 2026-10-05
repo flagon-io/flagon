@@ -1,4 +1,4 @@
-# flagon.io
+# flagon
 
 The [Flagon, Inc.](https://www.flagon.io) company site, built in the open.
 Flagon is the company; the products it builds (starting with

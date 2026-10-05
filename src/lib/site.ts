@@ -20,8 +20,10 @@ import { PRODUCTS } from "@/lib/products";
 
 const links = {
   github: "https://github.com/flagon-io",
+  /** The company's organization on g1t, our own forge. */
+  g1t: "https://g1t.sh/flagon-io",
   /** The repo backing this site (used for "edit on GitHub" links). */
-  repo: "https://github.com/flagon-io/website",
+  repo: "https://github.com/flagon-io/flagon",
   discord: "https://discord.gg/dtYQs6rPXN",
   email: "hey@flagon.io",
 } as const;
@@ -80,6 +82,7 @@ const nav: readonly NavItem[] = [
           icon: SiDiscord,
         },
         { label: "GitHub", href: links.github, external: true, icon: SiGithub },
+        { label: "Flagon on g1t", href: links.g1t, external: true, icon: GitBranch },
       ],
     ],
   },
