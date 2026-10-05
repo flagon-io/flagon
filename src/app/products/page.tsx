@@ -7,6 +7,7 @@ import { Cta } from "@/components/cta";
 import { ArtCard } from "@/components/art-card";
 import type { SceneName } from "@/components/art/scenes";
 import { ProductRail } from "@/components/product-rail";
+import { SlantSplit } from "@/components/slant";
 import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -73,7 +74,7 @@ export default function ProductsPage() {
             title="Held to a standard"
             lead="Different products, one bar. Here's what every one of them is held to, whichever team builds it."
           />
-          <div className="mt-10 grid gap-4 px-6 sm:px-8 md:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-10 grid gap-x-4 gap-y-12 px-6 sm:px-8 md:grid-cols-2 lg:grid-cols-4">
             {TRAITS.map((t) => (
               <ArtCard key={t.title} title={t.title} art={t.art} artId={`standard-${t.art}`}>
                 {t.body}
@@ -83,23 +84,21 @@ export default function ProductsPage() {
         </Section>
 
         {/* CTA */}
-        <Section divider className="text-center">
-          <div className="px-6 sm:px-8">
-            <h2 className="mx-auto max-w-2xl text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-              Want to build the next one?
-            </h2>
-            <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground">
-              Read how the company works, then come talk to us. The handbook is
-              the job description.
-            </p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Cta href="/careers">Work with us</Cta>
-              <Cta href="/handbook" variant="secondary">
-                Read the handbook
-              </Cta>
-            </div>
+        <SlantSplit art="panels" artId="products-cta">
+          <h2 className="max-w-md text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
+            Want to build the next one?
+          </h2>
+          <p className="mt-4 max-w-md text-pretty text-muted-foreground">
+            Read how the company works, then come talk to us. The handbook is
+            the job description.
+          </p>
+          <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
+            <Cta href="/careers">Work with us</Cta>
+            <Cta href="/handbook" variant="secondary">
+              Read the handbook
+            </Cta>
           </div>
-        </Section>
+        </SlantSplit>
       </main>
     </Frame>
   );

@@ -2,6 +2,9 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { SCENES, type SceneName } from "@/components/art/scenes";
+import { SlantBox } from "@/components/slant";
+import { DOTS } from "@/components/schematic";
+import { runForHeight } from "@/lib/slant";
 
 export type ChipLink = { label: string; href: string; external?: boolean };
 
@@ -30,9 +33,9 @@ export function Chip({ label, href, external }: { label: string; href?: string; 
 }
 
 /**
- * A card that leads with a drawing: the title over the art, a short paragraph,
- * then chips into the details. The art bleeds to the card's edges and fades
- * its construction lines out before them.
+ * A card that leads with a drawing: the art on a panel leaning at the site's
+ * tilt, then the title, a short paragraph, and chips into the details. The
+ * words sit flush under the panel's bottom-left corner.
  */
 export function ArtCard({
   title,
@@ -53,22 +56,26 @@ export function ArtCard({
   artClassName?: string;
 }) {
   const Scene = SCENES[art];
+  const run = runForHeight("var(--stage-h)");
   return (
-    <article
-      className={cn(
-        "relative flex flex-col overflow-hidden rounded-2xl border border-hairline bg-(--art-card)",
-        className,
-      )}
-    >
-      <h3 className="relative z-10 px-6 pt-6 text-lg font-semibold tracking-tight sm:px-7">
-        {title}
-      </h3>
-      {/* A fixed-height stage, so wide and narrow cards keep the same rhythm;
-          the drawing centers in it at its own aspect. */}
-      <div className={cn("-mt-4 h-52 px-2 sm:h-60", artClassName)}>
-        <Scene id={artId ?? `card-${art}`} className="h-full w-full" />
-      </div>
-      <div className="mt-auto px-6 pb-6 sm:px-7 sm:pb-7">
+    <article className={cn("flex flex-col", className)}>
+      {/* A fixed-height stage, so wide and narrow cards keep the same rhythm
+          and lean at the same angle; the drawing centers in it at its own
+          aspect. */}
+      <SlantBox
+        run={run}
+        className="h-(--stage-h) [--stage-h:13rem] sm:[--stage-h:15rem]"
+        frameClassName="rounded-sm border border-hairline bg-(--art-card)"
+      >
+        <div
+          className={cn("flex h-full items-center justify-center py-2", artClassName)}
+          style={{ ...DOTS, paddingInline: run }}
+        >
+          <Scene id={artId ?? `card-${art}`} className="h-full w-full" />
+        </div>
+      </SlantBox>
+      <h3 className="mt-5 text-lg font-semibold tracking-tight">{title}</h3>
+      <div className="mt-2">
         <div className="text-pretty text-sm leading-relaxed text-muted-foreground">{children}</div>
         {chips && chips.length > 0 ? (
           <ul className="mt-5 flex flex-wrap gap-2">

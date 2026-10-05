@@ -9,7 +9,13 @@ import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
 import { CopyCommand } from "@/components/copy-command";
 import { SCENES } from "@/components/art/scenes";
-import { PRODUCTS, getProduct, type ProductFeature } from "@/lib/products";
+import { SlantBox } from "@/components/slant";
+import { PRODUCTS, getProduct } from "@/lib/products";
+import { runForAspect } from "@/lib/slant";
+
+/** The hero drawing's panel: its shape, and how far its top leans right. */
+const HERO_ASPECT = 6 / 5;
+const HERO_RUN = runForAspect(HERO_ASPECT);
 
 type Params = { id: string };
 
@@ -122,21 +128,31 @@ export default async function ProductPage({
               </div>
             </div>
 
-            {/* The product's drawing, in its own colors, as the hero's art. */}
-            <figure
-              className="rise relative overflow-hidden rounded-2xl border border-hairline shadow-2xl shadow-black/20"
-              style={{ background: product.card.background, animationDelay: "160ms" }}
-            >
-              <div className={`${product.card.artClass} px-3 pb-2 pt-10 sm:px-6 sm:pt-12`}>
-                <Scene id={`hero-${product.id}`} label={page.pitch} />
-              </div>
-              <figcaption
-                className="flex items-center justify-between gap-4 border-t border-white/10 px-5 py-3.5 font-mono text-[10px] uppercase tracking-widest sm:px-6"
-                style={{ color: product.card.ink }}
+            {/* The product's drawing, in its own colors, on a panel leaning at
+                the site's tilt, like its card on the rail. */}
+            <figure className="rise" style={{ animationDelay: "160ms" }}>
+              <SlantBox
+                run={HERO_RUN}
+                style={{ aspectRatio: HERO_ASPECT }}
+                frameClassName="rounded-sm border border-white/10 shadow-2xl shadow-black/20"
               >
-                <span className="opacity-70">{product.domain}</span>
-                <span style={{ color: product.card.accent }}>{product.tagline}</span>
-              </figcaption>
+                <div className="flex h-full flex-col" style={{ background: product.card.background }}>
+                  <div
+                    className={`${product.card.artClass} min-h-0 flex-1 pb-2 pt-8 sm:pt-10`}
+                    style={{ paddingInline: HERO_RUN }}
+                  >
+                    <Scene id={`hero-${product.id}`} label={page.pitch} className="h-full w-full" />
+                  </div>
+                  {/* Kept clear of the right edge, which leans in at the bottom. */}
+                  <figcaption
+                    className="flex items-center justify-between gap-4 border-t border-white/10 py-3.5 pl-5 font-mono text-[10px] uppercase tracking-widest sm:pl-6"
+                    style={{ color: product.card.ink, paddingRight: `calc(${HERO_RUN} + 1.25rem)` }}
+                  >
+                    <span className="opacity-70">{product.domain}</span>
+                    <span style={{ color: product.card.accent }}>{product.tagline}</span>
+                  </figcaption>
+                </div>
+              </SlantBox>
             </figure>
           </div>
         </section>
@@ -189,22 +205,18 @@ export default async function ProductPage({
             lead="Hosting git is table stakes. This is the part we care about."
           />
           <Schematic bleed className="mt-10">
-            <div className="divide-y divide-hairline">
-              {rows(page.features, 3).map((row) => (
-                <SchematicGrid key={row[0].title} cols={3}>
-                  {row.map((f) => (
-                    <div key={f.title} className="p-6 sm:p-8">
-                      <h3 className="text-base font-semibold tracking-tight">
-                        {f.title}
-                      </h3>
-                      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                        {f.body}
-                      </p>
-                    </div>
-                  ))}
-                </SchematicGrid>
+            <SchematicGrid cols={3}>
+              {page.features.map((f) => (
+                <div key={f.title} className="p-6 sm:p-8">
+                  <h3 className="text-base font-semibold tracking-tight">
+                    {f.title}
+                  </h3>
+                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                    {f.body}
+                  </p>
+                </div>
               ))}
-            </div>
+            </SchematicGrid>
           </Schematic>
         </Section>
 
@@ -271,7 +283,7 @@ export default async function ProductPage({
                   href={l.href}
                   target="_blank"
                   rel="noreferrer"
-                  className="group flex flex-col justify-between gap-8 p-6 outline-none transition hover:bg-panel focus-visible:bg-panel focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:p-8"
+                  className="group flex flex-col justify-between gap-8 p-6 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:p-8"
                 >
                   <span className="text-lg font-semibold tracking-tight group-hover:text-brand">
                     {l.label}
@@ -304,11 +316,4 @@ export default async function ProductPage({
       </main>
     </Frame>
   );
-}
-
-/** Split features into rows so each row gets its own hairline grid. */
-function rows(items: ProductFeature[], size: number): ProductFeature[][] {
-  const out: ProductFeature[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
 }

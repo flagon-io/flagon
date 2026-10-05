@@ -29,15 +29,19 @@ export default function BlogIndex() {
 
         <Section divider>
           {posts.length > 0 ? (
-            <ul className="grid gap-4 px-6 sm:px-8 md:grid-cols-2 lg:grid-cols-3">
+            <ul className="grid gap-x-4 gap-y-12 px-6 sm:px-8 md:grid-cols-2 lg:grid-cols-3">
               {posts.map((p) => (
                 <li key={p.slug}>
                   <Link
                     href={`/blog/${p.slug}`}
-                    className="group flex h-full flex-col overflow-hidden rounded-2xl border border-hairline bg-(--art-card) outline-none transition hover:border-foreground/20 focus-visible:ring-2 focus-visible:ring-brand"
+                    className="group flex h-full flex-col rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-4 focus-visible:ring-offset-background"
                   >
-                    <PostCover art={p.art} id={`post-${p.slug}`} className="rounded-none border-0 border-b" />
-                    <div className="flex flex-1 flex-col p-6">
+                    <PostCover
+                      art={p.art}
+                      id={`post-${p.slug}`}
+                      className="motion-safe:transition-transform motion-safe:duration-300 motion-safe:group-hover:-translate-y-1"
+                    />
+                    <div className="flex flex-1 flex-col pt-5">
                       <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-widest text-subtle">
                         <span>{formatDate(p.date)}</span>
                         <span aria-hidden>·</span>

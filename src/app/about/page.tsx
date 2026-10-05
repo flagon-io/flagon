@@ -6,6 +6,7 @@ import { FlagonPour } from "@/components/flagon-pour";
 import { Schematic, SchematicGrid } from "@/components/schematic";
 import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
+import { SlantSplit } from "@/components/slant";
 import { AuthorCard } from "@/components/author-card";
 import { site } from "@/lib/site";
 import { getFounder } from "@/lib/people";
@@ -219,27 +220,25 @@ export default function AboutPage() {
         </Section>
 
         {/* CTA */}
-        <Section divider className="text-center">
-          <div className={GUTTER}>
-            <h2 className="mx-auto max-w-2xl text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-              Want the full picture?
-            </h2>
-            <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground">
+        <SlantSplit art="handbook" artId="about-cta">
+          <h2 className="max-w-md text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
+            Want the full picture?
+          </h2>
+          <p className="mt-4 max-w-md text-pretty text-muted-foreground">
               The handbook is the real answer to almost any question about how
               Flagon works. If you&rsquo;d want to work somewhere like this, the{" "}
               <Link href="/careers" className="text-link underline underline-offset-2">
                 careers page
               </Link>{" "}
               is the next stop.
-            </p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Cta href="/handbook">Read the handbook</Cta>
-              <Cta href={site.links.discord} external variant="secondary">
-                Join the Discord
-              </Cta>
-            </div>
+          </p>
+          <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
+            <Cta href="/handbook">Read the handbook</Cta>
+            <Cta href={site.links.discord} external variant="secondary">
+              Join the Discord
+            </Cta>
           </div>
-        </Section>
+        </SlantSplit>
       </main>
     </Frame>
   );

@@ -601,10 +601,12 @@ label[for] {
  * the row reads as swipeable. From md up: the cards fill the row exactly,
  * counting the overlap that keeps their slanted edges a constant gap apart,
  * and never get narrower than a readable minimum (past that, the row scrolls).
- * --n (the number of cards) is set inline; --slant must match the clip-path. */
+ * --n (the number of cards) is set inline. --slant is the share of a card's
+ * width its top is shifted right: the site's --tilt over the card's aspect,
+ * so the cards lean at the same angle as every other slanted edge. */
 .product-rail {
   container-type: inline-size;
-  --slant: 0.16;
+  --slant: calc(var(--tilt) * 5 / 3);
   --gap: 0.75rem;
   --card-w: min(17rem, 74cqw);
   --card-aspect: 3 / 5;
@@ -613,6 +615,7 @@ label[for] {
   .product-rail {
     /* Wider cards would get very tall at 3:5, so they get squatter. */
     --card-aspect: 5 / 7;
+    --slant: calc(var(--tilt) * 7 / 5);
     --card-w: max(
       12.5rem,
       calc((100cqw - (var(--n) - 1) * var(--gap) - 1px) / (var(--n) - var(--slant) * (var(--n) - 1)))
@@ -622,6 +625,75 @@ label[for] {
 .product-rail-slot {
   width: var(--card-w);
 }
+.product-rail-clip {
+  clip-path: polygon(calc(var(--slant) * 100%) 0, 100% 0, calc(100% - var(--slant) * 100%) 100%, 0 100%);
+}
 .product-rail-slot + .product-rail-slot {
   margin-left: calc(var(--card-w) * var(--slant) * -1 + var(--gap));
+}
+
+/* Slant (lib/slant.ts, components/slant.tsx). One lean for every slanted edge
+ * on the site: --tilt is the horizontal run per unit of height, about 6.5
+ * degrees. Keep it in step with TILT in lib/slant.ts. Skewing rather than
+ * clipping keeps the angle the same whatever an element's size. */
+:root {
+  --tilt: 0.1142857;
+  --tilt-angle: atan(var(--tilt));
+}
+@utility slant-skew {
+  transform: skewX(calc(-1 * var(--tilt-angle)));
+}
+@utility slant-unskew {
+  transform: skewX(var(--tilt-angle));
+}
+
+/* SchematicGrid's column rules lean at the tilt too. They're drawn once on
+ * the grid, not per cell, so each rule runs unbroken through every row: one
+ * layer skewed about its middle (so the rules still meet the frame's top and
+ * bottom), with a 1px line at each column boundary. Stacked cells keep their
+ * flat rules. */
+.slant-rules {
+  position: relative;
+  --rule: linear-gradient(var(--hairline), var(--hairline));
+}
+.slant-rules::before {
+  content: "";
+  display: none;
+  position: absolute;
+  inset: 0;
+  transform: skewX(calc(-1 * var(--tilt-angle)));
+  pointer-events: none;
+}
+.slant-rules-2::before {
+  background: var(--rule) 50% 0 / 1px 100% no-repeat;
+}
+.slant-rules-3::before {
+  background:
+    var(--rule) calc(100% / 3) 0 / 1px 100% no-repeat,
+    var(--rule) calc(200% / 3) 0 / 1px 100% no-repeat;
+}
+.slant-rules-4::before {
+  background:
+    var(--rule) 25% 0 / 1px 100% no-repeat,
+    var(--rule) 50% 0 / 1px 100% no-repeat,
+    var(--rule) 75% 0 / 1px 100% no-repeat;
+}
+/* Once cells sit in columns, wrapped rows get a flat rule between them. */
+@media (width >= 40rem) {
+  .slant-rules-2::before,
+  .slant-rules-3::before {
+    display: block;
+  }
+  .slant-rules-2 > :nth-child(n + 3),
+  .slant-rules-3 > :nth-child(n + 4) {
+    border-top: 1px solid var(--hairline);
+  }
+}
+@media (width >= 64rem) {
+  .slant-rules-4::before {
+    display: block;
+  }
+  .slant-rules-4 > :nth-child(n + 5) {
+    border-top: 1px solid var(--hairline);
+  }
 }

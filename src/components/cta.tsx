@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ArrowRight, ArrowUpRight } from "lucide-react";
-import { buttonClasses, type ButtonSize, type ButtonVariant } from "@/components/button";
+import { Slash, buttonClasses, type ButtonSize, type ButtonVariant } from "@/components/button";
 
 type Variant = "primary" | "secondary" | "ghost";
 
@@ -16,21 +16,23 @@ type CtaProps = {
   children: ReactNode;
   variant?: Variant;
   external?: boolean;
+  /** A trailing arrow; on by default for all but primary, which leads with a slash. */
   arrow?: boolean;
   size?: ButtonSize;
   className?: string;
 };
 
 /**
- * Marketing call-to-action: a link styled as a button, with a nudging arrow.
- * Internal links go through next/link; external links open in a new tab.
+ * Marketing call-to-action: a link styled as a button. Primary actions lead
+ * with a slash; the rest trail a nudging arrow. Internal links go through
+ * next/link; external links open in a new tab.
  */
 export function Cta({
   href,
   children,
   variant = "primary",
   external = false,
-  arrow = true,
+  arrow = variant !== "primary",
   size,
   className,
 }: CtaProps) {
@@ -38,6 +40,7 @@ export function Cta({
   const cls = buttonClasses({ variant: toButtonVariant[variant], size, className });
   const inner = (
     <>
+      {variant === "primary" && <Slash />}
       {children}
       {arrow && (
         <Arrow

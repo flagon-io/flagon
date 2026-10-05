@@ -9,6 +9,7 @@ import { ProductRail } from "@/components/product-rail";
 import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
 import { ArtCard } from "@/components/art-card";
+import { SlantSplit } from "@/components/slant";
 import { site } from "@/lib/site";
 import { getAllPosts, formatDate } from "@/lib/blog";
 
@@ -86,7 +87,7 @@ export default function Home() {
           title="A company you can read."
           lead="We run the whole company in public. How we work, how we pay people, how we price, and why: it's all written down, and you can hold us to it."
         />
-        <div className={`mt-10 grid gap-4 ${GUTTER} md:grid-cols-2 lg:grid-cols-3`}>
+        <div className={`mt-10 grid gap-x-4 gap-y-12 ${GUTTER} md:grid-cols-2 lg:grid-cols-3`}>
           <ArtCard
             title="The handbook"
             art="handbook"
@@ -192,23 +193,21 @@ export default function Home() {
       )}
 
       {/* Closing CTA */}
-      <Section divider className="text-center">
-        <div className={GUTTER}>
-          <h2 className="mx-auto max-w-2xl text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-            Come build with us.
-          </h2>
-          <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground">
-            Read the handbook, see how we hire, or jump into Discord and tell us
-            what you wish existed. It&rsquo;s all in the open.
-          </p>
-          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Cta href="/careers">Work with us</Cta>
-            <Cta href={site.links.discord} external variant="secondary">
-              Join the Discord
-            </Cta>
-          </div>
+      <SlantSplit art="craft" artId="home-cta">
+        <h2 className="max-w-md text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
+          Come build with us.
+        </h2>
+        <p className="mt-4 max-w-md text-pretty text-muted-foreground">
+          Read the handbook, see how we hire, or jump into Discord and tell us
+          what you wish existed. It&rsquo;s all in the open.
+        </p>
+        <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
+          <Cta href="/careers">Work with us</Cta>
+          <Cta href={site.links.discord} external variant="secondary">
+            Join the Discord
+          </Cta>
         </div>
-      </Section>
+      </SlantSplit>
     </Frame>
   );
 }

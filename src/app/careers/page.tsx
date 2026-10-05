@@ -6,6 +6,7 @@ import { HexField } from "@/components/hex-field";
 import { Schematic, SchematicGrid } from "@/components/schematic";
 import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
+import { SlantSplit } from "@/components/slant";
 import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -19,17 +20,16 @@ export default function CareersPage() {
     <Frame>
       <main>
         {/* Hero */}
-        <section className="relative isolate flex flex-col items-center justify-center px-6 pb-14 pt-20 text-center sm:pt-24">
-          <HexField />
-          <h1 className="max-w-3xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
+        <SlantSplit art="teams" artId="careers-hero" backdrop={<HexField />} divider={false}>
+          <h1 className="max-w-xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
             Come build with us.
           </h1>
-          <p className="mt-6 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
+          <p className="mt-6 max-w-lg text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
             Flagon is a small crew of misfits making software worth using, in the
             open. We hire rarely and carefully. If the way we work sounds like the
             place you&rsquo;ve been looking for, we&rsquo;d love to hear from you.
           </p>
-          <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row">
+          <div className="mt-9 flex flex-col items-start gap-3 sm:flex-row">
             <Cta href={`mailto:${site.links.email}`} external={false}>
               Introduce yourself
             </Cta>
@@ -37,7 +37,7 @@ export default function CareersPage() {
               Read the handbook
             </Cta>
           </div>
-        </section>
+        </SlantSplit>
 
         {/* Why Flagon */}
         <Section divider>

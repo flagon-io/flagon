@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight, Code2, Globe, Plug, Terminal } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { SCENES } from "@/components/art/scenes";
+import { slantForAspect } from "@/lib/slant";
 import {
   PRODUCTS,
   productHref,
@@ -16,16 +17,42 @@ import {
  * its games. Products we haven't announced yet hold their place as quiet
  * placeholders, and the last card is an invitation to come build one.
  *
- * The slant is a clip-path, so the content inside stays upright. Because a
- * clip also clips focus rings and borders, each card draws its outline with an
- * SVG polygon that follows the same shape.
+ * The slant is a clip-path (.product-rail-clip), so the content inside stays
+ * upright. Unlike the rest of the site's slanted shapes, the rail clips rather
+ * than skews, because its cards overlap by exactly their slant to keep the
+ * gaps between them even. The slant is the site's tilt over the card's aspect
+ * (--slant in globals.css), so the cards lean at the same angle as everything
+ * else. Because a clip also clips focus rings and borders, each card draws its
+ * outline with an SVG polygon that follows the same shape.
  */
 
-/** How far the top edge is shifted right, as a fraction of the card's width.
- * Keep in step with --slant on .product-rail in globals.css. */
-const SLANT = 0.16;
-const pct = `${SLANT * 100}%`;
-const CLIP = `polygon(${pct} 0, 100% 0, ${100 - SLANT * 100}% 100%, 0 100%)`;
+/** The share of a card's width its top is shifted right, on phones (3:5
+ * cards) and from md up (5:7). Keep the aspects in step with globals.css. */
+const SLANT_NARROW = slantForAspect(3 / 5);
+const SLANT_WIDE = slantForAspect(5 / 7);
+
+/** How far content keeps clear of the slanted edges, as a fraction of width. */
+const CLEARANCE = 0.08;
+
+/**
+ * Side padding for a block spanning `top` to `bottom` (fractions of the card's
+ * height), so it sits CLEARANCE clear of both slanted edges. A flat padding
+ * would crowd content near the top-left and bottom-right corners, where the
+ * edges lean in. Percentages resolve against the card's width, so the block's
+ * parent must span the full card.
+ */
+function clearOfSlant(top: number, bottom: number): CSSProperties {
+  return {
+    paddingLeft: `calc((var(--slant) * ${1 - top} + ${CLEARANCE}) * 100%)`,
+    paddingRight: `calc((var(--slant) * ${bottom} + ${CLEARANCE}) * 100%)`,
+  };
+}
+
+/** The header near the top of a card, and the details along the bottom. The
+ * header's padding is lopsided by the slant, so centering inside it centers
+ * on the visible band rather than the card's bounding box. */
+const HEAD = clearOfSlant(0.08, 0.25);
+const FOOT = clearOfSlant(0.7, 0.95);
 
 /** Unannounced products, held in place on the rail. */
 const PLACEHOLDERS = [
@@ -87,9 +114,19 @@ function Slot({ children }: { children: ReactNode }) {
   );
 }
 
-/** The card's outline, following the same slanted shape as its clip. */
+/** The card's outline, following the same slanted shape as its clip. The
+ * slant changes with the card's aspect at md, so there's one of each. */
 function Outline({ className, dashed = false }: { className?: string; dashed?: boolean }) {
-  const s = SLANT * 100;
+  return (
+    <>
+      <OutlineShape slant={SLANT_NARROW} dashed={dashed} className={cn("md:hidden", className)} />
+      <OutlineShape slant={SLANT_WIDE} dashed={dashed} className={cn("hidden md:block", className)} />
+    </>
+  );
+}
+
+function OutlineShape({ slant, dashed, className }: { slant: number; dashed: boolean; className?: string }) {
+  const s = slant * 100;
   return (
     <svg
       aria-hidden
@@ -112,7 +149,7 @@ function Outline({ className, dashed = false }: { className?: string; dashed?: b
 }
 
 const tileBase =
-  "group relative flex aspect-(--card-aspect) flex-col outline-none motion-safe:transition-transform motion-safe:duration-300";
+  "product-rail-clip group relative flex aspect-(--card-aspect) flex-col outline-none motion-safe:transition-transform motion-safe:duration-300";
 
 function ProductTile({ product }: { product: Product }) {
   const { card } = product;
@@ -121,31 +158,35 @@ function ProductTile({ product }: { product: Product }) {
     <Link
       href={productHref(product)}
       className={cn(tileBase, "motion-safe:hover:-translate-y-1.5 motion-safe:focus-visible:-translate-y-1.5")}
-      style={{ clipPath: CLIP, background: card.background, color: card.ink } as CSSProperties}
+      style={{ background: card.background, color: card.ink } as CSSProperties}
     >
-      <div className="relative flex flex-1 flex-col px-[18%] pb-8 pt-10">
-        {/* eslint-disable-next-line @next/next/no-img-element -- the product's own published file */}
-        <img
-          src={product.logo.dark}
-          alt={product.name}
-          className="h-9 w-auto self-start"
-          style={{ aspectRatio: product.logo.aspect }}
-        />
-        <p className="mt-4 text-sm font-medium leading-snug opacity-90">
-          {product.tagline}
-        </p>
+      <div className="relative flex flex-1 flex-col pb-8 pt-10">
+        {/* Centered between the slanted edges at this height, not on the
+            card's box, so the logo sits in the middle of what you see. */}
+        <div className="flex flex-col items-center text-center" style={HEAD}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- the product's own published file */}
+          <img
+            src={product.logo.dark}
+            alt={product.name}
+            className="h-9 w-auto"
+            style={{ aspectRatio: product.logo.aspect }}
+          />
+          <p className="mt-4 text-sm font-medium leading-snug opacity-90">
+            {product.tagline}
+          </p>
+        </div>
 
         {/* The product's drawing, in its own palette, wider than the text. */}
         <div
           className={cn(
             card.artClass,
-            "-mx-[24%] my-auto motion-safe:transition-transform motion-safe:duration-500 motion-safe:group-hover:scale-[1.03]",
+            "mx-[3%] my-auto motion-safe:transition-transform motion-safe:duration-500 motion-safe:group-hover:scale-[1.03]",
           )}
         >
           <Scene id={`rail-${product.id}`} />
         </div>
 
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3" style={FOOT}>
           <span
             className="self-start rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest"
             style={{ borderColor: card.accent, color: card.accent }}
@@ -176,12 +217,11 @@ function PlaceholderTile({ label, note }: { label: string; note: string }) {
     <div
       className={cn(tileBase, "bg-panel text-subtle")}
       style={{
-        clipPath: CLIP,
         backgroundImage: "radial-gradient(var(--hairline) 1px, transparent 1px)",
         backgroundSize: "18px 18px",
       }}
     >
-      <div className="relative flex flex-1 flex-col items-start justify-end px-[18%] pb-8 pt-10">
+      <div className="relative flex flex-1 flex-col items-start justify-end pb-8 pt-10" style={FOOT}>
         <span className="font-mono text-6xl font-semibold leading-none text-mark" aria-hidden>
           ?
         </span>
@@ -201,9 +241,8 @@ function JoinTile() {
     <Link
       href="/careers"
       className={cn(tileBase, "text-foreground motion-safe:hover:-translate-y-1.5 motion-safe:focus-visible:-translate-y-1.5")}
-      style={{ clipPath: CLIP }}
     >
-      <div className="relative flex flex-1 flex-col items-start justify-end px-[18%] pb-8 pt-10">
+      <div className="relative flex flex-1 flex-col items-start justify-end pb-8 pt-10" style={FOOT}>
         <p className="text-balance text-xl font-semibold leading-snug tracking-tight group-hover:text-brand">
           Want to build the next one?
         </p>

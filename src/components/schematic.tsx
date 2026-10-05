@@ -1,5 +1,12 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/cn";
+
+/** The blueprint dot grid behind schematic surfaces. */
+export const DOTS: CSSProperties = {
+  backgroundImage: "radial-gradient(var(--hairline) 1px, transparent 1px)",
+  backgroundSize: "22px 22px",
+  backgroundPosition: "center",
+};
 
 /**
  * A hairline-framed region with corner registration marks, in the technical
@@ -22,11 +29,7 @@ export function Schematic({
   return (
     <div
       className={cn("relative border-hairline", bleed ? "border-y" : "border", className)}
-      style={{
-        backgroundImage: "radial-gradient(var(--hairline) 1px, transparent 1px)",
-        backgroundSize: "22px 22px",
-        backgroundPosition: "center",
-      }}
+      style={DOTS}
     >
       <CornerMarks />
       {children}
@@ -47,15 +50,17 @@ function CornerMarks() {
   );
 }
 
+/** Column rules are drawn by .slant-rules in globals.css, leaning at the
+ * site's tilt. */
 const COLS: Record<2 | 3 | 4, string> = {
-  2: "sm:grid-cols-2 sm:divide-x sm:divide-y-0",
-  3: "sm:grid-cols-3 sm:divide-x sm:divide-y-0",
-  4: "lg:grid-cols-4 lg:divide-x lg:divide-y-0",
+  2: "sm:grid-cols-2 sm:divide-y-0 slant-rules-2",
+  3: "sm:grid-cols-3 sm:divide-y-0 slant-rules-3",
+  4: "lg:grid-cols-4 lg:divide-y-0 slant-rules-4",
 };
 
 /**
  * A grid that divides its cells with hairlines: stacked with horizontal rules on
- * mobile, columns with vertical rules from the breakpoint up. Drop it inside a
+ * mobile, columns with slanted rules from the breakpoint up. Drop it inside a
  * Schematic.
  */
 export function SchematicGrid({
@@ -68,7 +73,7 @@ export function SchematicGrid({
   className?: string;
 }) {
   return (
-    <div className={cn("grid divide-y divide-hairline *:min-w-0", COLS[cols], className)}>
+    <div className={cn("slant-rules grid divide-y divide-hairline *:min-w-0", COLS[cols], className)}>
       {children}
     </div>
   );

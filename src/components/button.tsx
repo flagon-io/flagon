@@ -22,6 +22,18 @@ const sizes: Record<ButtonSize, string> = {
   lg: "h-11 px-6 text-[15px]",
 };
 
+/**
+ * The leading slash on primary actions, echoing the site's slanted edges and a
+ * command line. Decorative, so screen readers skip it.
+ */
+export function Slash() {
+  return (
+    <span aria-hidden className="-ml-0.5 font-mono opacity-60">
+      /
+    </span>
+  );
+}
+
 /** Class string for a button-styled element (button or link). */
 export function buttonClasses(opts?: {
   variant?: ButtonVariant;
