@@ -88,13 +88,13 @@ export function MobileNav() {
           className="mx-auto flex w-full max-w-7xl flex-col gap-0.5 px-6 py-4"
         >
           <div className="mb-3 border-b border-hairline pb-4">
-            <a
-              href={site.links.app}
+            <Link
+              href="/careers"
               onClick={() => setOpen(false)}
               className={buttonClasses({ variant: "default", className: "w-full" })}
             >
-              Login
-            </a>
+              Careers
+            </Link>
           </div>
           {site.nav.map((item) => {
             if (isNavGroup(item)) {

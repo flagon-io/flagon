@@ -1,0 +1,91 @@
+---
+title: Developing locally
+description: "Postgres in Docker, then the API and the app however you like: both in containers, or natively so you can keep next dev up while you restart Go. Running in minutes, not days."
+section: Engineering
+order: 3
+---
+
+You should be able to go from a fresh clone to a running Flagon in a few minutes, on your first day, without a wiki-crawl or a colleague on a call talking you through it. Fast, boring local setup is something we protect, because a slow environment is a tax every engineer pays every day. This page is the happy path. If reality doesn't match it, that mismatch is a bug worth fixing, not a rite of passage to endure. The [README](https://github.com/flagon-io/flagon) is the always-current version; this page is the why behind it.
+
+## Before you start
+
+- **Docker**, for Postgres (and optionally the services too)
+- **Go** (the version in `api/go.mod`) if you want to run the API natively
+- **Node** if you want to run the app natively
+
+That's the whole list. There's no company VPN to join and no private registry to authenticate against. If a setup step ever needs an internal-only credential, we've done something wrong.
+
+## Publish the ports first
+
+The base `compose.yml` binds no host ports on purpose, so it mirrors production and won't collide with a server you're running natively. To do local work, copy the override into place once. It's gitignored, so yours is per-machine:
+
+```bash
+cp compose.override.example.yml compose.override.yml
+```
+
+`docker compose` picks it up automatically from then on.
+
+## The whole stack in Docker
+
+The simplest way to see everything running:
+
+```bash
+docker compose up -d --build
+# api      -> http://localhost:8080   (air live-reloads on Go changes)
+# app      -> http://localhost:4000   (next dev, live-reloads)
+# postgres -> localhost:5432          (databases flagon_api + flagon_app)
+```
+
+That's the full system with live reload on both services. The app runs on `4000` here, which conveniently leaves `3000` free for running it natively.
+
+<Callout type="brand">
+  One Postgres, two services, live reload. If this doesn't come up clean on a fresh clone, that's the most important bug in the building until it's fixed.
+</Callout>
+
+## Or run a service natively
+
+Often you want Postgres and one service in Docker while you iterate on the other by hand, for instance leaving `next dev` up while you restart Go with a plain `go run`. Start just the database, then bring up whichever pieces you're not actively editing:
+
+```bash
+docker compose up -d postgres
+
+# The API: defaults point at the compose Postgres, so no env is needed.
+# It migrates on boot, then serves on :8080.
+cd api && go run ./cmd/flagon serve
+
+# The app: reads app/.env.local automatically.
+cd app && npm install && npm run dev   # http://localhost:3000
+npm run db:migrate                     # one-time: auth + user_email tables
+npm run db:seed                        # a demo user you can log in as
+```
+
+## Logging in
+
+`npm run db:seed` (from `app/`) creates a demo account with a static password and a pre-verified email, so you can log in immediately and the tests have stable credentials. It's idempotent, so re-running just resets it. The defaults are `demo@flagon.dev` / `password12345`, overridable with `SEED_*` env vars.
+
+## The flagon CLI
+
+The API binary is the `flagon` CLI. `serve` runs the HTTP API and `migrate` provisions the app role and applies migrations; more commands will follow. Every setting is a flag with an env-var source and a sensible local default, so the common case needs no configuration at all:
+
+```bash
+cd api
+go run ./cmd/flagon --help          # list commands
+go run ./cmd/flagon serve --help    # every flag, env var, and default
+```
+
+## Tests
+
+Run the Go tests from `api/`, and lint the app from `app/`:
+
+```bash
+cd api && go test ./...
+cd app && npm run lint
+```
+
+We keep the suite fast on purpose, because a test suite nobody wants to run stops catching regressions, which is the whole argument in [how we test](/handbook/testing). If the tests are slow enough that you're tempted to skip them, that's a real problem worth raising, not a personal failing.
+
+## When setup fights back
+
+If you hit a wall, the fix is almost never to suffer through it quietly. Ask in the engineering channel, and once you're unstuck, improve the thing that tripped you: a clearer error, a missing check, a line in the README or this page. The best possible outcome of a rough first setup is a pull request that makes the next person's setup smooth. We [own what we build](/handbook/feature-ownership), and the developer experience is part of what we build.
+
+Next, get your bearings with [project structure](/handbook/project-structure).

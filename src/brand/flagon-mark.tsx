@@ -29,7 +29,7 @@ type FlagonMarkProps = {
   lid?: boolean;
   /** The thumb-lever at the lid hinge (needs `lid`). */
   lever?: boolean;
-  /** Etch the platform's hex lattice faintly across the glass. */
+  /** Etch the brand's hex lattice faintly across the glass. */
   etch?: boolean;
   /** Pour + wave + bubbles instead of a held, still fill. */
   animated?: boolean;

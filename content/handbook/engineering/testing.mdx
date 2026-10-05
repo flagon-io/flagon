@@ -1,0 +1,48 @@
+---
+title: How we test
+description: Tests that earn their keep, catch real regressions, and give you the confidence to ship without slowing everyone down.
+section: Engineering
+order: 10
+---
+
+We test to ship with confidence, not to hit a number. Everything below follows from that. A test suite is a tool, and like any tool it can be sharp and useful or heavy and in the way. We aim for sharp. This is the longer version of the "tests where they earn their keep" line in [how we build](/handbook/how-we-build).
+
+## Tests earn their keep
+
+Every test is code you have to maintain, run, and read. So each one should pay for itself by catching something that would actually hurt. We write tests for the logic that's easy to get subtly wrong, the paths that money and data flow through, and the bugs that have already bitten us once (that last category is non-negotiable: a bug you fixed without a test is a bug you've agreed to ship again).
+
+We don't write tests to make a coverage percentage go up. Coverage tells you what code ran during the suite, not whether it's correct, and chasing the number produces tests that assert nothing while looking diligent. A line can be 100% covered and completely broken.
+
+## Test behavior, not implementation
+
+Test what the code does, not how it does it. A good test reads like a description of a promise the system makes: given this input, you get this result. It should survive a refactor. If you rewrite the internals without changing the behavior and half your tests go red, those tests were pinned to the implementation, and they were costing you the very thing tests are supposed to buy: the freedom to change code safely.
+
+```
+# tied to behavior, survives a rewrite
+expect(priceFor(cart)).toBe(1200)
+
+# tied to implementation, breaks on any refactor
+expect(calc.applyDiscount).toHaveBeenCalledWith(0.1)
+```
+
+The second test knows too much. It fails when you rename a method or restructure the math, even when the price is still right, which trains everyone to update tests reflexively instead of trusting them.
+
+## Fast and reliable over exhaustive
+
+A test suite people trust and run is worth more than a thorough one they route around. Two properties matter most.
+
+Fast, because a suite that takes twenty minutes doesn't get run before you push, it gets run by CI after you've moved on. Reliable, because a flaky test is worse than no test: it cries wolf, people learn to hit rerun, and then it's useless the one time it's telling the truth.
+
+<Callout type="warn" title="Flaky tests are a fire, not a chore">
+  A test that fails at random is actively eroding trust in the whole suite. Fix it or delete it the day you find it. A quarantined flaky test is a decision to fix it, not a place to forget it.
+</Callout>
+
+## What we don't bother testing
+
+Plenty. We generally don't write tests for trivial code with no logic (a getter, a straight passthrough), for third-party libraries (that's their job, not ours), or for throwaway spikes we're about to delete. We lean on types to make whole categories of test unnecessary: if the compiler already guarantees it, a test asserting it is just ceremony. And we don't chase exhaustive tests on the parts of the UI that change every week, where the maintenance cost swamps the payoff.
+
+The heuristic: if a test would only ever fail because someone deliberately changed the behavior it pins, and that behavior doesn't matter, skip it.
+
+## Confidence to ship is the real goal
+
+The question behind every testing decision is: does this let us change the code and release it without holding our breath? That's what keeps `main` releasable and lets us ship small and often. When a test gives you that confidence, keep it. When it just makes the suite slower and the refactor scarier, it's failing at its one job, and you should delete it happily. A leaner suite you believe is worth far more than a bloated one you've learned to ignore.

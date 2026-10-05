@@ -1,0 +1,55 @@
+---
+title: How we review code
+description: Kind and rigorous, fast on small changes, and aimed at the person who reads this code a year from now.
+section: Engineering
+order: 7
+---
+
+Code review is two people making a change better, not a gate you sweet-talk your way through and not a stage where a senior person performs authority. When it works, the code that lands is better than either person would have written alone, and both of them understand it. This is where a lot of [how we build](/handbook/how-we-build) actually happens, so it's worth being deliberate about. For the step-by-step mechanics, the author's checklist and the reviewer's, see [how we review PRs](/handbook/how-we-review-prs).
+
+## Kind and rigorous, both
+
+These aren't in tension. The kindest thing you can do for a colleague is read their change carefully and tell them the truth about it. Waving through code you didn't understand isn't nice, it's negligent with a smile. Rigor without kindness is just someone showing off; it makes people ship smaller, safer, more timid changes to avoid the ordeal of review, which is the opposite of what you want.
+
+So: high standards, warm delivery. Assume the author is smart and had reasons. Ask before you accuse. The review is about the code, not about them, and your tone should make that obvious.
+
+## Review for real
+
+Read it like you'll maintain it, because you might. That means actually reading it: following the logic, checking the edge the author probably didn't hit, thinking about the call site you can't see in the diff. "LGTM" on 600 lines you skimmed is not a review, it's a signature on a document you didn't read.
+
+If you don't have time to review it properly, say that instead of approving it anyway. A slow review is annoying. A fast approval on code nobody checked is how the 2am page gets written.
+
+## Small PRs get fast reviews
+
+The single biggest thing an author controls is size. A change you can review in ten minutes gets reviewed in ten minutes. A 900-line change sits for two days because nobody has a two-hour block to give it the attention it needs, and when they finally do, they rubber-stamp it out of guilt.
+
+<Callout type="brand">
+  Want a fast, thorough review? Send a small change. The two are the same request.
+</Callout>
+
+Keep them small, keep them focused, and separate the noisy commits (a rename, a formatting pass) from the real one so the reviewer isn't hunting for signal in a wall of diff.
+
+## What a good comment looks like
+
+A good comment is specific and often a question. It points at a line, names the concern, and where it can, suggests a direction.
+
+```
+# useful
+This retries forever if the host is down. Cap it, or is there a
+reason we want unbounded here?
+
+# less useful
+this seems wrong
+```
+
+The first invites a conversation and might teach you something (maybe there is a reason). The second is a shrug that makes the author guess what you meant. Say the real thing, say it precisely, and separate "this must change" from "here's a thought" so the author knows what's blocking and what's a preference.
+
+## Review for the reader and the long haul
+
+The person you're really reviewing for isn't the author, it's whoever opens this file in a year with no context and a bug to fix. Optimize for their ability to understand what's here. Naming, a comment that explains the why (not the what), an abstraction that isn't cleverer than the problem: these matter more than local style nits, and they're what review is uniquely good at catching.
+
+## Disagreement, handled well
+
+You will disagree, and that's fine, that's the point. Argue it in the open, on the merits, briefly. Most disagreements dissolve once both people say what they actually mean. When one doesn't, the author usually gets the call on reversible things, since they own what they ship, and you pull in a third person for the genuinely hard, expensive ones. What you don't do is relitigate a settled decision in every future PR, or go quiet and passive-aggressive.
+
+This is [feedback](/handbook/feedback) in one of its highest-leverage forms: frequent, low-stakes, and specific. Treat it that way and it stops being a chore and starts being the best part of the day.

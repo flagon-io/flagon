@@ -44,7 +44,7 @@ const FOR: Item[] = [
 const NOT_FOR: Item[] = [
   {
     lead: "You need guaranteed dates.",
-    body: "The roadmap is public, but we won't promise exactly what ships when. Plans move as we learn.",
+    body: "We build in public, but we won't promise exactly what ships when. Plans move as we learn.",
   },
   {
     lead: "You want a lot of structure.",

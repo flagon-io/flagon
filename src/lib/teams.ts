@@ -1,6 +1,6 @@
 /**
  * The canonical list of teams (really, the functions of the company), in one
- * place. The /teams page, the People page, and the roadmap all read from here,
+ * place. The /teams page and the People page both read from here,
  * so a team's name and blurb live once. These describe the shape of the company
  * by design; a function might be one person today or a whole team later. Add an
  * entry as we grow. Deep per-team handbook pages will grow under the handbook's
@@ -13,7 +13,7 @@ export const TEAMS = [
   },
   {
     name: "Engineering",
-    blurb: "Builds and runs the platform, and keeps it fast, safe, and boring in the good way.",
+    blurb: "Builds and runs our products, and keeps them fast, safe, and boring in the good way.",
   },
   {
     name: "Product",
@@ -25,11 +25,11 @@ export const TEAMS = [
   },
   {
     name: "Developer relations",
-    blurb: "Meets the people who build on Flagon where they are, and brings their feedback home.",
+    blurb: "Meets the people who build with our products where they are, and brings their feedback home.",
   },
   {
     name: "Growth",
-    blurb: "Helps the right people find Flagon and get value fast, without dark patterns.",
+    blurb: "Helps the right people find what we make and get value fast, without dark patterns.",
   },
   {
     name: "Marketing",

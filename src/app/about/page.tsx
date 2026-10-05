@@ -99,9 +99,9 @@ export default function AboutPage() {
                 out.
               </Right>
               <Right title="No bill shock">
-                When there&rsquo;s a product, it&rsquo;s priced with caps you set.
-                You will never open an invoice and gasp. If pricing surprises you,
-                we got it wrong.
+                Our products are priced close to what they cost us, with the markup
+                stated plainly. You will never open an invoice and gasp. If pricing
+                surprises you, we got it wrong.
               </Right>
               <Right title="Try it without us">
                 No &ldquo;book a demo&rdquo; wall in front of the thing. Use it,
@@ -130,8 +130,7 @@ export default function AboutPage() {
               You can see how the entire company operates. How we work, what we
               value, how we make decisions, and{" "}
               <Link href="/handbook/compensation">exactly how we pay people</Link>,
-              down to the formula. Our <Link href="/roadmap">roadmap</Link> is
-              public, and this whole site, handbook and all, is{" "}
+              down to the formula. This whole site, handbook and all, is{" "}
               <a href={site.links.github} target="_blank" rel="noreferrer">
                 open source
               </a>{" "}
@@ -148,7 +147,7 @@ export default function AboutPage() {
             <SchematicGrid cols={3}>
               <Stat value="100%" label="Handbook, public" />
               <Stat value="Open" label="Source, in git" />
-              <Stat value="Public" label="Comp, roadmap, reasoning" />
+              <Stat value="Public" label="Comp, decisions, reasoning" />
             </SchematicGrid>
           </Schematic>
         </Section>

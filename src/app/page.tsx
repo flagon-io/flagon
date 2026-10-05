@@ -4,10 +4,12 @@ import { ArrowRight } from "lucide-react";
 import { Frame } from "@/components/frame";
 import { HexField } from "@/components/hex-field";
 import { FlagonPour } from "@/components/flagon-pour";
-import { Schematic, SchematicGrid } from "@/components/schematic";
+import { Schematic } from "@/components/schematic";
+import { ProductCard, MoreInTheWorks } from "@/components/product-card";
 import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
 import { site } from "@/lib/site";
+import { FEATURED_PRODUCT } from "@/lib/products";
 import { getAllPosts, formatDate } from "@/lib/blog";
 
 export const metadata: Metadata = {
@@ -31,9 +33,9 @@ export default function Home() {
           className="rise mt-8 max-w-3xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl"
           style={{ animationDelay: "120ms" }}
         >
-          Your whole system,{" "}
+          We make good software,{" "}
           <span className="bg-linear-to-r from-brand-bright to-brand bg-clip-text text-transparent">
-            in one place.
+            in the open.
           </span>
         </h1>
 
@@ -41,51 +43,36 @@ export default function Home() {
           className="rise mt-6 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg"
           style={{ animationDelay: "180ms" }}
         >
-          Flagon is the developer platform for everything you build and run:
-          projects, tools, and teams in one place you operate from the dashboard
-          or the API. AI is wired through all of it, for when you want it.
-          Powerful with AI, great without it. Open source, and built in the open.
+          {site.legalName} is a small, independent software company. We build
+          products for developers, and we run the whole company where you can
+          see it: the handbook, the pay, and the way we decide.
         </p>
 
         <div
           className="rise mt-9 flex flex-col items-center gap-3 sm:flex-row"
           style={{ animationDelay: "240ms" }}
         >
-          <Cta href="/docs">Explore the docs</Cta>
+          <Cta href="/products">See what we&rsquo;re building</Cta>
           <Cta href="/handbook" variant="secondary">
             Read the handbook
           </Cta>
         </div>
       </section>
 
-      {/* What Flagon is */}
+      {/* What we're building */}
       <Section divider>
         <SectionHeader
-          title="One place for your whole system."
-          lead="Your work is spread across a dozen tools that each know a slice of the picture. Flagon pulls it together into one system you can operate however you like, click it, script it, or ask for it."
+          title="What we're building."
+          lead="Flagon is the company; the products are their own things, each with its own site and room to grow. Here's what's in the workshop."
         />
-        <Schematic bleed className="mt-10">
-          <SchematicGrid cols={3}>
-            <Pillar
-              title="One system, not twelve"
-              body="Your projects, teams, and the tools around them, in one place you can actually operate, instead of smeared across a dozen dashboards that each disagree."
-            />
-            <Pillar
-              title="Operate it your way"
-              body="A fast dashboard, a real API, and MCP, all driving the same operations. Prefer to ask? The assistant works over your data with your permissions. Great with AI, and great without it."
-            />
-            <Pillar
-              title="Open and yours"
-              body="Open source and self-hostable, end to end. Your infrastructure, your data, no lock-in. Leaving is always an option, which is exactly why you won't want to."
-            />
-          </SchematicGrid>
-        </Schematic>
+        <ProductCard product={FEATURED_PRODUCT} className="mt-10" />
+        <MoreInTheWorks />
         <div className="mt-8 px-6 sm:px-8">
           <Link
-            href="/docs/get-started/introduction"
+            href="/products"
             className="group inline-flex items-center gap-1.5 text-sm font-medium text-brand"
           >
-            See what Flagon is, and where it&rsquo;s going
+            All products
             <ArrowRight
               className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
               strokeWidth={2}
@@ -102,10 +89,10 @@ export default function Home() {
               A company you can read.
             </h2>
             <p className="mt-4 text-pretty leading-relaxed text-muted-foreground">
-              We build the whole thing in public. How we work, what we decide, how
-              we pay people, and where the product is headed: it&rsquo;s a handbook
-              and a roadmap you can open, argue with, and hold us to. No big
-              reveal, no roadmap of maybes. You watch it get made.
+              We run the whole company in public. How we work, what we decide,
+              how we pay people, and why: it&rsquo;s a handbook you can open,
+              argue with, and hold us to. No big reveal, no culture deck. You
+              watch it get made.
             </p>
             <div className="mt-6">
               <Link
@@ -183,11 +170,11 @@ export default function Home() {
             Come build with us.
           </h2>
           <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground">
-            Start with the docs, read the handbook, or jump into Discord and tell
-            us what you wish existed. It&rsquo;s all in the open.
+            Read the handbook, see how we hire, or jump into Discord and tell us
+            what you wish existed. It&rsquo;s all in the open.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Cta href="/docs">Explore the docs</Cta>
+            <Cta href="/careers">Work with us</Cta>
             <Cta href={site.links.discord} external variant="secondary">
               Join the Discord
             </Cta>
@@ -195,15 +182,6 @@ export default function Home() {
         </div>
       </Section>
     </Frame>
-  );
-}
-
-function Pillar({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="p-6 sm:p-8">
-      <h3 className="text-base font-semibold tracking-tight">{title}</h3>
-      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{body}</p>
-    </div>
   );
 }
 

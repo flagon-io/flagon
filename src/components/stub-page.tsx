@@ -11,7 +11,8 @@ type Action = {
 /**
  * A reserved-route page. Not a "coming soon" dead end: it states honestly what
  * will live here and points to the real content that exists today. Used for the
- * product-shaped nav slots (Product, Pricing, Docs) until they're fleshed out.
+ * smaller company pages (Media, Side projects, Partnerships) until they're
+ * fleshed out.
  */
 export function StubPage({
   title,

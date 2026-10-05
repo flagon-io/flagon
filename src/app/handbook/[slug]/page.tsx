@@ -4,18 +4,21 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Mdx } from "@/components/mdx";
 import { Toc } from "@/components/toc";
-import { HandbookUnavailable } from "@/components/handbook-unavailable";
 import {
   getHandbookPage,
   getHandbookOrder,
-  sectionDir,
+  listHandbookSlugs,
 } from "@/lib/handbook";
+import { site } from "@/lib/site";
 import { extractToc } from "@/lib/toc";
 
 type Params = { slug: string };
 
-// Rendered live per request from the API (no local copy, no build-time list),
-// so the handbook is always current with the corpus.
+export async function generateStaticParams(): Promise<Params[]> {
+  return (await listHandbookSlugs()).map((slug) => ({ slug }));
+}
+
+export const dynamicParams = false;
 
 export async function generateMetadata({
   params,
@@ -39,13 +42,7 @@ export default async function HandbookPage({
   const { slug } = await params;
   const [page, order] = await Promise.all([getHandbookPage(slug), getHandbookOrder()]);
 
-  // Distinguish "API unreachable" from "no such page". The handbook is never
-  // legitimately empty, so an empty order means the API is down: show a plain
-  // unavailable state. A populated order without this slug is a genuine 404.
-  if (!page) {
-    if (order.length === 0) return <HandbookUnavailable />;
-    notFound();
-  }
+  if (!page) notFound();
 
   const toc = extractToc(page.content);
   const idx = order.findIndex((p) => p.slug === slug);
@@ -75,12 +72,11 @@ export default async function HandbookPage({
           </div>
         </article>
 
-        {/* edit link. Handbook pages are grouped into category folders in the
-            product repo (docs/handbook/<category>/<page>.mdx) while keeping a flat
-            URL, so the source path folds the category back in from the section. */}
+        {/* edit link: pages live in content/handbook/<folder>/<page>.mdx behind a
+            flat URL, so the loader records each page's source path. */}
         <div className="mt-12 max-w-2xl border-t border-hairline pt-6">
           <a
-            href={`https://github.com/flagon-io/flagon/blob/main/docs/handbook/${sectionDir(page.section)}/${slug}.mdx`}
+            href={`${site.links.repo}/blob/main/${page.source}`}
             target="_blank"
             rel="noreferrer"
             className="font-mono text-[11px] uppercase tracking-widest text-subtle transition hover:text-foreground"

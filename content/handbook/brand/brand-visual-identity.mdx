@@ -1,0 +1,44 @@
+---
+title: Visual identity
+description: The Flagon mark, the palette, and the type, with the rules for using them. One vessel, one accent, one typeface family.
+section: Brand
+order: 4
+---
+
+The visual system is deliberately small: one mark, one accent colour, one type family. Small systems are easier to keep consistent and harder to get wrong, and restraint reads as confidence. It should feel considered, a little technical, and never precious.
+
+## The mark
+
+The mark is a flagon that is actually full. The brew is the mark; the vessel just holds it. It comes in three treatments. Reach for the one that fits the surface, and never redraw the vessel.
+
+<MarkTreatments />
+
+It has to hold from a favicon to a hero. It stays legible down to 16px; below that the sheen falls away gracefully and the silhouette still reads as a full flagon.
+
+<MarkSizes />
+
+The mark isn't only a still image. Pouring is part of it: the brew fills in once, then keeps a slow living wave with a few rising bubbles. Reach for the motion where it earns attention, a hero or a loading state, and the still mark everywhere else. All of it is CSS, and it halts under reduced motion.
+
+<MarkMotion />
+
+## Colour
+
+A single accent, teal, on cool neutrals. The neutrals carry a faint cool bias so they read as chosen rather than default. Dark mode is true black, not a dark grey, so the teal has somewhere to glow. Every value is a design token, so swapping the token re-themes the whole system at once.
+
+<Palette />
+
+The one accessibility rule that bites: the brand teal is only about 3.6:1 on the light background, which fails AA for text. For links and small text on light surfaces, use the deeper `#0f766e`. The bright teal is for marks, fills, and large display only, never body text on white.
+
+## Type
+
+Three roles, kept clean. **Hanken Grotesk** sets headlines: tight tracking, a touch heavier, the display voice. **Geist** carries body and UI, the neutral workhorse. **JetBrains Mono** handles labels, code, and data as its own separate thing. Uppercase captions get wide tracking; headings get tight.
+
+<TypeSpecimen />
+
+## Using the mark
+
+Four rules cover almost everything. When in doubt, give the mark room and keep it full.
+
+<MarkUsage />
+
+For the actual files and formats, see [brand assets](/handbook/brand-assets). For applying all of this to real surfaces, see [brand in practice](/handbook/brand-in-practice).

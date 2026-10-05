@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { getHandbookNav } from "@/lib/handbook";
-import { HandbookUnavailable } from "@/components/handbook-unavailable";
 import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -13,12 +12,6 @@ export const metadata: Metadata = {
 
 export default async function HandbookIndex() {
   const categories = await getHandbookNav();
-
-  // No pages means the API is unreachable (the handbook is never legitimately
-  // empty). Show a plain unavailable state rather than a bare header.
-  if (!categories.some((c) => c.sections.some((s) => s.pages.length > 0))) {
-    return <HandbookUnavailable />;
-  }
 
   return (
     <main>

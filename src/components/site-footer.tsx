@@ -3,6 +3,7 @@ import { SiGithub, SiDiscord } from "@icons-pack/react-simple-icons";
 import { Logo } from "@/components/logo";
 import { Plus } from "@/components/plus";
 import { site } from "@/lib/site";
+import { PRODUCTS } from "@/lib/products";
 
 export function SiteFooter() {
   const year = new Date().getFullYear();
@@ -51,21 +52,19 @@ export function SiteFooter() {
           </div>
         </div>
 
-        <FooterCol title="Product">
-          <FooterLink href="/products">Products</FooterLink>
-          <FooterLink href="/pricing">Pricing</FooterLink>
-          <FooterLink href="/docs">Docs</FooterLink>
-          <FooterLink href={site.links.ui} external>
-            Flagon UI
-          </FooterLink>
+        <FooterCol title="Products">
+          {PRODUCTS.map((p) => (
+            <FooterLink key={p.id} href={p.url} external>
+              {p.name}
+            </FooterLink>
+          ))}
+          <FooterLink href="/products">All products</FooterLink>
         </FooterCol>
 
         <FooterCol title="Company">
           <FooterLink href="/about">About</FooterLink>
           <FooterLink href="/people">People</FooterLink>
           <FooterLink href="/handbook">Handbook</FooterLink>
-          <FooterLink href="/roadmap">Roadmap</FooterLink>
-          <FooterLink href="/changelog">Changelog</FooterLink>
           <FooterLink href="/media">Media</FooterLink>
           <FooterLink href="/careers">Careers</FooterLink>
           <FooterLink href="/handbook/brand-overview">Brand</FooterLink>

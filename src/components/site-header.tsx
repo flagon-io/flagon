@@ -6,7 +6,6 @@ import { MobileNav } from "@/components/mobile-nav";
 import { MainNav } from "@/components/main-nav";
 import { Search } from "@/components/search";
 import { buttonClasses } from "@/components/button";
-import { site } from "@/lib/site";
 
 export function SiteHeader() {
   return (
@@ -28,12 +27,12 @@ export function SiteHeader() {
           <Search />
           <ThemeToggle />
           <div className="hidden md:block">
-            <a
-              href={site.links.app}
+            <Link
+              href="/careers"
               className={buttonClasses({ variant: "default", size: "sm" })}
             >
-              Login
-            </a>
+              Careers
+            </Link>
           </div>
           <MobileNav />
         </div>

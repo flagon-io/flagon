@@ -1,0 +1,37 @@
+---
+title: Shipping and releasing
+description: "How a change actually gets to production here: small pull requests, a trunk that's always releasable, and deploys boring enough to do on a Friday."
+section: Engineering
+order: 9
+---
+
+This is the mechanical companion to [how we build](/handbook/how-we-build): not the philosophy of shipping small, but what the path from your machine to production actually looks like. The whole thing is designed so that releasing is uneventful. A release that makes anyone nervous is a bug in the process.
+
+## The path a change takes
+
+1. **Branch off `main`.** Keep the change small and focused. If it's growing arms and legs, that's a signal to split it, not to push on.
+2. **Open a pull request.** Describe what it does and, more usefully, why. Draft it early if you want eyes before it's finished.
+3. **Get it reviewed.** Small changes get fast, real reviews; that's the deal in [how we review code](/handbook/code-review), and the step-by-step is in [how we review PRs](/handbook/how-we-review-prs). Keep the noisy commits (a rename, a formatting pass) separate from the substantive one so the reviewer isn't hunting for signal.
+4. **Merge to `main`.** CI runs the [tests](/handbook/testing) and, when it's green, deploys both services automatically: the app to Vercel and the API to Fly. There's no separate "release" ceremony to schedule.
+
+## Main stays releasable, always
+
+`main` should be deployable at any moment, not after someone finishes one more fix. This is the single rule that makes everything else work: when the trunk is always green, shipping is routine and a release is a non-event. If `main` isn't releasable, fixing that is the most important thing in the building until it is.
+
+<Callout type="brand">
+  If you'd be uncomfortable with `main` deploying to production by accident right now, it isn't ready. Get it back to green before you do anything else.
+</Callout>
+
+## Ship behind a flag when it's not ready to be seen
+
+A change being merged and a feature being visible are two different events, and it's often right to separate them. Merge the code early, in small pieces, with the new behavior gated off. Then turn it on for yourself, then for a few friendly users, then for everyone, watching as you widen the circle. This is what lets us [ship the smallest useful change](/handbook/iteration) without waiting for a whole feature to be finished before any of it lands.
+
+It also means a bad release is a config change to reverse, not a frantic rollback.
+
+## Continuous for the services, deliberate for what others depend on
+
+The app and the API deploy continuously on every merge to `main`, because we own both ends and can fix forward fast. The things other people build against are different. The [public API](/handbook/tech-stack) is a contract: a breaking change gets versioned and announced, not slipped out, which is the whole point of [customer comms as an engineer](/handbook/customer-comms). The public SDKs and client CLI [on the roadmap](/roadmap) will release the same way when they land: a tagged version, a changelog entry a human can actually read, and semver that means what it says. Breaking someone's build to save yourself a few minutes of care is not a trade we make.
+
+## When a release goes wrong
+
+It will, sometimes. The response is calm and practiced: flip the flag off or roll forward with a fix, get users back to working, and only then figure out what happened. The full playbook, including the blameless write-up afterward, is in [when things break](/handbook/incidents). The goal is never to find who to blame. It's to make the system a little harder to break the same way twice.

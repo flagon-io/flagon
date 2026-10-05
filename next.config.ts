@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
         destination: "/handbook/brand-overview",
         permanent: true,
       },
+      // Pages from when Flagon was itself the product. Each product now has its
+      // own site, so old links land on the portfolio instead of a 404. Not
+      // permanent: these paths may be reused.
+      ...["/pricing", "/docs", "/docs/:path*", "/roadmap", "/changelog", "/customers"].map(
+        (source) => ({ source, destination: "/products", permanent: false }),
+      ),
     ];
   },
 };

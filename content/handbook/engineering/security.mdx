@@ -1,0 +1,42 @@
+---
+title: Security and trust
+description: How we think about security, privacy, and earning the trust people place in us.
+section: Engineering
+order: 14
+---
+
+People trust us with their data and their systems. That trust is slow to earn and fast to lose, and no amount of good marketing survives one careless breach. So we treat security and privacy as part of building the product, not a compliance chore we bolt on later. This page is our stance, so you can hold us to it.
+
+## Secure by default
+
+The secure path has to be the easy path, or it won't get taken. We build so that the default configuration is the safe one, and doing the risky thing takes deliberate effort and a good reason. Secrets stay out of the code and out of the logs. Data is encrypted in transit and at rest as a matter of course, not as a feature we remember to turn on. If security depends on every engineer remembering to do the careful thing every single time, it will fail, so we push it into the defaults where it holds up on its own.
+
+## Least privilege
+
+Access is granted narrowly and reviewed often. People, and systems, get exactly the permissions the job requires and nothing spare, because every extra grant is a bigger blast radius when something goes wrong. This applies to us as much as anyone: standing access to production and to customer data is kept tight, logged, and revisited, not handed out broadly for convenience and forgotten.
+
+## Collect the minimum
+
+The safest data is the data you never collected. We ask for the minimum we actually need to make the product work, and we're skeptical of collecting anything "just in case." Data we don't hold can't leak, can't be subpoenaed, and can't be misused. When we do collect something, we're clear about why, and we don't quietly repurpose it later for something you didn't sign up for.
+
+## Honest, fast incident handling
+
+<Callout type="warn" title="When something goes wrong">
+  We tell you promptly and truthfully. No downplaying, no burying it in a quarterly footnote, no waiting until we're sure nobody noticed.
+</Callout>
+
+Something will eventually go wrong; it does for everyone. What separates trustworthy from not is what happens next. We handle incidents fast and honestly: contain it, fix it, figure out how it happened, and tell the people affected in plain language and without delay. The postmortem is blameless, because the goal is a system that doesn't fail that way again, not a person to point at. It's the same posture we take with [engineering incidents](/handbook/incidents), and we hold to it even when the truth is embarrassing. Especially then.
+
+## Responsible disclosure welcome
+
+If you've found a vulnerability in something we run, we want to hear about it, and we'll treat you like an ally, not a threat. Email us at [hey@flagon.io](mailto:hey@flagon.io) with what you found and how to reproduce it. We'll acknowledge it, work the fix, and credit you if you'd like. Good-faith security research makes our product safer, and researchers who take the time to tell us instead of selling it deserve a thank-you and a straight answer, not a lawyer.
+
+## Transparent, even when it's uncomfortable
+
+We [build in the open](/handbook/open-source), and that shapes how we do security. It doesn't mean publishing secrets; it means being honest about how the system works, what we collect, and where we've fallen short. When we get something wrong, we'd rather say so than hope nobody looks. Transparency you only offer when the news is good isn't transparency, it's public relations, and people can tell the difference.
+
+## Certifications, when they're earned
+
+We claim a certification only when we've earned it, and not a day before. The security itself is real today: the practices on this page are how we operate now, not aspirations. Formal attestations like SOC 2 are ones we pursue and pass as we grow into them, and when we pass an audit we'll say so, with the report to back it up. We won't put a logo on the site for one we haven't. Judge us on the practices, which are real, not on a plaque.
+
+The short version: we protect your data like it's ours, we tell you the truth when things go sideways, and we earn the trust the slow, honest way.

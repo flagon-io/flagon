@@ -1,20 +1,16 @@
 import type { ComponentType } from "react";
 import {
-  BookOpen,
   Boxes,
-  Briefcase,
-  Building2,
-  Component,
   FlaskConical,
+  GitBranch,
   Handshake,
   Info,
-  Map,
+  LayoutGrid,
   Megaphone,
-  Newspaper,
-  ScrollText,
   Users,
 } from "lucide-react";
 import { SiDiscord, SiGithub } from "@icons-pack/react-simple-icons";
+import { PRODUCTS } from "@/lib/products";
 
 /**
  * Single source of truth for the company's identity and top-level navigation.
@@ -26,12 +22,6 @@ const links = {
   github: "https://github.com/flagon-io",
   /** The repo backing this site (used for "edit on GitHub" links). */
   repo: "https://github.com/flagon-io/website",
-  /** The product app, on its own subdomain. */
-  app: "https://app.flagon.io",
-  /** Flagon UI, the design system, on its own subdomain. Open source, free to use. */
-  ui: "https://ui.flagon.io",
-  /** Where every "Start for free" CTA points. */
-  signup: "https://app.flagon.io/signup",
   discord: "https://discord.gg/dtYQs6rPXN",
   email: "hey@flagon.io",
 } as const;
@@ -52,19 +42,37 @@ export type NavGroup = {
 export type NavItem = NavLink | NavGroup;
 
 /**
- * Top nav is product-shaped (PostHog model): the products/pricing/docs slots sit
- * up front, and the community + company pages collapse into grouped dropdowns.
+ * Top nav is company-shaped: Flagon is the studio, and each product has its own
+ * site. Products sit up front as a dropdown that links out; the handbook, blog,
+ * and company pages follow.
  */
 const nav: readonly NavItem[] = [
-  { label: "Products", href: "/products" },
-  { label: "Pricing", href: "/pricing" },
-  { label: "Docs", href: "/docs" },
   {
-    label: "Community",
+    label: "Products",
+    sections: [
+      PRODUCTS.map((p) => ({
+        label: p.name,
+        href: p.url,
+        external: true,
+        icon: GitBranch,
+      })),
+      [{ label: "All products", href: "/products", icon: LayoutGrid }],
+    ],
+  },
+  { label: "Handbook", href: "/handbook" },
+  { label: "Blog", href: "/blog" },
+  {
+    label: "Company",
     sections: [
       [
-        { label: "Blog", href: "/blog", icon: Newspaper },
-        { label: "Flagon UI", href: links.ui, external: true, icon: Component },
+        { label: "About", href: "/about", icon: Info },
+        { label: "People", href: "/people", icon: Users },
+        { label: "Small teams", href: "/teams", icon: Boxes },
+        { label: "Media", href: "/media", icon: Megaphone },
+      ],
+      [
+        { label: "Side projects", href: "/side-projects", icon: FlaskConical },
+        { label: "Partnerships", href: "/partnerships", icon: Handshake },
         {
           label: "Discord",
           href: links.discord,
@@ -72,26 +80,6 @@ const nav: readonly NavItem[] = [
           icon: SiDiscord,
         },
         { label: "GitHub", href: links.github, external: true, icon: SiGithub },
-      ],
-    ],
-  },
-  {
-    label: "Company",
-    sections: [
-      [
-        { label: "About", href: "/about", icon: Info },
-        { label: "Customers", href: "/customers", icon: Building2 },
-        { label: "Handbook", href: "/handbook", icon: BookOpen },
-        { label: "Roadmap", href: "/roadmap", icon: Map },
-        { label: "Changelog", href: "/changelog", icon: ScrollText },
-        { label: "Media", href: "/media", icon: Megaphone },
-      ],
-      [
-        { label: "People", href: "/people", icon: Users },
-        { label: "Small teams", href: "/teams", icon: Boxes },
-        { label: "Careers", href: "/careers", icon: Briefcase },
-        { label: "Side projects", href: "/side-projects", icon: FlaskConical },
-        { label: "Partnerships", href: "/partnerships", icon: Handshake },
       ],
     ],
   },
@@ -104,7 +92,7 @@ export const site = {
   url: "https://www.flagon.io",
   tagline: "We build software in the open.",
   description:
-    "Flagon is a developer platform for operating your whole system: your projects, tools, and teams in one place, driven from the dashboard, the API, or an AI assistant. Powerful with AI, great without it. Open source, self-hostable, and built in the open.",
+    "Flagon, Inc. is a small, independent software company. We build products for developers, starting with g1t, and we run the company in the open: the handbook, the pay, and the way we decide are all public.",
   links,
   nav,
 } as const;

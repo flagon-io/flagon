@@ -5,43 +5,15 @@ import { FlagonPour } from "@/components/flagon-pour";
 import { Schematic, SchematicGrid } from "@/components/schematic";
 import { Section, SectionHeader } from "@/components/section";
 import { Cta } from "@/components/cta";
+import { ProductCard, MoreInTheWorks } from "@/components/product-card";
+import { PRODUCTS } from "@/lib/products";
 import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Products",
   description:
-    "Flagon is an AI-native platform for operating your whole system: connect your tools, operate them with AI over your real data, and drive everything from the dashboard, an assistant, or the API. Open source, self-hostable, and built in public.",
+    "The products Flagon, Inc. builds, starting with g1t: git for AI scale. Each one has its own site and its own team, held to the same standard.",
 };
-
-const PILLARS: { title: string; body: string }[] = [
-  {
-    title: "Your system, connected",
-    body: "Bring your projects, teams, and the tools around them into one place, with shared context across all of it, instead of a slice of the truth in each dashboard.",
-  },
-  {
-    title: "Operate with AI",
-    body: "Ask in plain language and act on the answer. The assistant and agents work over your real data with your permissions. Reads run; changes are proposed for you to confirm.",
-  },
-  {
-    title: "One surface, everywhere",
-    body: "The dashboard, the assistant, the API, and MCP all drive the same permission-checked operations. Click it, ask it, script it, or point an agent at it.",
-  },
-];
-
-const UI_POINTS: { title: string; body: string }[] = [
-  {
-    title: "Accessible by default",
-    body: "Built on Radix primitives: keyboard and screen-reader ready out of the box, so you inherit the accessibility work instead of redoing it.",
-  },
-  {
-    title: "The real thing",
-    body: "The same components Flagon itself is built from, not a stripped-down sample. What you see running the product is what you get.",
-  },
-  {
-    title: "Yours to use",
-    body: "Open source and free. Install it, theme it, and build your own interface with it, whether or not you ever touch the rest of Flagon.",
-  },
-];
 
 const TRAITS: { title: string; body: string }[] = [
   {
@@ -49,16 +21,16 @@ const TRAITS: { title: string; body: string }[] = [
     body: "Quality over quantity, down to the empty states and error copy. If a competitor could slap their logo on it and nobody would notice, it isn't finished.",
   },
   {
+    title: "Its own thing",
+    body: "Every product gets its own name, site, and brand, and a small team that owns it end to end. Flagon is the company behind it, not a logo stamped on top.",
+  },
+  {
     title: "Open by default",
-    body: "Open source and self-hostable. Your infrastructure, your data, no lock-in. Leaving is always an option, which is exactly why you won't want to.",
+    body: "We build in public and open source what we can. You can see how the work gets made and argue with the decisions while they're still being made.",
   },
   {
-    title: "Priced without games",
-    body: "A genuinely free tier, usage-based paid plans, and no bill shock. We make money when you're happy to pay, not when you're trapped.",
-  },
-  {
-    title: "Built in public",
-    body: "You watch it get made, argue with the decisions, and shape what comes next. No big reveal, no roadmap of maybes.",
+    title: "Here for the long game",
+    body: "We'd rather build a few things people rely on for years than chase whatever's loud this quarter. Products earn their place by being useful.",
   },
 ];
 
@@ -73,49 +45,34 @@ export default function ProductsPage() {
             <FlagonPour className="relative h-32 w-32 sm:h-40 sm:w-40" />
           </div>
           <h1 className="mt-8 max-w-3xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
-            The platform for your whole system.
+            What we&rsquo;re building.
           </h1>
           <p className="mt-6 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-            Flagon brings your tools into one place you can operate and reason
-            about, with AI there when you want it. Connect your system,
-            understand what&rsquo;s happening across it, and act on it, from the
-            dashboard, the API, or an AI assistant.
+            {site.legalName} makes software for developers. Each product is its
+            own thing, with its own site and the team that builds it. This is
+            where we introduce them.
           </p>
-          <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row">
-            <Cta href="/docs">Explore the docs</Cta>
-            <Cta href="/roadmap" variant="secondary">
-              See the roadmap
-            </Cta>
-          </div>
         </section>
 
-        {/* Pillars */}
+        {/* The portfolio */}
         <Section divider>
           <SectionHeader
-            title="One system, run with AI"
-            lead="Connect the tools your work already lives in, then operate the whole thing, and let AI act on it, over your real data, safely."
+            title="Our products"
+            lead="Everything here is in active development. Follow the links for the product itself: its docs, its pricing, and how to get started."
           />
-          <Schematic bleed className="mt-10">
-            <SchematicGrid cols={3}>
-              {PILLARS.map((p) => (
-                <div key={p.title} className="p-6 sm:p-8">
-                  <h3 className="text-base font-semibold tracking-tight">
-                    {p.title}
-                  </h3>
-                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                    {p.body}
-                  </p>
-                </div>
-              ))}
-            </SchematicGrid>
-          </Schematic>
+          <div className="mt-10 flex flex-col gap-10">
+            {PRODUCTS.map((p) => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+          <MoreInTheWorks />
         </Section>
 
         {/* The standard */}
         <Section divider>
           <SectionHeader
             title="Held to a standard"
-            lead="Every part of Flagon is built to the same bar, no matter which feature it is. Here's what that bar means in practice."
+            lead="Different products, one bar. Here's what every one of them is held to, whichever team builds it."
           />
           <Schematic bleed className="mt-10">
             <SchematicGrid cols={4}>
@@ -133,50 +90,20 @@ export default function ProductsPage() {
           </Schematic>
         </Section>
 
-        {/* Flagon UI: a shipped, standalone product of its own. */}
-        <Section divider>
-          <SectionHeader
-            title="Flagon UI, a product of its own"
-            lead="Flagon's interface is built on Flagon UI, our open-source design system of accessible, Radix-based React components. It ships as its own product on its own site, so you can build with the same pieces Flagon is made from."
-          />
-          <Schematic bleed className="mt-10">
-            <SchematicGrid cols={3}>
-              {UI_POINTS.map((p) => (
-                <div key={p.title} className="p-6 sm:p-8">
-                  <h3 className="text-base font-semibold tracking-tight">
-                    {p.title}
-                  </h3>
-                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                    {p.body}
-                  </p>
-                </div>
-              ))}
-            </SchematicGrid>
-          </Schematic>
-          <div className="mt-8 flex flex-col items-center gap-3 px-6 sm:flex-row sm:px-8">
-            <Cta href={site.links.ui} external>
-              Explore Flagon UI
-            </Cta>
-            <Cta href="/docs/get-started/introduction" variant="secondary">
-              Read the docs
-            </Cta>
-          </div>
-        </Section>
-
         {/* CTA */}
         <Section divider className="text-center">
           <div className="px-6 sm:px-8">
             <h2 className="mx-auto max-w-2xl text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-              See what&rsquo;s next
+              Want to build the next one?
             </h2>
             <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground">
-              We build in the open. See where the platform is on the roadmap, or
-              read exactly who we&rsquo;re building it for.
+              Read how the company works, then come talk to us. The handbook is
+              the job description.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Cta href="/docs">Explore the docs</Cta>
-              <Cta href="/roadmap" variant="secondary">
-                See the roadmap
+              <Cta href="/careers">Work with us</Cta>
+              <Cta href="/handbook" variant="secondary">
+                Read the handbook
               </Cta>
             </div>
           </div>

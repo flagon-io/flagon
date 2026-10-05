@@ -1,0 +1,41 @@
+---
+title: Bug prioritization
+description: "How we decide which bugs get fixed when. A simple four-level scheme, honestly applied, so the important things get fixed fast and nothing rots silently in a backlog."
+section: Engineering
+order: 11
+---
+
+Not every bug is an emergency, and not every bug can wait. The point of having a scheme is so that call gets made deliberately and out loud, instead of by whoever shouts loudest or whatever's freshest in someone's inbox. This is deliberately simple: four levels, a label on the issue, and the honesty to tag things at the level they actually are.
+
+## The four levels
+
+We tag every bug with one of these, as a label on the issue:
+
+| Level | What it means | What we do |
+| --- | --- | --- |
+| **P0** | Critical and breaking: a crash, data loss, something core is down or wrong. | Drop what you're doing. This is the most important thing in the building until it's fixed. |
+| **P1** | Urgent but not breaking: it works, badly, or a real workflow is painful. | Fixed soon, ahead of feature work, not left to drift. |
+| **P2** | Affects the experience but the thing still functions. | Scheduled into normal work; a real fix, on a real timeline. |
+| **P3** | Icebox: minor, cosmetic, or rare. Worth fixing when we're nearby. | Fixed when someone's in the area, or when it climbs the list. |
+
+The levels aren't about how annoyed anyone is. They're about impact on the person using Flagon: how many people, how badly, and whether there's a way around it.
+
+## Tag it honestly
+
+The scheme only works if the labels mean something. The two failure modes are inflating everything to P0 so your thing gets attention, and quietly under-tagging a real problem so it doesn't spoil a roadmap. Both corrode trust in the labels, and once nobody believes the labels, you're back to shouting. Tag it at the level it actually is, and if you think something's mislabeled, say so and change it.
+
+<Callout type="warn" title="A P0 that's live in production is an incident">
+  If a P0 is actively hurting users right now, it's not just a high-priority bug, it's an [incident](/handbook/incidents). Treat it as one: stabilize first, fix, then write up what happened. The label and the playbook go together.
+</Callout>
+
+## Who decides
+
+Whoever's triaging tags it, and anyone can push back. There's no bug committee. Because you [own what you build](/handbook/feature-ownership), the bugs in your area are yours to weigh, and because we don't build walls between building and support, a lot of these come straight from [support and care](/handbook/support-and-care), where the same question asked three times is one P1 to fix, not three tickets to close.
+
+## Bugs versus features
+
+A backlog of P2s and P3s that never gets touched because features always win is its own kind of bug. We don't let quality rot silently under a pile of new work. The rough rule: P0 and P1 come before feature work, P2s get woven into normal cycles rather than deferred forever, and P3s are the happy tax you pay when you're already editing nearby, which ties back to [fixing the adjacent broken thing](/handbook/feature-ownership). Shipping small and often only stays safe if the small things you shipped actually work.
+
+## Security bugs are different
+
+A security vulnerability is prioritized on its severity like any other bug, but it's handled under a different rule: we don't discuss it in public until a fix is live and reasonably rolled out. The details of how we grade and handle those are in [security and trust](/handbook/security). If you think you've found one, treat it as sensitive from the first moment.

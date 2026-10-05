@@ -1,10 +1,11 @@
 # flagon.io
 
-The [Flagon, Inc.](https://www.flagon.io) company site, built in the open. One
-Next.js app holds the marketing site, the public [handbook](https://www.flagon.io/handbook),
-the [blog](https://www.flagon.io/blog), and the product docs, including a live
-[API reference](https://www.flagon.io/docs/api). The content is Markdown/MDX you
-can read, edit, and send a pull request against.
+The [Flagon, Inc.](https://www.flagon.io) company site, built in the open.
+Flagon is the company; the products it builds (starting with
+[g1t](https://g1t.sh)) each have their own site. One Next.js app holds the
+company pages, the products portfolio, the public [handbook](https://www.flagon.io/handbook),
+and the [blog](https://www.flagon.io/blog). The content is Markdown/MDX you can
+read, edit, and send a pull request against, and it all lives in this repo.
 
 ## Quick start
 
@@ -24,30 +25,31 @@ npm run typecheck
 
 ## What's in here
 
-- **Marketing site**: home, about, pricing, products, careers, and the rest of the public pages.
-- **The handbook** (`/handbook`): the company's operating manual and source of truth, around 60 MDX pages, including the brand guidelines (`/brand` redirects into it).
+- **Company site**: home, about, careers, people, teams, and the rest of the public pages.
+- **Products** (`/products`): the portfolio. Each product is one entry in [`src/lib/products.ts`](src/lib/products.ts) and links out to its own site.
+- **The handbook** (`/handbook`): the company's operating manual and source of truth, around 90 MDX pages, including the brand guidelines (`/brand` redirects into it).
 - **The blog** (`/blog`).
-- **Docs** (`/docs`), including a bespoke **API reference** (`/docs/api`) generated live from the OpenAPI document the API publishes.
 
 ## Project structure
 
 ```text
 content/
-  handbook/          # the company handbook, one .mdx per page
+  handbook/          # the company handbook: <folder>/<slug>.mdx, flat URLs
   blog/              # blog posts, one .mdx per post
 src/
-  app/               # routes (home, /about, /handbook, /blog, /docs, /pricing, ...)
-    docs/api/        # the API reference route, its spec proxy, and Try-it proxy
+  app/               # routes (home, /about, /products, /handbook, /blog, ...)
   brand/             # the Flagon mark (SVG component)
-  components/        # site chrome, MDX rendering, and the api/ reference components
-  lib/               # content loaders and config (handbook.ts, blog.ts, openapi.ts, site.ts)
+  components/        # site chrome and MDX rendering
+  lib/               # content loaders and config (handbook.ts, blog.ts, products.ts, site.ts)
 ```
 
 ## Authoring content
 
 ### A handbook page
 
-Create `content/handbook/<slug>.mdx`:
+Create `content/handbook/<folder>/<slug>.mdx`. Folders only group source files
+by department; the URL is always `/handbook/<slug>`, so slugs must be unique
+across folders.
 
 ```mdx
 ---
@@ -96,22 +98,6 @@ New content files are read from disk, so the dev server may need a restart to
 pick up a brand-new `.mdx` file in the handbook nav (edits to existing files
 hot-reload fine).
 
-## The API reference
-
-`/docs/api` renders the OpenAPI document from `api.flagon.io`, proxied through
-`/docs/api/spec` (same-origin, cached, revalidated) so it stays current and
-sidesteps CORS. The renderer is hand-built (see [`src/lib/openapi.ts`](src/lib/openapi.ts)
-and [`src/components/api/`](src/components/api/)): markdown descriptions,
-recursive schema view, syntax-colored request/response examples, a filterable
-scrollspy nav, authentication and models sections, a server switcher, and a live
-"Try it" console.
-
-While the spec has no paths, the page shows a "building in the open" state; the
-full explorer activates on its own as endpoints ship. Try-it requests are
-forwarded by [`/docs/api/proxy`](src/app/docs/api/proxy/route.ts), which only
-targets the origins the spec itself declares (no open proxy) and adds no
-credentials of its own; the viewer's token lives in their browser.
-
 ## Theming
 
 Dark mode is class-based: a `.dark` class on `<html>`, set before first paint by
@@ -126,7 +112,6 @@ install beyond what is in `package.json`.
 - [Tailwind CSS v4](https://tailwindcss.com)
 - MDX via [`next-mdx-remote`](https://github.com/hashicorp/next-mdx-remote) with
   `remark-gfm`, slugged and linkable headings, and Shiki code highlighting
-- `react-markdown` for OpenAPI description fields
 
 ## Deploy
 

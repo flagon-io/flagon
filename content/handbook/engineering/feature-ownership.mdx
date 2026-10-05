@@ -1,0 +1,33 @@
+---
+title: Feature ownership
+description: "You build it, you own it, from the first commit through it running in production. What that means, and what it doesn't."
+section: Engineering
+order: 12
+---
+
+Ownership here is simple to state and does a lot of work: the person who builds something keeps an eye on it. We don't write code and throw it over a wall to a separate team that catches the pager when it breaks. The one who wrote the thing understands it best, and that understanding is worth the most exactly when something is on fire.
+
+## What owning it means
+
+- **You see it through to production.** Ownership doesn't end at merge. It ends when the thing is live and working for real users, and honestly it doesn't fully end even then.
+- **You watch it.** You know whether the thing you shipped is actually being used, and you notice when it starts misbehaving before a user has to tell you.
+- **You improve it.** The first version is rarely the last. Following up to make it better is part of the job, not a nice-to-have you get to if there's time.
+- **You keep it honest.** If it changes the API, the typed client and the spec move with it. If it has docs, the docs are true. If it has a page in this handbook, that page still matches reality.
+
+This is the same idea as [product engineering](/handbook/product-engineering): you own an outcome, not a ticket.
+
+## What it does not mean
+
+Owning something is not suffering alone with it. Ask for help early and often; that's a sign of judgment, not weakness. Ownership means the buck stops somewhere real instead of dissolving into "the process," but the work itself is still a team sport.
+
+<Callout type="warn" title="Ownership is not territory">
+  Owning a piece of the product doesn't make it yours to guard. Anyone can fix a typo, send a patch, or ask hard questions about your code. If you find yourself defending a boundary instead of a decision, something has gone wrong.
+</Callout>
+
+## Fix the adjacent broken thing
+
+A subtle but important part of ownership: when you're in an area and you spot something broken next to your work, you don't step around it and file a ticket for later. You fix it, or at least you make it visible and make sure someone will. Waiting for someone else to fix an adjacent problem is exactly the habit we're trying not to have, described in [how to do product as an engineer](/handbook/product-engineering).
+
+## When ownership needs to move
+
+People change teams, and things change hands. When that happens, ownership transfers deliberately, not by quietly going stale: the new owner actually understands what they're taking on, and the old owner is around long enough to answer the questions that only surface once you're holding it. An owned thing with no real owner is one of the more dangerous states a system can be in, precisely because everyone assumes someone else has it.

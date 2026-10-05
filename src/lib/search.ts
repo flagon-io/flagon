@@ -1,46 +1,29 @@
 import "server-only";
 import { getHandbookSections } from "@/lib/handbook";
-import { getProductDocsBySection } from "@/lib/docs";
 import { getAllPosts } from "@/lib/blog";
 
 /** One searchable entry in the site-wide command palette. */
 export type SearchDoc = {
   title: string;
   url: string;
-  group: "Pages" | "Docs" | "Handbook" | "Blog";
+  group: "Pages" | "Handbook" | "Blog";
   section?: string;
   description?: string;
 };
 
 /** Top-level pages, hand-curated so the palette can jump anywhere on the site. */
 const PAGES: SearchDoc[] = [
-  { title: "Home", url: "/", group: "Pages", description: "Good software, on tap." },
+  { title: "Home", url: "/", group: "Pages", description: "Flagon, Inc.: a small company that builds products in the open." },
   { title: "About", url: "/about", group: "Pages", description: "Who we are and why we do it this way." },
-  { title: "Products", url: "/products", group: "Pages", description: "What we make and the standard it's held to." },
-  { title: "Pricing", url: "/pricing", group: "Pages", description: "Free until you need more, fair when you do." },
-  { title: "Docs", url: "/docs", group: "Pages", description: "Product documentation, built like the product." },
+  { title: "Products", url: "/products", group: "Pages", description: "What we make, starting with g1t." },
   { title: "Handbook", url: "/handbook", group: "Pages", description: "How the whole company works, in the open." },
   { title: "Blog", url: "/blog", group: "Pages", description: "Notes from building in public." },
-  { title: "Roadmap", url: "/roadmap", group: "Pages", description: "What we're building, in the open." },
-  { title: "Changelog", url: "/changelog", group: "Pages", description: "What changes at Flagon, as it changes." },
   { title: "Careers", url: "/careers", group: "Pages", description: "Work at the company we always wanted to work for." },
   { title: "Not for everyone", url: "/not-for-everyone", group: "Pages", description: "Honest reasons Flagon might be wrong for you." },
 ];
 
 /** The full index: pages, every handbook page, and every blog post. */
 export async function getSearchIndex(): Promise<SearchDoc[]> {
-  const docs: SearchDoc[] = (await getProductDocsBySection()).flatMap((g) =>
-    g.docs
-      .filter((d) => d.status !== "planned")
-      .map((d) => ({
-        title: d.title,
-        url: `/docs/${d.slug}`,
-        group: "Docs" as const,
-        section: g.section,
-        description: d.description,
-      })),
-  );
-
   const handbook: SearchDoc[] = (await getHandbookSections()).flatMap((s) =>
     s.pages.map((p) => ({
       title: p.title,
@@ -58,5 +41,5 @@ export async function getSearchIndex(): Promise<SearchDoc[]> {
     description: p.description,
   }));
 
-  return [...PAGES, ...docs, ...handbook, ...blog];
+  return [...PAGES, ...handbook, ...blog];
 }

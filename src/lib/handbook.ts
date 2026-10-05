@@ -1,16 +1,18 @@
 import "server-only";
+import fs from "node:fs";
+import path from "node:path";
+import matter from "gray-matter";
 import readingTime from "reading-time";
-import { getDoc, getDocs, type DocMeta } from "@/lib/docs";
 
 /**
- * The handbook is served by the API, straight from the flagon repo's docs
- * corpus (slugs under "handbook/"). This site is a pure client: it holds no copy,
- * so the handbook can never drift from the source. These helpers shape the
- * corpus into the structures the handbook UI already expects; the section
- * taxonomy below is presentation that stays here.
+ * The handbook lives in this repo as MDX under content/handbook/<folder>/<page>.mdx.
+ * Folders group the source files by department; URLs stay flat (/handbook/<page>),
+ * so every page filename must be unique across folders. These helpers shape the
+ * files into the structures the handbook UI expects; the section taxonomy below
+ * is presentation that stays here.
  */
 
-const PREFIX = "handbook/";
+const HANDBOOK_ROOT = path.join(process.cwd(), "content", "handbook");
 
 /** Metadata for one page (no body): enough for nav, lists, search, sitemap. */
 export type HandbookMeta = {
@@ -24,6 +26,8 @@ export type HandbookMeta = {
 /** A full page, with its rendered-from Markdown body and reading estimate. */
 export type HandbookPage = HandbookMeta & {
   readingMinutes: number;
+  /** Source path relative to the repo root, for "edit on GitHub" links. */
+  source: string;
   content: string;
 };
 
@@ -76,39 +80,63 @@ const SECTIONS: { name: string; category: string | null; soon?: boolean }[] = [
 
 const SECTION_ORDER = SECTIONS.map((s) => s.name);
 
-/** The website-facing slug (no "handbook/" prefix). */
-function pageSlug(corpusSlug: string): string {
-  return corpusSlug.slice(PREFIX.length);
+type HandbookFile = HandbookMeta & {
+  /** Source path relative to the repo root, for "edit on GitHub" links. */
+  source: string;
+  content: string;
+};
+
+function toNumber(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 /**
- * The category folder a handbook page's source file lives in, derived from its
- * section. Handbook pages are grouped into docs/handbook/<category>/<page>.mdx in
- * the product repo but keep a flat URL, so this reconstructs the folder for
- * "edit on GitHub" links. Must match how the files are grouped there.
+ * Every handbook file, parsed once per process. The handbook is static content
+ * shipped with the site, so there is nothing to invalidate between requests.
  */
-export function sectionDir(section: string): string {
-  return section
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+let cache: HandbookFile[] | null = null;
+function handbookFiles(): HandbookFile[] {
+  if (cache) return cache;
+  const files: HandbookFile[] = [];
+  if (fs.existsSync(HANDBOOK_ROOT)) {
+    for (const entry of fs.readdirSync(HANDBOOK_ROOT, {
+      recursive: true,
+      encoding: "utf8",
+    })) {
+      if (!entry.endsWith(".mdx")) continue;
+      const file = path.join(HANDBOOK_ROOT, entry);
+      const { content, data } = matter(fs.readFileSync(file, "utf8"));
+      const slug = path.basename(entry, ".mdx");
+      files.push({
+        slug,
+        title: String(data.title ?? slug),
+        description: String(data.description ?? ""),
+        section: String(data.section ?? "Chapters"),
+        order: toNumber(data.order, 100),
+        source: path
+          .join("content", "handbook", entry)
+          .split(path.sep)
+          .join("/"),
+        content,
+      });
+    }
+  }
+  cache = files;
+  return files;
 }
 
-function toMeta(d: DocMeta): HandbookMeta {
-  return {
-    slug: pageSlug(d.slug),
-    title: d.title,
-    description: d.description ?? "",
-    section: d.section ?? "Chapters",
-    order: d.order ?? 100,
-  };
-}
-
-/** Every handbook page's metadata, from the corpus. */
+/** Every handbook page's metadata. */
 async function handbookMetas(): Promise<HandbookMeta[]> {
-  const docs = await getDocs();
-  return docs.filter((d) => d.slug.startsWith(PREFIX)).map(toMeta);
+  return handbookFiles().map(
+    ({ slug, title, description, section, order }) => ({
+      slug,
+      title,
+      description,
+      section,
+      order,
+    }),
+  );
 }
 
 export async function listHandbookSlugs(): Promise<string[]> {
@@ -116,17 +144,11 @@ export async function listHandbookSlugs(): Promise<string[]> {
 }
 
 export async function getHandbookPage(slug: string): Promise<HandbookPage | null> {
-  const lookup = await getDoc(`${PREFIX}${slug}`);
-  if (lookup.state !== "ok") return null;
-  const doc = lookup.doc;
+  const file = handbookFiles().find((f) => f.slug === slug);
+  if (!file) return null;
   return {
-    slug,
-    title: doc.title,
-    description: doc.description ?? "",
-    section: doc.section ?? "Chapters",
-    order: doc.order ?? 100,
-    readingMinutes: Math.max(1, Math.round(readingTime(doc.body).minutes)),
-    content: doc.body,
+    ...file,
+    readingMinutes: Math.max(1, Math.round(readingTime(file.content).minutes)),
   };
 }
 
