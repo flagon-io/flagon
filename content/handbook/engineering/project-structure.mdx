@@ -1,49 +1,61 @@
 ---
 title: Project structure
-description: "A map of the Flagon monorepo, so you can find the thing you need to change without reading everything first."
+description: "How our repos are laid out: each product owns its own, its README is the map, and the map stays true."
 section: Engineering
 order: 4
 ---
 
-This is a map, not a tour. The goal is that when you have a change to make, you know roughly which door to open, and when you're reading a pull request you can tell where each file lives without guessing. The repo is [flagon-io/flagon](https://github.com/flagon-io/flagon), a single monorepo holding both services, the shared UI, and the generated API spec, so a change that crosses those boundaries lands in one reviewable pull request instead of several that have to merge in a careful order.
+There's no single Flagon codebase to map. Each product owns its own repo (or repos), laid out however suits it, and the team that owns the product owns the layout too. So this page isn't a map. It's the rules every map follows, so that when you land in any of our repos you know where the map is, and you can trust it.
 
-## The shape of it
+## The README is the map
+
+Every repo's README is the source of truth for that repo. Not this handbook, not a wiki, not the person who set it up. A good README answers, in order:
+
+- **What this is**, in a sentence or two, and where it runs.
+- **Where things are**: a short layout, one line per top-level directory, saying what lives there.
+- **How to run it**, from a fresh clone (the bar for that is in [developing locally](/handbook/developing-locally)).
+- **How to check a change** before you push it.
+- **How it ships.**
+
+If a newcomer has to ask a person any of those, the README has a bug.
+
+## Group by what changes together
+
+When pieces of a product change together, they live together, so a change that crosses them lands in one reviewable pull request instead of several that have to merge in a careful order. That usually means one repo per product, with its apps, services and shared packages side by side. When pieces don't change together, they don't need to share a repo just because the same company owns them.
+
+### Two real maps
+
+[g1t](https://g1t.sh) is one repo holding everything it ships, hosted on g1t itself:
 
 ```text
-api/            the Go service: source of truth, all data and logic
-  cmd/flagon      the `flagon` CLI (serve, migrate, ...)
-  cmd/genspec     generates openapi/openapi.json as a build artifact
-  internal/server chi router + huma setup, shared by both commands
-  internal/...    the product domains
-app/            the Next.js service: UI, gateway, and auth
-  src/app         routes (dashboard, [org], login, signup, settings, ...)
-  src/components  UI, composed from the shared package
-  src/lib         the typed API client and helpers
-  db/  scripts/   migrations and seeding for the app's own auth store
-packages/ui     @flagon-io/ui, the shared component library
-openapi/        the generated OpenAPI spec (gitignored, not hand-edited)
+apps/web          the site: server-rendered React on a Worker, holds no data
+apps/docs         the documentation site, with the API explorer
+apps/api          the REST API and MCP server (Rust)
+services/*        identity, repos, work, events, runner: one Worker and database each
+crates/*          Rust shared by the services, and the program that runs in a sandbox
+packages/*        TypeScript contracts and the shared design tokens
 ```
 
-It's an npm workspace: `app` and `packages/*` are workspaces, and `api` is its own Go module.
+This website is a single Next.js app, and its [repo](https://github.com/flagon-io/website) is about as small as a map gets:
 
-## Where things actually live
+```text
+content/handbook  the handbook, one .mdx per page, grouped in folders by department
+content/blog      the blog, one .mdx per post
+src/app           routes
+src/components    site chrome and MDX rendering
+src/lib           content loaders and config
+```
 
-**All the product logic is in `api/`.** This is the half that matters most to get right, because it's the [source of truth](/handbook/tech-stack): it owns the data, the multi-tenancy, and the secrets. The HTTP layer is set up in `internal/server` (the chi router plus huma), and the domains live in `internal/` beside it. Endpoints are registered through huma, which is what makes them show up in the OpenAPI spec automatically, with no separate step where docs can drift from code.
-
-**`app/` is deliberately thin.** Its routes render the UI and handle auth, and for anything to do with product data they call the API through the typed client in `src/lib`. The app has its own small database for authentication (sessions, verified emails), migrated and seeded from `db/` and `scripts/`, but it does not reach into the product's data or touch Stripe. If you find business logic creeping into `app/`, that's the smell to catch in review.
-
-**`packages/ui` is the shared frontend vocabulary.** Components the app builds from live here as `@flagon-io/ui`, so the look and behavior stay consistent and there's one place to change a button.
-
-**`openapi/` is generated, never edited by hand.** It falls out of the huma registrations in `api/`. You regenerate the artifact with `make openapi` when you need it outside a running server (to build the typed client), but the running API serves the live spec, so day to day you don't touch this at all.
+Both READMEs carry these maps, and both are more current than this page will ever be. Read the README, not this.
 
 ## How to find your way in
 
-The fastest way to understand a change isn't to read the whole tree, it's to follow one request end to end. Pick something small and trace it: a page in `app/src/app` calls the typed client in `app/src/lib`, which hits the API, which routes through `internal/server` into a domain package, down to Postgres, and back. That single thread teaches you more about how the two services fit together than an afternoon of browsing, and it makes the [gateway-and-source-of-truth split](/handbook/tech-stack) concrete instead of abstract.
+The fastest way to understand a repo isn't to read the whole tree, it's to follow one request end to end. Pick something small and trace it: the page that renders it, the call it makes, the thing that owns the data behind that call, and back. In g1t that means a route in `apps/web` asking a service for something; here it means a URL resolving to an `.mdx` file through a loader in `src/lib`. One thread like that teaches you more than an afternoon of browsing, and it makes [who owns the data](/handbook/tech-stack) concrete instead of abstract.
 
 <Callout type="note" title="When you can't find where something goes">
-  If a change doesn't have an obvious home, that's worth surfacing in review, not silently forcing. The usual question is which side of the line it belongs on: is this really product logic (it goes in `api/`) or genuinely presentation and auth (it stays in `app/`)? When that's unclear, the confusion is information.
+  If a change doesn't have an obvious home, that's worth surfacing in review, not silently forcing. The usual question is which side of the data boundary it belongs on: is this logic that belongs with the thing that owns the data, or is it presentation? When that's unclear, the confusion is information.
 </Callout>
 
 ## Keeping the map true
 
-Structure rots when nobody tends it. If you move things, update this page in the same pull request. A map that quietly stops matching the territory is worse than no map, because people trust it and get lost. Keeping it honest is part of [owning what you build](/handbook/feature-ownership).
+Structure rots when nobody tends it. If you move things, update the README in the same pull request. A map that quietly stops matching the territory is worse than no map, because people trust it and get lost. Keeping it honest is part of [owning what you build](/handbook/feature-ownership).

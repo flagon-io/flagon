@@ -1,24 +1,41 @@
 ---
 title: Which products to build
-description: How we decide what to build, starting from the foundation and building up, never sideways into a worse version of five other tools.
+description: How Flagon decides which products to start, how it lets each one grow on its own terms, and when it stops one.
 section: Chapters
 order: 8
 ---
 
-Deciding what to build is mostly deciding what not to. Here's the rule we hold ourselves to, so the decision isn't remade from scratch every time a good-sounding idea shows up. The day-to-day version of this, the way a team sets its priorities, is [deciding what to build](/handbook/deciding-what-to-build).
+Flagon makes several products, so the biggest product decision we make isn't a feature. It's whether a product should exist at all. Deciding that is mostly deciding what not to start. Here's the rule we hold ourselves to, so the decision isn't remade from scratch every time a good-sounding idea shows up. The day-to-day version, the way a product team sets its own priorities once it exists, is [deciding what to build](/handbook/deciding-what-to-build).
 
-## Start at the foundation
+## What earns a product a start
 
-Flagon begins as a multi-tenant platform where people define and manage their products and teams. That is the foundation, and it comes first, done properly, before anything clever gets built on top of it. Tenancy, ownership, and the core model of products and teams are the thing everything else depends on, so they get the care of a foundation, not the speed of a feature.
+A new product costs more than its code. It takes a team's full attention, a name, a site, docs, support, and a promise to the people who come to rely on it. So an idea has to clear a few bars before it becomes one.
 
-## Build up, not sideways
+- **A real problem for developers.** We build for [developers](/handbook/who-we-build-for), and the problem has to be one we've felt or watched people feel, not one we've reasoned our way into from a market slide.
+- **A point of view.** If the best we can offer is a slightly cheaper copy of something that already works, we pass. We start a product when we think the thing should be done differently, and can say how in a sentence.
+- **Something we'd be proud of in ten years.** [The long game](/handbook/values#the-long-game) applies to products too. A quick hit we'd quietly abandon is not worth the trust it would cost.
+- **Pricing that can be honest.** If the only way to make it pay is per-seat pricing, a hidden meter, or lock-in, it fails [how we make money](/handbook/how-we-make-money) before it starts.
+- **Someone to own it.** A product without a small team that owns it end to end isn't a product, it's a liability. We don't start more than we can give a real home.
 
-Once the foundation holds, we add the things that make it more useful: keeping definitions in sync, an API and SDKs to build against, access control, history. What we don't do is wander sideways into unrelated features because a competitor has them. A pile of features bolted onto the side just makes us a worse version of five other tools. If it doesn't make products and teams as a source of truth more true, more useful, or more trustworthy, it's a no, even when it's a good idea in the abstract.
+g1t is the worked example. Cloudflare asked, in its "Build the Next-Gen Git Platform" competition, what a git forge looks like when most of the people using it are agents. That was a real problem developers are already running into, and we had a clear view of the answer: keep the issues and pull requests people know, and let any number of agents work the same issue at once, each checked in a clean sandbox before anything merges. It cleared the bars, so it became a product.
 
-## Sync is the point, not a plugin
+## Then let it be itself
 
-The definitions have to stay true in the tools people already live in. So synchronization, in both directions, is foundational work. We don't treat it as an integration to bolt on once the "real" product is done. Being the source of truth means nothing if the truth can't reach the places that need it.
+Once a product exists, it's its own thing. It gets its own name and brand (not "Flagon something"), its own site, docs, roadmap, changelog and pricing, and its own repo and stack, chosen by the team that owns it. We let each product do what it's going to do, within the company's values and quality bar. The company doesn't hand down a feature list; the team that's closest to the users decides.
+
+Inside a product, the old rule still holds: build up, not sideways. Get the foundation of the thing right first, then add what makes it more useful. Don't wander into unrelated features because a competitor has them, because a pile of features bolted onto the side just makes a worse version of five other tools.
+
+## When we stop one
+
+Not every product will work, and pretending otherwise is how companies end up carrying things nobody believes in. We stop a product when it stops clearing the same bars that started it: the problem turned out not to be real, someone else solved it better and we have nothing different to add, it can't pay for itself honestly, or we can no longer give it a team that cares.
+
+Stopping is a decision like any other, so it's made in the open and written down with the reason. And it's done the way we'd want to be treated as users: with plenty of notice, a working way to take your data with you, and no quiet decay where the thing is technically up but nobody is home. Ending a product well is part of building it well.
+
+<Callout type="note" title="Starting is cheap, stopping is the test">
+  It's easy to say yes to a new idea. The discipline is in saying no to most of
+  them, and in being honest when one we said yes to isn't working.
+</Callout>
 
 ## We decide in the open
 
-None of this happens behind a curtain. What we're weighing, what we've committed to, and what we've said no to lives on the public [roadmap](/roadmap), and the reasoning gets written down the same way we [make every other decision](/handbook/decisions). If we change our minds, you'll see why.
+None of this happens behind a curtain. What a product is weighing and has committed to lives on its own public roadmap, the reasoning for starting or stopping a product gets written down the same way we [make every other decision](/handbook/decisions), and the products themselves are on [our products page](/products). If we change our minds, you'll see why.

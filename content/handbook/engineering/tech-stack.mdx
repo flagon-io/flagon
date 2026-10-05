@@ -1,47 +1,44 @@
 ---
 title: Tech stack
-description: "What Flagon is built with, and why: two small, independently deployed services, boring proven tools, and a hard rule that the API is the only thing that owns data."
+description: "What we reach for by default, and why: boring proven tools, one clear owner for the data, and each product free to pick the stack that fits it."
 section: Engineering
 order: 2
 ---
 
-This is what Flagon runs on and the reasoning behind each choice. None of it is exotic. That's the point: we spend our interesting-technology budget on the product, not the plumbing, exactly as [how we build](/handbook/how-we-build) describes. It all lives in one monorepo, [flagon-io/flagon](https://github.com/flagon-io/flagon), but it deploys as two separate services that talk to each other over HTTP. They work together; neither is bundled inside the other.
+Flagon doesn't have one tech stack. Each product picks its own, because each product is its own thing with its own small team, and that team is the one living with the choice every day. What the company does have is a set of defaults and a couple of rules that hold everywhere. This page is those, with the stacks we actually run as worked examples. None of it is exotic. That's the point: we spend our interesting-technology budget on the product, not the plumbing, exactly as [how we build](/handbook/how-we-build) describes.
 
-## The two halves
+## What we reach for by default
 
-| Piece | Stack | What it is | Hosted on |
-| --- | --- | --- | --- |
-| `app/` (`app.flagon.io`) | Next.js, TypeScript | the web UI, the gateway, and auth | Vercel |
-| `api/` (`api.flagon.io`) | Go (chi + huma) | the source of truth: all data and logic | Fly.io |
+- **TypeScript for anything with a UI.** The types pay for themselves the first time you rename a field, and they make whole categories of test unnecessary.
+- **React for interfaces**, rendered on the server where we can, so the first paint is real content and not a spinner.
+- **A written contract at every boundary.** When one piece calls another over the network, the shape of that call lives in shared types or an OpenAPI document, generated from the code where possible, so the two sides can't quietly disagree about what an endpoint returns.
+- **A managed platform over servers we babysit.** Vercel and Cloudflare today. Every machine we don't have to patch is one fewer thing that pages someone at 2am.
+- **The language that fits the job**, not the one that's fashionable this year, and not the one a previous product happened to use.
 
-Underneath both sits **Postgres**, and a shared **`@flagon-io/ui`** package holds the components the app is built from. The two services are wired together with a couple of environment variables (`FLAGON_API_URL`, `FLAGON_INTERNAL_TOKEN`), and that's the whole coupling.
+These are defaults, not mandates. A product team can choose differently, and sometimes should. What it needs is a reason it can say out loud, and an answer to the question from [how we build](/handbook/how-we-build): who's on call when this breaks in a way nobody has seen before?
 
-## The API owns everything real
+## One thing owns the data
 
-`api/` is a Go program built on chi and huma. It's the source of truth: it owns all the business data and logic, it's multi-tenant through Postgres Row-Level Security scoped by `org_id`, and it's the only place that holds real secrets like the database credentials and the Stripe keys. It ships as a single Go binary with its schema migrations embedded, so deploying it is running one file that migrates itself on boot.
-
-Go earns its place here for the same reasons it always does: it compiles to that one static binary with nothing to install around it, the standard library covers most of what we need, and it stays legible to people who didn't write it, which matters for a project we want strangers to [read and contribute to](/handbook/open-source).
+This is the rule that holds across every product, whatever it's written in. The data has exactly one owner, and that owner is the only thing that touches it. The web front end holds none of it; when it needs something real, it asks.
 
 <Callout type="brand" title="One rule holds the architecture together">
-  The API is the only thing that touches business data or Stripe. If you're reaching around it, stop. That single boundary is what keeps the system honest as it grows.
+  Whatever owns the data is the only thing that reads or writes it. If you're reaching around it, stop. That single boundary is what keeps a system honest as it grows, because the rules live in one place instead of two.
 </Callout>
 
-## The app is a thin gateway
+How that looks varies a lot by product, which is fine. The boundary is what matters, not the shape on either side of it.
 
-`app/` is a Next.js app in TypeScript, and it's deliberately thin. It renders the UI, it handles authentication (sign-up, login, sessions, email verification), and it forwards everything else to the API. It does not reach into the product's data or talk to Stripe; when it needs something real, it asks the API. Keeping the app thin is what lets the API stay the single source of truth instead of one of two places the rules live.
+## The stacks we run today
 
-TypeScript because the types pay for themselves the first time you rename a field, and because we generate a typed client from the API's OpenAPI spec, so the app and the API can't quietly disagree about what an endpoint returns.
+### g1t
 
-## Postgres, and the OpenAPI contract
+[g1t](https://g1t.sh) is Rust and TypeScript on Cloudflare Workers. The site is server-rendered React on a Worker, and it holds no data. Everything that isn't a web UI is written in Rust: the REST API and MCP server, and a set of services (accounts and workspaces, repositories, issues and pull requests, events, and the runner that starts sandboxes), each its own Worker with its own database. The services call each other through service bindings and react to each other through events, so each one owns its slice of the data outright. Acceptance checks and g1t's own agents run in sandboxes on Cloudflare Containers. The REST API and the MCP server sit over the same operations, described by one OpenAPI document, so there's one contract and two ways in.
 
-Everything that persists lives in **Postgres**. In production the two services get their own instances; locally they share one instance with two databases to go easy on a laptop, but the boundary is the same. One store, well understood, that every host already knows how to back up. We reach for a Postgres feature long before we reach for a second piece of infrastructure.
+### This website
 
-The API is **OpenAPI-first**: every endpoint registered with huma is documented automatically, so the spec can't drift from the code, and the running server serves it live. That spec is the contract the [live API reference](/docs/api) renders from and the typed client is generated against. Public SDKs and a client CLI are [on the roadmap](/roadmap); when they arrive they'll be generated from this same spec rather than hand-written.
+The company site you're reading is the simplest thing that works: a Next.js App Router app in TypeScript and React, styled with Tailwind CSS v4, deployed on Vercel. The handbook and the blog are MDX files in the repo, rendered with `next-mdx-remote`. There's no database at all. The content is the files, so changing a handbook page is a pull request like any other change, and the data owner is git.
 
-## Self-hostable by construction
-
-Because [leaving is always an option](/handbook/open-source), Flagon has to be something you can run yourself. That's two services and a Postgres: point the app at the API with two env vars, give the API a `DATABASE_URL`, and host them wherever you like. Our own instance happens to run on Vercel and Fly, but nothing in the code assumes that.
+The two look nothing alike, and that's the model working. A forge for thousands of agents and a company website have different jobs, so they got different tools.
 
 ## How to read this page later
 
-Specific versions and libraries drift, and this page drifts with them rather than listing every dependency; the lock files and `go.mod` are the real answer to "what exactly are we on." What shouldn't drift is the shape: two services, one monorepo, the API owns the data, Postgres underneath. If a proposed change breaks one of those, it needs a good story for why.
+Versions and libraries drift, and this page doesn't try to track them. The real answer to "what exactly are we on" is in each product's own repo: its lock files, its `Cargo.toml` or `package.json`, and its README, which is the source of truth for how that product is built (more on that in [project structure](/handbook/project-structure)). What shouldn't drift is the shape: boring defaults, a written contract at each boundary, and one owner for the data. If a proposed change breaks one of those, it needs a good story for why.

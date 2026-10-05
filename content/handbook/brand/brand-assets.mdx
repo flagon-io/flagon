@@ -5,11 +5,13 @@ section: Brand
 order: 5
 ---
 
-Everything Flagon makes is in the open, and the brand is no exception. The mark, the palette tokens, and the type choices all live in the source for this site, so the canonical version of the identity is never a stale file in a shared drive: it is whatever is in the repo right now. See [open source](/handbook/open-source) for where that is.
+Everything Flagon makes is in the open, and the brand is no exception. The mark, the palette tokens, and the type choices all live in the source for this site, the [company website repo](https://github.com/flagon-io/website), so the canonical version of the identity is never a stale file in a shared drive: it is whatever is in the repo right now. See [open source](/handbook/open-source) for how we think about working in the open.
+
+These are the company's assets. Our products have their own names, marks, and sites, and their teams look after those. Use the Flagon mark where the company is speaking, not to dress up a product.
 
 ## The mark, canonically
 
-The source of truth for the mark is the `FlagonMark` component, which renders crisp at any size and follows the current theme. For anywhere that can't import the component, another app like the product at app.flagon.io, an email, a slide, there are self-contained SVG files hosted at stable URLs. The teal brew is baked in, and the glass outline uses `currentColor` with a light and dark default built in, so they read on any background even when dropped in with a plain `<img>` tag. Do not recreate the mark by hand; use these.
+The source of truth for the mark is the `FlagonMark` component, which renders crisp at any size and follows the current theme. For anywhere that can't import the component, a product site's footer crediting the company, an email, a slide, a conference badge, there are self-contained SVG files hosted at stable URLs. The teal brew is baked in, and the glass outline uses `currentColor` with a light and dark default built in, so they read on any background even when dropped in with a plain `<img>` tag. Do not recreate the mark by hand; use these.
 
 - **Static:** [`/brand/flagon-mark.svg`](/brand/flagon-mark.svg)
 - **Animated** (pours in, then a slow living wave; halts under reduced motion): [`/brand/flagon-mark-animated.svg`](/brand/flagon-mark-animated.svg)
