@@ -10,7 +10,6 @@ import { Cta } from "@/components/cta";
 import { CopyCommand } from "@/components/copy-command";
 import { SCENES } from "@/components/art/scenes";
 import { PRODUCTS, getProduct, type ProductFeature } from "@/lib/products";
-import { site } from "@/lib/site";
 
 type Params = { id: string };
 
@@ -71,14 +70,9 @@ export default async function ProductPage({
 
           <div className="relative mt-10 grid gap-12 lg:grid-cols-[1fr_1.1fr] lg:items-center">
             <div className="max-w-2xl">
-              <div className="rise flex flex-wrap items-center gap-3">
-                <span className="rounded-full border border-hairline bg-background px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-brand">
-                  {product.status}
-                </span>
-                <span className="font-mono text-[11px] uppercase tracking-widest text-subtle">
-                  A {site.name} product
-                </span>
-              </div>
+              <span className="rise inline-block rounded-full border border-hairline bg-background px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-brand">
+                {product.status}
+              </span>
               <h1
                 className="rise mt-6"
                 style={{ animationDelay: "60ms" }}
