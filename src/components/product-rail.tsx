@@ -124,10 +124,13 @@ function ProductTile({ product }: { product: Product }) {
       style={{ clipPath: CLIP, background: card.background, color: card.ink } as CSSProperties}
     >
       <div className="relative flex flex-1 flex-col px-[18%] pb-8 pt-10">
-        <div className="flex items-center gap-2.5">
-          <card.Mark className="h-9 w-9" />
-          <span className="text-3xl font-bold tracking-[-0.045em]">{product.name}</span>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element -- the product's own published file */}
+        <img
+          src={product.logo.dark}
+          alt={product.name}
+          className="h-9 w-auto self-start"
+          style={{ aspectRatio: product.logo.aspect }}
+        />
         <p className="mt-4 text-sm font-medium leading-snug opacity-90">
           {product.tagline}
         </p>

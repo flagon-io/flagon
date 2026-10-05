@@ -69,7 +69,7 @@ export default async function ProductPage({
             </ol>
           </nav>
 
-          <div className="relative mt-10 grid gap-10 lg:grid-cols-[1.5fr_1fr] lg:items-end">
+          <div className="relative mt-10 grid gap-12 lg:grid-cols-[1fr_1.1fr] lg:items-center">
             <div className="max-w-2xl">
               <div className="rise flex flex-wrap items-center gap-3">
                 <span className="rounded-full border border-hairline bg-background px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-brand">
@@ -80,10 +80,24 @@ export default async function ProductPage({
                 </span>
               </div>
               <h1
-                className="rise mt-6 text-5xl font-semibold tracking-tight sm:text-7xl"
+                className="rise mt-6"
                 style={{ animationDelay: "60ms" }}
               >
-                {product.name}
+                {/* The product's own logo files, one per theme. */}
+                {/* eslint-disable-next-line @next/next/no-img-element -- the product's own published file */}
+                <img
+                  src={product.logo.light}
+                  alt={product.name}
+                  className="h-14 w-auto sm:h-20 dark:hidden"
+                  style={{ aspectRatio: product.logo.aspect }}
+                />
+                {/* eslint-disable-next-line @next/next/no-img-element -- the product's own published file */}
+                <img
+                  src={product.logo.dark}
+                  alt={product.name}
+                  className="hidden h-14 w-auto sm:h-20 dark:block"
+                  style={{ aspectRatio: product.logo.aspect }}
+                />
               </h1>
               <p
                 className="rise mt-4 text-balance text-2xl font-medium tracking-tight sm:text-3xl"
@@ -114,34 +128,22 @@ export default async function ProductPage({
               </div>
             </div>
 
-            <Schematic className="rise bg-background/80">
-              <dl className="divide-y divide-hairline">
-                {page.facts.map((f) => (
-                  <div
-                    key={f.label}
-                    className="flex items-baseline justify-between gap-6 px-5 py-3.5"
-                  >
-                    <dt className="font-mono text-[11px] uppercase tracking-widest text-subtle">
-                      {f.label}
-                    </dt>
-                    <dd className="text-right text-sm font-medium">
-                      {f.href ? (
-                        <a
-                          href={f.href}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline decoration-hairline underline-offset-4 transition hover:text-brand hover:decoration-brand"
-                        >
-                          {f.value}
-                        </a>
-                      ) : (
-                        f.value
-                      )}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </Schematic>
+            {/* The product's drawing, in its own colors, as the hero's art. */}
+            <figure
+              className="rise relative overflow-hidden rounded-2xl border border-hairline shadow-2xl shadow-black/20"
+              style={{ background: product.card.background, animationDelay: "160ms" }}
+            >
+              <div className={`${product.card.artClass} px-3 pb-2 pt-10 sm:px-6 sm:pt-12`}>
+                <Scene id={`hero-${product.id}`} label={page.pitch} />
+              </div>
+              <figcaption
+                className="flex items-center justify-between gap-4 border-t border-white/10 px-5 py-3.5 font-mono text-[10px] uppercase tracking-widest sm:px-6"
+                style={{ color: product.card.ink }}
+              >
+                <span className="opacity-70">{product.domain}</span>
+                <span style={{ color: product.card.accent }}>{product.tagline}</span>
+              </figcaption>
+            </figure>
           </div>
         </section>
 
@@ -152,11 +154,6 @@ export default async function ProductPage({
               <h2 className="text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
                 Why we&rsquo;re building it
               </h2>
-              <div
-                className={`${product.card.artClass} mt-8 overflow-hidden rounded-2xl border border-hairline bg-(--art-card) p-2`}
-              >
-                <Scene id={`page-${product.id}`} label={product.page.pitch} />
-              </div>
             </div>
             <div className="max-w-2xl space-y-5 text-pretty leading-relaxed text-muted-foreground">
               {page.story.map((p) => (

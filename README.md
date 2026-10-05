@@ -11,7 +11,7 @@ read, edit, and send a pull request against, and it all lives in this repo.
 
 ```bash
 npm install
-npm run dev      # http://localhost:3001
+npm run dev      # http://localhost:3000
 ```
 
 Node 24 (see [`.nvmrc`](.nvmrc) and the `engines` field in `package.json`).

@@ -533,6 +533,68 @@ label[for] {
   --art-accent-2-fill: #221f36;
 }
 
+/* g1t's drawing in motion (G1tArt). Slow and eased: the forks breathe on
+ * their own rhythms, the checks flicker, and once a loop the checks sweep mint
+ * and the mint fork settles onto main as a new commit. The merge pieces share
+ * one 9s loop so they stay in step. Without motion, it holds just before the
+ * merge. */
+.g1t-flash, .g1t-commit, .g1t-ping, .g1t-pass { opacity: 0; }
+.g1t-cell { opacity: 0.18; }
+.g1t-ping { transform-box: fill-box; transform-origin: center; }
+@media (prefers-reduced-motion: no-preference) {
+  .g1t-bob { animation: g1t-bob 6s ease-in-out infinite; }
+  .g1t-bob-2 { animation-duration: 7s; animation-delay: -2.5s; }
+  .g1t-bob-3 { animation-duration: 8s; animation-delay: -5s; }
+  .g1t-bob-issue { animation-duration: 9s; animation-delay: -1s; }
+  .g1t-land { animation: g1t-land 9s cubic-bezier(0.65, 0, 0.35, 1) infinite; }
+  .g1t-flash { animation: g1t-flash 9s ease-out infinite; }
+  .g1t-commit { animation: g1t-commit 9s ease-out infinite; }
+  .g1t-ping { animation: g1t-ping 9s ease-out infinite; }
+  .g1t-diff { animation: g1t-diff 2.8s ease-in-out infinite; }
+  .g1t-cell { animation: g1t-cell 3.3s ease-in-out infinite; }
+  .g1t-pass { animation: g1t-pass 9s ease-in-out infinite; }
+}
+@keyframes g1t-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+/* Hover, sink onto main, then drift back in from above for the next run. */
+@keyframes g1t-land {
+  0%, 34% { transform: translateY(0); opacity: 1; }
+  52% { transform: translateY(26px); opacity: 1; }
+  60% { transform: translateY(26px); opacity: 0; }
+  61% { transform: translateY(-16px); opacity: 0; }
+  82%, 100% { transform: translateY(0); opacity: 1; }
+}
+@keyframes g1t-flash {
+  0%, 50% { opacity: 0; }
+  55% { opacity: 0.9; }
+  80%, 100% { opacity: 0; }
+}
+@keyframes g1t-commit {
+  0%, 52% { opacity: 0; }
+  58%, 92% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes g1t-ping {
+  0%, 53% { opacity: 0; transform: scale(0.6); }
+  56% { opacity: 1; transform: scale(1); }
+  74%, 100% { opacity: 0; transform: scale(3); }
+}
+@keyframes g1t-diff {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@keyframes g1t-cell {
+  0%, 45%, 70%, 100% { opacity: 0.12; }
+  55% { opacity: 0.85; }
+}
+@keyframes g1t-pass {
+  0%, 26% { opacity: 0; }
+  32%, 52% { opacity: 1; }
+  64%, 100% { opacity: 0; }
+}
+
 /* Products rail (components/product-rail.tsx). The rail is a size container,
  * so a card's width can be worked out from the rail's own width. Phones: a
  * card is about three quarters of the rail, with the next one peeking in so

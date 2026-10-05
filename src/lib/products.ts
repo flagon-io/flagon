@@ -1,6 +1,4 @@
-import type { ComponentType } from "react";
 import type { SceneName } from "@/components/art/scenes";
-import { G1tMark } from "@/brand/g1t-mark";
 
 /**
  * The products Flagon, Inc. builds. Each one is its own thing, with its own
@@ -39,6 +37,18 @@ export type Product = {
   /** A short paragraph: who it's for and why it exists. */
   description: string;
   status: "In development" | "Beta" | "Live";
+  /**
+   * The product's logo, linked straight from the files its own site publishes,
+   * so it follows the product's brand as it changes and is never redrawn here.
+   */
+  logo: {
+    /** For light backgrounds. */
+    light: string;
+    /** For dark backgrounds, including the product's own card art. */
+    dark: string;
+    /** The logo file's width / height, so it can be sized before it loads. */
+    aspect: number;
+  };
 
   /**
    * The product's card in the products rail, in the product's own colors (not
@@ -52,8 +62,6 @@ export type Product = {
     ink: string;
     /** Accent for small details (status, icons). */
     accent: string;
-    /** The product's mark, as an inline SVG component (src/brand). */
-    Mark: ComponentType<{ className?: string }>;
     surfaces: ProductSurface[];
     /** The product's line drawing (components/art/scenes.tsx). */
     scene: SceneName;
@@ -77,8 +85,6 @@ export type Product = {
     tryIt?: { lead: string; command: string };
     /** Ways into the product, out on its own site. The first is the main one. */
     links: ProductLink[];
-    /** Small facts for the sidebar ("Built on": "Cloudflare Workers"). */
-    facts: { label: string; value: string; href?: string }[];
   };
 };
 
@@ -92,6 +98,11 @@ export const PRODUCTS: Product[] = [
     description:
       "A git forge built for the agentic world. Issues, pull requests and review work the way you expect, except any number of agents can take a run at an issue, each in its own fork with a recording of how the change was made, and you merge the one that's right.",
     status: "In development",
+    logo: {
+      light: "https://g1t.sh/brand/g1t-logo.svg",
+      dark: "https://g1t.sh/brand/g1t-logo-on-dark.svg",
+      aspect: 232.19 / 94.04,
+    },
     // g1t's own tokens: near-black, mint for what's live, lavender for art.
     card: {
       background: [
@@ -101,7 +112,6 @@ export const PRODUCTS: Product[] = [
       ].join(", "),
       ink: "#ededef",
       accent: "#86efc4",
-      Mark: G1tMark,
       surfaces: ["web", "git", "mcp", "api"],
       scene: "g1t",
       artClass: "art-g1t",
@@ -112,7 +122,7 @@ export const PRODUCTS: Product[] = [
       story: [
         "Coding agents are part of everyday work now, and the forge is where it falls apart. One agent per pull request, a person refereeing every collision, and the reasoning behind a change gone the moment the session closes. The tools were built for a handful of people, not for a fleet of agents working the same codebase at once.",
         "So we're building the forge we want to use. Everything you expect from a forge is there, so an engineer is at home on day one, and moving in is easy: import a repository from any git host and bring the workflows you already run. What changes is how many hands are on the work and how it finds its way onto main: agents that know what the others are doing, checks that decide what lands, and a record of why every change exists.",
-        "g1t started as our entry in Cloudflare's competition to build the next git platform, and it runs entirely on Cloudflare. It's in active development, and we build it on g1t.",
+        "g1t started as our entry in Cloudflare's competition to build the next git platform. It's in active development, and we build it on g1t.",
       ],
       steps: [
         {
@@ -189,17 +199,6 @@ export const PRODUCTS: Product[] = [
           href: "https://g1t.sh/flagon-io/g1t",
           hint: "Open source, MIT",
         },
-      ],
-      facts: [
-        { label: "Status", value: "In development" },
-        { label: "Built on", value: "Cloudflare Workers" },
-        { label: "Written in", value: "Rust and TypeScript" },
-        {
-          label: "License",
-          value: "MIT",
-          href: "https://g1t.sh/flagon-io/g1t",
-        },
-        { label: "Docs", value: "docs.g1t.sh", href: "https://docs.g1t.sh" },
       ],
     },
   },
