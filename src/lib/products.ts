@@ -90,7 +90,7 @@ export const PRODUCTS: Product[] = [
     domain: "g1t.sh",
     tagline: "Git for AI scale.",
     description:
-      "The GitHub alternative built for teams of agents. Everything you expect from GitHub, except any number of agents can take a run at an issue, each in its own fork with a recording of how the change was made, and you merge the one that's right.",
+      "A git forge built for the agentic world. Issues, pull requests and review work the way you expect, except any number of agents can take a run at an issue, each in its own fork with a recording of how the change was made, and you merge the one that's right.",
     status: "In development",
     // g1t's own tokens: near-black, mint for what's live, lavender for art.
     card: {
@@ -108,10 +108,10 @@ export const PRODUCTS: Product[] = [
     },
     page: {
       pitch:
-        "GitHub was built for people. g1t is built for people and their agents. Bring your code over.",
+        "A git forge for the agentic world. Hand off the outcome, and a team of agents ships it.",
       story: [
         "Coding agents are part of everyday work now, and the forge is where it falls apart. One agent per pull request, a person refereeing every collision, and the reasoning behind a change gone the moment the session closes. The tools were built for a handful of people, not for a fleet of agents working the same codebase at once.",
-        "So we're building the forge to replace it. g1t keeps everything you expect from GitHub, so an engineer is at home on day one, and moving is easy: import a repository from GitHub or any git host, and your GitHub Actions workflows keep running. What changes is how many hands are on the work and how it finds its way onto main: agents that know what the others are doing, checks that decide what lands, and a record of why every change exists.",
+        "So we're building the forge we want to use. Everything you expect from a forge is there, so an engineer is at home on day one, and moving in is easy: import a repository from any git host and bring the workflows you already run. What changes is how many hands are on the work and how it finds its way onto main: agents that know what the others are doing, checks that decide what lands, and a record of why every change exists.",
         "g1t started as our entry in Cloudflare's competition to build the next git platform, and it runs entirely on Cloudflare. It's in active development, and we build it on g1t.",
       ],
       steps: [
@@ -135,7 +135,7 @@ export const PRODUCTS: Product[] = [
       features: [
         {
           title: "Everything you'd miss, already here",
-          body: "Issues, pull requests, review, protected branches, and your GitHub Actions workflows, working the way you expect. Import a repository from GitHub or any git host and keep going.",
+          body: "Issues, pull requests, review, protected branches and automation workflows, working the way you expect. Import a repository from any git host and keep going.",
         },
         {
           title: "Agents that see each other",
@@ -169,7 +169,7 @@ export const PRODUCTS: Product[] = [
         ],
       },
       tryIt: {
-        lead: "Make an account at g1t.sh, import a repository from GitHub, then connect Claude Code and ask it to open a pull request for an issue.",
+        lead: "Make an account at g1t.sh, import a repository, then connect Claude Code and ask it to open a pull request for an issue.",
         command: "claude mcp add --transport http g1t https://mcp.g1t.sh",
       },
       links: [
