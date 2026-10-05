@@ -532,3 +532,34 @@ label[for] {
   --art-accent-2: #b6a8ff;
   --art-accent-2-fill: #221f36;
 }
+
+/* Products rail (components/product-rail.tsx). The rail is a size container,
+ * so a card's width can be worked out from the rail's own width. Phones: a
+ * card is about three quarters of the rail, with the next one peeking in so
+ * the row reads as swipeable. From md up: the cards fill the row exactly,
+ * counting the overlap that keeps their slanted edges a constant gap apart,
+ * and never get narrower than a readable minimum (past that, the row scrolls).
+ * --n (the number of cards) is set inline; --slant must match the clip-path. */
+.product-rail {
+  container-type: inline-size;
+  --slant: 0.16;
+  --gap: 0.75rem;
+  --card-w: min(17rem, 74cqw);
+  --card-aspect: 3 / 5;
+}
+@media (width >= 48rem) {
+  .product-rail {
+    /* Wider cards would get very tall at 3:5, so they get squatter. */
+    --card-aspect: 5 / 7;
+    --card-w: max(
+      12.5rem,
+      calc((100cqw - (var(--n) - 1) * var(--gap) - 1px) / (var(--n) - var(--slant) * (var(--n) - 1)))
+    );
+  }
+}
+.product-rail-slot {
+  width: var(--card-w);
+}
+.product-rail-slot + .product-rail-slot {
+  margin-left: calc(var(--card-w) * var(--slant) * -1 + var(--gap));
+}

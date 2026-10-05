@@ -21,7 +21,8 @@ import {
  * SVG polygon that follows the same shape.
  */
 
-/** How far the top edge is shifted right, as a fraction of the card's width. */
+/** How far the top edge is shifted right, as a fraction of the card's width.
+ * Keep in step with --slant on .product-rail in globals.css. */
 const SLANT = 0.16;
 const pct = `${SLANT * 100}%`;
 const CLIP = `polygon(${pct} 0, 100% 0, ${100 - SLANT * 100}% 100%, 0 100%)`;
@@ -31,6 +32,9 @@ const PLACEHOLDERS = [
   { key: "next", label: "Next up", note: "In the workshop. We'll show it when it's ready." },
   { key: "later", label: "After that", note: "Still a sketch on a whiteboard." },
 ];
+
+/** Every card on the rail: the products, the placeholders, and the invitation. */
+const COUNT = PRODUCTS.length + PLACEHOLDERS.length + 1;
 
 const SURFACE: Record<ProductSurface, { label: string; icon: typeof Globe }> = {
   web: { label: "Web", icon: Globe },
@@ -45,11 +49,12 @@ export function ProductRail({ className }: { className?: string }) {
       role="region"
       aria-label="Our products"
       tabIndex={0}
+      // Card width and overlap are worked out in CSS from the rail's own
+      // width (.product-rail in globals.css), so the row fills on wide screens
+      // and swipes on phones.
+      style={{ "--n": COUNT } as CSSProperties}
       className={cn(
-        // Card width drives the overlap, so the slanted edges sit a constant
-        // gap apart instead of leaving wedges of empty space between cards.
-        "[--card-w:14.5rem] sm:[--card-w:16.5rem]",
-        "flex snap-x snap-mandatory overflow-x-auto overscroll-x-contain px-6 pb-6 pt-2 outline-none [scrollbar-width:thin] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-8",
+        "product-rail flex scroll-px-6 snap-x sm:scroll-px-8 snap-mandatory overflow-x-auto overscroll-x-contain px-6 pb-6 pt-2 outline-none [scrollbar-width:thin] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-8",
         className,
       )}
     >
@@ -75,7 +80,7 @@ export function ProductRail({ className }: { className?: string }) {
 function Slot({ children }: { children: ReactNode }) {
   return (
     <li
-      className="w-(--card-w) shrink-0 snap-start not-first:ml-[calc(var(--card-w)*-0.16+0.75rem)]"
+      className="product-rail-slot shrink-0 snap-start"
     >
       {children}
     </li>
@@ -107,7 +112,7 @@ function Outline({ className, dashed = false }: { className?: string; dashed?: b
 }
 
 const tileBase =
-  "group relative flex aspect-[3/5] flex-col outline-none motion-safe:transition-transform motion-safe:duration-300";
+  "group relative flex aspect-(--card-aspect) flex-col outline-none motion-safe:transition-transform motion-safe:duration-300";
 
 function ProductTile({ product }: { product: Product }) {
   const { card } = product;
@@ -180,7 +185,8 @@ function PlaceholderTile({ label, note }: { label: string; note: string }) {
         <p className="mt-6 font-mono text-[11px] uppercase tracking-widest text-foreground">
           {label}
         </p>
-        <p className="mt-2 text-sm leading-snug">{note}</p>
+        {/* Two lines reserved, so labels line up across placeholders. */}
+        <p className="mt-2 min-h-[2lh] text-sm leading-snug">{note}</p>
       </div>
       <Outline dashed className="text-mark" />
     </div>
@@ -199,7 +205,7 @@ function JoinTile() {
           Want to build the next one?
         </p>
         <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand">
-          Come work with us
+          Work with us
           <ArrowRight
             className="h-4 w-4 motion-safe:transition-transform motion-safe:group-hover:translate-x-0.5"
             strokeWidth={2}
