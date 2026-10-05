@@ -10,7 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import { SiDiscord, SiGithub } from "@icons-pack/react-simple-icons";
-import { PRODUCTS } from "@/lib/products";
+import { PRODUCTS, productHref } from "@/lib/products";
 
 /**
  * Single source of truth for the company's identity and top-level navigation.
@@ -45,8 +45,8 @@ export type NavItem = NavLink | NavGroup;
 
 /**
  * Top nav is company-shaped: Flagon is the studio, and each product has its own
- * site. Products sit up front as a dropdown that links out; the handbook, blog,
- * and company pages follow.
+ * site. Products sit up front as a dropdown into each one's page here, which
+ * then links out; the handbook, blog, and company pages follow.
  */
 const nav: readonly NavItem[] = [
   {
@@ -54,8 +54,7 @@ const nav: readonly NavItem[] = [
     sections: [
       PRODUCTS.map((p) => ({
         label: p.name,
-        href: p.url,
-        external: true,
+        href: productHref(p),
         icon: GitBranch,
       })),
       [{ label: "All products", href: "/products", icon: LayoutGrid }],

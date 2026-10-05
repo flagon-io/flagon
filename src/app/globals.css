@@ -96,6 +96,21 @@
   --foam-line: rgba(15, 118, 110, 0.4);
   --sheen: rgba(255, 255, 255, 0.6);
 
+  /* line art (components/art): ink for edges, opaque face fills so nearer
+   * shapes cover farther ones, and an accent for the one thing that matters. */
+  --art-card: #f6f6f7;
+  --art-ink: rgba(9, 9, 11, 0.78);
+  --art-line: rgba(9, 9, 11, 0.34);
+  --art-faint: rgba(9, 9, 11, 0.16);
+  --art-node: #ffffff;
+  --art-top: #ffffff;
+  --art-left: #efeff1;
+  --art-right: #e4e4e7;
+  --art-accent: #0d9488;
+  --art-accent-fill: #ccfbf1;
+  --art-accent-2: rgba(9, 9, 11, 0.5);
+  --art-accent-2-fill: #e9e9ec;
+
   /* shiki dual-theme code */
   --shiki-light: #24292e;
   --shiki-dark: #e1e4e8;
@@ -129,6 +144,19 @@
   --hairline: rgba(255, 255, 255, 0.11);
   --panel: rgba(255, 255, 255, 0.03);
   --mark: rgba(255, 255, 255, 0.15);
+
+  --art-card: #0b0b0d;
+  --art-ink: rgba(255, 255, 255, 0.8);
+  --art-line: rgba(255, 255, 255, 0.34);
+  --art-faint: rgba(255, 255, 255, 0.13);
+  --art-node: #0b0b0d;
+  --art-top: #1a1a1d;
+  --art-left: #121215;
+  --art-right: #0e0e10;
+  --art-accent: #2dd4bf;
+  --art-accent-fill: #0d3b36;
+  --art-accent-2: rgba(255, 255, 255, 0.5);
+  --art-accent-2-fill: #18181b;
 
   --brew-top: #2dd4bf;
   --brew-bot: #0d9488;
@@ -486,4 +514,21 @@ label[for] {
  * alone, so table columns still size to their words (`owner`, not `owne|r`). */
 .prose :not(pre) > code {
   overflow-wrap: break-word;
+}
+
+/* Line art in g1t's own palette (its design tokens): near-black, mint for
+ * what's live and merged, lavender for the fleet. Fixed, not themed. */
+.art-g1t {
+  --art-card: #0f0f11;
+  --art-ink: #ededef;
+  --art-line: rgba(237, 237, 239, 0.36);
+  --art-faint: rgba(237, 237, 239, 0.12);
+  --art-node: #0f0f11;
+  --art-top: #1e1e21;
+  --art-left: #161618;
+  --art-right: #121214;
+  --art-accent: #86efc4;
+  --art-accent-fill: #10302a;
+  --art-accent-2: #b6a8ff;
+  --art-accent-2-fill: #221f36;
 }

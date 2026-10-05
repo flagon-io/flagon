@@ -5,11 +5,11 @@ import { Frame } from "@/components/frame";
 import { HexField } from "@/components/hex-field";
 import { FlagonPour } from "@/components/flagon-pour";
 import { Schematic } from "@/components/schematic";
-import { ProductCard, MoreInTheWorks } from "@/components/product-card";
+import { ProductRail } from "@/components/product-rail";
 import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
+import { ArtCard } from "@/components/art-card";
 import { site } from "@/lib/site";
-import { FEATURED_PRODUCT } from "@/lib/products";
 import { getAllPosts, formatDate } from "@/lib/blog";
 
 export const metadata: Metadata = {
@@ -63,16 +63,15 @@ export default function Home() {
       <Section divider>
         <SectionHeader
           title="What we're building."
-          lead="Flagon is the company; the products are their own things, each with its own site and room to grow. Here's what's in the workshop."
+          lead="Flagon is the company; the products are their own things, each with its own name and room to grow. Here's what's in the workshop."
         />
-        <ProductCard product={FEATURED_PRODUCT} className="mt-10" />
-        <MoreInTheWorks />
-        <div className="mt-8 px-6 sm:px-8">
+        <ProductRail className="mt-8" />
+        <div className="mt-4 px-6 sm:px-8">
           <Link
             href="/products"
             className="group inline-flex items-center gap-1.5 text-sm font-medium text-brand"
           >
-            All products
+            See everything we make
             <ArrowRight
               className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
               strokeWidth={2}
@@ -81,38 +80,67 @@ export default function Home() {
         </div>
       </Section>
 
-      {/* Built in the open (identity) */}
+      {/* How we run the place */}
       <Section divider>
-        <div className={`grid gap-10 ${GUTTER} lg:grid-cols-[1.2fr_1fr] lg:items-center`}>
-          <div className="max-w-2xl">
-            <h2 className="text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
-              A company you can read.
-            </h2>
-            <p className="mt-4 text-pretty leading-relaxed text-muted-foreground">
-              We run the whole company in public. How we work, what we decide,
-              how we pay people, and why: it&rsquo;s a handbook you can open,
-              argue with, and hold us to. No big reveal, no culture deck. You
-              watch it get made.
-            </p>
-            <div className="mt-6">
-              <Link
-                href="/handbook"
-                className="group inline-flex items-center gap-1.5 text-sm font-medium text-brand"
-              >
-                Read the handbook
-                <ArrowRight
-                  className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-                  strokeWidth={2}
-                />
-              </Link>
-            </div>
-          </div>
-          <Schematic className="flex flex-col divide-y divide-hairline">
-            <Marker k="01" label="Decide in the open" />
-            <Marker k="02" label="Ship when it's good, not when it's due" />
-            <Marker k="03" label="Let the people using it steer" />
-            <Marker k="04" label="Write down why" />
-          </Schematic>
+        <SectionHeader
+          title="A company you can read."
+          lead="We run the whole company in public. How we work, how we pay people, how we price, and why: it's all written down, and you can hold us to it."
+        />
+        <div className={`mt-10 grid gap-4 ${GUTTER} md:grid-cols-2 lg:grid-cols-3`}>
+          <ArtCard
+            title="The handbook"
+            art="handbook"
+            className="lg:col-span-2"
+            chips={[
+              { label: "Values", href: "/handbook/values" },
+              { label: "Pay formula", href: "/handbook/compensation" },
+              { label: "Decisions", href: "/handbook/decisions" },
+              { label: "Time off", href: "/handbook/time-off" },
+              { label: "How we hire", href: "/handbook/how-we-hire" },
+            ]}
+          >
+            How the company actually runs, not a polished excerpt. What we value,
+            how we decide, how we pay people down to the formula. If something
+            reads badly, that&rsquo;s a bug, and anyone can send a fix.
+          </ArtCard>
+          <ArtCard
+            title="Built in the open"
+            art="open"
+            chips={[
+              { label: "Open source", href: "/handbook/open-source" },
+              { label: "g1t's code", href: "https://g1t.sh/flagon-io/g1t", external: true },
+              { label: "This site", href: site.links.repo, external: true },
+            ]}
+          >
+            Open source is where every product starts. The code, the reasoning,
+            and the mistakes, out where you can read them.
+          </ArtCard>
+          <ArtCard
+            title="Priced close to cost"
+            art="pricing"
+            chips={[
+              { label: "Why", href: "/handbook/priced-close-to-cost" },
+              { label: "How we make money", href: "/handbook/how-we-make-money" },
+            ]}
+          >
+            What it costs us, plus a markup we say out loud. No seats, no
+            surprise bills, and the price book is public.
+          </ArtCard>
+          <ArtCard
+            title="Small teams, whole ownership"
+            art="teams"
+            className="lg:col-span-2"
+            chips={[
+              { label: "How we're structured", href: "/handbook/how-were-structured" },
+              { label: "How teams work", href: "/handbook/how-our-teams-work" },
+              { label: "The teams", href: "/teams" },
+              { label: "The people", href: "/people" },
+            ]}
+          >
+            Each product gets a small team that owns it end to end, from the
+            first line of code to the support inbox. The company underneath is
+            shared: the values, this handbook, and how we hire and pay.
+          </ArtCard>
         </div>
       </Section>
 
@@ -182,14 +210,5 @@ export default function Home() {
         </div>
       </Section>
     </Frame>
-  );
-}
-
-function Marker({ k, label }: { k: string; label: string }) {
-  return (
-    <div className="flex items-center gap-4 p-5 sm:p-6">
-      <span className="font-mono text-[11px] uppercase tracking-widest text-brand">{k}</span>
-      <span className="text-sm font-medium">{label}</span>
-    </div>
   );
 }

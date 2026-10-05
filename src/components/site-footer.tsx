@@ -3,7 +3,7 @@ import { SiGithub, SiDiscord } from "@icons-pack/react-simple-icons";
 import { Logo } from "@/components/logo";
 import { Plus } from "@/components/plus";
 import { site } from "@/lib/site";
-import { PRODUCTS } from "@/lib/products";
+import { PRODUCTS, productHref } from "@/lib/products";
 
 export function SiteFooter() {
   const year = new Date().getFullYear();
@@ -54,7 +54,7 @@ export function SiteFooter() {
 
         <FooterCol title="Products">
           {PRODUCTS.map((p) => (
-            <FooterLink key={p.id} href={p.url} external>
+            <FooterLink key={p.id} href={productHref(p)}>
               {p.name}
             </FooterLink>
           ))}

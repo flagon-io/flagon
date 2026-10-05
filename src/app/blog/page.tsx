@@ -4,6 +4,7 @@ import { Frame } from "@/components/frame";
 import { Section, SectionHeader } from "@/components/section";
 import { Schematic } from "@/components/schematic";
 import { Cta } from "@/components/cta";
+import { PostCover } from "@/components/post-cover";
 import { getAllPosts, formatDate } from "@/lib/blog";
 import { site } from "@/lib/site";
 
@@ -27,8 +28,38 @@ export default function BlogIndex() {
         </Section>
 
         <Section divider>
-          <Schematic bleed>
-            {posts.length === 0 ? (
+          {posts.length > 0 ? (
+            <ul className="grid gap-4 px-6 sm:px-8 md:grid-cols-2 lg:grid-cols-3">
+              {posts.map((p) => (
+                <li key={p.slug}>
+                  <Link
+                    href={`/blog/${p.slug}`}
+                    className="group flex h-full flex-col overflow-hidden rounded-2xl border border-hairline bg-(--art-card) outline-none transition hover:border-foreground/20 focus-visible:ring-2 focus-visible:ring-brand"
+                  >
+                    <PostCover art={p.art} id={`post-${p.slug}`} className="rounded-none border-0 border-b" />
+                    <div className="flex flex-1 flex-col p-6">
+                      <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-widest text-subtle">
+                        <span>{formatDate(p.date)}</span>
+                        <span aria-hidden>·</span>
+                        <span>{p.readingMinutes} min</span>
+                      </div>
+                      <h2 className="mt-3 text-balance text-lg font-semibold tracking-tight group-hover:text-brand">
+                        {p.title}
+                      </h2>
+                      <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
+                        {p.description}
+                      </p>
+                      <p className="mt-auto pt-5 text-sm text-subtle">
+                        by {p.author}
+                        {p.role ? `, ${p.role}` : ""}
+                      </p>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Schematic bleed>
               <div className="mx-auto max-w-md px-6 py-20 text-center sm:py-24">
                 <p className="font-mono text-[11px] uppercase tracking-widest text-subtle">
                   Nothing here yet
@@ -50,40 +81,8 @@ export default function BlogIndex() {
                   </Cta>
                 </div>
               </div>
-            ) : (
-              <div className="divide-y divide-hairline">
-                {posts.map((p) => (
-                  <Link
-                    key={p.slug}
-                    href={`/blog/${p.slug}`}
-                    className="group block p-6 transition hover:bg-panel sm:p-8"
-                  >
-                    <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-widest text-subtle">
-                      <span>{formatDate(p.date)}</span>
-                      <span>·</span>
-                      <span>{p.readingMinutes} min</span>
-                      {p.tags[0] ? (
-                        <>
-                          <span>·</span>
-                          <span className="text-brand">{p.tags[0]}</span>
-                        </>
-                      ) : null}
-                    </div>
-                    <h2 className="mt-3 text-xl font-semibold tracking-tight group-hover:text-brand sm:text-2xl">
-                      {p.title}
-                    </h2>
-                    <p className="mt-2 max-w-2xl text-pretty leading-relaxed text-muted-foreground">
-                      {p.description}
-                    </p>
-                    <p className="mt-4 text-sm text-subtle">
-                      by {p.author}
-                      {p.role ? `, ${p.role}` : ""}
-                    </p>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Schematic>
+            </Schematic>
+          )}
         </Section>
       </main>
     </Frame>

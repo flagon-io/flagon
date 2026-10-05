@@ -1,6 +1,7 @@
 import "server-only";
 import { getHandbookSections } from "@/lib/handbook";
 import { getAllPosts } from "@/lib/blog";
+import { PRODUCTS, productHref } from "@/lib/products";
 
 /** One searchable entry in the site-wide command palette. */
 export type SearchDoc = {
@@ -41,5 +42,12 @@ export async function getSearchIndex(): Promise<SearchDoc[]> {
     description: p.description,
   }));
 
-  return [...PAGES, ...handbook, ...blog];
+  const products: SearchDoc[] = PRODUCTS.map((p) => ({
+    title: p.name,
+    url: productHref(p),
+    group: "Pages" as const,
+    description: p.tagline,
+  }));
+
+  return [...PAGES, ...products, ...handbook, ...blog];
 }

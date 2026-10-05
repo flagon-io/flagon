@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Frame } from "@/components/frame";
 import { Mdx } from "@/components/mdx";
+import { PostCover } from "@/components/post-cover";
 import { getPost, getAllPosts, formatDate } from "@/lib/blog";
 import { site } from "@/lib/site";
 
@@ -58,6 +59,7 @@ export default async function BlogPost({
         </Link>
 
         <article className="mt-8">
+          <PostCover art={post.art} id={`cover-${post.slug}`} className="mb-10" />
           <header className="border-b border-hairline pb-8">
             <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] uppercase tracking-widest text-subtle">
               <span>{formatDate(post.date)}</span>

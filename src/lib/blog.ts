@@ -1,5 +1,6 @@
 import "server-only";
 import { readCollection, readDoc } from "@/lib/content";
+import { SCENES, type SceneName } from "@/components/art/scenes";
 
 export type Post = {
   slug: string;
@@ -9,9 +10,22 @@ export type Post = {
   author: string;
   role?: string;
   tags: string[];
+  /** The cover drawing: `art:` in frontmatter, or one picked from the slug. */
+  art: SceneName;
   readingMinutes: number;
   content: string;
 };
+
+/** Drawings a post can get by default; product scenes are opt-in by name. */
+const DEFAULT_COVERS: SceneName[] = ["handbook", "open", "pricing", "teams", "craft", "panels", "stairs"];
+
+/** The named cover if it exists, else a stable pick from the slug. */
+function coverFor(slug: string, named: unknown): SceneName {
+  if (typeof named === "string" && named in SCENES) return named as SceneName;
+  let h = 0;
+  for (const ch of slug) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return DEFAULT_COVERS[h % DEFAULT_COVERS.length];
+}
 
 function toPost(d: {
   slug: string;
@@ -27,6 +41,7 @@ function toPost(d: {
     author: String(d.data.author ?? "Flagon"),
     role: d.data.role ? String(d.data.role) : undefined,
     tags: Array.isArray(d.data.tags) ? (d.data.tags as string[]) : [],
+    art: coverFor(d.slug, d.data.art),
     readingMinutes: d.readingMinutes,
     content: d.content,
   };
@@ -48,9 +63,12 @@ export function formatDate(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
+  // Frontmatter dates are calendar days, parsed as UTC midnight; format them in
+  // UTC too, or every timezone west of Greenwich shows the day before.
   return d.toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
+    timeZone: "UTC",
   });
 }

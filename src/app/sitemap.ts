@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { site } from "@/lib/site";
 import { listHandbookSlugs } from "@/lib/handbook";
 import { getAllPosts } from "@/lib/blog";
+import { PRODUCTS, productHref } from "@/lib/products";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = site.url;
@@ -35,5 +36,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     lastModified: p.date ? new Date(p.date) : now,
   }));
 
-  return [...staticRoutes, ...handbook, ...blog];
+  const products = PRODUCTS.map((p) => ({
+    url: `${base}${productHref(p)}`,
+    lastModified: now,
+  }));
+
+  return [...staticRoutes, ...products, ...handbook, ...blog];
 }

@@ -87,7 +87,21 @@ tags: [company]
 Body goes here.
 ```
 
-Posts are sorted newest-first by `date`.
+Posts are sorted newest-first by `date`. Every post gets a cover drawing: name
+one with `art:` in the frontmatter (`handbook`, `open`, `pricing`, `teams`,
+`craft`, `panels`, `stairs`, or a product's own, like `g1t`), or leave it out
+and one is picked from the slug.
+
+### Line art
+
+The illustrations are isometric line drawings built in code, in
+[`src/components/art/`](src/components/art/): `iso.tsx` is a small kit (boxes,
+sheets, faces, guide lines, corner markers, and `OnFace` for laying a logo or
+text flat onto a surface), and `scenes.tsx` composes it into the named
+drawings. Colors come from the `--art-*` variables in `globals.css`, so every
+drawing follows light and dark mode, and a class like `.art-g1t` repaints one
+in a product's own palette. `ArtCard` (`src/components/art-card.tsx`) is the
+card that leads with a drawing and ends in link chips.
 
 ### Two things that will bite you
 
