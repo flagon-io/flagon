@@ -183,7 +183,7 @@ export const PRODUCTS: Product[] = [
         command: "claude mcp add --transport http g1t https://mcp.g1t.sh",
       },
       links: [
-        { label: "Make the move", href: "https://g1t.sh/register", hint: "g1t.sh" },
+        { label: "Make the move", href: "https://g1t.sh", hint: "g1t.sh" },
         {
           label: "Get started",
           href: "https://docs.g1t.sh/quickstart/",
