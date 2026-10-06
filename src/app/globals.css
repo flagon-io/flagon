@@ -687,36 +687,47 @@ label[for] {
   transform: skewX(var(--tilt-angle));
 }
 
-/* SchematicGrid's column rules lean at the tilt too. They're drawn once on
- * the grid, not per cell, so each rule runs unbroken through every row: one
- * layer skewed about its middle (so the rules still meet the frame's top and
- * bottom), with a 1px line at each column boundary. Stacked cells keep their
- * flat rules. */
+/* SchematicGrid's column rules lean too. They're drawn once on the grid, not
+ * per cell, so each rule runs unbroken through every row. Unlike the site's
+ * other slants they lean by a fixed run (--rule-run, top to bottom) rather
+ * than at --tilt: a grid can be any height, and at a fixed angle a tall one
+ * would drift the rule into the cells' text. The run stays inside the cells'
+ * padding however tall the grid gets. Each rule is a diagonal gradient line
+ * across a strip --rule-run wide, centred on its column boundary (top-right to
+ * bottom-left, the same way the rest of the site leans). Background positions
+ * resolve against the grid's width less the strip's, hence the offsets: a
+ * strip centred at fraction f sits at f * 100% + (f - 0.5) * --rule-run. Stacked cells keep
+ * their flat rules. */
 .slant-rules {
   position: relative;
-  --rule: linear-gradient(var(--hairline), var(--hairline));
+  --rule-run: 1.5rem;
+  --rule: linear-gradient(
+    to bottom right,
+    transparent calc(50% - 0.75px),
+    var(--hairline) 50%,
+    transparent calc(50% + 0.75px)
+  );
 }
 .slant-rules::before {
   content: "";
   display: none;
   position: absolute;
   inset: 0;
-  transform: skewX(calc(-1 * var(--tilt-angle)));
   pointer-events: none;
 }
 .slant-rules-2::before {
-  background: var(--rule) 50% 0 / 1px 100% no-repeat;
+  background: var(--rule) 50% 0 / var(--rule-run) 100% no-repeat;
 }
 .slant-rules-3::before {
   background:
-    var(--rule) calc(100% / 3) 0 / 1px 100% no-repeat,
-    var(--rule) calc(200% / 3) 0 / 1px 100% no-repeat;
+    var(--rule) calc(100% / 3 - var(--rule-run) / 6) 0 / var(--rule-run) 100% no-repeat,
+    var(--rule) calc(200% / 3 + var(--rule-run) / 6) 0 / var(--rule-run) 100% no-repeat;
 }
 .slant-rules-4::before {
   background:
-    var(--rule) 25% 0 / 1px 100% no-repeat,
-    var(--rule) 50% 0 / 1px 100% no-repeat,
-    var(--rule) 75% 0 / 1px 100% no-repeat;
+    var(--rule) calc(25% - var(--rule-run) / 4) 0 / var(--rule-run) 100% no-repeat,
+    var(--rule) 50% 0 / var(--rule-run) 100% no-repeat,
+    var(--rule) calc(75% + var(--rule-run) / 4) 0 / var(--rule-run) 100% no-repeat;
 }
 /* Once cells sit in columns, wrapped rows get a flat rule between them. */
 @media (width >= 40rem) {
