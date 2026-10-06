@@ -9,7 +9,7 @@ import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
 import { CopyCommand } from "@/components/copy-command";
 import { SCENES } from "@/components/art/scenes";
-import { SlantBox } from "@/components/slant";
+import { SlantBeams, SlantBox, Tag } from "@/components/slant";
 import { PRODUCTS, getProduct } from "@/lib/products";
 import { runForAspect } from "@/lib/slant";
 
@@ -60,6 +60,7 @@ export default async function ProductPage({
         {/* Hero */}
         <section className="relative isolate overflow-hidden px-6 pb-14 pt-10 sm:px-8 sm:pt-12">
           <HexField />
+          <SlantBeams />
           <nav aria-label="Breadcrumb" className="relative">
             <ol className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-subtle">
               <li>
@@ -76,9 +77,9 @@ export default async function ProductPage({
 
           <div className="relative mt-10 grid gap-12 lg:grid-cols-[1fr_1.1fr] lg:items-center">
             <div className="max-w-2xl">
-              <span className="rise inline-block rounded-full border border-hairline bg-background px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-brand">
+              <Tag className="rise text-brand before:border before:border-hairline before:bg-background">
                 {product.status}
-              </span>
+              </Tag>
               <h1
                 className="rise mt-6"
                 style={{ animationDelay: "60ms" }}
@@ -130,7 +131,7 @@ export default async function ProductPage({
 
             {/* The product's drawing, in its own colors, on a panel leaning at
                 the site's tilt, like its card on the rail. */}
-            <figure className="rise" style={{ animationDelay: "160ms" }}>
+            <figure className="art-host rise" style={{ animationDelay: "160ms" }}>
               <SlantBox
                 run={HERO_RUN}
                 style={{ aspectRatio: HERO_ASPECT }}
@@ -174,7 +175,7 @@ export default async function ProductPage({
         </Section>
 
         {/* How it works */}
-        <Section divider>
+        <Section divider bleed="end">
           <SectionHeader
             title="How it works"
             lead="The workflow you already know, built for a lot more hands on it."
@@ -199,7 +200,7 @@ export default async function ProductPage({
         </Section>
 
         {/* What's different */}
-        <Section divider>
+        <Section divider bleed="end">
           <SectionHeader
             title={`What makes ${product.name} different`}
             lead="Hosting git is table stakes. This is the part we care about."

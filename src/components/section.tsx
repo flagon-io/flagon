@@ -5,19 +5,32 @@ import { cn } from "@/lib/cn";
  * A marketing section with consistent vertical rhythm. Full-bleed Schematic
  * frames provide the horizontal rules, so sections carry no top border by
  * default. Pass `divider` for a full-width hairline on a text-only transition.
+ *
+ * When a section ends (or starts and ends) with a full-bleed Schematic, pass
+ * `bleed` so the frame runs flush to the section's edge: the padding goes, and
+ * the frame drops its own rule there because the neighbouring divider already
+ * draws it. Otherwise you get an empty strip and a doubled rule.
  */
 export function Section({
   children,
   className,
   divider = false,
+  bleed,
 }: {
   children: ReactNode;
   className?: string;
   divider?: boolean;
+  bleed?: "end" | "both";
 }) {
   return (
     <section
-      className={cn("py-12 sm:py-14", divider && "border-t border-hairline", className)}
+      className={cn(
+        "py-12 sm:py-14",
+        divider && "border-t border-hairline",
+        bleed && "pb-0! [&>:last-child]:border-b-0",
+        bleed === "both" && "pt-0! [&>:first-child]:border-t-0",
+        className,
+      )}
     >
       {children}
     </section>

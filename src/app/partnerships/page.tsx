@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 export default function PartnershipsPage() {
   return (
     <StubPage
+      art="panels"
       title="Let's build something together"
       lead="If you're making something that fits alongside one of our products, or you think there's a way we could work together, we're open to it. Tell us what you have in mind, plainly."
       actions={[

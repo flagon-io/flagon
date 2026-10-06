@@ -1,38 +1,31 @@
 import type { ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
+import { slantSurface } from "@/lib/slant";
 
 export type ButtonVariant = "default" | "secondary" | "ghost" | "outline";
 export type ButtonSize = "sm" | "md" | "lg";
 
-const base =
-  "group inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50";
+/** Buttons are slanted by nature: the fill, border and focus ring live on a
+ * skewed surface (slantSurface), the label stays upright. */
+const base = cn(
+  slantSurface,
+  "group inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium outline-none transition-colors focus-visible:before:ring-2 focus-visible:before:ring-brand focus-visible:before:ring-offset-2 focus-visible:before:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+);
 
 const variants: Record<ButtonVariant, string> = {
-  default: "bg-primary text-primary-foreground hover:bg-primary/90",
+  default: "text-primary-foreground before:bg-primary hover:before:bg-primary/90",
   secondary:
-    "border border-hairline bg-panel text-foreground hover:bg-secondary",
-  ghost: "text-muted-foreground hover:bg-panel hover:text-foreground",
+    "text-foreground before:border before:border-hairline before:bg-panel hover:before:bg-secondary",
+  ghost: "text-muted-foreground hover:text-foreground hover:before:bg-panel",
   outline:
-    "border border-hairline bg-transparent text-foreground hover:bg-panel",
+    "text-foreground before:border before:border-hairline hover:before:bg-panel",
 };
 
 const sizes: Record<ButtonSize, string> = {
-  sm: "h-8 px-3 text-sm",
-  md: "h-[38px] px-4 text-sm",
-  lg: "h-11 px-6 text-[15px]",
+  sm: "h-8 px-3.5 text-sm",
+  md: "h-[38px] px-5 text-sm",
+  lg: "h-11 px-7 text-[15px]",
 };
-
-/**
- * The leading slash on primary actions, echoing the site's slanted edges and a
- * command line. Decorative, so screen readers skip it.
- */
-export function Slash() {
-  return (
-    <span aria-hidden className="-ml-0.5 font-mono opacity-60">
-      /
-    </span>
-  );
-}
 
 /** Class string for a button-styled element (button or link). */
 export function buttonClasses(opts?: {

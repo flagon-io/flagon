@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Frame } from "@/components/frame";
-import { Section, SectionHeader, GUTTER } from "@/components/section";
+import { Section, SectionHeader } from "@/components/section";
+import { Schematic, SchematicGrid } from "@/components/schematic";
 import { Cta } from "@/components/cta";
+import { SlantSplit } from "@/components/slant";
 import { TEAMS } from "@/lib/teams";
 
 export const metadata: Metadata = {
@@ -21,41 +23,36 @@ export default function TeamsPage() {
           />
         </Section>
 
-        <Section divider>
-          <div className={GUTTER}>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Section divider bleed="both">
+          <Schematic bleed>
+            <SchematicGrid cols={3}>
               {TEAMS.map((team) => (
-                <div
-                  key={team.name}
-                  className="flex flex-col rounded-xl border border-hairline bg-card p-5"
-                >
+                <div key={team.name} className="p-6 sm:p-8">
                   <h3 className="text-base font-semibold tracking-tight">{team.name}</h3>
-                  <p className="mt-2 flex-1 text-sm leading-relaxed text-muted-foreground">
+                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                     {team.blurb}
                   </p>
                 </div>
               ))}
-            </div>
-          </div>
+            </SchematicGrid>
+          </Schematic>
         </Section>
 
-        <Section divider className="text-center">
-          <div className={GUTTER}>
-            <h2 className="mx-auto max-w-2xl text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-              Why we work in small teams
-            </h2>
-            <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground">
-              Ownership only feels real when it&rsquo;s whole. The full reasoning, and
-              how we intend to stay small as we grow, is in the handbook.
-            </p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Cta href="/handbook/how-were-structured">Read how small teams work</Cta>
-              <Cta href="/careers" variant="secondary">
-                See careers
-              </Cta>
-            </div>
+        <SlantSplit art="teams" artId="teams-cta">
+          <h2 className="max-w-md text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
+            Why we work in small teams
+          </h2>
+          <p className="mt-4 max-w-md text-pretty text-muted-foreground">
+            Ownership only feels real when it&rsquo;s whole. The full reasoning, and
+            how we intend to stay small as we grow, is in the handbook.
+          </p>
+          <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
+            <Cta href="/handbook/how-were-structured">Read how small teams work</Cta>
+            <Cta href="/careers" variant="secondary">
+              See careers
+            </Cta>
           </div>
-        </Section>
+        </SlantSplit>
       </main>
     </Frame>
   );

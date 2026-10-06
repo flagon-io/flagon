@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 export default function MediaPage() {
   return (
     <StubPage
+      art="handbook"
       title="For anyone writing about us"
       lead="Logos, the mark, and the plain facts about Flagon, free to use. The brand assets live in the handbook, and each of our products keeps its own on its own site. For a quote, a detail, or anything else, reach us directly."
       actions={[

@@ -40,7 +40,7 @@ export default function CareersPage() {
         </SlantSplit>
 
         {/* Why Flagon */}
-        <Section divider>
+        <Section divider bleed="end">
           <SectionHeader
             title="A place built for people who care about the work"
             lead="No games, no busywork, nothing hidden. Here's what you'd actually be signing up for."
@@ -132,28 +132,26 @@ export default function CareersPage() {
         </Section>
 
         {/* Open roles */}
-        <Section divider>
-          <SectionHeader
-            title="No listings up right now"
-            lead="We hire in small, deliberate bursts, so most of the time this page is quiet. That doesn't mean don't reach out."
-          />
-          <div className="mt-10 px-6 sm:px-8">
-            <Schematic className="p-6 sm:p-8">
-              <p className="max-w-2xl text-pretty leading-relaxed text-muted-foreground">
-                If you&rsquo;re exceptional at what you do and this is the kind of
-                place you&rsquo;ve been looking for, don&rsquo;t wait for a
-                listing. Tell us who you are, what you&rsquo;ve made, and what
-                you&rsquo;d want to work on. We read every note.
-              </p>
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                <Cta href={`mailto:${site.links.email}`}>Email us</Cta>
-                <Cta href={site.links.discord} external variant="secondary">
-                  Say hi in Discord
-                </Cta>
-              </div>
-            </Schematic>
+        <SlantSplit art="open" artId="careers-roles">
+          <h2 className="max-w-md text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
+            No listings up right now
+          </h2>
+          <p className="mt-4 max-w-md text-pretty text-muted-foreground">
+            We hire in small, deliberate bursts, so most of the time this page is
+            quiet. That doesn&rsquo;t mean don&rsquo;t reach out.
+          </p>
+          <p className="mt-4 max-w-md text-pretty text-muted-foreground">
+            If this is the kind of place you&rsquo;ve been looking for, tell us
+            who you are, what you&rsquo;ve made, and what you&rsquo;d want to
+            work on. We read every note.
+          </p>
+          <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
+            <Cta href={`mailto:${site.links.email}`}>Email us</Cta>
+            <Cta href={site.links.discord} external variant="secondary">
+              Say hi in Discord
+            </Cta>
           </div>
-        </Section>
+        </SlantSplit>
       </main>
     </Frame>
   );

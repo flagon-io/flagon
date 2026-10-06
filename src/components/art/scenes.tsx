@@ -1,3 +1,4 @@
+import type { CSSProperties, ReactNode } from "react";
 import { FlagonMark } from "@/brand/flagon-mark";
 import {
   Art,
@@ -20,6 +21,10 @@ import {
  * technical line drawing about one idea, built back to front and framed on its
  * subject. They take color from the --art-* variables, so they follow the
  * theme, and a wrapper class (like .art-g1t) can repaint them.
+ *
+ * They also answer the pointer: parts wrapped in <Move> or <Hop> act out the
+ * idea while the drawing's host (an element with .art-host, like a card) is
+ * hovered or focused. See the .art-move rules in globals.css.
  */
 
 type SceneProps = {
@@ -28,6 +33,56 @@ type SceneProps = {
   /** Describe the drawing for screen readers; omit when it is decoration. */
   label?: string;
 };
+
+/**
+ * A part that moves while the drawing's host is hovered: `to` is a CSS
+ * transform in drawing units. With `box`, the transform is about the part's
+ * own bounds (e.g. scaleY from its bottom, to stretch a line).
+ */
+function Move({
+  to,
+  origin,
+  box = false,
+  delay = 0,
+  children,
+}: {
+  to: string;
+  origin?: string;
+  box?: boolean;
+  delay?: number;
+  children: ReactNode;
+}) {
+  return (
+    <g
+      className={box ? "art-move art-move-box" : "art-move"}
+      style={{ "--to": to, transformOrigin: origin, transitionDelay: `${delay}ms` } as CSSProperties}
+    >
+      {children}
+    </g>
+  );
+}
+
+/** A part that hops once when the drawing's host is hovered, after `delay` ms. */
+function Hop({ delay = 0, children }: { delay?: number; children: ReactNode }) {
+  return (
+    <g className="art-hop" style={{ "--d": `${delay}ms` } as CSSProperties}>
+      {children}
+    </g>
+  );
+}
+
+/**
+ * How much to stretch a line from `a` up to `b` (scaleY about its bottom) so
+ * its top end follows a part lifted by `d`.
+ */
+function stretch(a: P3, b: P3, d: number): number {
+  const h = Math.abs(iso(a)[1] - iso(b)[1]);
+  return (h + d) / h;
+}
+
+/** Screen offset for `d` drawing units along space's +x or +y axis. */
+const along = (axis: "x" | "y", d: number) =>
+  `translate(${Math.round((axis === "x" ? 1 : -1) * d * Math.cos(Math.PI / 6) * 100) / 100}px, ${d / 2}px)`;
 
 /** Long construction lines along both axes through a point, faded by <Art>. */
 function axes(at: P3, reach = 520) {
@@ -99,6 +154,8 @@ export function HandbookArt({ id = "art-handbook", className, label }: SceneProp
   const under = corners([x0 - 16, y0, 36], [W, D, 3]);
   const noteAt: P3 = [x0 + 120, y0 - 92, 96];
   const note = corners(noteAt, [62, 42, 2]);
+  // On hover the top page lifts further off the stack, its note with it.
+  const raise = 16;
   return (
     <Art
       id={id}
@@ -116,23 +173,29 @@ export function HandbookArt({ id = "art-handbook", className, label }: SceneProp
         <Box key={i} at={[x0 - i * 4, y0, i * 9]} size={[W, D, 3]} ink="line" />
       ))}
       {PAGE_CORNERS.map((k) => (
-        <Line key={k} ps={[under[k], top[below(k)]]} ink="line" dots />
+        <Move key={k} to={`scaleY(${stretch(under[k], top[below(k)], raise)})`} origin="bottom" box>
+          <Line ps={[under[k], top[below(k)]]} ink="line" dots />
+        </Move>
       ))}
-      <Box at={topAt} size={[W, D, 3]} nodes />
-      <OnFace face="top" origin={[topAt[0] + 14, topAt[1] + 12, lift + 3]}>
-        <g style={{ color: "var(--art-ink)" }}>
-          <FlagonMark variant="mono" size={30} lid={false} lever={false} />
-        </g>
-        <TextLines x={40} y={6} width={84} lines={3} />
-        <TextLines x={0} y={44} width={124} lines={5} heading={false} />
-      </OnFace>
-      {/* A note pinned off to the side, tied back to the page. */}
-      <Line ps={[top.t10, note.b01]} ink="line" dashed />
-      <Box at={noteAt} size={[62, 42, 2]} ink="line" />
-      <OnFace face="top" origin={[noteAt[0] + 8, noteAt[1] + 8, noteAt[2] + 2]}>
-        <TextLines width={44} lines={2} gap={6} />
-      </OnFace>
-      <Node p={note.t01} ink="accent" />
+      <Move to={`translateY(-${raise}px)`}>
+        <Box at={topAt} size={[W, D, 3]} nodes />
+        <OnFace face="top" origin={[topAt[0] + 14, topAt[1] + 12, lift + 3]}>
+          <g style={{ color: "var(--art-ink)" }}>
+            <FlagonMark variant="mono" size={30} lid={false} lever={false} />
+          </g>
+          <TextLines x={40} y={6} width={84} lines={3} />
+          <TextLines x={0} y={44} width={124} lines={5} heading={false} />
+        </OnFace>
+        {/* A note pinned off to the side, tied back to the page. */}
+        <Line ps={[top.t10, note.b01]} ink="line" dashed />
+        <Move to="translate(4px, -6px)" delay={80}>
+          <Box at={noteAt} size={[62, 42, 2]} ink="line" />
+          <OnFace face="top" origin={[noteAt[0] + 8, noteAt[1] + 8, noteAt[2] + 2]}>
+            <TextLines width={44} lines={2} gap={6} />
+          </OnFace>
+          <Node p={note.t01} ink="accent" />
+        </Move>
+      </Move>
     </Art>
   );
 }
@@ -145,6 +208,8 @@ export function OpenArt({ id = "art-open", className, label }: SceneProps) {
   const box = corners(at, size);
   const lidAt: P3 = [at[0] + 34, at[1] - 34, 150];
   const lid = corners(lidAt, [120, 90, 4]);
+  // On hover the lid rises higher and what's inside floats up after it.
+  const raise = 18;
   const cubes: { at: P3; s: number; accent?: boolean }[] = [
     { at: [-20, -10, 74], s: 18 },
     { at: [18, -30, 104], s: 14, accent: true },
@@ -166,29 +231,34 @@ export function OpenArt({ id = "art-open", className, label }: SceneProps) {
       <Face ps={[box.b10, box.b11, box.t11, box.t10]} tone="right" />
       <Line ps={[box.t00, box.t10, box.t11, box.t01, box.t00]} ink="ink" />
       {cubes.map((c, i) => (
-        <Box
-          key={i}
-          at={c.at}
-          size={[c.s, c.s, c.s]}
-          top={c.accent ? "accent" : "top"}
-          ink={c.accent ? "accent" : "ink"}
-        />
+        <Move key={i} to={`translateY(-${10 + i * 5}px)`} delay={60 + i * 50}>
+          <Box
+            at={c.at}
+            size={[c.s, c.s, c.s]}
+            top={c.accent ? "accent" : "top"}
+            ink={c.accent ? "accent" : "ink"}
+          />
+        </Move>
       ))}
       {PAGE_CORNERS.map((k) => (
-        <Line key={k} ps={[box[k], lid[below(k)]]} ink="line" dots />
+        <Move key={k} to={`scaleY(${stretch(box[k], lid[below(k)], raise)})`} origin="bottom" box>
+          <Line ps={[box[k], lid[below(k)]]} ink="line" dots />
+        </Move>
       ))}
-      <Box at={lidAt} size={[120, 90, 4]} nodes />
-      <OnFace face="top" origin={[lidAt[0] + 30, lidAt[1] + 26, lidAt[2] + 4]}>
-        <text
-          y={30}
-          fontFamily="var(--font-mono)"
-          fontSize={30}
-          fontWeight={600}
-          fill="var(--art-ink)"
-        >
-          {"</>"}
-        </text>
-      </OnFace>
+      <Move to={`translateY(-${raise}px)`}>
+        <Box at={lidAt} size={[120, 90, 4]} nodes />
+        <OnFace face="top" origin={[lidAt[0] + 30, lidAt[1] + 26, lidAt[2] + 4]}>
+          <text
+            y={30}
+            fontFamily="var(--font-mono)"
+            fontSize={30}
+            fontWeight={600}
+            fill="var(--art-ink)"
+          >
+            {"</>"}
+          </text>
+        </OnFace>
+      </Move>
     </Art>
   );
 }
@@ -225,9 +295,13 @@ export function PricingArt({ id = "art-pricing", className, label }: SceneProps)
       />
       <Box at={a} size={[S, S, H]} hatch="right" hatchId={ids.hatch} nodes />
       <Box at={b} size={[S, S, H]} hatch="right" hatchId={ids.hatch} />
-      <Box at={[b[0], b[1], H]} size={[S, S, slab]} top="accent" ink="accent" nodes />
       <Callout p={cost.t11} text="COST" dx={-30} dy={18} ink="ink" />
-      <Callout p={priced.t10} text="+20%" dx={30} dy={-16} />
+      {/* On hover the markup hops up off the cost, so you can see it's a
+          separate, stated slice. */}
+      <Move to="translateY(-12px)">
+        <Box at={[b[0], b[1], H]} size={[S, S, slab]} top="accent" ink="accent" nodes />
+        <Callout p={priced.t10} text="+20%" dx={30} dy={-16} />
+      </Move>
     </Art>
   );
 }
@@ -263,19 +337,22 @@ export function TeamsArt({ id = "art-teams", className, label }: SceneProps) {
           </g>
         );
       })}
-      <Box at={core} size={[52, 52, 46]} top="accent" ink="accent" nodes />
-      <OnFace face="top" origin={[core[0] + 10, core[1] + 8, 46]}>
-        <g style={{ color: "var(--art-accent)" }}>
-          <FlagonMark variant="mono" size={34} lid={false} lever={false} />
-        </g>
-      </OnFace>
+      {/* On hover the core lifts, then each team in turn. */}
+      <Move to="translateY(-10px)">
+        <Box at={core} size={[52, 52, 46]} top="accent" ink="accent" nodes />
+        <OnFace face="top" origin={[core[0] + 10, core[1] + 8, 46]}>
+          <g style={{ color: "var(--art-accent)" }}>
+            <FlagonMark variant="mono" size={34} lid={false} lever={false} />
+          </g>
+        </OnFace>
+      </Move>
       {clusters.map((c, i) => (
-        <g key={i}>
+        <Move key={i} to="translateY(-7px)" delay={90 + i * 70}>
           <Box at={c} size={[C, C, C]} />
           <Box at={[c[0] + C + gap, c[1], 0]} size={[C, C, C * 1.4]} />
           <Box at={[c[0], c[1] + C + gap, 0]} size={[C, C, C * 0.8]} />
           <Box at={[c[0] + C + gap, c[1] + C + gap, 0]} size={[C, C, C * 1.15]} nodes />
-        </g>
+        </Move>
       ))}
     </Art>
   );
@@ -370,31 +447,33 @@ export function G1tArt({ id = "art-g1t", className, label }: SceneProps) {
 
       {/* The forks. Each floats on its own rhythm; the mint one lands. */}
       {forks.map((f, i) => (
-        <g key={i} className={f.won ? "g1t-land" : `g1t-bob g1t-bob-${i}`}>
-          <Box
-            at={f.at}
-            size={plate}
-            top={f.won ? "accent" : "accent-2"}
-            ink={f.won ? "accent" : "accent-2"}
-            nodes={i === 3}
-          />
-          <OnFace face="top" origin={[f.at[0] + 14, f.at[1] + 14, f.at[2] + plate[2]]}>
-            <TextLines width={92} lines={4} gap={9} />
-            {[0, 1, 2].map((k) => (
-              <rect
-                key={k}
-                className="g1t-diff"
-                style={{ animationDelay: `${-(i * 0.7 + k * 0.45)}s` }}
-                x={100}
-                y={11 + k * 18}
-                width={10}
-                height={4}
-                rx={1}
-                fill={f.won || k !== 1 ? "var(--art-accent)" : "var(--art-ink)"}
-              />
-            ))}
-          </OnFace>
-        </g>
+        <Move key={i} to={`translateY(-${i * 7}px)`} delay={i * 40}>
+          <g className={f.won ? "g1t-land" : `g1t-bob g1t-bob-${i}`}>
+            <Box
+              at={f.at}
+              size={plate}
+              top={f.won ? "accent" : "accent-2"}
+              ink={f.won ? "accent" : "accent-2"}
+              nodes={i === 3}
+            />
+            <OnFace face="top" origin={[f.at[0] + 14, f.at[1] + 14, f.at[2] + plate[2]]}>
+              <TextLines width={92} lines={4} gap={9} />
+              {[0, 1, 2].map((k) => (
+                <rect
+                  key={k}
+                  className="g1t-diff"
+                  style={{ animationDelay: `${-(i * 0.7 + k * 0.45)}s` }}
+                  x={100}
+                  y={11 + k * 18}
+                  width={10}
+                  height={4}
+                  rx={1}
+                  fill={f.won || k !== 1 ? "var(--art-accent)" : "var(--art-ink)"}
+                />
+              ))}
+            </OnFace>
+          </g>
+        </Move>
       ))}
 
       {/* The checks: a grid of runs that flicker, then sweep mint as one passes. */}
@@ -432,16 +511,18 @@ export function G1tArt({ id = "art-g1t", className, label }: SceneProps) {
       </OnFace>
 
       {/* The issue that set the fleet going, floating off to the side. */}
-      <g className="g1t-bob g1t-bob-issue">
-        <Line ps={[issue.b11, [forks[2].at[0], forks[2].at[1] + plate[1], forks[2].at[2]]]} ink="line" dots />
-        <Box at={issueAt} size={issueSize} nodes />
-        <OnFace face="top" origin={[issueAt[0] + 8, issueAt[1] + 7, issueAt[2] + 2]}>
-          <text y={10} fontFamily="var(--font-mono)" fontSize={11} fontWeight={600} fill="var(--art-accent)">
-            #128
-          </text>
-          <TextLines y={17} width={32} lines={2} heading={false} gap={6} />
-        </OnFace>
-      </g>
+      <Move to="translateY(-14px)" delay={80}>
+        <g className="g1t-bob g1t-bob-issue">
+          <Line ps={[issue.b11, [forks[2].at[0], forks[2].at[1] + plate[1], forks[2].at[2]]]} ink="line" dots />
+          <Box at={issueAt} size={issueSize} nodes />
+          <OnFace face="top" origin={[issueAt[0] + 8, issueAt[1] + 7, issueAt[2] + 2]}>
+            <text y={10} fontFamily="var(--font-mono)" fontSize={11} fontWeight={600} fill="var(--art-accent)">
+              #128
+            </text>
+            <TextLines y={17} width={32} lines={2} heading={false} gap={6} />
+          </OnFace>
+        </g>
+      </Move>
     </Art>
   );
 }
@@ -453,6 +534,10 @@ export function CraftArt({ id = "art-craft", className, label }: SceneProps) {
   const size: P3 = [120, 90, 66];
   const c = corners(at, size);
   const o = 20;
+  // Extension lines run long enough for the dimensions to slide out along
+  // them on hover.
+  const ext = o + 16;
+  const out = 11;
   return (
     <Art
       id={id}
@@ -463,17 +548,23 @@ export function CraftArt({ id = "art-craft", className, label }: SceneProps) {
     >
       <Box at={at} size={size} hatch="left" hatchId={ids.hatch} nodes />
       {/* Dimension lines along each visible edge, offset outward. */}
-      <Line ps={[[c.b01[0], c.b01[1] + o, 0], [c.b11[0], c.b11[1] + o, 0]]} ink="accent" />
-      <Line ps={[c.b01, [c.b01[0], c.b01[1] + o + 5, 0]]} ink="line" />
-      <Line ps={[c.b11, [c.b11[0], c.b11[1] + o + 5, 0]]} ink="line" />
-      <Line ps={[[c.b11[0] + o, c.b11[1], 0], [c.b10[0] + o, c.b10[1], 0]]} ink="accent" />
-      <Line ps={[c.b11, [c.b11[0] + o + 5, c.b11[1], 0]]} ink="line" />
-      <Line ps={[c.b10, [c.b10[0] + o + 5, c.b10[1], 0]]} ink="line" />
-      <Line ps={[[c.b10[0] + o, c.b10[1], 0], [c.t10[0] + o, c.t10[1], c.t10[2]]]} ink="accent" />
-      <Line ps={[c.t10, [c.t10[0] + o + 5, c.t10[1], c.t10[2]]]} ink="line" />
-      <Callout p={[c.b01[0] + 60, c.b01[1] + o, 0]} text="120.00" dx={-26} dy={20} />
-      <Callout p={[c.b11[0] + o, c.b11[1] - 45, 0]} text="90.00" dx={30} dy={18} />
-      <Callout p={[c.b10[0] + o, c.b10[1], 33]} text="66.00" dx={30} dy={-10} />
+      <Line ps={[c.b01, [c.b01[0], c.b01[1] + ext, 0]]} ink="line" />
+      <Line ps={[c.b11, [c.b11[0], c.b11[1] + ext, 0]]} ink="line" />
+      <Line ps={[c.b11, [c.b11[0] + ext, c.b11[1], 0]]} ink="line" />
+      <Line ps={[c.b10, [c.b10[0] + ext, c.b10[1], 0]]} ink="line" />
+      <Line ps={[c.t10, [c.t10[0] + ext, c.t10[1], c.t10[2]]]} ink="line" />
+      <Move to={along("y", out)}>
+        <Line ps={[[c.b01[0], c.b01[1] + o, 0], [c.b11[0], c.b11[1] + o, 0]]} ink="accent" />
+        <Callout p={[c.b01[0] + 60, c.b01[1] + o, 0]} text="120.00" dx={-26} dy={20} />
+      </Move>
+      <Move to={along("x", out)} delay={70}>
+        <Line ps={[[c.b11[0] + o, c.b11[1], 0], [c.b10[0] + o, c.b10[1], 0]]} ink="accent" />
+        <Callout p={[c.b11[0] + o, c.b11[1] - 45, 0]} text="90.00" dx={30} dy={18} />
+      </Move>
+      <Move to={along("x", out)} delay={140}>
+        <Line ps={[[c.b10[0] + o, c.b10[1], 0], [c.t10[0] + o, c.t10[1], c.t10[2]]]} ink="accent" />
+        <Callout p={[c.b10[0] + o, c.b10[1], 33]} text="66.00" dx={30} dy={-10} />
+      </Move>
     </Art>
   );
 }
@@ -497,7 +588,7 @@ export function PanelsArt({ id = "art-panels", className, label }: SceneProps) {
         const placeholder = i < 2;
         const at: P3 = [x, y, 0];
         return (
-          <g key={i}>
+          <Move key={i} to={`translateY(-${placeholder ? 4 : 6 + (i - 1) * 4}px)`} delay={(3 - i) * 60}>
             <Box at={at} size={[W, 3, H]} dashed={placeholder} ink={placeholder ? "line" : "ink"} />
             {placeholder ? (
               <OnFace face="left" origin={[x + 36, y + 3, H - 40]}>
@@ -523,7 +614,7 @@ export function PanelsArt({ id = "art-panels", className, label }: SceneProps) {
               </OnFace>
             )}
             <Node p={[x + W, y + 3, H]} ink={placeholder ? "line" : "ink"} />
-          </g>
+          </Move>
         );
       })}
     </Art>
@@ -555,33 +646,36 @@ export function StairsArt({ id = "art-stairs", className, label }: SceneProps) {
         const s = step(i);
         const isLast = i === n - 1;
         return (
-          <Box
-            key={i}
-            at={s.at}
-            size={[D, S, s.h]}
-            hatch="right"
-            hatchId={ids.hatch}
-            top={isLast ? "accent" : "top"}
-            ink={isLast ? "accent" : "ink"}
-          />
+          <Hop key={i} delay={i * 70}>
+            <Box
+              at={s.at}
+              size={[D, S, s.h]}
+              hatch="right"
+              hatchId={ids.hatch}
+              top={isLast ? "accent" : "top"}
+              ink={isLast ? "accent" : "ink"}
+            />
+          </Hop>
         );
       })}
-      {/* Where it goes next. */}
-      <Line
-        ps={[
-          lastTop,
-          [x0 + D, last.at[1] - S, last.h + rise],
-          [x0 + D, last.at[1] - 2 * S, last.h + 2 * rise],
-        ]}
-        ink="accent"
-        dots
-      />
-      <Node p={[x0 + D, last.at[1] - 2 * S, last.h + 2 * rise]} ink="accent" />
-      <OnFace face="top" origin={[x0 + 18, last.at[1] + 4, last.h]}>
-        <g style={{ color: "var(--art-accent)" }}>
-          <FlagonMark variant="mono" size={22} lid={false} lever={false} />
-        </g>
-      </OnFace>
+      {/* Where it goes next; on hover a wave climbs the steps to it. */}
+      <Hop delay={(n - 1) * 70}>
+        <Line
+          ps={[
+            lastTop,
+            [x0 + D, last.at[1] - S, last.h + rise],
+            [x0 + D, last.at[1] - 2 * S, last.h + 2 * rise],
+          ]}
+          ink="accent"
+          dots
+        />
+        <Node p={[x0 + D, last.at[1] - 2 * S, last.h + 2 * rise]} ink="accent" />
+        <OnFace face="top" origin={[x0 + 18, last.at[1] + 4, last.h]}>
+          <g style={{ color: "var(--art-accent)" }}>
+            <FlagonMark variant="mono" size={22} lid={false} lever={false} />
+          </g>
+        </OnFace>
+      </Hop>
     </Art>
   );
 }

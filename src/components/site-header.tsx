@@ -5,7 +5,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { MobileNav } from "@/components/mobile-nav";
 import { MainNav } from "@/components/main-nav";
 import { Search } from "@/components/search";
-import { Slash, buttonClasses } from "@/components/button";
+import { buttonClasses } from "@/components/button";
 
 export function SiteHeader() {
   return (
@@ -31,7 +31,6 @@ export function SiteHeader() {
               href="/careers"
               className={buttonClasses({ variant: "default", size: "sm" })}
             >
-              <Slash />
               Careers
             </Link>
           </div>

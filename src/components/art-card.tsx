@@ -4,21 +4,23 @@ import { cn } from "@/lib/cn";
 import { SCENES, type SceneName } from "@/components/art/scenes";
 import { SlantBox } from "@/components/slant";
 import { DOTS } from "@/components/schematic";
-import { runForHeight } from "@/lib/slant";
+import { runForHeight, slantSurface } from "@/lib/slant";
 
 export type ChipLink = { label: string; href: string; external?: boolean };
 
 /**
- * A small uppercase pill. With an href it's a friendly way into a deeper page
+ * A small uppercase tag, slanted like the buttons. With an href it's a friendly way into a deeper page
  * ("Values", "Pay formula"); without one it's just a tag.
  */
 export function Chip({ label, href, external }: { label: string; href?: string; external?: boolean }) {
-  const cls =
-    "inline-flex items-center rounded-full bg-foreground/[0.06] px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-foreground/80";
+  const cls = cn(
+    slantSurface,
+    "inline-flex items-center px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-foreground/80 before:bg-foreground/[0.06]",
+  );
   if (!href) return <span className={cls}>{label}</span>;
   const linkCls = cn(
     cls,
-    "outline-none transition hover:bg-brand/15 hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand",
+    "outline-none transition-colors hover:text-foreground hover:before:bg-brand/15 focus-visible:before:ring-2 focus-visible:before:ring-brand",
   );
   return external ? (
     <a href={href} target="_blank" rel="noreferrer" className={linkCls}>
@@ -58,7 +60,7 @@ export function ArtCard({
   const Scene = SCENES[art];
   const run = runForHeight("var(--stage-h)");
   return (
-    <article className={cn("flex flex-col", className)}>
+    <article className={cn("art-host flex flex-col", className)}>
       {/* A fixed-height stage, so wide and narrow cards keep the same rhythm
           and lean at the same angle; the drawing centers in it at its own
           aspect. */}

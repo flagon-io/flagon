@@ -9,7 +9,7 @@ import { ProductRail } from "@/components/product-rail";
 import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
 import { ArtCard } from "@/components/art-card";
-import { SlantSplit } from "@/components/slant";
+import { SlantBeams, SlantSplit } from "@/components/slant";
 import { site } from "@/lib/site";
 import { getAllPosts, formatDate } from "@/lib/blog";
 
@@ -25,6 +25,7 @@ export default function Home() {
       {/* Hero */}
       <section className="relative isolate flex flex-col items-center justify-center px-6 pb-14 pt-20 text-center sm:pt-24">
         <HexField />
+        <SlantBeams />
 
         <div className="rise" style={{ animationDelay: "0ms" }}>
           <FlagonPour className="relative h-36 w-36 sm:h-44 sm:w-44" />

@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { Check, Minus } from "lucide-react";
 import { Frame } from "@/components/frame";
-import { Section, SectionHeader, GUTTER } from "@/components/section";
+import { Section, SectionHeader } from "@/components/section";
 import { Schematic, SchematicGrid } from "@/components/schematic";
 import { Cta } from "@/components/cta";
+import { SlantSplit } from "@/components/slant";
 import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -79,7 +80,7 @@ export default function NotForEveryonePage() {
           />
         </Section>
 
-        <Section divider>
+        <Section divider bleed="both">
           <Schematic bleed>
             <SchematicGrid cols={2}>
               <Column
@@ -96,23 +97,21 @@ export default function NotForEveryonePage() {
           </Schematic>
         </Section>
 
-        <Section divider className="text-center">
-          <div className={GUTTER}>
-            <h2 className="mx-auto max-w-2xl text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-              Sound like your kind of place?
-            </h2>
-            <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground">
-              If the left column reads like you, you&rsquo;re probably our kind of
-              person. Read the handbook, or come say hi.
-            </p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Cta href="/handbook">Read the handbook</Cta>
-              <Cta href={site.links.discord} external variant="secondary">
-                Join the Discord
-              </Cta>
-            </div>
+        <SlantSplit art="stairs" artId="nfe-cta">
+          <h2 className="max-w-md text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
+            Sound like your kind of place?
+          </h2>
+          <p className="mt-4 max-w-md text-pretty text-muted-foreground">
+            If the left column reads like you, you&rsquo;re probably our kind of
+            person. Read the handbook, or come say hi.
+          </p>
+          <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
+            <Cta href="/handbook">Read the handbook</Cta>
+            <Cta href={site.links.discord} external variant="secondary">
+              Join the Discord
+            </Cta>
           </div>
-        </Section>
+        </SlantSplit>
       </main>
     </Frame>
   );

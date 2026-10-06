@@ -628,16 +628,56 @@ label[for] {
 .product-rail-clip {
   clip-path: polygon(calc(var(--slant) * 100%) 0, 100% 0, calc(100% - var(--slant) * 100%) 100%, 0 100%);
 }
+/* From md up the cards step up and down like box art on a shelf. Each one
+ * slides along its own slanted edges (down by --dy, left by the tilt of that),
+ * so the gaps between neighbours stay exactly even. */
+@media (width >= 48rem) {
+  .product-rail-slot {
+    translate: calc(var(--tilt) * var(--dy, 0rem) * -1) var(--dy, 0rem);
+  }
+  .product-rail-slot:nth-child(4n + 2) { --dy: 1.75rem; }
+  .product-rail-slot:nth-child(4n + 3) { --dy: 0.5rem; }
+  .product-rail-slot:nth-child(4n + 4) { --dy: 2.25rem; }
+}
 .product-rail-slot + .product-rail-slot {
   margin-left: calc(var(--card-w) * var(--slant) * -1 + var(--gap));
 }
 
+/* Line art that answers the pointer (components/art/scenes.tsx). Parts in a
+ * <Move> ease to their --to transform while the drawing's host (.art-host: a
+ * card, a split, a cover) is hovered or has focus, with a little overshoot so
+ * they settle like something physical; parts in a <Hop> jump once, staggered
+ * by --d. Held still under reduced motion. */
+.art-move {
+  transition: transform 700ms cubic-bezier(0.34, 1.45, 0.64, 1);
+}
+.art-move-box {
+  transform-box: fill-box;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .art-host:hover .art-move,
+  .art-host:focus-visible .art-move,
+  .art-host:focus-within .art-move {
+    transform: var(--to);
+  }
+  .art-host:hover .art-hop,
+  .art-host:focus-visible .art-hop,
+  .art-host:focus-within .art-hop {
+    animation: art-hop 650ms cubic-bezier(0.3, 0.7, 0.4, 1) var(--d, 0ms) both;
+  }
+}
+@keyframes art-hop {
+  40% {
+    transform: translateY(-7px);
+  }
+}
+
 /* Slant (lib/slant.ts, components/slant.tsx). One lean for every slanted edge
- * on the site: --tilt is the horizontal run per unit of height, about 6.5
+ * on the site: --tilt is the horizontal run per unit of height, about 8.5
  * degrees. Keep it in step with TILT in lib/slant.ts. Skewing rather than
  * clipping keeps the angle the same whatever an element's size. */
 :root {
-  --tilt: 0.1142857;
+  --tilt: 0.15;
   --tilt-angle: atan(var(--tilt));
 }
 @utility slant-skew {

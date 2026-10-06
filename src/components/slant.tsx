@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { slantSurface } from "@/lib/slant";
 import { SCENES, type SceneName } from "@/components/art/scenes";
 import { DOTS } from "@/components/schematic";
 import { Plus } from "@/components/plus";
@@ -9,6 +10,56 @@ import { Plus } from "@/components/plus";
  * clip, so the angle holds whatever an element's size, and borders follow the
  * slant for free.
  */
+
+/** A small slanted label, e.g. a product's status. */
+export function Tag({
+  children,
+  className,
+  style,
+}: {
+  children: ReactNode;
+  /** Colors: text, plus before: utilities for the surface. */
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <span
+      className={cn(
+        slantSurface,
+        "inline-flex items-center px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-widest",
+        className,
+      )}
+      style={style}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Long bands of light leaning at the site's tilt, behind a hero, like light
+ * through tall windows. Decorative; sits under the content.
+ */
+const BEAMS = [
+  { left: "6%", width: "9%" },
+  { left: "18%", width: "1.5%" },
+  { left: "68%", width: "14%" },
+  { left: "86%", width: "2.5%" },
+];
+
+export function SlantBeams({ className }: { className?: string }) {
+  return (
+    <div aria-hidden className={cn("pointer-events-none absolute inset-0 -z-10 overflow-hidden", className)}>
+      {BEAMS.map((b) => (
+        <div
+          key={b.left}
+          className="slant-skew absolute inset-y-0 origin-bottom border-l border-brand/15 bg-linear-to-b from-brand/[0.07] via-brand/[0.02] to-transparent"
+          style={{ left: b.left, width: b.width }}
+        />
+      ))}
+    </div>
+  );
+}
 
 /**
  * A box whose sides lean at the site's tilt, with its content upright inside.
@@ -81,7 +132,7 @@ export function SlantSplit({
   return (
     <section
       className={cn(
-        "relative isolate grid overflow-x-clip md:grid-cols-2",
+        "art-host relative isolate grid overflow-x-clip md:grid-cols-2",
         divider && "border-t border-hairline",
         className,
       )}
@@ -96,6 +147,9 @@ export function SlantSplit({
           className="absolute inset-0 border-t border-hairline bg-(--art-card) md:origin-bottom-left md:border-l md:border-t-0 md:slant-skew"
           style={DOTS}
         >
+          {/* A brand glow pooled behind the drawing, so the panel reads as a
+              lit stage rather than a gap. */}
+          <div className="absolute inset-0 bg-[radial-gradient(60%_55%_at_55%_60%,color-mix(in_oklab,var(--brand)_16%,transparent),transparent)]" />
           <Plus className={cn(mark, "-left-[7px] -top-[7px]", !divider && "md:hidden")} />
           <Plus className={cn(mark, "-bottom-[7px] -left-[7px]")} />
         </div>

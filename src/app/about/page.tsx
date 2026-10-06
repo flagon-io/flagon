@@ -87,7 +87,7 @@ export default function AboutPage() {
         </Section>
 
         {/* We just do the right thing */}
-        <Section divider>
+        <Section divider bleed="end">
           <SectionHeader
             title="We just try to do the right thing"
             lead="Not as a slogan. As a list of specific things we will and won't do, that you can hold us to."
@@ -125,7 +125,7 @@ export default function AboutPage() {
         </Section>
 
         {/* Transparency */}
-        <Section divider>
+        <Section divider bleed="end">
           <Narrative heading={<>Transparency isn&rsquo;t a feature. It&rsquo;s the whole thing.</>}>
             <p>
               You can see how the entire company operates. How we work, what we

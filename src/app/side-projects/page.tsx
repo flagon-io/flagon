@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 export default function SideProjectsPage() {
   return (
     <StubPage
+      art="craft"
       title="Things we build for the fun of it"
       lead="The small, sometimes weird projects we make outside the main work, for ourselves and for the community. They show up here and out in the open on GitHub."
       actions={[

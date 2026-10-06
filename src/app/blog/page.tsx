@@ -27,14 +27,14 @@ export default function BlogIndex() {
           />
         </Section>
 
-        <Section divider>
+        <Section divider bleed={posts.length > 0 ? undefined : "both"}>
           {posts.length > 0 ? (
             <ul className="grid gap-x-4 gap-y-12 px-6 sm:px-8 md:grid-cols-2 lg:grid-cols-3">
               {posts.map((p) => (
                 <li key={p.slug}>
                   <Link
                     href={`/blog/${p.slug}`}
-                    className="group flex h-full flex-col rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+                    className="art-host group flex h-full flex-col rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-4 focus-visible:ring-offset-background"
                   >
                     <PostCover
                       art={p.art}

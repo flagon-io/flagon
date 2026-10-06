@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
-import { Slash, buttonClasses } from "@/components/button";
+import { buttonClasses } from "@/components/button";
 import { site, isNavGroup } from "@/lib/site";
 
 /**
@@ -93,7 +93,6 @@ export function MobileNav() {
               onClick={() => setOpen(false)}
               className={buttonClasses({ variant: "default", className: "w-full" })}
             >
-              <Slash />
               Careers
             </Link>
           </div>

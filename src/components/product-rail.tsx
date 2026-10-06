@@ -4,6 +4,7 @@ import { ArrowRight, Code2, Globe, Plug, Terminal } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { SCENES } from "@/components/art/scenes";
 import { slantForAspect } from "@/lib/slant";
+import { Tag } from "@/components/slant";
 import {
   PRODUCTS,
   productHref,
@@ -81,7 +82,7 @@ export function ProductRail({ className }: { className?: string }) {
       // and swipes on phones.
       style={{ "--n": COUNT } as CSSProperties}
       className={cn(
-        "product-rail flex scroll-px-6 snap-x sm:scroll-px-8 snap-mandatory overflow-x-auto overscroll-x-contain px-6 pb-6 pt-2 outline-none [scrollbar-width:thin] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-8",
+        "product-rail flex scroll-px-6 snap-x sm:scroll-px-8 snap-mandatory overflow-x-auto overscroll-x-contain px-6 pb-6 pt-2 md:pb-14 outline-none [scrollbar-width:thin] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-8",
         className,
       )}
     >
@@ -149,7 +150,7 @@ function OutlineShape({ slant, dashed, className }: { slant: number; dashed: boo
 }
 
 const tileBase =
-  "product-rail-clip group relative flex aspect-(--card-aspect) flex-col outline-none motion-safe:transition-transform motion-safe:duration-300";
+  "art-host product-rail-clip group relative flex aspect-(--card-aspect) flex-col outline-none motion-safe:transition-transform motion-safe:duration-300";
 
 function ProductTile({ product }: { product: Product }) {
   const { card } = product;
@@ -187,12 +188,12 @@ function ProductTile({ product }: { product: Product }) {
         </div>
 
         <div className="flex flex-col gap-3" style={FOOT}>
-          <span
-            className="self-start rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest"
-            style={{ borderColor: card.accent, color: card.accent }}
+          <Tag
+            className="self-start before:border before:border-(--tag)"
+            style={{ "--tag": card.accent, color: card.accent } as CSSProperties}
           >
             {product.status}
-          </span>
+          </Tag>
           <ul className="flex items-center gap-2.5" aria-label="Works with">
             {card.surfaces.map((s) => {
               const { label, icon: Icon } = SURFACE[s];

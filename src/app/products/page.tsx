@@ -7,7 +7,7 @@ import { Cta } from "@/components/cta";
 import { ArtCard } from "@/components/art-card";
 import type { SceneName } from "@/components/art/scenes";
 import { ProductRail } from "@/components/product-rail";
-import { SlantSplit } from "@/components/slant";
+import { SlantBeams, SlantSplit } from "@/components/slant";
 import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -46,6 +46,7 @@ export default function ProductsPage() {
         {/* Hero */}
         <section className="relative isolate flex flex-col items-center justify-center px-6 pb-14 pt-20 text-center sm:pt-24">
           <HexField />
+          <SlantBeams />
           <div className="rise">
             <FlagonPour className="relative h-32 w-32 sm:h-40 sm:w-40" />
           </div>
