@@ -1,0 +1,686 @@
+---
+title: Everyone waits in line
+description: Pick an isolation level on purpose, handle errors and retries in transactions, read pg_locks during an incident, and build a job queue on SKIP LOCKED.
+part: Changing it
+builds_on: [mvcc, acid]
+---
+
+A migration adds a nullable column to `accounts`. It's a metadata-only change that completes in milliseconds. The moment it runs, every request that touches `accounts` hangs, the connection pool fills, and the site goes down. Nothing in the migration was slow. It was waiting, and while it waited, everyone else waited too.
+
+Here is that outage, reproduced with three sessions on the book's database. `migration` runs `alter table accounts add column note text`, and `web` runs `select name from accounts where id = 42`:
+
+```text
+  pid  |    app    |        state        | wait_event | blocked_by
+-------+-----------+---------------------+------------+------------
+ 11033 | reporting | idle in transaction | ClientRead | {}
+ 11046 | migration | active              | relation   | {11033}
+ 11061 | web       | active              | relation   | {11046}
+```
+
+The `reporting` session ran `select count(*) from accounts` inside a transaction and never closed it. The migration needs an exclusive lock, so it waits for the reporting session. The web request only wants to read one row, which the reporting session would happily allow, but it's queued behind the migration. Every request after it joins the line.
+
+Usually readers and writers don't block each other ([Updates are inserts](/books/eight-kilobytes/mvcc)). When they do, the line is the whole story. Learn to read it.
+
+## Pick an isolation level on purpose
+
+**Read committed**, the default, gives each statement a fresh [snapshot](/books/eight-kilobytes/glossary#snapshot); **repeatable read** gives the whole transaction one; **serializable** also guarantees a result some one-at-a-time order could produce. [Only serializable rules out every anomaly](/books/eight-kilobytes/acid#only-serializable-rules-out-every-anomaly) lists what each prevents; here is what each does to your code. (InnoDB defaults to repeatable read: [MySQL defaults to repeatable read; Postgres doesn't](/books/eight-kilobytes/not-mysql#mysql-defaults-to-repeatable-read-postgres-doesnt).)
+
+### Read committed loses updates computed in the app
+
+Most applications run here and are fine. The trap is read-modify-write in application code: two requests each read a balance, subtract in the application, and write back.
+
+<Fig name="lost-update">
+
+**The second write wins, silently.** Both transactions read 100, and tx2 waits for tx1's row lock, then writes a value computed from that stale read. The balance ends at 80, and tx1's spend is lost with no error.
+
+</Fig>
+
+tx1 spent 30 and tx2 spent 20: fifty credits spent, balance down by twenty. That's a **lost update**, and no error says so. Do the arithmetic in the database instead:
+
+```sql
+update credits
+set balance = balance - 30
+where account_id = 42 and balance >= 30
+returning balance;
+```
+
+An update that waited on a changed row re-reads the latest version and re-checks its `where`, so two concurrent spends return 70 and then 50. When the logic can't fit in one statement, lock the row as you read it with `select ... for update`.
+
+<DeepDive title="The lost update, run for real">
+
+Two sessions, both at read committed, each doing what a request handler would:
+
+```text
+  tx1                                tx2
+  begin;                             begin;
+  select balance ...;  -- 100        select balance ...;  -- 100
+  update credits set balance = 70
+                                     update credits set balance = 80
+                                       (waits on tx1's row lock)
+  commit;
+                                       (proceeds, overwrites 70)
+                                     commit;
+```
+
+While tx2 waits, `pg_stat_activity` shows it on `Lock` / `transactionid`, blocked by tx1. When tx1 commits, tx2's update finds the row changed, re-reads it, re-checks `where account_id = 42` (still true), and writes its 80 over tx1's 70.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.run('tx1', 'update credits set balance = 70 where account_id = 42') \g /dev/null
+select dblink_send_query('tx2', 'update credits set balance = 80 where account_id = 42') \g /dev/null
+select pg_sleep(0.3) \g /dev/null
+
+select lab.prove(
+  'tx2''s update waits for tx1''s row lock',
+  (select wait_event_type = 'Lock' and wait_event = 'transactionid'
+          and pg_blocking_pids(pid) = (select array_agg(pid) from lab.activity
+                                       where application_name = 'tx1')
+   from lab.activity where application_name = 'tx2'));
+
+select lab.run('tx1', 'commit') \g /dev/null
+select lab.finish('tx2') as tx2_result \gset
+select lab.run('tx2', 'commit') \g /dev/null
+
+select lab.prove(
+  'under read committed tx2 proceeds without error and overwrites: balance 80, a lost update',
+  :'tx2_result' = 'ok'
+  and (select balance from credits where account_id = 42) = 80);
+```
+
+</ProveIt>
+
+Run the same sequence with both transactions at repeatable read and tx2 fails the moment tx1 commits, because the row it wants to update changed after its snapshot. tx1's 70 stands.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.prove(
+  'under repeatable read tx2 fails with 40001 could not serialize access due to concurrent update, and tx1''s 70 stands',
+  :'tx2_result' = '40001: could not serialize access due to concurrent update'
+  and (select balance from credits where account_id = 42) = 70);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Repeatable read turns that race into an error to retry
+
+At repeatable read, an update of a row someone changed since your snapshot is refused instead of overwritten: the same race fails tx2 with `could not serialize access due to concurrent update`. At this level and at serializable, that error (SQLSTATE `40001`) is a normal outcome, not a bug: your code **retries the whole transaction**, or rare races become user-facing errors.
+
+### Serializable catches the write skew repeatable read misses
+
+Repeatable read still allows **write skew**. An on-call rotation must always have someone on call. Two engineers go off call at the same moment; each counts who's on call (2, so it's safe) and deactivates only their own row. Both commit, and nobody is on call; no row was updated twice, so repeatable read saw nothing wrong. At `serializable`, one fails with `could not serialize access due to read/write dependencies among transactions`. Postgres tracks what each transaction read, without blocking anyone, and aborts one when no serial order explains the result ([Even a read-only transaction can see the impossible](/books/eight-kilobytes/acid#even-a-read-only-transaction-can-see-the-impossible)).
+
+<DeepDive title="Write skew on the on-call table">
+
+Two rows, both active; each engineer's transaction runs:
+
+```sql
+begin isolation level repeatable read;
+select count(*) from on_call where account_id = 42 and active;  -- 2, so it's safe
+-- the other transaction deactivates user 2
+update on_call set active = false where account_id = 42 and user_id = 1;
+commit;
+```
+
+The read tracking shows as `SIReadLock` entries in `pg_locks`. You pay in overhead and in more retryable failures, a few of them false positives.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.prove(
+  'serializable records what each transaction read as SIReadLock entries in pg_locks',
+  exists (select from pg_locks l join lab.activity a using (pid)
+          where a.application_name = 'tx1' and l.mode = 'SIReadLock'));
+
+select lab.prove(
+  'one transaction fails with 40001 could not serialize access due to read/write dependencies, and someone stays on call',
+  :'outcome' like '%40001: could not serialize access due to read/write dependencies among transactions%'
+  and (select count(*) from on_call where active) = 1);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+Our default: read committed for requests, repeatable read for reports, serializable for rules across rows, with retries.
+
+### Retry the whole transaction
+
+Serialization failures (`40001`) and deadlocks (`40P01`) mean "nothing happened; try again". Retry the whole transaction, reads included, with capped, jittered attempts. Those two codes are the ones to retry by default; under serializable, a unique violation (`23505`) or exclusion violation (`23P01`) can also be a lost race worth one more try. Retry nothing else blindly. Keep side effects out of the retried function, or an email goes out once per attempt; record the intent and act after commit ([Put the message in the same transaction as the order](/books/eight-kilobytes/acid#put-the-message-in-the-same-transaction-as-the-order)).
+
+<DeepDive title="A retry wrapper in Go">
+
+```go
+func withRetry(ctx context.Context, pool *pgxpool.Pool,
+	fn func(pgx.Tx) error) error {
+	for attempt := 0; ; attempt++ {
+		opts := pgx.TxOptions{IsoLevel: pgx.Serializable}
+		err := pgx.BeginTxFunc(ctx, pool, opts, fn)
+		var pgErr *pgconn.PgError
+		retryable := errors.As(err, &pgErr) &&
+			(pgErr.Code == "40001" || pgErr.Code == "40P01")
+		if retryable && attempt < 4 {
+			jitter := rand.Intn(20 * (attempt + 1))
+			time.Sleep(time.Duration(jitter) * time.Millisecond)
+			continue
+		}
+		return err
+	}
+}
+```
+
+</DeepDive>
+
+## One error aborts the whole transaction
+
+In Postgres, any error inside a transaction poisons the rest of it:
+
+```sql
+begin;
+insert into users (account_id, email, name) values (1, 'new@example.com', 'New');
+insert into users (account_id, email, name) values (2, 'user1@example.com', 'Dup');
+update accounts set name = name where id = 1;
+commit;
+```
+
+```text
+ERROR:  duplicate key value violates unique constraint "users_account_id_email_key"
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ROLLBACK
+```
+
+The `update` never ran, and `commit` came back as `ROLLBACK`: the first insert is gone too. "Insert, catch the duplicate, carry on" breaks the moment someone wraps it in a transaction. Prevent the error instead (`on conflict do nothing`), or use a savepoint (MySQL differs; see [Errors abort the whole transaction](/books/eight-kilobytes/not-mysql#errors-abort-the-whole-transaction)).
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.prove(
+  'after a duplicate key error, the next statement fails with 25P02 and COMMIT reports ROLLBACK',
+  lab.run('tx1', 'begin') = 'ok'
+  and lab.run('tx1', $$insert into users (account_id, email, name) values (1, 'new@example.com', 'New')$$) = 'ok'
+  and lab.run('tx1', $$insert into users (account_id, email, name) values (2, 'user1@example.com', 'Dup')$$)
+      = '23505: duplicate key value violates unique constraint "users_account_id_email_key"'
+  and lab.run('tx1', 'update accounts set name = name where id = 1')
+      = '25P02: current transaction is aborted, commands ignored until end of transaction block'
+  and dblink_exec('tx1', 'commit') = 'ROLLBACK');
+```
+
+</ProveIt>
+
+### Savepoints contain the damage
+
+A savepoint marks a point you can roll back to without losing the rest. ORM "nested transactions" are savepoints (Rails' `requires_new: true`, Django's nested `atomic()`), and so is every PL/pgSQL `EXCEPTION` block.
+
+### Subtransactions are not free
+
+Each savepoint starts a **subtransaction**, and one that writes gets its own XID. Each backend caches 64 subtransaction XIDs; past that the cache **overflows**, and every session's visibility checks against that transaction fall back to an on-disk structure, `pg_subtrans`. Replicas are more fragile still: there, any subtransaction alongside one long-running transaction can push lookups into `pg_subtrans`. This bit GitLab in 2021: on their replicas, a single savepoint during a long-running transaction was enough to stall queries on and off for weeks, until they removed savepoints from the application ([GitLab's write-up](https://about.gitlab.com/blog/why-we-spent-the-last-month-eliminating-postgresql-subtransactions/)). Keep savepoints out of loops, and reach for `on conflict` first.
+
+<DeepDive title="Watching the subtransaction cache overflow">
+
+`pg_stat_get_backend_subxact` (PostgreSQL 16+) shows it. After 64 savepoints in one transaction, each followed by an insert: `subxact_count` 64, `subxact_overflowed` false. One more: still 64, and true.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+begin;
+select format('savepoint s%s', g), format('insert into subxact_demo values (%s)', g)
+from generate_series(1, 64) g \gexec
+
+select lab.prove(
+  'after 64 savepoints, each followed by an insert: 64 cached, not overflowed',
+  (select (subxact_count, subxact_overflowed) = (64, false) from lab.my_subxact()));
+
+savepoint s65;
+insert into subxact_demo values (65);
+
+select lab.prove(
+  'one more: the count stops at 64 and the overflow flag flips',
+  (select (subxact_count, subxact_overflowed) = (64, true) from lab.my_subxact()));
+rollback;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Every statement locks the table
+
+Every statement also locks each table it touches until the transaction ends. Three facts about the eight table lock modes cover nearly every incident:
+
+- **Reads and writes never conflict at the table level.** Row conflicts are a separate system.
+- **`ACCESS EXCLUSIVE` conflicts with everything, including plain `select`.** `drop`, `truncate`, and most `alter table` forms take it.
+- **`SHARE` blocks writes but not reads**, which is why plain `create index` makes a table read-only and `create index concurrently` exists.
+
+### Most ALTER TABLE forms take ACCESS EXCLUSIVE
+
+Most `ALTER TABLE` forms take `ACCESS EXCLUSIVE`, even when the work is instant: adding a nullable column takes microseconds, but getting the lock is the dangerous part ([Change the schema, keep the site](/books/eight-kilobytes/migrations)). To check a statement, run it in a transaction, read your rows in `pg_locks`, and roll back.
+
+<DeepDive title="The eight modes, the conflict matrix, and what each DDL took">
+
+`ROW SHARE` is `select ... for update`; `ROW EXCLUSIVE` is `insert`, `update`, `delete`; `SHARE UPDATE EXCLUSIVE` is `vacuum`, `analyze`, `create index concurrently`; `SHARE ROW EXCLUSIVE` is `create trigger` and adding a foreign key; `EXCLUSIVE` is `refresh materialized view concurrently`.
+
+```text
+                      held: AS   RS   RE   SUE  S    SRE  E    AE
+  requested
+  ACCESS SHARE (AS)         .    .    .    .    .    .    .    X
+  ROW SHARE (RS)            .    .    .    .    .    .    X    X
+  ROW EXCL (RE)             .    .    .    .    X    X    X    X
+  SHARE UPD EXCL (SUE)      .    .    .    X    X    X    X    X
+  SHARE (S)                 .    .    X    X    .    X    X    X
+  SHARE ROW EX (SRE)        .    .    X    X    X    X    X    X
+  EXCLUSIVE (E)             .    X    X    X    X    X    X    X
+  ACCESS EXCL (AE)          X    X    X    X    X    X    X    X
+```
+
+An X means the requested mode waits. On this server `add column`, `add constraint ... not valid`, and `rename column` took `AccessExclusiveLock`; `validate constraint` and `set (fillfactor = 90)` took `ShareUpdateExclusiveLock`; `add foreign key ... not valid` took `ShareRowExclusiveLock` on both tables.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+-- lab.locks_taken runs a statement, reads this session's table locks from
+-- pg_locks, and rolls back
+select lab.prove('add column takes AccessExclusiveLock',
+  lab.locks_taken('alter table projects add column note text', '{projects}') = '{"projects AccessExclusiveLock"}');
+select lab.prove('validate constraint takes ShareUpdateExclusiveLock',
+  lab.locks_taken('alter table projects validate constraint name_not_empty', '{projects}')
+    = '{"projects ShareUpdateExclusiveLock"}');
+select lab.prove('create index takes ShareLock',
+  lab.locks_taken('create index on projects (created_at)', '{projects}') = '{"projects ShareLock"}');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A waiting lock blocks everyone behind it
+
+Locks are granted in order, like a single line at a counter. Requests that conflict with a **waiting** request queue behind it, even if they're compatible with everything held. That prevents starvation, and it's exactly what turns a harmless migration into an outage.
+
+<Fig name="lock-queue">
+
+**One waiting lock stops every query.** The migration waits for the idle reporting transaction, and every query after it, even a plain read, waits behind the migration. When reporting commits, the migration runs in a millisecond and the line drains.
+
+</Fig>
+
+In `pg_locks` during the opening incident, the web query's `AccessShareLock` shows `granted = f`, though the only granted lock is another `AccessShareLock`: it's behind the migration. In production a few hundred requests a second pile up, the pool runs dry, and health checks fail. When the reporting transaction ends, the migration runs in a millisecond and the line drains.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.prove(
+  'the web SELECT waits too: its AccessShareLock is not granted, and it is blocked by the migration',
+  exists (select from pg_locks where pid = :web_pid and relation = 'accounts'::regclass
+          and mode = 'AccessShareLock' and not granted)
+  and pg_blocking_pids(:web_pid) = array[:migration_pid]
+  and (select (wait_event_type, wait_event) = ('Lock', 'relation') from lab.activity where pid = :web_pid));
+```
+
+</ProveIt>
+
+The defense is to make DDL give up quickly. With `set lock_timeout = '2s'`, the same `alter` fails with `canceling statement due to lock timeout` after two seconds instead of holding the line. Two seconds of blocked traffic is a blip; retry a few times. Then find the session that held the lock: an `idle in transaction` session holding locks is a bug, and [idle_in_transaction_session_timeout](/books/eight-kilobytes/connections#idle_in_transaction_session_timeout-matters-most) caps how long it can last.
+
+<Callout type="danger" title="Every migration sets lock_timeout">
+Any statement that takes `ACCESS EXCLUSIVE` can take the site down if it has to wait, so every migration session sets `lock_timeout` and retries ([Rule one: lock_timeout and retry](/books/eight-kilobytes/migrations#rule-one-lock_timeout-and-retry)).
+</Callout>
+
+<DeepDive title="Reproducing the queue">
+
+Three sessions: `reporting` runs `begin; select count(*) from accounts;` and sits idle; `migration` runs `alter table accounts add column note text`; `web` runs `select name from accounts where id = 42`. Then `pg_locks` joined to `pg_stat_activity` on `pid`, for `relation = 'accounts'::regclass`:
+
+```text
+  pid  | application_name | locktype |        mode         | granted
+-------+------------------+----------+---------------------+---------
+ 11033 | reporting        | relation | AccessShareLock     | t
+ 11046 | migration        | relation | AccessExclusiveLock | f
+ 11061 | web              | relation | AccessShareLock     | f
+```
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.prove(
+  'the migration waits for AccessExclusiveLock, blocked by reporting',
+  exists (select from pg_locks where pid = :migration_pid and relation = 'accounts'::regclass
+          and mode = 'AccessExclusiveLock' and not granted)
+  and pg_blocking_pids(:migration_pid) = array[:reporting_pid]);
+
+set lock_timeout = '2s';
+select lab.prove(
+  'with lock_timeout = 2s the migration gives up: canceling statement due to lock timeout',
+  lab.try('alter table accounts add column note text')
+    = '55P03: canceling statement due to lock timeout');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Row locks live in the row, not in pg_locks
+
+Row locks aren't kept in `pg_locks` while held (there could be millions). A locking transaction writes its ID into the row's header ([`xmax`](/books/eight-kilobytes/glossary#xmin-and-xmax), [Everything is a page](/books/eight-kilobytes/storage)), and a transaction wanting a conflicting lock waits for that **transaction** to finish. So a row-lock wait usually shows up as an ungranted `ShareLock` on a `transactionid`, not on a row. When several sessions queue for the same row, the first waiter also holds a heavyweight `tuple` lock on it, and the ones behind it wait on that `tuple` lock instead, so in a pile-up you'll see ungranted `tuple` entries too.
+
+| Lock | Taken by | Blocks |
+|---|---|---|
+| `FOR UPDATE` | `DELETE`; `UPDATE` that changes a key column; explicit | All other row locks |
+| `FOR NO KEY UPDATE` | Any other `UPDATE`; explicit | `FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE` |
+| `FOR SHARE` | Explicit `select ... for share` | `FOR UPDATE`, `FOR NO KEY UPDATE` |
+| `FOR KEY SHARE` | Foreign key checks on the referenced row; explicit | `FOR UPDATE` only |
+
+The weaker pair exists for foreign keys. Inserting an event for project 1 takes `FOR KEY SHARE` on the project, and a rename of the project (`FOR NO KEY UPDATE`) doesn't block it. But while a session holds `select ... for update` on the project, the insert waits: 3.6 seconds in our test, until that session rolled back. So lock with `for no key update` unless you'll delete the row or change its key. **`nowait`** fails instead of waiting; **`skip locked`** skips rows someone holds.
+
+<DeepDive title="What a row-lock wait looks like in pg_locks">
+
+With session A holding `for update` on project 1, the insert's locks:
+
+```text
+  app   |   locktype    |      mode       | granted | blocked_by
+--------+---------------+-----------------+---------+------------
+ locker | transactionid | ExclusiveLock   | t       | {}
+ writer | transactionid | ExclusiveLock   | t       | {10113}
+ writer | tuple         | AccessShareLock | t       | {10113}
+ writer | transactionid | ShareLock       | f       | {10113}
+```
+
+The writer asks for a `ShareLock` on the locker's XID: "wake me when that transaction ends". The granted `tuple` lock is the writer's place at the head of the line for this row; a second writer would wait on it, ungranted.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+set lock_timeout = '1s';
+select lab.prove(
+  'an explicit FOR NO KEY UPDATE does not block it either',
+  lab.try($$insert into events (account_id, project_id, user_id, kind) values (9, 1, 8, 'comment')$$)
+    = 'ok');
+
+-- now tx1 holds select ... for update on project 1, and tx2 sends the same insert
+select lab.prove(
+  'FOR UPDATE on the project blocks the insert: an ungranted ShareLock on the locker''s transactionid',
+  exists (select from pg_locks l join lab.activity a using (pid)
+          where a.application_name = 'tx2' and l.locktype = 'transactionid'
+            and l.mode = 'ShareLock' and not l.granted)
+  and (select pg_blocking_pids(pid) from lab.activity where application_name = 'tx2')
+      = (select array_agg(pid) from lab.activity where application_name = 'tx1'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Shared row locks make multixacts, and multixacts wrap too
+
+When two open transactions lock the same row in modes that don't conflict, such as two child inserts taking `FOR KEY SHARE` on one parent, Postgres puts a **multixact** in its `xmax`: an ID pointing to a member list. A popular parent under many concurrent child inserts gets a new one per insert. Multixacts have their own wraparound ([Wraparound stops writes before anything is corrupted](/books/eight-kilobytes/vacuum#wraparound-stops-writes-before-anything-is-corrupted)): watch `mxid_age(datminmxid)` next to transaction ID age, and keep child-inserting transactions short.
+
+<DeepDive title="Three lockers, and the member-space limits">
+
+Three sessions each `begin`, insert one child row for parent 1, and stay open. `pgrowlocks` shows one multixact in the parent's `xmax`, and `pg_get_multixact_members` lists three transaction IDs in `keysh` mode. The third locker got a new multixact holding all three, since multixacts never change.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.prove(
+  'two open child inserts make the parent row''s xmax a multixact of two FOR KEY SHARE members',
+  :'mx_multi' = 't'
+  and (select count(*) = 2 and bool_and(mode = 'keysh')
+       from pg_get_multixact_members(:'mx_two'::xid)));
+
+select lab.prove(
+  'a third locker creates a new multixact holding all three, rather than changing the old one',
+  :'mx_three' <> :'mx_two'
+  and (select count(*) = 3 and bool_and(mode = 'keysh')
+       from pg_get_multixact_members(:'mx_three'::xid)));
+```
+
+</ProveIt>
+
+`autovacuum_multixact_freeze_max_age` (400 million by default) forces an anti-wraparound vacuum. The member area has its own limit: past about 10 GB autovacuum gets aggressive everywhere, and at about 20 GB the server refuses to create multixacts (`multixact "members" limit exceeded`, [Routine Vacuuming](https://www.postgresql.org/docs/18/routine-vacuuming.html#VACUUM-FOR-MULTIXACT-WRAPAROUND)), which blocks exactly the foreign key inserts into a busy parent. For such a parent, `alter table projects set (autovacuum_multixact_freeze_max_age = 100000000)` freezes it sooner, and avoid `for share` in application code.
+
+</DeepDive>
+
+## LWLock waits are fixed in the workload, not the query
+
+Not every line forms on a lock you asked for. Under heavy concurrency, sessions also queue on `LWLock`s, which no statement of yours mentions. A **lightweight lock** guards a piece of shared memory for microseconds, and a pile of waits means "too many of us are doing the same internal thing at once", not "someone holds what I want". So the fix is in the workload:
+
+- **`LockManager`**: hot queries lock too many tables and indexes. Each backend has a few private **fast-path** slots that skip the shared lock table: 16 through PostgreSQL 17, 64 by default in 18.
+- **`BufferMapping`**: the working set doesn't fit in memory.
+- **`WALWrite`**: too many tiny transactions commit.
+
+<DeepDive title="Inside the lock manager: the fast path, and four LWLocks">
+
+Every query locks every relation it plans against, in a shared lock table split into 16 partitions, each behind one `LockManager` LWLock. Private **fast-path** slots skip that for weak table locks; PostgreSQL 18 sizes them from `max_locks_per_transaction`, 64 at the default ([the commit](https://postgr.es/c/c4d5cb71d)). An unpruned query over 365 partitions took 64 fast-path locks and 1,035 shared ones ([Every partition a query can't prune costs planning time](/books/eight-kilobytes/partitioning#every-partition-a-query-cant-prune-costs-planning-time)). Drop unused indexes, make partitioned queries prune, and on 18 raise `max_locks_per_transaction` (a restart) if hot queries touch more than 64 relations.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+-- one transaction locks 100 small tables in AccessShare mode
+select lab.prove(
+  'PostgreSQL 18 has more than 16 fast-path slots, at most 64 at the default max_locks_per_transaction; the rest go to the shared lock table',
+  :fp_fast > 16 and :fp_fast <= 64 and :fp_fast + :fp_slow = 100);
+```
+
+</ProveIt>
+
+`BufferMapping` is explained in [Finding a page takes a hash lookup](/books/eight-kilobytes/buffers#finding-a-page-takes-a-hash-lookup) and `WALWrite` in [Many commits share one flush](/books/eight-kilobytes/wal#many-commits-share-one-flush). A fourth, `BufferContent`, means one hot page many sessions write, like the last leaf of an ever-increasing key. Two more lines form inside the server: the **relation extension lock** (`Lock:extend`) when many sessions grow one table, much cheaper since PostgreSQL 16 ([the commit](https://postgr.es/c/00d1e02be)), and the **SLRU** caches for transaction status, subtransactions, and multixacts, thrashing when `pg_stat_slru`'s `blks_read` keeps climbing.
+
+</DeepDive>
+
+## A Postgres queue commits with the business write
+
+Row locks and `skip locked` add up to a solid job queue, with one decisive advantage over a separate system: the job is enqueued in the same transaction as the business write. Roll back and it never existed. A `jobs` table needs a partial index on queued jobs only, which stays small however many finished jobs pile up:
+
+```sql
+create index jobs_ready_idx on jobs (queue, run_at, id)
+  where status = 'queued';
+```
+
+### Each worker skips the jobs others hold
+
+Each worker must get a different job without waiting on the others:
+
+```sql
+update jobs
+set status    = 'running',
+    attempts  = attempts + 1,
+    locked_at = now(),
+    locked_by = 'worker-a'
+where id = (
+  select id from jobs
+  where queue = 'default' and status = 'queued' and run_at <= now()
+  order by run_at, id
+  limit 1
+  for update skip locked
+)
+returning id, payload, attempts;
+```
+
+The subquery skips any job another worker holds and takes the first it can lock: 20 buffers with 200,000 finished jobs in the table. With worker A holding job 1, worker B got job 2 immediately. Without `skip locked`, a third worker queued behind A until its `lock_timeout` fired: every worker in line for the same row, throughput collapsed to one.
+
+<DeepDive title="The table, the claim's plan, and the workers side by side">
+
+```sql
+create table jobs (
+  id          bigint generated always as identity primary key,
+  queue       text not null default 'default',
+  payload     jsonb not null,
+  status      text not null default 'queued'
+              check (status in ('queued', 'running', 'done', 'failed')),
+  attempts    int not null default 0,
+  run_at      timestamptz not null default now(),
+  locked_at   timestamptz,
+  locked_by   text,
+  last_error  text,
+  created_at  timestamptz not null default now()
+);
+```
+
+```text
+ Update on jobs (actual time=0.040..0.041 rows=1.00 loops=1)
+   Buffers: shared hit=20
+   InitPlan 1
+     ->  Limit ...
+           ->  LockRows ...
+                 ->  Index Scan using jobs_ready_idx on jobs jobs_1 ...
+```
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.prove(
+  'worker-b gets the next job immediately, not worker-a''s',
+  :b_job = :a_job + 1);
+
+select lab.prove(
+  'without skip locked, worker-c queues behind worker-a''s lock until its lock_timeout fires',
+  lab.run('worker-c', 'set lock_timeout = ''1s''') = 'ok'
+  and lab.run('worker-c', $$select id from jobs
+                            where queue = 'default' and status = 'queued' and run_at <= now()
+                            order by run_at, id limit 1
+                            for update$$)
+      = '55P03: canceling statement due to lock timeout');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Short jobs hold the transaction; long jobs commit first
+
+For jobs of a few seconds, **hold the transaction for the whole job**: a crash rolls it back and frees the job. For jobs that run minutes, which would hold back vacuum, **claim and commit, process, then record the result**, with a reaper for jobs stuck in `running` and idempotent handlers. A claim reads about 20 pages, so the queue rarely limits throughput before the jobs do; we didn't benchmark a ceiling, so measure yours. Delete or archive `done` jobs on a schedule: the partial index ignores them, but the heap and vacuum don't.
+
+<DeepDive title="Recording results, retries, and the reaper">
+
+```sql
+-- success
+update jobs set status = 'done', locked_at = null where id = $1;
+
+-- failure: retry with exponential backoff, give up after 5 attempts
+update jobs
+set status     = case when attempts >= 5 then 'failed' else 'queued' end,
+    run_at     = now() + interval '10 seconds' * power(2, attempts),
+    last_error = $2,
+    locked_at  = null
+where id = $1;
+
+-- the reaper
+update jobs
+set status = 'queued', locked_at = null, locked_by = null
+where status = 'running' and locked_at < now() - interval '15 minutes';
+```
+
+`notify jobs` in the enqueuing transaction is delivered only on commit, so workers can `listen` instead of polling hard. At high enqueue rates, though, every committing transaction that issued a `notify` takes one database-wide lock to queue its notifications, which serializes those commits. Notify once per batch, or let workers poll at a modest interval.
+
+</DeepDive>
+
+## Take advisory locks per transaction, not per session
+
+For mutual exclusion over something that isn't a row ("only one nightly rollup at a time"), advisory locks lock an integer key that means whatever you say. Two cron instances each start a transaction and run `select pg_try_advisory_xact_lock(hashtext('nightly-rollup'))`: the first gets `t`, the second `f` and exits. The transaction-scoped form is released at commit or rollback, so prefer it to the session-level `pg_advisory_lock`. Session-level locks leak through any error path that skips the unlock, for as long as the pooled connection lives.
+
+<DeepDive title="An advisory lock shows up as its hashed key">
+
+The checks below use the session-level `pg_try_advisory_lock` to show the difference. In `pg_locks` the lock shows as `locktype = advisory` with `objid` 107030647, which is `hashtext('nightly-rollup')`. For entity locks, the two-integer form, `pg_advisory_xact_lock(1, account_id)`, avoids hash collisions.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.prove(
+  'the first cron instance gets the lock, the second does not',
+  (select got from dblink('cron-a', $$select pg_try_advisory_lock(hashtext('nightly-rollup'))$$) as t(got boolean))
+  and not (select got from dblink('cron-b', $$select pg_try_advisory_lock(hashtext('nightly-rollup'))$$) as t(got boolean)));
+
+select lab.prove(
+  'a transaction-scoped advisory lock is released at commit',
+  lab.run('cron-a', 'begin') = 'ok'
+  and (select true from dblink('cron-a', 'select pg_advisory_xact_lock(1, 42)') as t(v text))
+  and not (select got from dblink('cron-b', 'select pg_try_advisory_xact_lock(1, 42)') as t(got boolean))
+  and lab.run('cron-a', 'commit') = 'ok'
+  and (select got from dblink('cron-b', 'select pg_try_advisory_xact_lock(1, 42)') as t(got boolean)));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Deadlocks are an ordering bug
+
+A deadlock is two transactions each waiting for a lock the other holds. After `deadlock_timeout` (1 second) Postgres finds the cycle and aborts one:
+
+```text
+  tx1                                tx2
+  ------------------------------     ------------------------------
+  update accounts ... id = 1;
+                                     update accounts ... id = 2;
+  update accounts ... id = 2;
+    (waits for tx2)
+                                     update accounts ... id = 1;
+                                       (waits for tx1: cycle)
+```
+
+tx1 got `ERROR: deadlock detected`; tx2 committed. The fix is **consistent lock ordering**: lock rows in primary key order (`select ... order by id for update` first, since `where id = any($1)` doesn't guarantee order), touch tables in a fixed order, and retry `40P01`. Turn on `log_lock_waits`.
+
+<DeepDive title="Deadlocks are counted, so graph them">
+
+The error's `DETAIL` names both processes, the XID each was waiting for, and both statements, which usually points straight at the two code paths that lock in opposite orders. `pg_stat_database.deadlocks` counts them, so graph it: a steady trickle means an ordering bug in a hot path, not bad luck. With `log_lock_waits` on, any lock wait that outlasts `deadlock_timeout` is logged with its blocker even when no cycle forms, which catches the near misses too.
+
+<ProveIt lab="24-concurrency">
+
+```sql
+select lab.prove(
+  'exactly one of the two fails with 40P01 deadlock detected; the other gets its lock',
+  :'outcome' in ('40P01: deadlock detected / ok', 'ok / 40P01: deadlock detected'));
+
+select lab.prove(
+  'pg_stat_database counts the deadlock',
+  (select deadlocks from pg_stat_database where datname = current_database()) > :deadlocks_before);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Find the root blocker
+
+When something is stuck, find the root of the line first. This query lists every session waiting on a lock plus every session blocking one; it produced the table at the top of this chapter, which shows only some of its columns:
+
+```sql
+select pid,
+       application_name           as app,
+       state,
+       wait_event_type            as wait_type,
+       wait_event,
+       pg_blocking_pids(pid)      as blocked_by,
+       date_trunc('second', now() - xact_start) as xact_age,
+       left(query, 40)            as query
+from pg_stat_activity
+where backend_type = 'client backend'
+  and (wait_event_type = 'Lock' or pid in (
+        select unnest(pg_blocking_pids(pid)) from pg_stat_activity))
+order by xact_start;
+```
+
+`wait_event` says `relation` for a table lock, `transactionid` for a row lock. The root has an empty `blocked_by` and is often `idle in transaction`. `select pg_terminate_backend(11033)` ends it, rolling back its transaction (`pg_cancel_backend` does nothing for an idle session). Then fix whatever left it open.
+
+<Callout type="tip" title="Keep transactions short">
+Almost every problem in this chapter gets worse with long transactions: they hold locks longer, extend the lock queue, widen the window for deadlocks, keep subtransaction overflow alive, and block vacuum. Never hold a transaction open across a network call or a user's think time.
+</Callout>
+
+## The short version
+
+- Read committed loses updates in application read-modify-write. Do the arithmetic in SQL.
+- Repeatable read and serializable turn anomalies into `40001` errors; retry the whole transaction, side effects after commit.
+- One error aborts the transaction. Prevent errors instead of catching them, and keep savepoints out of loops.
+- One waiting `ALTER TABLE` blocks every later query on its table. Always set `lock_timeout` for migrations.
+- `LWLock` waits mean the workload is crowding an internal structure: fix the workload.
+- `for update skip locked` and a partial index make a job queue that commits with the business write.
+- Lock in a consistent order. In an incident, find the root blocker first.
+
+## Further reading
+
+- [Transaction Isolation](https://www.postgresql.org/docs/18/transaction-iso.html), PostgreSQL documentation. What each level guarantees, including the read committed re-check rule.
+- [Explicit Locking](https://www.postgresql.org/docs/18/explicit-locking.html), PostgreSQL documentation. Table and row lock matrices, advisory locks, deadlocks.
+- [Serialization Failure Handling](https://www.postgresql.org/docs/18/mvcc-serialization-failure-handling.html), PostgreSQL documentation. Which SQLSTATEs to retry.
+- [Why we spent the last month eliminating PostgreSQL subtransactions](https://about.gitlab.com/blog/why-we-spent-the-last-month-eliminating-postgresql-subtransactions/), GitLab, 2021. The incident above, investigated in full.
+- [Subtransactions](https://www.postgresql.org/docs/18/subxacts.html), PostgreSQL documentation. The 64-entry cache and what happens past it.
+- [src/backend/storage/lmgr/README](https://github.com/postgres/postgres/blob/master/src/backend/storage/lmgr/README), PostgreSQL source. Spinlocks, LWLocks, heavyweight locks, and the fast path.
+- [Multixacts and Wraparound](https://www.postgresql.org/docs/18/routine-vacuuming.html#VACUUM-FOR-MULTIXACT-WRAPAROUND), PostgreSQL documentation. Freezing multixacts and the member-space limits.

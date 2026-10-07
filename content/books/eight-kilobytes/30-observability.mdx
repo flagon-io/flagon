@@ -1,0 +1,637 @@
+---
+title: Watch it run
+description: Use pg_stat_statements, pg_stat_activity, and the cumulative statistics views to find what is slow, what is stuck, and what to alert on.
+part: Running it
+builds_on: [buffers, concurrency, vacuum]
+---
+
+For one minute, our test server ran a mixed workload with `pgbench`: primary key lookups on `users`, inserts into `events`, a project list, and a small report. Here are the most frequent query and the least frequent one:
+
+```text
+ calls | total_ms | pct  |                  query
+-------+----------+------+------------------------------------------
+   525 |    29923 | 66.1 | select kind, count(*) from events where
+ 31137 |      800 |  1.8 | select id, email, name from users where
+```
+
+The query that ran 59 times less often consumed 37 times more database time: two thirds of everything the server did. A dashboard of request rates wouldn't show it. Neither would a slow-query log at 100 ms, since a typical call took about 57 ms.
+
+The slow query you can see is rarely the problem. The views in this chapter show you the one you can't, and end with a short list worth waking someone for. Nearly all of them read the **cumulative statistics system**: counters every backend increments, kept until a reset or a crash. A counter alone tells you almost nothing. Rates and rankings do.
+
+## Start with pg_stat_statements
+
+`pg_stat_statements` is the most useful observability tool in Postgres. It groups statements by normalized shape and keeps running totals per shape: calls, time, rows, buffers, WAL, temp files. It ships with Postgres, and every major managed service offers it.
+
+### pg_stat_statements loads at server start
+
+It has to be preloaded, so turning it on takes a restart:
+
+```ini
+shared_preload_libraries = 'pg_stat_statements'   # restart required
+track_io_timing = on                              # adds I/O time columns
+```
+
+Then `create extension pg_stat_statements` in each database you'll query it from; the data is cluster-wide. `track_io_timing` is cheap on modern Linux (`pg_test_timing` checks), and the I/O time it records is among the most useful data you can collect.
+
+Constants become placeholders, so every primary key lookup is one row, keyed by `queryid`, which also appears in `pg_stat_activity` as `query_id`.
+
+<DeepDive title="How statements are grouped, and what PostgreSQL 18 changed">
+
+`pg_stat_statements.max` (5,000) caps distinct statements; `track = top`, the default, counts only top-level ones. Since PostgreSQL 18, tables go into the `queryid` hash by name, so dropping and recreating a table keeps its history. The flip side: same-named tables in different schemas now share one entry, so with a schema per tenant, every tenant's `select ... from orders` is one row. `%Q` in `log_line_prefix` puts the `queryid` in the log.
+
+ORMs that send `in ($1, $2)`, then `in ($1, $2, $3)`, used to flood the view with one entry per list length. PostgreSQL 18 collapses them into one entry, `in ($1 /*, ... */)`. `= any($1)` with an array is still the better habit: one statement shape on every version ([Queries that age well](/books/eight-kilobytes/queries)).
+
+<ProveIt lab="30-observability">
+
+```sql
+select lab.prove(
+  'pg_stat_statements is preloaded, compute_query_id is auto, and it tracks top-level statements',
+  current_setting('shared_preload_libraries') like '%pg_stat_statements%'
+  and current_setting('compute_query_id') = 'auto'
+  and current_setting('pg_stat_statements.track') = 'top');
+```
+
+</ProveIt>
+
+<ProveIt lab="30-observability">
+
+```sql
+select count(*) from projects where id = 1;
+select   count(*)
+  from projects   where id = 2;
+
+select lab.prove(
+  'whitespace and constants do not change the queryid',
+  (select calls from lab.stmts where query = 'select count(*) from projects where id = $1') = 2);
+
+create table scratch (id int);
+select count(*) from scratch where id = 1;
+drop table scratch;
+create table scratch (id int);
+select count(*) from scratch where id = 1;
+
+select lab.prove(
+  'PostgreSQL 18 hashes tables by name: a dropped and recreated table keeps its queryid',
+  (select calls from lab.stmts where query = 'select count(*) from scratch where id = $1') = 2);
+```
+
+</ProveIt>
+
+<ProveIt lab="30-observability">
+
+```sql
+select count(*) from users where id in (1, 2);
+select count(*) from users where id in (1, 2, 3, 4, 5);
+select count(*) from users where id in (7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+select count(*) from users where id in ($1, $2) \bind 1 2 \g
+select count(*) from users where id in ($1, $2, $3) \bind 1 2 3 \g
+
+select lab.prove(
+  'PostgreSQL 18 collapses IN lists of any length into one entry, shown as in ($1 /*, ... */)',
+  (select calls from lab.stmts
+   where query = 'select count(*) from users where id in ($1 /*, ... */)') = 5);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Rank the same view four ways, total time first
+
+Every investigation starts with the same view, ranked four ways. **Where does the time go?** Rank by `total_exec_time`. It's the first query to run on any server:
+
+```sql
+select calls,
+       round(total_exec_time) as total_ms,
+       round((100 * total_exec_time
+              / sum(total_exec_time) over ())::numeric, 1) as pct,
+       left(regexp_replace(query, '\s+', ' ', 'g'), 40) as query
+  from pg_stat_statements
+ order by total_exec_time desc
+ limit 4;
+```
+
+```text
+ calls | total_ms | pct  |                  query
+-------+----------+------+------------------------------------------
+   525 |    29923 | 66.1 | select kind, count(*) from events where
+ 10484 |     9617 | 21.2 | insert into events (account_id, project_
+  5619 |     4930 | 10.9 | select p.id, p.name, (select count(*) fr
+ 31137 |      800 |  1.8 | select id, email, name from users where
+```
+
+Total time is calls times average time. Fixing the top line frees two thirds of this server's query time; fixing the most frequent query, at most 1.8%.
+
+**What is slow for the user?** Rank by `mean_exec_time`, skipping rare statements. The report averaged 57 ms. A large `max_exec_time` says a query is sometimes much slower, like the insert here (mean 0.92 ms, max 254 ms) on a disk busy with something else.
+
+**What touches the most pages?** Rank by `shared_blks_hit + shared_blks_read`, divided by `calls`. Time is noisy; pages are not. This is the whole book's argument as a query:
+
+```text
+ calls | blks_per_call | hit_pct |                  query
+-------+---------------+---------+------------------------------------------
+   525 |         35248 |    34.0 | select kind, count(*) from events where
+  5619 |           257 |    99.6 | select p.id, p.name, (select count(*) fr
+ 10484 |            22 |    93.5 | insert into events (account_id, project_
+ 31137 |             3 |    67.7 | select id, email, name from users where
+```
+
+The report touches 35,248 pages per call, 275 MB: the whole `events` table, which has no index on `project_id` ([The B-tree does the heavy lifting](/books/eight-kilobytes/btree) fixes it). The primary key lookup touches 3. The project list touches 257 for 20 rows, through an unindexed foreign key. Blocks per call is the number to drive down, and it barely moves between runs, so it's the before-and-after measure ([Change one thing, and measure it end to end](/books/eight-kilobytes/benchmarking#change-one-thing-and-measure-it-end-to-end)).
+
+**What writes the most?** Rank by `wal_bytes`. The insert wrote 75 MB of WAL in a minute, about 7.5 KB per row, almost all of it [full-page images](/books/eight-kilobytes/glossary#full-page-write) ([Write it down first](/books/eight-kilobytes/wal)). WAL volume drives replica lag, backup size, and disk throughput.
+
+<DeepDive title="The other ranking queries, and five WAL records per insert">
+
+<ProveIt lab="30-observability">
+
+```sql
+select lab.prove(
+  'the report ran over 20 times less often than the lookup but took over 5 times more total time',
+  (select calls from w where name = 'lookup') > 20 * (select calls from w where name = 'report')
+  and (select total_exec_time from w where name = 'report')
+      > 5 * (select total_exec_time from w where name = 'lookup'));
+
+select lab.prove(
+  'the report touches the entire events table every call (blocks per call within 5% of its pages)',
+  (select (shared_blks_hit + shared_blks_read)::numeric / calls from w where name = 'report')
+    between 0.95 * (select relpages from pg_class where relname = 'events')
+        and 1.05 * (select relpages from pg_class where relname = 'events'));
+
+select lab.prove(
+  'the primary key lookup touches 3 pages: root and leaf of users_pkey, plus one heap page',
+  (select (shared_blks_hit + shared_blks_read)::numeric / calls from w where name = 'lookup')
+    between 3 and 3.5
+  and (select level from bt_metap('users_pkey')) = 1);
+```
+
+</ProveIt>
+
+The other rankings swap the `order by`: `mean_exec_time` (with `where calls > 100`), `shared_blks_hit + shared_blks_read`, or `wal_bytes`. `rows / calls` catches queries returning more than the app can use. The WAL ranking's top row was the insert: 10,484 calls, 53,067 records, 9,272 full-page images. That's about five records per row: the heap tuple, the primary key entry, and a row lock on each of the three parent rows the foreign keys checked (the commit record comes after the statement, so it isn't counted). Those locks touch three random parent pages per insert, on a server that was checkpointing often, which is where the page images came from.
+
+Also worth knowing: `temp_blks_written` (sorts or hashes spilling to disk), `shared_blk_read_time` (with `track_io_timing`; `blk_read_time` before PostgreSQL 17), and `plans` and `total_plan_time`, filled only with `pg_stat_statements.track_planning = on`, off by default because of its overhead.
+
+<ProveIt lab="30-observability">
+
+```sql
+select lab.prove(
+  'the project list touches about 257 pages for 20 rows (between 200 and 320)',
+  (select (shared_blks_hit + shared_blks_read) / calls from w where name = 'projects')
+    between 200 and 320);
+
+select lab.prove(
+  'each insert writes about five WAL records: heap tuple, primary key entry, and three foreign key row locks',
+  (select wal_records::numeric / calls from w where name = 'insert') between 4.9 and 5.6);
+
+-- one insert, read straight from the WAL with pg_walinspect
+select lab.prove(
+  'one insert transaction: heap INSERT, B-tree INSERT_LEAF, three heap LOCK records, then COMMIT',
+  (select array_agg(resource_manager || '/' || record_type order by start_lsn)
+   from pg_get_wal_records_info(:'wal_start', :'wal_end')
+   where xid = :'insert_xid'::xid)
+  = array['Heap/INSERT', 'Btree/INSERT_LEAF', 'Heap/LOCK', 'Heap/LOCK', 'Heap/LOCK',
+          'Transaction/COMMIT']);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Snapshot and diff; don't reset
+
+After weeks, accumulated history dominates, and a query that got slow yesterday hides in its long fast past. Don't reset on a schedule. **Snapshot and diff**: copy the view every few minutes and compute deltas, so you can ask what the top queries were between 14:00 and 14:15 yesterday. Most monitoring agents do this for you.
+
+Before a [benchmark](/books/eight-kilobytes/benchmarking#change-one-thing-and-measure-it-end-to-end), a targeted `pg_stat_statements_reset(userid, dbid, queryid)` is fine. And watch `dealloc` in `pg_stat_statements_info`: rising means statements are being evicted past `pg_stat_statements.max`.
+
+## pg_stat_activity shows this instant
+
+`pg_stat_statements` is the past. `pg_stat_activity` is this instant: one row per server process, with what it's running, since when, and what it's waiting for. Its `state` is `active`, `idle` (waiting for the client's next statement, which is normal), or `idle in transaction`: inside an open transaction, holding its locks and possibly its [snapshot](/books/eight-kilobytes/glossary#snapshot) while the application does something else. Milliseconds of that are normal; minutes are a bug.
+
+### An active session with no wait event is on a CPU
+
+`wait_event_type` and `wait_event` say what a backend is waiting for; an `active` row with neither is on a CPU. **Lock** is a heavyweight lock (on a table, or `transactionid` for a row another transaction holds); **LWLock** is contention on an internal structure ([LWLock waits are fixed in the workload, not the query](/books/eight-kilobytes/concurrency#lwlock-waits-are-fixed-in-the-workload-not-the-query)); **IO** is a page read or a WAL flush; **Client** waits for the application. `pg_wait_events` (PostgreSQL 17+) documents every one. Count them ten times a second and you have a [profile](#sample-waits-to-see-where-the-time-goes).
+
+<DeepDive title="The sessions behind these examples">
+
+The examples in this section come from three sessions on account 7. Session a updated the account inside a transaction, then ran `pg_sleep(60)`. Session b opened a transaction, read some users, and went idle without committing. Session c tried to update the same account and blocked. A sleeping session is `active`, not idle: it's running a statement, and its wait event is `Timeout:PgSleep`, which is how a slow application step looks when it runs inside the database. Session a also has a `backend_xid`, because it wrote; b has none, because a transaction gets an XID only at its first write.
+
+<ProveIt lab="30-observability">
+
+```sql
+-- a: begin; update accounts set name = name where id = 7; select pg_sleep(60)
+-- b: begin; select count(*) from users where account_id = 7;  (then idle)
+-- c: update accounts set plan = plan where id = 7;            (blocks on a)
+select lab.prove(
+  'a session sleeping inside its transaction is active, waiting on Timeout/PgSleep, and has a backend_xid',
+  (select state = 'active' and wait_event_type = 'Timeout' and wait_event = 'PgSleep'
+          and backend_xid is not null
+   from pg_stat_activity where pid = :pid_a));
+
+select lab.prove(
+  'a session waiting for a row waits on Lock/transactionid, and pg_blocking_pids names the holder',
+  (select wait_event_type = 'Lock' and wait_event = 'transactionid'
+          and pg_blocking_pids(pid) = array[:pid_a]
+   from pg_stat_activity where pid = :pid_c));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### backend_xmin names the transaction holding vacuum back
+
+Long transactions block vacuum, hold locks, and make migrations time out. List every open transaction by age:
+
+```sql
+select pid, state,
+       date_trunc('second', now() - xact_start)   as xact_age,
+       date_trunc('second', now() - state_change) as in_state,
+       backend_xid, backend_xmin,
+       left(query, 40)                            as last_query
+  from pg_stat_activity
+ where xact_start is not null and pid <> pg_backend_pid()
+ order by xact_start;
+```
+
+```text
+ pid  |        state        | xact_age | in_state | backend_xid | backend_xmin | ...
+------+---------------------+----------+----------+-------------+--------------+----
+ 9726 | active              | 00:00:05 | 00:00:05 |     1297936 |      1297901 | ...
+ 9733 | idle in transaction | 00:00:05 | 00:00:05 |             |              | ...
+ 9745 | active              | 00:00:03 | 00:00:03 |     1297939 |      1297901 | ...
+```
+
+`idle in transaction` with a large `in_state` is a forgotten transaction; `query` is the **last** statement it ran. `backend_xmin` is the oldest transaction its snapshot needs, which is what holds vacuum back. Session 9733, idle in read committed, has none, because read committed drops its snapshot between statements; `repeatable read` keeps it for the whole transaction.
+
+`pg_blocking_pids(pid)` shows who blocks whom: 9745's update was blocked by `{9726}`, which updated the same account and hasn't committed. In an incident, `pg_cancel_backend(9726)` cancels its statement and releases the row; a session `idle in transaction` has no statement to cancel, so `pg_terminate_backend` ends it ([Everyone waits in line](/books/eight-kilobytes/concurrency)).
+
+<Callout type="warn" title="Watch the oldest xmin, not just the oldest query">
+
+What silently hurts a database is an old snapshot, not a slow query. Vacuum can't remove any row version the oldest snapshot might need, across the whole database. Check `max(age(backend_xmin))` in `pg_stat_activity`, plus the `xmin` of replication slots and of standbys using `hot_standby_feedback`, which hold back the same horizon ([Vacuum can't remove what an old snapshot might need](/books/eight-kilobytes/vacuum#vacuum-cant-remove-what-an-old-snapshot-might-need)).
+
+</Callout>
+
+<DeepDive title="Who holds an xmin, proven">
+
+Isolation level decides whether an idle transaction holds the horizon. Session b, idle in read committed, shows neither an XID nor an xmin: between statements it holds no snapshot, so it blocks vacuum not at all, though it still holds its locks. A fourth session, d, ran `begin isolation level repeatable read`, one `select`, and went idle; its `backend_xmin` stays set for as long as the transaction is open, because every later statement must see the same snapshot. That's why a reporting job in repeatable read that forgets to commit is worse than an app transaction that does the same. To find the session behind the horizon:
+
+```sql
+select pid, application_name, state, age(backend_xmin) as xmin_age
+  from pg_stat_activity
+ where backend_xmin is not null
+ order by age(backend_xmin) desc
+ limit 5;
+```
+
+<ProveIt lab="30-observability">
+
+```sql
+select lab.prove(
+  'an open read committed transaction that has not written shows idle in transaction, ClientRead, no xid, no xmin',
+  (select state = 'idle in transaction' and wait_event = 'ClientRead'
+          and backend_xid is null and backend_xmin is null
+   from pg_stat_activity where pid = :pid_b));
+
+select lab.prove(
+  'a repeatable read transaction keeps its xmin while idle',
+  (select state = 'idle in transaction' and backend_xmin is not null
+   from pg_stat_activity where pid = :pid_d));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Sample waits to see where the time goes
+
+One look at `pg_stat_activity` is a photo. Take one ten times a second for a minute, count what you saw, and you have a profile: how much of your sessions' busy time went to CPU, to reading pages, to locks, to flushing WAL. It needs no extension, and it answers what `pg_stat_statements` can't: not which query, but what the queries waited on.
+
+### Each sample must be its own transaction
+
+Create a table, then run one insert over and over from psql:
+
+```sql
+create temp table wait_samples (
+  taken_at timestamptz, pid int, application_name text, state text,
+  wait_event_type text, wait_event text, query_id bigint
+);
+
+insert into wait_samples
+select statement_timestamp(), pid, application_name, state,
+       wait_event_type, wait_event, query_id
+  from pg_stat_activity
+ where backend_type = 'client backend'
+   and state <> 'idle'
+   and pid <> pg_backend_pid()
+\watch interval=0.1 count=600
+```
+
+`\watch` reruns the insert every 100 ms, 600 times: one minute (`count` is psql 16+). Each run must be its own transaction: Postgres takes one snapshot of `pg_stat_activity` per transaction, so a sampling loop written as one `DO` block records its first sample 600 times.
+
+<DeepDive title="A sampling loop in SQL must clear its snapshot">
+
+Call `pg_stat_clear_snapshot()` before each sample and stamp rows with `clock_timestamp()`, since `now()` and `statement_timestamp()` are frozen too. (A minute-long `DO` block is also a minute-long transaction, its own small problem.)
+
+<ProveIt lab="30-observability">
+
+```sql
+begin;
+select count(*) from pg_stat_activity where application_name = 'ws_late' \g /dev/null
+select dblink_connect('ws_late', format('dbname=%s application_name=ws_late', current_database())) \g /dev/null
+select pg_sleep(0.3) \g /dev/null
+
+select lab.prove(
+  'inside one transaction pg_stat_activity repeats its first snapshot: a session that connected since is invisible',
+  (select count(*) from pg_stat_activity where application_name = 'ws_late') = 0);
+
+select pg_stat_clear_snapshot() \g /dev/null
+
+select lab.prove(
+  'after pg_stat_clear_snapshot() the next read sees it',
+  (select count(*) from pg_stat_activity where application_name = 'ws_late') = 1);
+commit;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A CPU line above your core count means queuing
+
+Count samples per wait event. An active session with no wait event is on a CPU, so label it that:
+
+```sql
+select coalesce(wait_event_type, 'CPU')  as type,
+       coalesce(wait_event, 'running')   as event,
+       count(*)                          as samples,
+       round(100.0 * count(*) / sum(count(*)) over (), 1) as pct,
+       round(count(*) / 600.0, 2)        as avg_sessions   -- / rounds taken
+  from wait_samples
+ where state = 'active'
+ group by 1, 2
+ order by samples desc;
+```
+
+Over a toy workload of four sessions (one spinning in a loop, one sleeping, one holding a row lock and idling, one waiting for that row), sampled 20 rounds:
+
+```text
+  type   |     event     | samples | pct  | avg_sessions
+---------+---------------+---------+------+--------------
+ CPU     | running       |      20 | 33.3 |         1.00
+ Lock    | transactionid |      20 | 33.3 |         1.00
+ Timeout | PgSleep       |      20 | 33.3 |         1.00
+```
+
+With 20 rounds, the query divides by 20 instead of 600. Each line is exactly one average session; the session idling in its transaction isn't there, because the profile counts `active` rows only. `avg_sessions` is the unit managed dashboards plot. Compare the CPU line to your core count: above it, sessions are queuing for a processor.
+
+Then join `query_id` to `pg_stat_statements` to see which statements own each wait. A statement whose samples are mostly CPU or `DataFileRead` is slow because of its own work, and the fix is in its plan. One whose samples are mostly `Lock` or `LWLock` is slow because of everyone else, and the fix is in whatever it waits for.
+
+<DeepDive title="The toy profile, proven, and the join from waits to statements">
+
+<ProveIt lab="30-observability">
+
+```sql
+-- ws_cpu spins in a PL/pgSQL loop, ws_sleep runs pg_sleep, ws_hold updates
+-- account 9 and idles in its transaction, ws_wait updates the same row;
+-- 20 samples, 100 ms apart, with \watch
+select lab.prove(
+  'a session running a CPU loop samples as active with no wait event (at least 16 of 20)',
+  (select count(*) from wait_samples
+   where application_name = 'ws_cpu' and state = 'active' and wait_event is null) >= 16);
+
+select lab.prove(
+  'a session waiting for a row samples as Lock:transactionid every time',
+  (select count(*) filter (where (wait_event_type, wait_event) = ('Lock', 'transactionid')) = count(*)
+          and count(*) >= 18
+   from wait_samples where application_name = 'ws_wait'));
+```
+
+</ProveIt>
+
+```sql
+select coalesce(s.wait_event_type || ':' || s.wait_event, 'CPU') as wait,
+       count(*)                                                  as samples,
+       left(regexp_replace(p.query, '\s+', ' ', 'g'), 40)        as query
+  from wait_samples s
+  left join pg_stat_statements p on p.queryid = s.query_id
+ where s.state = 'active'
+ group by 1, 3
+ order by samples desc
+ limit 10;
+```
+
+The join can return a statement twice if several users or databases run it; filter `pg_stat_statements` by `dbid` and `userid` on a shared server.
+
+<ProveIt lab="30-observability">
+
+```sql
+select lab.prove(
+  'a session idle inside its transaction samples as idle in transaction, Client:ClientRead',
+  (select bool_and(state = 'idle in transaction' and (wait_event_type, wait_event) = ('Client', 'ClientRead'))
+          and count(*) >= 18
+   from wait_samples where application_name = 'ws_hold'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A handful of events lead most profiles
+
+Each one points to a different fix:
+
+- **CPU**: the queries are doing work. Rank by total time and blocks per call.
+- **`IO:DataFileRead`**: reading pages not in shared buffers. Rank by `shared_blks_read` and fix the query before buying memory.
+- **`LWLock:WALWrite`** and **`IO:WalSync`**: commits waiting for WAL to reach disk. Fewer, larger transactions or faster WAL storage ([Many commits share one flush](/books/eight-kilobytes/wal#many-commits-share-one-flush)).
+- **`Lock:transactionid`**: sessions waiting for a row another transaction holds. Find the root of the chain ([Find the root blocker](/books/eight-kilobytes/concurrency#find-the-root-blocker)). `Lock:relation` is usually DDL in a lock queue.
+
+Samples aren't a timer, but over a minute every event shows up in proportion to its total time, which is what you want to rank. To compare with last week, sample continuously: the [`pg_wait_sampling`](https://github.com/postgrespro/pg_wait_sampling) extension does it inside the server, and managed providers' "database load" charts are this same profile ([Provider dashboards are wait-event samplers](/books/eight-kilobytes/managed#provider-dashboards-are-wait-event-samplers)). Learn to read your own SQL version and you can read any of them.
+
+## Table counters find missing indexes and unused ones
+
+In `pg_stat_user_tables`, **`seq_tup_read` is the number to look at.** A sequential scan of a 10-row lookup table is fine; rows read by sequential scans are what cost. After the one-minute workload, `events` showed 1,054,772,482: a billion rows in a minute, the report again. A big table with large, rising rows per scan is missing an index. (`events` counted 1,573 scans for 525 reports, because each parallel worker's share counts. Watch rates.)
+
+`pg_stat_user_indexes` finds indexes nobody uses: `idx_scan = 0` over weeks. But `events_pkey` showed 0 after 10,484 inserts, because uniqueness checks don't count as scans. Never drop an index backing a constraint because it looks unused, and check replicas, which count their own usage ([An idx_scan of zero is a suspect, not a verdict](/books/eight-kilobytes/btree#an-idx_scan-of-zero-is-a-suspect-not-a-verdict)).
+
+<Callout type="note" title="These counters start from zero more often than you think">
+
+Cumulative statistics reset with `pg_stat_reset()`, vanish on a crash, and aren't copied when you create a database from a template: in our freshly cloned database, `n_live_tup` read 0 for 100,000 users. Before calling an index unused, check `stats_reset` in `pg_stat_database`.
+
+</Callout>
+
+<DeepDive title="More table counters, and the proofs">
+
+Also in `pg_stat_user_tables`: `n_dead_tup` and `last_autovacuum` ([Vacuum is not optional](/books/eight-kilobytes/vacuum)), the HOT share `n_tup_hot_upd / n_tup_upd` ([Keep your updates HOT](/books/eight-kilobytes/hot)), `last_seq_scan` (PostgreSQL 16+), and `total_autovacuum_time` (PostgreSQL 18+).
+
+<ProveIt lab="30-observability">
+
+```sql
+select lab.prove(
+  'every report read the whole events table: about 2 million rows read per report',
+  (select seq_tup_read::numeric from pg_stat_user_tables where relname = 'events')
+  / (select calls from w where name = 'report') between 1900000 and 2200000);
+
+select lab.prove(
+  'events counts more sequential scans than report runs, because each parallel worker''s share counts',
+  (select seq_scan from pg_stat_user_tables where relname = 'events')
+    >= 1.5 * (select calls from w where name = 'report'));
+
+select lab.prove(
+  'events_pkey shows idx_scan = 0 after hundreds of inserts: uniqueness checks do not count as scans',
+  (select idx_scan from pg_stat_user_indexes where indexrelname = 'events_pkey') = 0
+  and (select n_tup_ins from pg_stat_user_tables where relname = 'events') > 100);
+
+select lab.prove(
+  'a database cloned from a template starts with empty statistics: n_live_tup is 0 for 100,000 users',
+  (select n_live_tup from pg_stat_user_tables where relname = 'users') = 0
+  and (select reltuples from pg_class where relname = 'users') = 100000);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## The cache hit ratio is a trend, not a target
+
+The buffer cache hit ratio, the share of page requests found in shared buffers, is the most quoted Postgres health metric. Ours was 40.64%, alarming next to the usual "stay above 99%" rule. Look closer and it falls apart:
+
+- **A "read" isn't a disk read.** Postgres counts a page served from the [OS page cache](/books/eight-kilobytes/glossary#os-page-cache) in microseconds as a read: the `users` lookup had a 67.7% hit ratio and averaged 0.03 ms.
+- **One query can dominate.** Nearly all these reads came from the report, whose scans use a small [ring of buffers](/books/eight-kilobytes/buffers#big-operations-get-a-ring) and so read most of their pages from the OS on every run.
+- **An average hides the tail.** 99.9% can coexist with one query reading 50,000 pages from disk every run.
+
+So graph the ratio and watch for sudden drops, then rank `pg_stat_statements` by `shared_blks_read` to find out what changed.
+
+<DeepDive title="Why the report rarely hits the cache">
+
+A sequential scan of a table bigger than a quarter of `shared_buffers` reads through a 256 KB ring of buffers instead of the whole cache, so one big scan can't evict everything else. The price falls on the scan itself: each of its pages is pushed out of the ring almost as soon as it's read, so the next run reads them all again. The hits it does get are pages some other query had already cached. The report found about a third of its pages in shared buffers, run after run, and no amount of repetition raises that; an index (or a bigger cache than the table) does.
+
+<ProveIt lab="30-observability">
+
+```sql
+select lab.prove(
+  'the events table is larger than a quarter of shared_buffers, so its scans use a bulkread ring',
+  pg_relation_size('events') > pg_size_bytes(current_setting('shared_buffers')) / 4);
+
+select lab.prove(
+  'the report finds under 60% of its pages in shared buffers, however often it runs',
+  (select 100.0 * shared_blks_hit / (shared_blks_hit + shared_blks_read)
+   from w where name = 'report') < 60);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## pg_stat_io catches backends writing dirty pages (PostgreSQL 16+)
+
+`pg_stat_io` breaks all I/O down by who did it, on what, and in which context (`normal`, or the `bulkread`, `bulkwrite`, and `vacuum` rings). Its best question: **are client backends writing dirty pages themselves?** Ideally the checkpointer and background writer do nearly all of it ([Your query shouldn't be the one writing dirty pages](/books/eight-kilobytes/buffers#your-query-shouldnt-be-the-one-writing-dirty-pages)).
+
+On our lab server, after a morning of loading data, client backends wrote 151,031 pages, more than the background writer's 60,192. The default 128 MB of `shared_buffers` was too small for that write load, and a more aggressive background writer (`bgwriter_lru_maxpages`) is the other lever. During a bulk load some of this is expected; in steady state it shouldn't be.
+
+<DeepDive title="Client backend fsyncs on relations should be zero">
+
+The 151,031 writes were in the `normal` context; the checkpointer wrote 119,725. Client backend `fsyncs` on relations should be zero (here, 0); nonzero means the checkpointer's request queue overflowed. The largest readers were parallel workers in `bulkread`, doing the report's scans. In PostgreSQL 18 the view also reports bytes and covers WAL: here, client backends did most WAL writes and 7,711 fsyncs, the commit path.
+
+<ProveIt lab="30-observability">
+
+```sql
+select lab.prove(
+  'pg_stat_io (PostgreSQL 18) reports bytes: read_bytes, write_bytes, extend_bytes',
+  (select count(*) from information_schema.columns
+   where table_name = 'pg_stat_io'
+     and column_name in ('read_bytes', 'write_bytes', 'extend_bytes')) = 3);
+
+select lab.prove(
+  'pg_stat_io covers WAL as an object in PostgreSQL 18',
+  exists (select 1 from pg_stat_io where object = 'wal'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Checkpoints should be timed
+
+Nearly every checkpoint should be timed, not requested by WAL volume. Our lab server's `pg_stat_checkpointer` (PostgreSQL 17+) showed 1 timed checkpoint and 28 requested: WAL was outrunning the default 1 GB `max_wal_size` ([Checkpoints put a limit on recovery](/books/eight-kilobytes/wal#checkpoints-put-a-limit-on-recovery) explains the counters and the fix). On PostgreSQL 18, also read `num_done`, the checkpoints actually completed: `num_timed` counts the ones skipped on an idle server too, which can make a quiet server look healthier than it is. Graph WAL bytes per second from `pg_stat_wal` next to them.
+
+## An abandoned slot will fill the disk
+
+`pg_stat_replication` on the primary shows each standby's lag ([Copies of the truth](/books/eight-kilobytes/replication)). One check belongs on every server, replicas or not: a [replication slot](/books/eight-kilobytes/glossary#replication-slot) with no consumer keeps WAL forever and will fill the disk.
+
+```sql
+select slot_name, slot_type, active, wal_status,
+       pg_size_pretty(
+         pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) as retained
+  from pg_replication_slots;
+```
+
+An inactive slot with growing `retained` is an incident in progress. Two settings put a ceiling on it: `max_slot_wal_keep_size` bounds how much WAL a slot may hold, and `idle_replication_slot_timeout` (PostgreSQL 18+) invalidates a slot that has gone unused for too long. Both default to off; an invalidated slot means its consumer must be rebuilt, which beats a full disk.
+
+## Estimate bloat cheaply, measure it off-peak
+
+Bloat is space taken by dead row versions or empty pages. `n_dead_tup` is the cheap estimate, good enough for a graph. `pgstattuple_approx` skips all-visible pages: after deleting a quarter of `events`, it reported 24% dead tuples. The exact `pgstattuple()` and `pgstatindex` read the whole relation, so run them off-peak ([Vacuum is not optional](/books/eight-kilobytes/vacuum) says what to do next).
+
+<DeepDive title="pgstattuple_approx and pgstatindex, run">
+
+```text
+scanned_percent      | 100
+dead_tuple_count     | 510178
+dead_tuple_percent   | 24.108421492938447
+```
+
+`scanned_percent` is 100 because nothing was vacuumed yet, so no page was all-visible. `pgstatindex('events_pkey')` reported `avg_leaf_density` 90.03: a fresh B-tree on an increasing key sits around 90%, its `fillfactor`. Far below that on an index that should be dense suggests a `REINDEX CONCURRENTLY`.
+
+<ProveIt lab="30-observability">
+
+```sql
+delete from events where id % 4 = 0;
+
+select lab.prove(
+  'after deleting a quarter of events, pgstattuple_approx reports 20 to 30% dead tuples',
+  (select dead_tuple_percent between 20 and 30 from pgstattuple_approx('events')));
+
+select lab.prove(
+  'with nothing vacuumed since, no page is all-visible, so it scans 100% of the table',
+  (select scanned_percent > 99 from pgstattuple_approx('events')));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Alert only on what needs a human soon
+
+Alert only on what needs a human soon and gets worse on its own. Everything else is a graph.
+
+**Alert on:**
+
+1. **Database unreachable**, or connections failing.
+2. **Transaction ID age**: `age(datfrozenxid)` at 500 million to 1 billion, well below the 2 billion limit. Near the limit, Postgres stops assigning transaction IDs on purpose, and writes stop until vacuum catches up ([Wraparound stops writes before anything is corrupted](/books/eight-kilobytes/vacuum#wraparound-stops-writes-before-anything-is-corrupted)).
+3. **Long transactions**: older than your app's threshold, or `idle in transaction` for more than a few minutes.
+4. **Replication**: lag beyond what your app tolerates, a standby gone, or an inactive slot retaining WAL.
+5. **Disk space** for data and WAL, with lead time (80% and rising).
+6. **WAL archiving failing** (`failed_count` in `pg_stat_archiver`): your point-in-time recovery has a hole.
+
+**Graph:** query time per second by top statement; connections by state and `application_name`; sessions by wait event; blocks read and hit; checkpoints by kind and WAL bytes per second; dead tuples for your largest tables; temp file bytes; replication lag; and the host's CPU, memory, IOPS, and disk latency.
+
+<Callout type="tip" title="Keep history, and keep it outside the database">
+
+Every view here shows "right now" or "since the last reset", and neither answers "what changed at 14:05 yesterday?". Scrape them into a time series system every 15 to 60 seconds and keep weeks of history. In an incident the question is almost always a comparison with last week.
+
+</Callout>
+
+## The short version
+
+- Install `pg_stat_statements` everywhere and rank by `total_exec_time` first: the most frequent query is rarely the most expensive.
+- Rank by blocks per call to find queries that touch too many pages; it's the best before-and-after measure. Snapshot and diff; don't reset.
+- In `pg_stat_activity`, hunt `idle in transaction` sessions and old `backend_xmin` values.
+- To learn what sessions wait on, sample `pg_stat_activity` ten times a second for a minute with `\watch` and count by wait event. Active with no wait event is CPU; compare it with your core count.
+- Large, rising `seq_tup_read` on a big table points to a missing index; `idx_scan = 0` to an unused one, unless it backs a constraint.
+- Treat the cache hit ratio as a trend, not a target. Check that checkpoints are mostly timed.
+- Alert on a short list: unreachable, transaction ID age, long transactions, replication, disk space, archiving. Graph everything else, and keep the history.
+
+## Further reading
+
+- [pg_stat_statements](https://www.postgresql.org/docs/18/pgstatstatements.html), PostgreSQL documentation. Every column, the settings, and how statements are normalized.
+- [The cumulative statistics system](https://www.postgresql.org/docs/18/monitoring-stats.html), PostgreSQL documentation. The reference for `pg_stat_activity`, the table and index views, `pg_stat_io`, `pg_stat_checkpointer`, and every wait event.
+- [pg_wait_sampling](https://github.com/postgrespro/pg_wait_sampling), Postgres Professional. An extension that samples wait events inside the server and keeps a profile per event and per query.
+- [Viewing locks](https://www.postgresql.org/docs/18/monitoring-locks.html) and [progress reporting](https://www.postgresql.org/docs/18/progress-reporting.html), PostgreSQL documentation. `pg_locks` and the `pg_stat_progress_*` views for vacuum, index builds, and more.
+- [The USE Method](https://www.brendangregg.com/usemethod.html), Brendan Gregg. A checklist for utilization, saturation, and errors that keeps host metrics honest.

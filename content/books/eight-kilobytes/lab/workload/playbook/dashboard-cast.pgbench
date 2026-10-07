@@ -1,0 +1,12 @@
+-- The performance playbook: the account dashboard, as first written.
+-- Events per day for the last 30 days. The ::date cast on the column
+-- means no index on created_at can narrow the range.
+\set a random(1, 1000)
+select created_at::date as day,
+       count(*) as events,
+       count(*) filter (where kind = 'deploy' and payload->>'status' = 'failed') as failed_deploys
+from events
+where account_id = :a
+  and created_at::date >= date '2026-09-06'
+group by 1
+order by 1;

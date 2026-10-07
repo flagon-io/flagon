@@ -42,3 +42,9 @@ next-env.d.ts
 
 # local planning notes (not for the repo)
 /posthog-inventory.md
+
+# Built by `npm run build` (scripts/book-pdf.mjs); never committed.
+public/books/*.pdf
+
+# Scratch state and output of the print-on-demand build (scripts/book-print.mjs).
+.book-print/

@@ -1,0 +1,693 @@
+---
+title: Everything is a page
+description: Open the files and pages behind a table, read a row's header byte by byte, and design tables that fit more rows into every 8 KB page.
+part: The machine
+---
+
+Here are two tables with the same six columns, holding the same million rows:
+
+```text
+ relname | size  | pages
+---------+-------+-------
+ padded  | 73 MB |  9346
+ packed  | 57 MB |  7353
+```
+
+The only difference is the order the columns were declared in. One is 27% bigger than the other: 27% more pages to scan, cache, back up, and replicate, forever.
+
+Postgres doesn't really store tables. It stores pages, and a table is whatever fits in them. Picture the page and you can say how many bytes any row takes, and how to make it take fewer. We'll go from the outside in, mostly through `pageinspect`, an extension that reads raw pages from SQL.
+
+## A table is a file of pages
+
+Every table and index is one or more ordinary files in the server's data directory. You can ask which:
+
+```sql
+select pg_relation_filepath('events');
+```
+
+```text
+ pg_relation_filepath
+----------------------
+ base/16764/16644
+```
+
+`16764` is the database's ID and `16644` the table's **relfilenode**, the name of its file (yours will differ). From a shell in the container (`docker compose exec postgres bash`, then `cd /var/lib/postgresql/18/docker`):
+
+```text
+-rw------- 1 postgres postgres 288137216 Oct  6 04:07 base/16764/16644
+-rw------- 1 postgres postgres     90112 Oct  6 04:07 base/16764/16644_fsm
+-rw------- 1 postgres postgres     16384 Oct  6 04:07 base/16764/16644_vm
+```
+
+As [Know the nouns first](/books/eight-kilobytes/basics) showed, 288,137,216 bytes divided by 8,192 is exactly 35,173. The file is nothing but pages, one after another, numbered from 0. (Past 1 GB, a table continues in `16644.1`, `16644.2`, and so on.)
+
+<ProveIt lab="03-storage">
+
+```sql
+select lab.prove(
+  'the events file is nothing but 8 KB pages: 288,137,216 bytes is exactly 35,173 pages',
+  pg_relation_size('events') = 288137216
+  and pg_relation_size('events') % 8192 = 0
+  and pg_relation_size('events') / 8192 = 35173);
+```
+
+</ProveIt>
+
+Anything that rewrites a whole table (`truncate`, `vacuum full`, some `alter table`s) writes a fresh file under a new name, so never assume the name is stable.
+
+## A table is more than its main file
+
+`events` had three files, not one. Each is a **fork** with its own job: `main` holds the rows, `_fsm` is the free space map, and `_vm` is the visibility map; both maps get sections below. Unlogged tables add an empty `_init` fork that's copied over them after a crash.
+
+That's why the honest answer to "how big is this table?" is rarely the main file alone:
+
+```sql
+select pg_size_pretty(pg_relation_size('events'))       as main,
+       pg_size_pretty(pg_total_relation_size('events')) as total;
+```
+
+```text
+  main  | total
+--------+--------
+ 275 MB | 318 MB
+```
+
+`pg_relation_size` is the main fork only. `pg_table_size` adds the other forks and the table's TOAST storage (below), and `pg_total_relation_size` adds every index. Use the total.
+
+## Every page has the same layout
+
+Every one of those 35,173 pages is laid out like this. It's the most important picture in this book:
+
+<Fig name="page-anatomy">
+
+**Line pointers from the front, tuples from the back.** The two grow toward each other, and the page is full when they meet.
+
+</Fig>
+
+It works like a notebook page with a table of contents written from the top and the entries written from the bottom up.
+
+A 24-byte **page header** records the page's last change, a checksum, and where the free space starts and ends. **Line pointers**, 4 bytes each, grow from the front; each points at a tuple. **Tuples** grow from the back; a **tuple** is one version of a row, as stored on the page. The page is full when the two meet. (Indexes keep bookkeeping in the **special space** at the end; table pages leave it empty.)
+
+<DeepDive title="Checking a real page header's arithmetic">
+
+```sql
+select lsn, checksum, flags, lower, upper, special, pagesize
+from page_header(get_raw_page('events', 0));
+```
+
+```text
+    lsn     | checksum | flags | lower | upper | special | pagesize
+------------+----------+-------+-------+-------+---------+----------
+ 0/AF5BFA50 |    27634 |     4 |   248 |   384 |    8192 |     8192
+```
+
+This page has 56 rows. A 24-byte header plus 56 line pointers at 4 bytes each ends at 248: that's `lower`. Tuples start at 384 (`upper`), leaving 136 bytes free, not enough for another row. `special` is 8192: no special space. `flags` is 4, the "all visible" flag you'll meet with the visibility map.
+
+<ProveIt lab="03-storage">
+
+```sql
+select lab.prove(
+  'lower = 24-byte header + 56 line pointers x 4 bytes = 248; upper = 384; 136 bytes free',
+  lower = 24 + 4 * 56 and lower = 248 and upper = 384 and upper - lower = 136)
+from page_header(get_raw_page('events', 0));
+
+select lab.prove(
+  '136 free bytes is too few for another events row (136 to 144 bytes, plus a line pointer)',
+  (select upper - lower from page_header(get_raw_page('events', 0)))
+    < (select min(lp_len) + 4 from heap_page_items(get_raw_page('events', 0))));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A line pointer lets a tuple move without changing its address
+
+The line pointer lets Postgres move a tuple within its page, to compact free space, without changing its address. That address is the row's **ctid**, a page number and a line pointer number, and every table has it as a hidden column:
+
+```sql
+select ctid, id, kind from events order by id limit 3;
+```
+
+```text
+ ctid  | id |  kind
+-------+----+---------
+ (0,1) |  1 | build
+ (0,2) |  2 | deploy
+ (0,3) |  3 | comment
+```
+
+`(0,1)` means page 0, line pointer 1. Indexes store ctids: when an index lookup finds `id = 2`, what it finds is "page 0, slot 2". Following a ctid to its table page is the fourth read in the four-page lookup from [A query is pages and round trips](/books/eight-kilobytes/latency#a-query-is-pages-and-round-trips).
+
+<Callout type="warn" title="A ctid is not an identifier">
+A row's ctid changes whenever the row is updated ([Updates are inserts](/books/eight-kilobytes/mvcc) shows why) and whenever the table is rewritten. Use it to inspect; never store it or hand it to an application.
+</Callout>
+
+<Callout type="info" title="Coming from MySQL">
+In InnoDB the table *is* the primary key B-tree. A Postgres table is a **heap**: rows go wherever there's room, and every index, the primary key included, points at a ctid ([Postgres is not MySQL](/books/eight-kilobytes/not-mysql)).
+</Callout>
+
+## 8 KB is a compile-time choice, and you should keep it
+
+Eight kilobytes isn't a law of nature. It's a constant, `BLCKSZ`, fixed when Postgres is compiled (`./configure --with-blocksize`, a power of two from 1 to 32 KB), and every file in the data directory is written in it. A server built for 16 KB pages can't open a data directory made with 8 KB ones, and `pg_upgrade` won't cross between them. A running server tells you what it was built with, and no setting changes it:
+
+```sql
+show block_size;
+```
+
+```text
+ block_size
+------------
+ 8192
+```
+
+Bigger pages sound like fewer pages to count, and for some work they are. A sequential scan makes fewer, larger reads; an index fits more keys per page, so the tree is a little shallower; and wide rows stay inline longer, because the threshold for compressing and moving big values (TOAST, below) scales with the page.
+
+But Postgres reads and caches whole pages, and sometimes logs them whole, so everything else gets worse. At 32 KB, a lookup that wants one row pulls four times the bytes into memory. The same `shared_buffers` holds a quarter as many pages, so your hot rows share the cache with four times as many cold neighbors. And the first change to a page after a checkpoint logs the whole page, so each of those [full-page images](/books/eight-kilobytes/wal#the-first-change-after-a-checkpoint-logs-the-whole-page) can be up to four times the size.
+
+So we keep 8 KB, and so should you. Managed services don't let you choose it anyway. Every lever in this book changes how many rows fit on a page without a custom build: column order, narrower types, fillfactor, TOAST, and the right index. Larger pages pay off mainly for scan-heavy analytics on a server you compile yourself, and that's the workload where a column store wins anyway ([Where Postgres loses](/books/eight-kilobytes/limits)).
+
+<ProveIt lab="03-storage">
+
+```sql
+select lab.prove('the page size is fixed when Postgres is built: block_size is 8192, and no setting can change it',
+  current_setting('block_size') = '8192'
+  and (select context from pg_settings where name = 'block_size') = 'internal');
+```
+
+</ProveIt>
+
+<DeepDive title="What else moves with the page size">
+
+We didn't build a 32 KB server for this book, so this box is reasoning from how pages are used, not a lab run. The limits that scale with `BLCKSZ`:
+
+- **TOAST** starts compressing a row at about a quarter of a page, roughly 2 KB here ([Large values are compressed, then moved out of the row](#large-values-are-compressed-then-moved-out-of-the-row)).
+- **Index entries** can't exceed about a third of a page, which is the error you hit indexing a long text column.
+- **The visibility map** keeps two bits per page, so each bit covers more rows, and one changed row clears the bit for more of its neighbors.
+- **Full-page images** in WAL are one page each, so bigger pages mean a bigger burst after every checkpoint.
+
+Two neighbors are separate compile-time constants: `wal_block_size` (also 8 KB) and the 1 GB file segment size, which is why a big table continues in `16644.1`. `pg_controldata` prints all three for a data directory, and tools that read raw pages, such as `pageinspect`, take their sizes from the server.
+
+<ProveIt lab="03-storage">
+
+```sql
+select lab.prove('WAL blocks are a separate compile-time constant, also 8 KB here',
+  current_setting('wal_block_size') = '8192'
+  and (select context from pg_settings where name = 'wal_block_size') = 'internal');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A row costs more than its columns
+
+Open a page and count what each row actually stores. `heap_page_items` decodes every tuple on a page:
+
+```sql
+select lp, lp_off, lp_len, t_xmin, t_xmax, t_ctid, t_hoff
+from heap_page_items(get_raw_page('events', 0))
+limit 3;
+```
+
+```text
+ lp | lp_off | lp_len | t_xmin | t_xmax | t_ctid | t_hoff
+----+--------+--------+--------+--------+--------+--------
+  1 |   8048 |    144 |    766 |      0 | (0,1)  |     24
+  2 |   7904 |    144 |    766 |      0 | (0,2)  |     24
+  3 |   7760 |    144 |    766 |      0 | (0,3)  |     24
+```
+
+Tuple 1 is 144 bytes at offset 8048, ending exactly at the end of the page; tuple 2 sits right below it. Each starts with a 23-byte **tuple header**.
+
+The header's two most important fields are `t_xmin`, the transaction that inserted this version, and `t_xmax`, the one that deleted or locked it (0 if none). They're the heart of Postgres's concurrency control and get a chapter of their own ([Updates are inserts](/books/eight-kilobytes/mvcc)). Here, every row was inserted by transaction 766, the seed, and none has been deleted. `t_ctid` is the tuple's own address, or its newer version's. `t_hoff` says the column values start at byte 24, after the header and a byte of alignment, in declaration order, end to end.
+
+Twenty-four bytes of header and a 4-byte line pointer, on every row. A row of two integers is mostly overhead.
+
+<DeepDive title="Reading a row byte by byte">
+
+The whole header:
+
+| Field | Size | What it is |
+| --- | --- | --- |
+| t_xmin | 4 bytes | ID of the transaction that inserted this version |
+| t_xmax | 4 bytes | ID of the transaction that deleted or locked it, or 0 |
+| t_cid | 4 bytes | Command number within the transaction |
+| t_ctid | 6 bytes | This tuple's address, or the address of its newer version |
+| t_infomask2 | 2 bytes | Number of columns, plus a few flags |
+| t_infomask | 2 bytes | Status flags |
+| t_hoff | 1 byte | Offset where the column data starts |
+
+`t_infomask` on row 1 is 2306, and `pageinspect` (PostgreSQL 13+) decodes it:
+
+```sql
+select raw_flags
+from heap_page_items(get_raw_page('events', 0)),
+     heap_tuple_infomask_flags(t_infomask, t_infomask2)
+where lp = 1;
+```
+
+```text
+                        raw_flags
+----------------------------------------------------------
+ {HEAP_HASVARWIDTH,HEAP_XMIN_COMMITTED,HEAP_XMAX_INVALID}
+```
+
+The row has variable-width columns, its inserting transaction is known to have committed, and it has no valid deleter. The last two are **hint bits**, cached answers that [A read can write](/books/eight-kilobytes/mvcc#a-read-can-write) explains.
+
+Then the data. The first eight bytes are `id`, the integer 1, least significant byte first, as on any x86 or 64-bit ARM machine:
+
+```sql
+select substr(t_data, 1, 16)
+from heap_page_items(get_raw_page('events', 0))
+where lp = 1;
+```
+
+```text
+               substr
+------------------------------------
+ \x0100000000000000a903000000000000
+```
+
+The next eight, `a903...`, are `account_id`: 0x03a9 is 937, exactly what `select account_id from events where id = 1` returns.
+
+<ProveIt lab="03-storage">
+
+```sql
+select lab.prove(
+  'pageinspect decodes t_infomask 2306 as HASVARWIDTH, XMIN_COMMITTED, XMAX_INVALID',
+  t_infomask = 2306
+  and raw_flags = '{HEAP_HASVARWIDTH,HEAP_XMIN_COMMITTED,HEAP_XMAX_INVALID}')
+from heap_page_items(get_raw_page('events', 0)),
+     heap_tuple_infomask_flags(t_infomask, t_infomask2)
+where lp = 1;
+
+select lab.prove(
+  'the next 8 bytes are account_id: 0x03a9 = 937',
+  substr(t_data, 9, 8) = '\xa903000000000000'::bytea
+  and (select account_id from events where id = 1) = 937
+  and x'03a9'::int = 937)
+from heap_page_items(get_raw_page('events', 0)) where lp = 1;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### NULLs cost one bit
+
+A NULL takes no space in the data area. A row with any NULL carries a **null bitmap** in its header instead: one bit per column, 0 for NULL. In `projects`, an unarchived project has a NULL `archived_at`:
+
+```text
+ lp |  t_bits  | lp_len
+----+----------+--------
+  1 | 11110100 |     72
+  2 |          |     80
+  3 | 11110100 |     72
+```
+
+Rows 1 and 3 aren't archived: their fifth bit is 0, and they're 8 bytes shorter than row 2, which stores its timestamp. One bit instead of eight bytes. (Up to 8 columns, the bitmap fits in a spare byte of the header. Past 8, a row with any NULL needs a longer bitmap, which can push the start of its data from byte 24 to byte 32.)
+
+<DeepDive title="Unarchived projects really are 8 bytes shorter">
+
+```sql
+select lp, t_bits, lp_len
+from heap_page_items(get_raw_page('projects', 0))
+limit 3;
+```
+
+<ProveIt lab="03-storage">
+
+```sql
+select lab.prove(
+  'projects rows 1 and 3 (not archived) carry a null bitmap 11110100; row 2 (archived) has none',
+  array_agg(coalesce(t_bits, '') order by lp) = '{11110100,"",11110100}')
+from heap_page_items(get_raw_page('projects', 0)) where lp <= 3;
+
+select lab.prove(
+  'row 2 is archived and 8 bytes longer, because it stores the timestamp',
+  (select lp_len from heap_page_items(get_raw_page('projects', 0)) where lp = 2)
+    = (select lp_len from heap_page_items(get_raw_page('projects', 0)) where lp = 1) + 8
+  and (select archived_at is not null from projects where ctid = '(0,2)')
+  and (select archived_at is null from projects where ctid = '(0,1)'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Column order is free space
+
+Now the mystery from the start of the chapter. CPUs read a value fastest at an address that's a multiple of its size, so Postgres lines values up that way: a `bigint` or `timestamptz` starts at a multiple of 8 bytes, an `integer` or `date` at a multiple of 4, a `smallint` at a multiple of 2, and a `boolean` anywhere. When an 8-byte column follows one that ended at an odd offset, Postgres pads the gap. Picture a parking lot where trucks may only park at every eighth line: let a motorbike take the first space, and the next seven go empty.
+
+Here are the two tables from the start, column by column. `pg_column_size` says a `padded` row is 72 bytes and a `packed` one 52:
+
+```text
+padded (72 bytes)              packed (52 bytes, 56 on the page)
+offset  contents               offset  contents
+   0    header (24)               0    header (24)
+  24    is_active (1)            24    id (8)
+  25    padding (7)              32    created_at (8)
+  32    id (8)                   40    score (8)
+  40    is_admin (1)             48    flags (2)
+  41    padding (7)              50    is_active (1)
+  48    created_at (8)           51    is_admin (1)
+  56    flags (2)                52    end
+  58    padding (6)
+  64    score (8)
+  72    end
+```
+
+It compounds: each tuple also starts at a multiple of 8 on the page (so `packed`'s 52 bytes occupy 56), and each needs a line pointer. That's 107 rows per page against 136, and 9,346 pages against 7,353.
+
+The rule that falls out:
+
+1. Fixed-width 8-byte columns first: `bigint`, `timestamptz`, `double precision`.
+2. Then 4-byte ones: `integer`, `real`, `date`.
+3. Then 2-byte, then 1-byte: `smallint`, `boolean`.
+4. Variable-length columns (`text`, `jsonb`, `numeric`) last. Short values need no alignment, so they pack tightly at the end.
+
+<Callout type="note" title="How much should you care?">
+For a few thousand rows, not at all. For a narrow table headed for hundreds of millions (events, logs, join tables, metrics), spend five minutes on it when you write the `create table`; reordering later means rewriting the table.
+</Callout>
+
+<DeepDive title="The page math, and how events fares">
+
+The two tables, loaded with the same million rows:
+
+```sql
+create table padded (
+  is_active  boolean,
+  id         bigint,
+  is_admin   boolean,
+  created_at timestamptz,
+  flags      smallint,
+  score      bigint
+);
+
+create table packed (
+  id         bigint,
+  created_at timestamptz,
+  score      bigint,
+  flags      smallint,
+  is_active  boolean,
+  is_admin   boolean
+);
+```
+
+```sql
+insert into padded
+  select true, g, false, now(), 1, g from generate_series(1, 1000000) g;
+insert into packed
+  select g, now(), g, 1, true, false from generate_series(1, 1000000) g;
+```
+
+With 8,168 usable bytes per page after the header, and a 4-byte line pointer per row:
+
+```text
+padded: 8168 usable bytes / (72 + 4) per row  =  107 rows per page
+packed: 8168 usable bytes / (56 + 4) per row  =  136 rows per page
+```
+
+<ProveIt lab="03-storage">
+
+```sql
+select lab.prove(
+  'a padded row is 72 bytes; the same columns packed take 52',
+  (select pg_column_size(p.*) from padded p limit 1) = 72
+  and (select pg_column_size(p.*) from packed p limit 1) = 52);
+
+select lab.prove(
+  'page 0 of padded holds 107 tuples, page 0 of packed holds 136',
+  (select count(*) from heap_page_items(get_raw_page('padded', 0))) = 107
+  and (select count(*) from heap_page_items(get_raw_page('packed', 0))) = 136
+  and 8168 / (72 + 4) = 107 and 8168 / (56 + 4) = 136);
+
+select lab.prove(
+  '9,346 pages versus 7,353: padded is about 27% bigger',
+  pg_relation_size('padded') / 8192 = 9346
+  and pg_relation_size('packed') / 8192 = 7353
+  and pg_relation_size('padded')::numeric / pg_relation_size('packed') between 1.26 and 1.28);
+```
+
+</ProveIt>
+
+Every type's alignment is in `pg_type.typalign`: `c` (any byte), `s` (2), `i` (4) or `d` (8). `uuid` is a surprise: 16 bytes, but `c`, so it needs no padding.
+
+The example schema does fine. An `events` row is the header, four 8-byte ids with no padding, `kind` as short text, `payload` as small jsonb, and `created_at`, which may pick up a few bytes of padding after the two variable-length columns. Measured rows are 136 to 144 bytes, about 66 of them JSON. The JSON is the cost worth watching; [Types are a contract](/books/eight-kilobytes/types) discusses when to promote a field out of `jsonb` into a real column.
+
+</DeepDive>
+
+## Large values are compressed, then moved out of the row
+
+A row must fit in an 8 KB page, yet a `text` value can be up to 1 GB. **TOAST** (The Oversized-Attribute Storage Technique) squares the two. When a row about to be stored is larger than about 2 KB (2,032 bytes with 8 KB pages, so at least four rows fit on a page), Postgres works through its variable-length columns, largest first:
+
+1. **Compress** the value in place.
+2. If the row is still too big, **move** the value into the table's own TOAST table, cut into chunks of just under 2 KB, leaving an 18-byte pointer behind.
+
+In a test table, 100,000 repeated characters compressed to 1,156 bytes and never left the row. 32,000 characters of random hex didn't compress, so they moved out in 17 chunks, leaving a 50-byte row behind. Reading that value back means an index lookup in the TOAST table and 17 more tuple fetches, invisible in your SQL.
+
+What that means for your queries:
+
+- **`select *` isn't free on wide tables.** A list view that doesn't show a document's body shouldn't fetch it, and most ORMs fetch every column unless told otherwise.
+- **Changing a toasted value rewrites all of it.** Change one key in a big `jsonb` document and Postgres stores the whole document again. Keep a hot counter out of the document; better still, give it a narrow table of its own ([Move hot counters to a narrow table](/books/eight-kilobytes/hot#move-hot-counters-to-a-narrow-table)).
+- **Medium values are the awkward case.** A 1 to 2 KB value isn't toasted and makes every row large, so only a handful fit per page.
+
+<DeepDive title="Watching TOAST compress, move, and chunk a value">
+
+A table with one `text` column, filled with a short string, repeated characters (very compressible), and random hex (barely compressible):
+
+```sql
+create table docs (
+  id   bigint generated always as identity primary key,
+  body text
+);
+insert into docs (body) values (repeat('a', 1000));
+insert into docs (body) values (repeat('a', 3000));
+insert into docs (body) values (repeat('a', 100000));
+insert into docs (body)
+  select string_agg(md5(random()::text), '') from generate_series(1, 100);
+insert into docs (body)
+  select string_agg(md5(random()::text), '') from generate_series(1, 1000);
+
+select id, length(body) as chars, pg_column_size(body) as stored,
+       pg_column_compression(body) as compression
+from docs order by id;
+```
+
+```text
+ id | chars  | stored | compression
+----+--------+--------+-------------
+  1 |   1000 |   1004 |
+  2 |   3000 |     44 | pglz
+  3 | 100000 |   1156 | pglz
+  4 |   3200 |   3200 |
+  5 |  32000 |  32000 |
+```
+
+Rows 4 and 5 left 50-byte tuples on the table's page (a 24-byte header, 8 for `id`, and the 18-byte pointer). Their chunks are rows in the TOAST table that `reltoastrelid` in `pg_class` names:
+
+```text
+ chunk_id | chunks | bytes | max_chunk
+----------+--------+-------+-----------
+    17446 |      2 |  3200 |      1996
+    17447 |     17 | 32000 |      1996
+```
+
+The threshold is exact: a 2,028-byte row is stored as is, a 2,038-byte one is compressed. And `pg_column_toast_chunk_id` (PostgreSQL 17+) shows the update rule: an update to another column keeps the same TOAST pointer and copies nothing, while changing the value stores all 17 chunks again.
+
+<ProveIt lab="03-storage">
+
+```sql
+create table toast_edge (body text);
+insert into toast_edge values (repeat('a', 2000)), (repeat('a', 2010));
+select lab.prove(
+  'a 2,028-byte row is stored as is; a 2,038-byte one crosses 2,032 bytes and is compressed',
+  (array_agg(lp_len order by lp))[1] = 2028
+  and (array_agg(lp_len order by lp))[2] < 100
+  and (select array_agg(pg_column_compression(body) is not null order by length(body))
+       from toast_edge) = '{f,t}')
+from heap_page_items(get_raw_page('toast_edge', 0));
+```
+
+</ProveIt>
+
+<ProveIt lab="03-storage">
+
+```sql
+select lab.prove(
+  'random hex doesn''t compress, so rows 4 and 5 move out of line',
+  bool_and(pg_column_compression(body) is null)
+  and bool_and(pg_column_toast_chunk_id(body) is not null)
+  and array_agg(pg_column_size(body) order by id) = '{3200,32000}')
+from docs where id in (4, 5);
+
+select reltoastrelid::regclass as toast_table from pg_class where relname = 'docs' \gset
+select lab.prove(
+  'out-of-line values are cut into chunks of at most 1,996 bytes: 2 chunks for row 4, 17 for row 5',
+  (select array_agg(n order by n) from
+     (select count(*) as n from :toast_table group by chunk_id) c) = '{2,17}'
+  and (select max(length(chunk_data)) from :toast_table) = 1996);
+```
+
+</ProveIt>
+
+<ProveIt lab="03-storage">
+
+```sql
+alter table docs add column title text;
+select pg_column_toast_chunk_id(body) as chunk_before from docs where id = 5 \gset
+update docs set title = 'renamed' where id = 5;
+select lab.prove(
+  'an update that doesn''t change a toasted value keeps the same TOAST pointer',
+  pg_column_toast_chunk_id(body) = :chunk_before)
+from docs where id = 5;
+
+update docs set body = body || 'x' where id = 5;
+select lab.prove(
+  'an update that changes a toasted value stores the whole new value, every chunk',
+  pg_column_toast_chunk_id(body) <> :chunk_before
+  and (select count(*) from :toast_table t
+       where t.chunk_id = pg_column_toast_chunk_id(d.body)) = 17)
+from docs d where id = 5;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="lz4, storage strategies, and what toast_tuple_target really does">
+
+Compression is per column. The default is `pglz`; since PostgreSQL 14 you can choose `lz4` (if the server was built with it, as most packaged builds are), which is generally much faster with similar ratios:
+
+```sql
+alter table docs alter column body set compression lz4;
+insert into docs (body) values (repeat('a', 100000));
+select id, pg_column_size(body), pg_column_compression(body) from docs where id = 6;
+```
+
+```text
+ id | pg_column_size | pg_column_compression
+----+----------------+-----------------------
+  6 |            411 | lz4
+```
+
+The same 100,000 characters that `pglz` stored in 1,156 bytes take 411. The setting applies only to newly stored values; if you store a lot of compressible text or JSON, `default_toast_compression = lz4` server-wide is a reasonable choice.
+
+Each column also has a storage strategy (`plain`, `main`, `external`, `extended`; `text` and `jsonb` default to `extended`, compress then move). Set `external` with `alter table ... alter column ... set storage` for data that's already compressed, like images: compressing again wastes CPU, and substring operations can fetch only the chunks they need.
+
+The `toast_tuple_target` storage parameter sets how small Postgres tries to make a row once toasting has started. It doesn't move the trigger: in PostgreSQL 18 toasting still starts at a row over about 2 KB, whatever the parameter says. (The `CREATE TABLE` reference describes it as the minimum length that triggers toasting, but the server code checks the fixed threshold.) So a lower target leaves a 1.5 KB row alone, and once a row does cross 2 KB, moves more of its medium-sized columns out of line, trading smaller rows for more TOAST lookups.
+
+<ProveIt lab="03-storage">
+
+```sql
+create table ttt_256 (a text, b text) with (toast_tuple_target = 256);
+insert into ttt_256 values (repeat('a', 1500), null);
+select lab.prove(
+  'toast_tuple_target = 256 does not touch a 1.5 KB row: toasting still starts at about 2 KB',
+  (select pg_column_compression(a) from ttt_256) is null
+  and (select pg_column_size(a) from ttt_256) = 1504);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Fillfactor leaves room for updates
+
+By default Postgres fills table pages completely; the **fillfactor** storage parameter tells inserts to stop earlier and leave room on each page. That room is for updates, which write a new version of the row and are much cheaper when it fits on the same page, so choosing the value is part of [Leave room on the page, or every update moves](/books/eight-kilobytes/hot#leave-room-on-the-page-or-every-update-moves).
+
+## Inserts find room without scanning the table
+
+How does an insert find a page with room? Not by scanning the table. The `_fsm` fork records roughly how much each page has free, one byte per page in steps of 32 bytes: page 0 of `events`, with 136 bytes free, is recorded as 128 (after setting aside 4 for a line pointer). Finding a page with room takes a few reads. Vacuum updates the map, which is when space from deleted rows becomes reusable. When no page has room, the table grows at the end.
+
+<ProveIt lab="03-storage">
+
+```sql
+select lab.prove(
+  'the FSM stores one byte per page in 32-byte steps: events page 0 (136 free) is recorded as 128',
+  avail = 128 and avail % 32 = 0)
+from pg_freespace('events') where blkno = 0;
+```
+
+</ProveIt>
+
+## Two bits per page let scans and vacuum skip work
+
+Two bits per page are why an index-only scan can skip the table, and why vacuuming a big, mostly static table is cheap. The last fork, `_vm`, is the **visibility map**: two bits for each page of the table.
+
+- **all-visible**: every row on the page is visible to every transaction, now and in the future.
+- **all-frozen**: every row on the page is frozen, safe from transaction ID wraparound forever ([Old rows must be frozen before the XID counter wraps](/books/eight-kilobytes/mvcc#old-rows-must-be-frozen-before-the-xid-counter-wraps)).
+
+The `pg_visibility` extension summarizes it:
+
+```sql
+create extension pg_visibility;
+select * from pg_visibility_map_summary('events');
+```
+
+```text
+ all_visible | all_frozen
+-------------+------------
+       35173 |          0
+```
+
+Every page is all-visible, because the seed ended with `vacuum analyze`. Two parts of Postgres lean on this map. **Index-only scans** skip the table page when it's all-visible and answer from the index alone ([The B-tree does the heavy lifting](/books/eight-kilobytes/btree)). **Vacuum** skips all-visible pages ([Vacuum is not optional](/books/eight-kilobytes/vacuum)). Any change to a page clears its bit; vacuum sets it again once every transaction can see the change.
+
+<DeepDive title="Watching a change clear the all-visible bit">
+
+The bit lives in two places: the map, and flag 4 in the page header.
+
+<ProveIt lab="03-storage">
+
+```sql
+update accounts set name = name where id = 1;
+select lab.prove(
+  'any change to a page clears its all-visible bit',
+  (select all_visible from pg_visibility_map('accounts', 0)) = false
+  and (select flags & 4 from page_header(get_raw_page('accounts', 0))) = 0);
+
+vacuum accounts;
+select lab.prove(
+  'vacuum sets it again once every transaction can see the change',
+  (select all_visible from pg_visibility_map('accounts', 0)) = true
+  and (select flags & 4 from page_header(get_raw_page('accounts', 0))) = 4);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Count pages before you create the table
+
+Put the pieces together and you can predict a table's size before it exists:
+
+```text
+row size      = 24 (header) + column data + padding, rounded up to 8
+bytes per row = row size + 4 (line pointer)
+rows per page = floor(8168 x fillfactor / 100 / bytes per row)
+pages         = rows / rows per page
+```
+
+8,168 is the page's 8,192 bytes minus its 24-byte header. `events` rows average about 139 bytes, so about 57 fit on a page, and 2,000,000 rows need about 35,100 pages. The real table has 35,173. Do that in your head the next time someone proposes a table that will take 50 million rows a month: how many pages, how many hot, and does it fit in memory?
+
+Page count drives everything that follows, starting with which of those pages get to stay in memory. And every `update` and `delete` changes it, in ways that surprise most people the first time they look.
+
+## The short version
+
+- A table is a file of 8 KB pages, plus forks for the free space map and visibility map. Ask `pg_total_relation_size` how big it really is.
+- 8 KB is fixed when Postgres is built (`block_size`, read-only). Change how many rows fit on a page with the schema, not a custom build.
+- Every row carries a 24-byte header and a 4-byte line pointer. Small rows are mostly overhead.
+- A ctid is a physical address (page, slot) that changes on every update. Never store it.
+- NULLs cost one bit, not the width of the column.
+- Order columns from 8-byte fixed-width types down to 1-byte types, variable-length last. The wrong order cost 27% more space here.
+- Values over about 2 KB are compressed, then moved to a TOAST table. Don't `select *` wide columns you don't need.
+- Fillfactor leaves room on each page for updates; the HOT chapter covers choosing it.
+
+## Further reading
+
+- [Database page layout](https://www.postgresql.org/docs/18/storage-page-layout.html), PGDG. The 8 KB page, line pointers, and every tuple header field, from the source of truth.
+- [TOAST](https://www.postgresql.org/docs/18/storage-toast.html), PGDG. Thresholds, storage strategies, and compression options.
+- [Free space map](https://www.postgresql.org/docs/18/storage-fsm.html) and [visibility map](https://www.postgresql.org/docs/18/storage-vm.html), PGDG. The two small forks that make inserts and vacuum fast.
+- [pageinspect](https://www.postgresql.org/docs/18/pageinspect.html), PGDG. Every function used in this chapter, and more.
+- [Heap table structure](https://www.interdb.jp/pg/pgsql01/03.html), Hironobu Suzuki, The Internals of PostgreSQL. A diagram-first companion explanation of the same layout.

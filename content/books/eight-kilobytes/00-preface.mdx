@@ -1,0 +1,225 @@
+---
+title: Before you start
+description: Why this book counts pages, why every claim comes with a proof, who it's for, how to read it at two depths, and how to run the same PostgreSQL 18 server and data used in every chapter.
+part: Front matter
+---
+
+Here are two queries against the same table, on the same server, a few seconds apart:
+
+```sql
+select * from events where id = 777777;
+select count(*) from events where project_id = 4242;
+```
+
+The first touched 4 pages. The second touched 35,173.
+
+Both return almost nothing, both look simple, and an ORM would generate either without complaint. One is how a database idles at 3% CPU. The other is how someone gets paged at 2 a.m.
+
+That gap is why this book exists.
+
+## Count the pages
+
+Most PostgreSQL advice arrives as folklore. Add an index. Raise `shared_buffers`. Run vacuum. Each is right some of the time, and without a model of the server you can't tell which time this is.
+
+The model is smaller than you'd think. Postgres stores everything (tables, indexes, the bookkeeping beside them) in 8 KB **pages**, and it reads, writes and caches whole pages. A slow query nearly always did one of two things: touched far more pages than it needed, or made far more round trips than it needed.
+
+So the first habit this book builds is one sentence long: **count the pages**.
+
+- When you design a table, ask how many rows fit on a page.
+- When you add an index, ask how many pages a lookup touches before and after.
+- When you read a plan, read the `Buffers:` line first. It counts pages.
+- When a table grows faster than its data, ask what is sitting in those pages that you didn't put there.
+
+You don't need to think about bytes all day. You need a feel for what fits in 8 KB, because nearly every performance property of Postgres follows from it. Hence the title.
+
+## Earn the bigger box
+
+The second habit is about money. When a database gets slow, the easiest thing to buy is a bigger one, and it works, for a while. Then the data catches up, and you're paying more every month for the same problem.
+
+An index costs nothing per month. A rewritten query costs an afternoon. A pooler, a vacuum setting, or a smaller row costs a little reading. So we hold one opinion harder than any other in this book: use up the cheap fixes before you buy hardware, and when you do upgrade, prove the need in numbers ([Earn the bigger box](/books/eight-kilobytes/scale#earn-the-bigger-box)). Every chapter is, one way or another, a cheap fix and the evidence that it worked.
+
+## Start with one database, and leave on evidence
+
+A growing product collects databases: a cache, a document store, a queue, a search engine, a vector store. Each brings its own backups, upgrades, failure modes, and pager, and its data has to stay in sync with all the others.
+
+Postgres covers most of that list from one server, in the same transaction as the rest of your data. Documents go in `jsonb`. A queue is a table and `for update skip locked`. Full-text search and vectors live next to the rows they describe. Time series fit BRIN and monthly partitions, and maps run on PostGIS. It's one size that fits most, and most reaches further than you'd guess ([You don't need another database (yet)](/books/eight-kilobytes/models)).
+
+Most isn't all, and this book says where the line is. On the same two million events, two column stores kept the data in under a fifth of the bytes and answered about ten times faster than a tuned Postgres, and still at least twice as fast on one core. Search relevance at scale, streams, global writes, and very large vector sets have lines of their own ([Where Postgres loses](/books/eight-kilobytes/limits)).
+
+So we start every product on one Postgres, and add a second system only for a property we can name and a number that proves we need it, with Postgres still the source of truth. It's the bigger box again, applied to architecture: start grounded, and leave on evidence.
+
+## Every claim comes with a proof
+
+You shouldn't take a database book's word for anything, this one included. So every claim that matters ships with its evidence.
+
+Every query here ran against a real PostgreSQL 18 server, on a sample schema you can load in a minute. The plans are real plans, the sizes are real sizes, and when a chapter says an index helps, it shows the pages read before and after. **Prove it** boxes sit next to the claims that matter. Each holds the exact check from that chapter's lab script, a `lab.prove(...)` that fails loudly if the claim isn't true, so you can rerun the evidence instead of trusting us.
+
+That's also how the book stays honest. When Postgres changes, a check fails, and the chapter gets fixed.
+
+## You know SQL; this is what's underneath it
+
+You write application code and use Postgres every day, through an ORM or by hand. You know `select`, `join`, `group by`, `insert` and `update`. Maybe you recently became "the database person" because someone had to.
+
+What you lack is a model of what's underneath: why an `update` makes a table bigger, why last month's fast query is slow now, why the planner ignores the index you just built. Without it, tuning is guessing. Every internal concept is explained the first time it appears. No C, no source code, no production experience required.
+
+## Read it at two depths
+
+Every chapter is two books in one. The **simple** track is a short essay: the argument, the one piece of evidence that proves it, and what to do. Read only that, in every chapter, and you get the whole book. The **deep dives** hold the internals, the full measurements, and the edge cases, each one placed right after the paragraph it deepens.
+
+On the site, the **Simple / Deep dive** switch at the top of a chapter sets the depth for the whole book; in Simple mode each deep dive folds to one line you can open on its own. On paper, every deep dive is printed, set apart so you can skip it, and each Prove it box prints as the claims its checks make, plus the lab file that holds them.
+
+## Why I wrote this
+
+I'm Chase Pierce, and I started [Flagon](https://www.flagon.io) to build software, and a company, in the open.
+
+I don't have a war story about how I got here. I picked Postgres for plain reasons and kept picking it. Over MySQL, because it does more: transactional schema changes, richer types, and an extension system that lets the database grow into what you need. Over Oracle and SQL Server, because it's open source, runs anywhere, and has no license to count cores against. Those reasons have held up on every project since.
+
+What never held up was the advice around it. The book I wanted didn't exist in one place. Internals books assume you want to work on the server itself. Tuning guides hand you settings without the model that explains them. Blog posts are right for someone's workload, on someone's version, in some year. I wanted the model, the evidence, and the opinions together, written for the person who just inherited the database. So I wrote it, and made every claim carry a check, because a claim you can't rerun is one more piece of folklore.
+
+The rest of the book says "we". That's Flagon's voice, and it's also you and me at the same terminal, looking at the same plan. When we hold an opinion, we say so plainly and show the numbers behind it. When you find a mistake, it's a bug: [open an issue or send a fix](https://github.com/flagon-io/flagon/issues).
+
+## The machine comes first; then jump to what hurts
+
+| Part | What it covers |
+| --- | --- |
+| The machine | Latency, pages, the buffer cache, MVCC, HOT updates, the write-ahead log, ACID, vacuum, and how all of it differs from MySQL |
+| Designing for it | Types, keys, constraints, data models, extensions |
+| Finding rows fast | Indexes, EXPLAIN, the planner, query patterns, search, functions |
+| Changing it | Locks, migrations that keep the site up, bulk loading |
+| Running it | Connections, benchmarking, configuration, monitoring, backups, security, managed services, a playbook for slow databases |
+| Scaling out | Scaling up first, replication, partitioning, sharding, and where Postgres loses |
+
+First comes a primer, [Know the nouns first](/books/eight-kilobytes/basics): a crash course in SQL and the server's vocabulary: tables, queries, updates, joins, indexes, databases, schemas, roles, the catalog. Skip it if `search_path` and `pg_class` are old friends. The machine is the foundation. If you read nothing else, read [Everything is a page](/books/eight-kilobytes/storage) and [Updates are inserts](/books/eight-kilobytes/mvcc); almost every later chapter leans on them. Then jump to whatever is hurting. A slow query ruining your week? Start with [Read the plan, not the clock](/books/eight-kilobytes/explain). Coming from MySQL? [Postgres is not MySQL](/books/eight-kilobytes/not-mysql) flags the habits that don't transfer.
+
+Every chapter ends with "The short version" and "Further reading".
+
+## Every example ran on PostgreSQL 18
+
+The book targets **PostgreSQL 18**. Almost every example ran on 18.6; the few chapters that needed a third-party image pinned another minor release and say so (Citus in [Shard last](/books/eight-kilobytes/sharding) on 18.4, pg_duckdb in [Where Postgres loses](/books/eight-kilobytes/limits) on 18.1). Most of it applies to any release from 13 on, and newer features are tagged with the version that introduced them, like `MERGE` (PostgreSQL 15+). Page layout, MVCC, vacuum, the planner and the write-ahead log have changed in detail, not in shape.
+
+Output from `psql` and `EXPLAIN` sits in its own block right after the query that produced it, trimmed with `...` where long. Some of it will differ on your machine, and that's expected:
+
+- **Transaction IDs, OIDs and file names** are assigned by the server as it runs. Yours will differ; the relationships between them won't.
+- **Timings** depend on hardware and load. Ours ran on a laptop, inside Docker, next to other workloads, and a few labs that write heavily turn on `synchronous_commit = off` to finish faster (they say so), so treat every millisecond as rough.
+- **Buffer counts and row counts are the evidence.** For a given data set and plan, they come out the same every time. A whole query's count can run a few dozen pages past the table itself, for the catalog and other small reads: a full scan of the 35,173-page `events` heap reports about 35,249.
+- **Sizes** are the binary values `pg_size_pretty` reports: the 288,137,216-byte `events` heap is 275 MB, not 288.
+
+Callouts flag what you must not miss. Read every warning; each one describes a way to take down a production database.
+
+## Run your own PostgreSQL 18
+
+You need Docker, and bash: any Linux or macOS terminal, or Git Bash or WSL on Windows. The lab kit is a small Compose project: PostgreSQL 18 with the example data, plus one script per chapter that turns the chapter's claims into checks. Download it and run a chapter:
+
+```bash
+curl -L https://www.flagon.io/books/eight-kilobytes/lab.tar.gz | tar xz
+cd eight-kilobytes-lab
+./lab 03-storage
+```
+
+A chapter's number or name works too (`./lab 3`, `./lab storage`), and `./lab` alone lists them all. The first run starts the server and builds the example database, which takes about a minute. Each run gets a fresh copy of the data, prints `PROVED:` for every claim that holds, and stops at the first one that doesn't. `./lab all` runs every chapter and lists any that failed; the [lab page](https://www.flagon.io/books/eight-kilobytes/lab) explains the rest.
+
+The server listens only on your machine, at `127.0.0.1:5418`, if you'd rather use a GUI client. A few chapters (replication, sharding, the MySQL comparison) need more than one server; for those, `./lab` starts the extra containers and removes them afterwards.
+
+The kit's `postgres` user is a superuser. That matters: some of the book's best tools (`pageinspect` above all, which reads the raw bytes of a page) are superuser-only by default, and managed services generally don't give you one. When you're finished, `docker compose down -v` throws it all away.
+
+## One ordinary SaaS schema runs through every chapter
+
+Every chapter uses the same small SaaS schema: accounts, their users, the projects they own, and a large table of events (deploys, builds, comments, alerts, logins) that grows forever. It's deliberately ordinary, and big enough for the planner to make real decisions and for mistakes to cost something you can measure:
+
+| Table | Rows | Heap size | Columns worth knowing |
+| --- | --- | --- | --- |
+| accounts | 1,000 | 72 KB | `plan` |
+| users | 100,000 | 9 MB | `account_id`, `email` (unique together) |
+| projects | 20,000 | 1.5 MB | `account_id`, `owner_id`, `archived_at` |
+| events | 2,000,000 | 275 MB | `account_id`, `project_id`, `user_id`, `kind`, `payload` (jsonb), `created_at` |
+
+Every table has a `bigint` identity `id` and a `created_at`. The data is generated from a fixed random seed and dated back from one fixed moment, October 6, 2026, so your plans, counts and dates will match ours.
+
+Two things are intentional, so don't "fix" them yet:
+
+- `events` has **no secondary indexes**, only its primary key. The indexing chapters add them one at a time, so you can see exactly what each one buys.
+- **Only one foreign key column is indexed, and only by accident.** `users.account_id` leads the `unique (account_id, email)` constraint's index; no other referencing column has one. Postgres doesn't index referencing columns for you, and that's one of the most common mistakes in real schemas. [Constraints, chosen on purpose](/books/eight-kilobytes/relationships) shows what it costs.
+
+<DeepDive title="How the seed makes the same two million events on every machine">
+
+The whole seed is [seed.sql](https://www.flagon.io/books/eight-kilobytes/lab/seed.sql) in the kit: five extensions, four tables, and an `insert` per table. The interesting part is the generator. Here is `events` and the statement that fills it:
+
+```sql
+create table events (
+  id          bigint generated always as identity primary key,
+  account_id  bigint not null references accounts (id),
+  project_id  bigint not null references projects (id),
+  user_id     bigint references users (id),
+  kind        text not null,
+  payload     jsonb not null default '{}',
+  created_at  timestamptz not null default now()
+);
+
+select setseed(0.42);
+-- ... accounts, users and projects first ...
+
+insert into events (account_id, project_id, user_id, kind, payload, created_at)
+select p.account_id, p.id, p.owner_id, r.kind,
+       jsonb_build_object('status', r.status,
+                          'duration_ms', r.duration_ms,
+                          'region', r.region),
+       r.created_at
+from (
+  select g,
+         1 + floor(random()*20000)::bigint as project_id,
+         (array['deploy','deploy','build','build','build',
+                'comment','alert','login'])[1 + floor(random()*8)::int] as kind,
+         (array['ok','ok','ok','failed'])[1 + floor(random()*4)::int] as status,
+         floor(random()*5000)::int as duration_ms,
+         (array['iad','sfo','ams','fra','syd'])
+           [1 + floor(random()*5)::int] as region,
+         timestamptz '2026-10-06' - interval '365 days'
+           + (g * interval '365 days' / 2000000) as created_at
+  from generate_series(1, 2000000) g
+) r
+join projects p on p.id = r.project_id
+order by r.g;
+
+vacuum analyze;
+```
+
+`setseed` makes `random()` return the same sequence every run, so the same projects get the same events. `created_at` is spread evenly over the year before October 6, 2026, and the `order by` inserts rows in time order, which is why recent events sit together at the end of the table (a fact the latency and indexing chapters lean on). The repeated array entries skew the mix: deploys and builds are common, comments, alerts and logins an eighth each, and a quarter of statuses are `failed`. The final `vacuum analyze` leaves every page marked all-visible and the planner's statistics fresh.
+
+</DeepDive>
+
+The kit loads it into a database called `book` (about 345 MB) and marks it as a template. Copying a template is far cheaper than rerunning the seed, so explore in a copy:
+
+```bash
+docker compose exec postgres psql -c "create database scratch template book"
+docker compose exec postgres psql -d scratch
+```
+
+<Callout type="tip" title="Work in a copy">
+Many chapters update every row, delete half a table, or add and drop indexes. Never touch `book` itself (the kit doesn't even allow connections to it). When you've made a mess in `scratch`, `drop database scratch` and copy again.
+</Callout>
+
+## Break things here, not in production
+
+Some examples are destructive on purpose: they update millions of rows, hold transactions open, or delete half a table to watch vacuum work. Run them on your disposable server, never on a database anyone depends on. Where a technique is meant for production (a migration pattern, a monitoring query, a setting), the text says so, with what it locks and what it costs.
+
+After a short primer on the nouns, the first stop is the hardware, because a page costs wildly different amounts of time depending on where it is when you ask for it.
+
+## The short version
+
+- Nearly every Postgres performance question reduces to pages touched and round trips made. Count the pages.
+- Use up the cheap fixes before you buy hardware, and prove the need in numbers when you do. Earn the bigger box.
+- Start on one Postgres. Add a second system only for a property you can name and a number that proves you need it.
+- Read the `Buffers:` line of a plan before the timing. Buffer and row counts are repeatable; milliseconds aren't.
+- Every claim that matters has a Prove it check. Rerun it instead of trusting us.
+- Read the simple track for the argument; open a deep dive when you want the internals or the full measurements.
+- Get the lab kit for a disposable PostgreSQL 18 with the example data in a template called `book`.
+- Rerun any chapter's evidence with `./lab <chapter>` from the kit's folder; the Prove it boxes show the checks.
+- Work in a copy (`create database scratch template book`) and drop it when you've made a mess.
+
+## Further reading
+
+- [PostgreSQL 18 documentation](https://www.postgresql.org/docs/18/index.html), PGDG. The reference this whole book leans on; learn to find your way around it.
+- [PostgreSQL 18 release notes](https://www.postgresql.org/docs/18/release-18.html), PGDG. The source for every "(PostgreSQL 18+)" tag in the book.
+- [Versioning policy](https://www.postgresql.org/support/versioning/), PGDG. Five-year support windows, and how long your major version has left.
+- [psql reference](https://www.postgresql.org/docs/18/app-psql.html), PGDG. The client behind every example; its backslash commands repay an hour of reading.
+- [Set returning functions](https://www.postgresql.org/docs/18/functions-srf.html), PGDG. How `generate_series` builds the seed, and how to build your own test data.

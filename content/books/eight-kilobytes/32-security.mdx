@@ -1,0 +1,658 @@
+---
+title: Trust no tenant
+description: Separate owner and app roles, lock down schemas, build multi-tenant row-level security that is fast and pooler-safe, and harden connections.
+part: Running it
+builds_on: [keys, connections]
+---
+
+Most multi-tenant apps keep tenants apart with one line repeated a thousand times: `where account_id = ?`. It works until someone writes the thousand-and-first query and forgets it, and one customer's dashboard shows another's data. That isn't a performance bug. It's a breach notification.
+
+Postgres can enforce that line below the application, where nobody can forget it. It takes an app role that doesn't own its tables, privileges granted on purpose, and row-level security policies that are correct and fast. Each piece has a way to fail silently, and we'll show you where.
+
+## The app never connects as postgres
+
+Postgres has one kind of principal: the role. A "user" is a role with `LOGIN`; a "group" is a role without it that others are members of.
+
+```sql
+create role wg_owner nologin;                    -- owns the schema and tables
+create role wg_app login password 'app-secret';  -- the application logs in as this
+create role wg_readonly nologin;                 -- a group for read access
+```
+
+Roles are cluster-wide, not inside a database, which is why `pg_dump` skips them ([pg_dump leaves out roles; dump them separately](/books/eight-kilobytes/backups#pg_dump-leaves-out-roles-dump-them-separately)).
+
+Role attributes are the powerful switches (`SUPERUSER`, `CREATEROLE`, `CREATEDB`, `REPLICATION`, `BYPASSRLS`), and your app role gets none of them. The most common Postgres security mistake is an app connecting as `postgres` or the managed service's admin user: every SQL injection becomes a full compromise, and no policy applies (the superuser bypasses them; the managed admin usually owns the tables, which skips them too).
+
+Grant one role to another and the grantee becomes a member, which by default inherits the granted role's privileges. Before inventing roles, check the predefined ones, such as `pg_monitor` for the views in [Watch it run](/books/eight-kilobytes/observability) and `pg_maintain` (PostgreSQL 17+) for `vacuum` and `reindex` without owning the tables.
+
+<DeepDive title="How a migrator borrows the owner's powers without carrying them all day">
+
+Since PostgreSQL 16 a grant carries three options: `inherit` (use the role's privileges automatically), `set` (may `set role` to it), and `admin` (may grant it). So a migrator can become the owner deliberately:
+
+```sql
+create role wg_migrator login;
+grant wg_owner to wg_migrator with inherit false, set true;
+
+select r.rolname as role, m.rolname as member,
+       a.inherit_option, a.set_option, a.admin_option
+from pg_auth_members a
+join pg_roles r on r.oid = a.roleid
+join pg_roles m on m.oid = a.member
+where m.rolname like 'wg_%';
+```
+
+```text
+    role     |   member    | inherit_option | set_option | admin_option
+-------------+-------------+----------------+------------+--------------
+ wg_owner    | wg_migrator | f              | t          | f
+ wg_readonly | wg_analyst  | t              | t          | f
+```
+
+As `wg_migrator`, ordinary queries fail until it runs `set role wg_owner`: the "sudo" behavior you want for schema changes. (`wg_analyst` is a login role made a member with a plain `grant wg_readonly to wg_analyst`.) Other predefined roles worth knowing: `pg_read_all_data` and `pg_write_all_data` (PostgreSQL 14+), and `pg_signal_backend` for cancelling queries.
+
+<ProveIt lab="32-security">
+
+```sql
+select lab.prove(
+  'PostgreSQL 16+ grants carry inherit, set, and admin options: wg_migrator may set role but does not inherit',
+  (select not a.inherit_option and a.set_option and not a.admin_option
+   from pg_auth_members a
+   join pg_roles r on r.oid = a.roleid
+   join pg_roles m on m.oid = a.member
+   where r.rolname = 'wg_owner' and m.rolname = 'wg_migrator'));
+```
+
+</ProveIt>
+
+Coming from MySQL: accounts there are `'user'@'host'` pairs, and roles (8.0+) are a separate thing you grant to them. In Postgres, login, group, and owner are all the same object with different attributes, and host rules live in `pg_hba.conf` ([Postgres is not MySQL](/books/eight-kilobytes/not-mysql)).
+
+</DeepDive>
+
+## The app never owns its tables
+
+An owner can `alter`, `drop`, and grant anything on its tables, and by default ignores row-level security on them. None of that belongs in a process handling web requests. So you have at least two roles:
+
+| Role | Login | Used by | Can do |
+|---|---|---|---|
+| owner / migrator | migrations only | the deploy pipeline | DDL, owns every object |
+| app | yes | the running application | `select`, `insert`, `update`, `delete` on granted tables |
+| readonly (optional) | via members | analysts, BI tools | `select` |
+
+The owner can be `nologin`, with migrators that `set role` into it (switch to it, like sudo, only for schema changes). The app's connection string never holds its credentials.
+
+### Reaching a table takes two grants
+
+`USAGE` on a schema lets a role look inside, and touching a table takes `USAGE` plus the table privilege:
+
+```sql
+create schema app authorization wg_owner;
+grant usage on schema app to wg_app, wg_readonly;
+```
+
+### Grants on all tables miss next week's table
+
+`grant ... on all tables in schema app` covers only tables that exist now. Next week's table gets `permission denied`, and someone "fixes" it by granting everything to everyone. Default privileges close that gap: they apply to objects a given role creates later.
+
+```sql
+set role wg_owner;
+alter default privileges in schema app
+  grant select, insert, update, delete on tables to wg_app;
+alter default privileges in schema app
+  grant select on tables to wg_readonly;
+-- serial columns also need: grant usage on sequences to wg_app
+-- (identity columns, like ours, don't)
+```
+
+Now every table `wg_owner` creates in `app` arrives with the right grants. For this chapter we created two of them, `app.projects` and `app.events`: copies of the sample tables with every row but fewer columns (no user or owner column). The app can select, insert, update, and delete, and nothing else: no truncate, no alter, no drop.
+
+<DeepDive title="Reading the grants in \dp">
+
+```text
+=> \dp app.events
+ Schema |  Name  | Type  |     Access privileges      | ...
+--------+--------+-------+----------------------------+
+ app    | events | table | wg_owner=arwdDxtm/wg_owner+|
+        |        |       | wg_app=arwd/wg_owner      +|
+        |        |       | wg_readonly=r/wg_owner     |
+```
+
+The letters: `a` insert, `r` select, `w` update, `d` delete, `D` truncate, `x` references, `t` trigger, `m` maintain. The app has `arwd`.
+
+<ProveIt lab="32-security">
+
+```sql
+select lab.prove(
+  'tables wg_owner creates in app arrive with grants: wg_owner=arwdDxtm, wg_app=arwd, wg_readonly=r',
+  (select relacl::text[] from pg_class where oid = 'app.events'::regclass)
+  = array['wg_owner=arwdDxtm/wg_owner', 'wg_app=arwd/wg_owner', 'wg_readonly=r/wg_owner']);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<Callout type="warn" title="Default privileges are per creating role">
+
+`alter default privileges` applies to objects created by the role that ran it (or the role named with `for role`). A migration that runs as a different role gets no automatic grants. Always create objects as the owner role, and check with `\ddp` in psql.
+
+</Callout>
+
+### Older databases still let anyone create in public
+
+`search_path` (by default `"$user", public`) decides where Postgres looks up an unqualified name. For years every role could create objects in `public`, which enabled a classic attack: plant a function there named like one a privileged user calls, and wait. PostgreSQL 15 closed it for new databases; everyone but the database owner gets only `USAGE`:
+
+```text
+=> create table public.scratch (id int);   -- as wg_app
+ERROR:  permission denied for schema public
+```
+
+A database upgraded or restored from an older version keeps the old grants: if `\dn+ public` shows `=UC` for everyone, run `revoke create on schema public from public`. For app schemas, qualify names in SQL (`app.events`) or set the path on the role: `alter role wg_app set search_path = app`.
+
+## A policy makes other tenants' rows invisible
+
+Row-level security (RLS) attaches **policies** to a table: boolean expressions Postgres adds to every query, so rows where the policy isn't true are invisible to reads and impossible to write.
+
+```sql
+set role wg_owner;
+alter table app.events enable row level security;
+create policy tenant_isolation on app.events
+  using (account_id = current_setting('app.account_id', true)::bigint);
+-- and the same on app.projects
+```
+
+The tenant is a custom setting, `app.account_id`, that the app sets per request; `current_setting(..., true)` returns null if it was never set. With no separate `with check` expression, `using` governs reads and writes.
+
+<Callout type="info" title="Coming from MySQL">
+
+MySQL has no row-level security; isolation lives in application code, or in views that a query on the base table bypasses. Here the policy is attached to the table ([Postgres is not MySQL](/books/eight-kilobytes/not-mysql)).
+
+</Callout>
+
+With 2,000,000 events across 1,000 accounts, the app role with no tenant set sees nothing:
+
+```text
+=> select count(*) from app.events;   -- as wg_app, no tenant
+ count
+-------
+     0
+```
+
+`account_id = null` is never true, so every row is hidden. RLS fails closed, which is the failure you want. Set tenant 42 and it sees its 2,084 events and nothing else. Asking for tenant 7 by name returns zero rows, and writing a row into tenant 7 fails:
+
+```text
+ERROR:  new row violates row-level security policy for table "events"
+```
+
+<ProveIt lab="32-security">
+
+```sql
+set role wg_app;
+select lab.prove(
+  'no tenant set: the app role sees 0 of 2,000,000 events (RLS fails closed)',
+  (select count(*) from app.events) = 0);
+
+select set_config('app.account_id', '42', false) \g /dev/null
+select lab.prove(
+  'tenant 42 sees its 2,084 events',
+  (select count(*) from app.events) = 2084);
+```
+
+</ProveIt>
+
+RLS is the check; unguessable public ids are the backup for the day a check is missing ([A counter is an invitation](/books/eight-kilobytes/keys#a-counter-is-an-invitation)).
+
+### Foreign keys look through policies
+
+Foreign key checks bypass RLS, so tenant 42 can attach an event to a project it can't see. The fix is the multi-tenant key design from [Make cross-tenant references impossible](/books/eight-kilobytes/keys#make-cross-tenant-references-impossible): carry the tenant in the foreign key, `(account_id, project_id)` referencing `projects (account_id, id)`, so the referenced row must belong to the same tenant.
+
+<DeepDive title="Watching a foreign key cross the tenant line">
+
+As tenant 42, project 1 is invisible:
+
+```text
+=> select account_id from app.projects where id = 1;
+(0 rows)
+```
+
+Yet the insert goes through:
+
+```sql
+begin;
+insert into app.events (account_id, project_id, kind)
+  values (42, 1, 'deploy') returning id;
+rollback;
+```
+
+```text
+   id
+---------
+ 2000002
+```
+
+<ProveIt lab="32-security">
+
+```sql
+begin;
+insert into app.events (account_id, project_id, kind) values (42, 1, 'deploy');
+select lab.prove(
+  'yet it can attach an event to project 1: the foreign key check bypasses RLS',
+  (select count(*) from app.events where project_id = 1) = 1);
+rollback;
+-- after adding the composite foreign key, the same insert fails with:
+--   insert or update on table "events" violates foreign key constraint "events_project_fk"
+```
+
+</ProveIt>
+
+With the tenant in the key, the same insert fails:
+
+```sql
+alter table app.projects
+  add constraint projects_account_id_id_key unique (account_id, id);
+alter table app.events
+  add constraint events_project_fk
+  foreign key (account_id, project_id) references app.projects (account_id, id);
+```
+
+```text
+ERROR:  insert or update on table "events" violates foreign key constraint "events_project_fk"
+DETAIL:  Key is not present in table "projects".
+```
+
+</DeepDive>
+
+### RLS skips the table owner unless you force it
+
+RLS doesn't apply to a table's owner by default. As the owner, with the same tenant set, `app.events` returns all 2,000,000 rows. If your app connects as the owner (common when the ORM's migration tool shares its connection string), RLS silently does nothing. After `alter table app.events force row level security`, the owner sees 2,084.
+
+Force RLS on every tenant table. It costs nothing at query time, but it binds every job that runs as the owner. `pg_dump` as the owner errors out rather than dump a partial table, and a backfill `update` run as the owner with no tenant set quietly changes zero rows. Superusers and `BYPASSRLS` roles still skip policies, so give backups and deliberate cross-tenant work a dedicated `BYPASSRLS` role, and make the bypass explicit (the backup side is in [pg_dump leaves out roles; dump them separately](/books/eight-kilobytes/backups#pg_dump-leaves-out-roles-dump-them-separately)).
+
+<ProveIt lab="32-security">
+
+```sql
+set role wg_owner;
+select lab.prove(
+  'the owner, same tenant setting, sees all 2,000,000 rows: RLS does not apply to owners by default',
+  current_setting('app.account_id', true) = '42'
+  and (select count(*) from app.events) = 2000000);
+
+alter table app.events force row level security;
+select lab.prove(
+  'after force row level security, the owner sees 2,084',
+  (select count(*) from app.events) = 2084);
+```
+
+</ProveIt>
+
+<Callout type="danger" title="Three ways RLS silently does nothing">
+
+The app connects as a superuser, as a `BYPASSRLS` role, or as the table owner without `force row level security`. In all three, queries succeed and return every tenant's rows. Test it: connect with the app's exact credentials, set no tenant, and confirm a tenant table returns zero rows.
+
+</Callout>
+
+### Pooled connections leak tenants
+
+A pool hands the same server connection to request after request ([Transaction pooling breaks session state](/books/eight-kilobytes/connections#transaction-pooling-breaks-session-state)). A tenant set for the session outlives its request, and the next request that forgets to set one runs as the previous tenant. A cross-tenant leak, with RLS fully on.
+
+The rule: **set the tenant inside the transaction, scoped to the transaction.** `set_config`'s third argument is the scope, and `true` means "until commit", like `set local`:
+
+```sql
+begin;
+select set_config('app.account_id', '7', true);   -- true = transaction-local
+select count(*) from app.projects;
+commit;
+```
+
+One trap: after that commit, a request that sets no tenant gets `invalid input syntax for type bigint: ""` instead of zero rows. Once set in a session, a custom setting reverts to an empty string, not to "not set". Still closed, but a forgotten tenant becomes a 500. Treat empty as missing:
+
+```sql
+alter policy tenant_isolation on app.events
+  using (account_id = nullif(current_setting('app.account_id', true), '')::bigint);
+```
+
+Then make the safe path the only path: one app helper that begins, sets the tenant from a bind parameter, runs the request, and commits.
+
+<DeepDive title="The empty string, proven, and a tenant helper for node-postgres">
+
+```sql
+select current_setting('app.account_id', true) is null as is_null,
+       current_setting('app.account_id', true) as val;
+```
+
+```text
+ is_null | val
+---------+-----
+ f       |
+```
+
+<ProveIt lab="32-security">
+
+```sql
+select lab.prove(
+  'after commit, a transaction-local custom setting reverts to an empty string, not to null',
+  current_setting('app.account_id', true) = '');
+-- the original policy then fails with: invalid input syntax for type bigint: ""
+-- after alter policy ... nullif(current_setting('app.account_id', true), '')::bigint:
+select lab.prove(
+  'with nullif(..., ''''), an unset tenant is null again and the query returns zero rows',
+  (select count(*) from app.projects) = 0 and (select count(*) from app.events) = 0);
+```
+
+</ProveIt>
+
+The helper, with node-postgres:
+
+```ts
+import { Pool, PoolClient } from "pg";
+
+const pool = new Pool(); // direct, or through PgBouncer in transaction mode
+
+export async function withTenant<T>(
+  accountId: string,
+  fn: (db: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    // true = transaction-local: gone at commit, never seen by the next request
+    await client.query("select set_config('app.account_id', $1, true)", [accountId]);
+    const result = await fn(client);
+    await client.query("commit");
+    return result;
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// every query for the request runs inside the tenant's transaction
+const { rows } = await withTenant(session.accountId, (db) =>
+  db.query("select id, name from app.projects order by name"),
+);
+```
+
+The tenant is a bind parameter, never concatenated into SQL. Every query goes through `db`; one on the bare `pool` has no tenant and, thanks to the policy, sees nothing. And `set_config(..., true)` beats `SET LOCAL` from app code because `SET` can't take bind parameters.
+
+</DeepDive>
+
+## RLS performance: policies are predicates
+
+A policy is one more condition in the `where` clause ([Views and policies are text substitution](/books/eight-kilobytes/plans#views-and-policies-are-text-substitution)), so it needs an index like any other. Without one, counting tenant 42's deploys as the app role read 33,309 pages: a parallel sequential scan, filtering on `kind` and the policy. Lead every tenant table's main index with the tenant column:
+
+```sql
+create index events_account_id_created_at_idx on app.events (account_id, created_at);
+```
+
+Now the same count reads 2,036 pages, and the policy is the index condition. The tenant's 20 newest events read 23 pages, and the query never mentions the tenant.
+
+Keep policies simple: a subquery in a policy joins into every query on the table. Resolve membership once per request and set the result as the tenant.
+
+<DeepDive title="The two plans, and why current_setting runs once in an index condition">
+
+Before the index:
+
+```text
+ Finalize Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared hit=10258 read=23051 written=5
+   ...
+               ->  Parallel Seq Scan on events (actual rows=160.67 loops=3)
+                     Filter: ((kind = 'deploy'::text) AND (account_id =
+                       (NULLIF(current_setting('app.account_id'::text, true), ...))::bigint))
+                     Rows Removed by Filter: 666506
+```
+
+After:
+
+```text
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared hit=685 read=1351
+   ->  Bitmap Heap Scan on events (actual rows=482.00 loops=1)
+         ...
+         ->  Bitmap Index Scan on events_account_id_created_at_idx (actual rows=2084.00 ...)
+               Index Cond: (account_id =
+                 (NULLIF(current_setting('app.account_id'::text, true), ''::text))::bigint)
+```
+
+`current_setting` is stable, so in an index condition Postgres evaluates it once and probes the index with the value. In the sequential scan's filter, it runs for every row. The newest-20 query is an `Index Scan Backward` on the same index, `Buffers: shared hit=23`.
+
+<ProveIt lab="32-security">
+
+```sql
+select lab.prove(
+  'with an index leading on the tenant column, the policy becomes an index condition: about 2,036 pages',
+  'Bitmap Index Scan' = any (lab.nodes($$ select count(*) from app.events where kind = 'deploy' $$))
+  and lab.buffers($$ select count(*) from app.events where kind = 'deploy' $$) between 1900 and 2200);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A function that isn't leakproof runs after the policy
+
+Postgres won't run every condition before the policy. A function whose error message contains its input could leak rows you can't see, so anything not marked `LEAKPROOF` (promising never to reveal its input) runs after the policy, and can't drive an index scan ahead of it. `=` and `<` on text, bigint, and timestamptz are leakproof. `like`, `ilike`, and jsonb containment (`@>`) are not.
+
+The cost is real. With a [GIN](/books/eight-kilobytes/glossary#gin) index on `payload`, a containment search with the tenant written into the query read 434 pages. Through the policy it read 2,036: the GIN index wasn't allowed, so the planner fetched all the tenant's rows and filtered. For your biggest customer, that's a scan of all their data on every search.
+
+The fix is to promote the field to a typed column whose comparison operators are leakproof. A stored generated `duration_ms int` column, indexed on `(account_id, duration_ms)`, answers the same search in four pages. Adding a stored column rewrites the table under an `ACCESS EXCLUSIVE` lock, so on a big table plan it like any rewrite ([Every change is a catalog edit, a scan, or a rewrite](/books/eight-kilobytes/migrations#every-change-is-a-catalog-edit-a-scan-or-a-rewrite)).
+
+Read plans as the app role: a superuser never sees the policy predicates at all.
+
+<DeepDive title="Which operators are leakproof, and the plans that show the GIN index refused">
+
+```sql
+select oprname, oprcode, p.proleakproof
+from pg_operator o join pg_proc p on p.oid = o.oprcode
+where (oprleft, oprright) in (('text'::regtype, 'text'::regtype),
+                              ('bigint'::regtype, 'bigint'::regtype),
+                              ('jsonb'::regtype, 'jsonb'::regtype),
+                              ('timestamptz'::regtype, 'timestamptz'::regtype))
+  and oprname in ('=', '<', '@>', '~~', '~~*')
+order by 1, 2;
+```
+
+```text
+ oprname |    oprcode     | proleakproof
+---------+----------------+--------------
+ <       | int8lt         | t
+ <       | text_lt        | t
+ <       | timestamptz_lt | t
+ <       | jsonb_lt       | f
+ =       | texteq         | t
+ =       | int8eq         | t
+ =       | timestamptz_eq | t
+ =       | jsonb_eq       | f
+ @>      | jsonb_contains | f
+ ~~      | textlike       | f
+ ~~*     | texticlike     | f
+```
+
+As `postgres` (which bypasses RLS), with the tenant in the query, `where account_id = 42 and payload @> '{"duration_ms": 1234}'`:
+
+```text
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared hit=434
+   ->  Bitmap Heap Scan on events (actual rows=1.00 loops=1)
+         ->  BitmapAnd (actual rows=0.00 loops=1)
+               ->  Bitmap Index Scan on events_payload_idx (actual rows=403.00 ...)
+               ->  Bitmap Index Scan on events_account_id_created_at_idx (actual rows=2084.00 ...)
+```
+
+As the app role, through the policy, `where payload @> '{"duration_ms": 1234}'`:
+
+```text
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared hit=2036
+   ->  Bitmap Heap Scan on events (actual rows=1.00 loops=1)
+         Filter: (payload @> '{"duration_ms": 1234}'::jsonb)
+         Rows Removed by Filter: 2083
+         ->  Bitmap Index Scan on events_account_id_created_at_idx (actual rows=2084.00 ...)
+```
+
+<ProveIt lab="32-security">
+
+```sql
+set role wg_app;
+select lab.prove(
+  'through the policy, the GIN index is not allowed: the planner fetches all of the tenant''s rows and filters',
+  not (lab.plan($$ select count(*) from app.events where payload @> '{"duration_ms": 1234}' $$)::text
+       like '%events_payload_idx%')
+  and lab.buffers($$ select count(*) from app.events where payload @> '{"duration_ms": 1234}' $$)
+      between 1900 and 2200);
+```
+
+</ProveIt>
+
+The generated-column fix. (The other way out, marking a function `LEAKPROOF`, takes a superuser and a function verified never to raise input-dependent errors.)
+
+```sql
+alter table app.events
+  add column duration_ms int
+  generated always as ((payload->>'duration_ms')::int) stored;
+create index on app.events (account_id, duration_ms);
+```
+
+```text
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared hit=1 read=3
+   ->  Index Only Scan using events_account_id_duration_ms_idx on events (actual rows=1.00 ...)
+         Index Cond: ((account_id = (NULLIF(current_setting(...), ''::text))::bigint)
+                      AND (duration_ms = 1234))
+         Heap Fetches: 0
+```
+
+</DeepDive>
+
+## SECURITY DEFINER functions need a pinned search_path
+
+A `security definer` function runs with its owner's privileges, like a setuid program: right for a narrow operation such as "accept this invitation", and a classic escalation. Unqualified names inside resolve through the caller's `search_path`, so a caller can put their own `count` first and have the owner run it. Pin the search path:
+
+```sql
+set role wg_owner;
+
+create function app.account_event_count(p_account bigint) returns bigint
+  language sql stable security definer
+  set search_path = pg_catalog, pg_temp
+  as $$ select count(*) from app.events where account_id = p_account $$;
+
+revoke execute on function app.account_event_count(bigint) from public;
+grant  execute on function app.account_event_count(bigint) to wg_app;
+```
+
+Three habits: pin `search_path` with `pg_temp` last, schema-qualify every table, and revoke `execute` from `public` (new functions are executable by everyone).
+
+Forced RLS binds the owner too, so tenant 42 calling `app.account_event_count(7)` gets 0; an owner that bypasses RLS would have returned tenant 7's count. And a definer function is never inlined, so the planner sees a black box ([STRICT, SECURITY DEFINER, or a SET clause stops inlining](/books/eight-kilobytes/functions#strict-security-definer-or-a-set-clause-stops-inlining)).
+
+<DeepDive title="The search_path attack, run">
+
+The lab defines a second function, `app.unpinned_event_count`, identical but without the `set search_path` clause. Then, as `wg_app`, in a schema it controls, it defines its own `count(*)` whose state function records who ran it, and puts that schema ahead of `pg_catalog`:
+
+```sql
+create function wg_app.steal(bigint) returns bigint language plpgsql as $$
+begin
+  perform set_config('lab.ran_as', current_user, false);
+  return $1 + 1;
+end $$;
+create aggregate wg_app.count(*) (sfunc = wg_app.steal, stype = bigint, initcond = '0');
+set search_path = wg_app, pg_catalog;
+select app.unpinned_event_count(42);
+```
+
+`pg_catalog` is searched first only when the path doesn't name it; naming it later hands the caller the first pick. The unpinned function runs the impostor as `wg_owner`. The pinned one ignores the caller's path, runs the real `count`, and returns 2,084.
+
+<ProveIt lab="32-security">
+
+```sql
+-- the attack: as wg_app, define wg_app.count(*) whose state function records
+-- current_user, then: set search_path = wg_app, pg_catalog;
+select app.unpinned_event_count(42) \g /dev/null
+select lab.prove(
+  'an unpinned SECURITY DEFINER function ran the caller''s count(*), as wg_owner',
+  current_setting('lab.ran_as') = 'wg_owner');
+
+select set_config('lab.ran_as', '', false) \g /dev/null
+select lab.prove(
+  'with search_path pinned to pg_catalog, pg_temp, the real count runs and the caller''s code does not',
+  app.account_event_count(42) = 2084 and current_setting('lab.ran_as') = '');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Use scram-sha-256 and verify-full, never trust
+
+Everything above assumes the right role is the one connecting. `pg_hba.conf` decides who may connect, from where, and how they prove it. The server uses the first line that matches the connection type, database, user, and address:
+
+```text
+# TYPE   DATABASE     USER          ADDRESS          METHOD
+local    all          postgres                       peer
+hostssl  app          wg_app        10.0.0.0/16      scram-sha-256
+hostssl  app          wg_migrator   10.0.5.10/32     scram-sha-256
+hostssl  replication  replicator    10.0.6.0/24      scram-sha-256
+host     all          all           all              reject
+```
+
+`hostssl` matches only TLS connections, so unencrypted ones don't match at all. Use `scram-sha-256`, never `trust` on a network line, and end with an explicit `reject`. Its address `all` covers IPv6 too, which `0.0.0.0/0` would miss.
+
+Passwords: `scram-sha-256` has been the default since PostgreSQL 14, and MD5 is deprecated as of PostgreSQL 18, which warns when MD5 passwords are set. Find old roles with `where rolpassword like 'md5%'` on `pg_authid` and reset them.
+
+TLS: set `ssl = on` and connect with `sslmode=verify-full`, so clients check the certificate and host name; `require` encrypts but doesn't stop impersonation. Managed databases ship a CA bundle for this.
+
+## Start auditing with the server log; it's free
+
+Locked doors still need a record of who opened them. Start with the server log: `log_statement = 'ddl'` records every create, alter, and drop with its user, and with the owner/app split, any DDL in the log came from your migration role. Log connections too. Don't set `log_statement = 'all'` on busy production: the log grows enormous and fills with sensitive values.
+
+<DeepDive title="A logging baseline, and which sessions really use TLS">
+
+```ini
+log_connections = 'authentication,authorization'   # PostgreSQL 18 takes a list
+log_disconnections = on
+log_statement = 'ddl'          # every create/alter/drop, with the user
+log_line_prefix = '%m [%p] %q%u@%d %a '
+```
+
+And for TLS, which sessions use it:
+
+```sql
+select a.usename, a.client_addr, s.ssl, s.version
+from pg_stat_ssl s join pg_stat_activity a using (pid)
+where a.backend_type = 'client backend';
+```
+
+</DeepDive>
+
+For compliance-grade auditing, use `pgaudit`. For application history ("who changed this invoice"), write an audit table in the same transaction ([History is a table you design](/books/eight-kilobytes/relationships#history-is-a-table-you-design)) and revoke `update` and `delete` on it from the app role.
+
+Then check privileges in CI. This query finds tenant tables without RLS enabled and forced:
+
+```sql
+select n.nspname, c.relname, c.relrowsecurity, c.relforcerowsecurity
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where c.relkind in ('r', 'p') and n.nspname = 'app'
+  and not (c.relrowsecurity and c.relforcerowsecurity);
+```
+
+Run against a migrated test database, it fails the build on a new tenant table without RLS. On this chapter's setup it already finds one: `app.projects`, which never got `force`. Add a second check for login roles with `rolsuper`, `rolbypassrls`, or `rolcreaterole`.
+
+## The short version
+
+- The app connects as a role that is not a superuser, has no `BYPASSRLS`, and doesn't own the tables. Migrations run as a separate owner role.
+- Use `alter default privileges` so new tables get the right grants automatically, and revoke `create` on `public` in databases that predate PostgreSQL 15.
+- For multi-tenant isolation, enable and force row-level security on every tenant table with a policy on `account_id` (backups and cross-tenant jobs then need a `BYPASSRLS` role), and add composite `(account_id, id)` foreign keys so references can't cross tenants.
+- Set the tenant with `set_config('app.account_id', $1, true)` inside each request's transaction, through one helper; wrap it in `nullif(..., '')` in policies.
+- Policies are predicates: lead indexes with the tenant column, keep policies simple, and promote jsonb fields you search through a policy to typed columns.
+- Every `security definer` function gets `set search_path = pg_catalog, pg_temp`, schema-qualified names, and `revoke execute ... from public`.
+- Use `hostssl` and `scram-sha-256` in `pg_hba.conf`, `sslmode=verify-full` in clients, and log DDL and connections.
+
+## Further reading
+
+- [Row Security Policies](https://www.postgresql.org/docs/18/ddl-rowsecurity.html) and [CREATE POLICY](https://www.postgresql.org/docs/18/sql-createpolicy.html), PostgreSQL documentation. Permissive versus restrictive policies, per-command policies, and the exact rules for `using` and `with check`.
+- [Privileges](https://www.postgresql.org/docs/18/ddl-priv.html) and [ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html), PostgreSQL documentation. The full privilege model, including the letters `\dp` prints.
+- [CREATE FUNCTION](https://www.postgresql.org/docs/18/sql-createfunction.html), PostgreSQL documentation. How to write SECURITY DEFINER functions safely.
+- [A Guide to CVE-2018-1058: Protect Your Search Path](https://wiki.postgresql.org/wiki/A_Guide_to_CVE-2018-1058%3A_Protect_Your_Search_Path), PostgreSQL wiki. The `search_path` attack, and why PostgreSQL 15 changed the public schema.
+- [Abusing SECURITY DEFINER functions](https://www.cybertec-postgresql.com/en/abusing-security-definer-functions/), Laurenz Albe, CYBERTEC, 2019. A worked privilege escalation through an unpinned search path.
+- [The pg_hba.conf File](https://www.postgresql.org/docs/18/auth-pg-hba-conf.html), PostgreSQL documentation. Every authentication method and match rule.
+- [pgAudit](https://github.com/pgaudit/pgaudit), pgAudit project. Statement and object auditing when the server log isn't enough.

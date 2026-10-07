@@ -1,0 +1,365 @@
+---
+title: You don't need another database (yet)
+description: Know how far Postgres stretches to cover key-value, document, graph, time-series, queue, search, and vector workloads, and when a separate system earns its place.
+part: Designing for it
+builds_on: [types, relationships]
+---
+
+Here's a session lookup in a 200,000-row Postgres table: 4 pages, a few microseconds of database time. The network round trip to fetch it costs more than the lookup does, and that would be just as true of a dedicated key-value store.
+
+The preface promised one database for most of what a product needs. This chapter checks that promise one model at a time: key-value, documents, graphs, time series, queues, search, and vectors. For each one we look at how close Postgres gets, what it costs in pages, and the signal that it's time for something else.
+
+## Each model is one shape, made fast
+
+A **data model** is the shape a database assumes your data has; its storage engine is built to make that shape fast.
+
+| Model       | Optimized for                          | Postgres tools                  |
+| ----------- | -------------------------------------- | ------------------------------- |
+| key-value   | get and put one value by key           | primary keys, unlogged tables   |
+| document    | nested records read and written whole  | `jsonb`, GIN                    |
+| graph       | following relationships many hops deep | recursive CTEs, `ltree`         |
+| time series | append-only, time-ordered range scans  | BRIN, partitioning              |
+| queue       | each job to exactly one worker         | `for update skip locked`        |
+| search      | ranking text by relevance              | `tsvector`, GIN                 |
+| vector      | nearest neighbors                      | the `pgvector` extension        |
+
+Each trades the relational model's generality for speed on one pattern. Postgres's extensibility (new types, operators, index methods) is how it borrows that speed back.
+
+## Key-value is a primary key lookup
+
+A key-value store puts a value under a key and gets it back. In Postgres that's a table with a primary key, and a primary key lookup is about as cheap as a database read gets:
+
+```sql
+create unlogged table kv_unlogged (
+  key text primary key, value jsonb not null, expires_at timestamptz not null
+);
+explain (analyze, costs off, timing off, summary off)
+select value from kv_unlogged where key = 'session:4242';
+```
+
+```text
+ Index Scan using kv_unlogged_pkey on kv_unlogged (actual rows=1.00 loops=1)
+   Buffers: shared hit=4
+```
+
+Four pages in a 200,000-row table: a few B-tree pages and one heap page, microseconds of database time. The network round trip dominates, as it would for any networked store.
+
+### An unlogged table is emptied after a crash
+
+The interesting word above is `unlogged`. An unlogged table skips the write-ahead log: the same 200,000 sessions wrote 41 MB of WAL into a normal table and none into this one. The trade-offs are severe:
+
+- **After a crash, an unlogged table is emptied.** Not rolled back: truncated. A clean shutdown keeps it; a crash or failover doesn't.
+- **It isn't replicated,** and physical base backups skip its data.
+
+So use one for what a cache holds: sessions users can re-create, rate-limit counters, recomputable results. Never for anything you can't lose. There's no TTL: delete expired rows in batches, filter `expires_at > now()` on read, and give the table aggressive autovacuum ([Vacuum is not optional](/books/eight-kilobytes/vacuum)).
+
+<DeepDive title="Four pages, no WAL, and the empty copy that replaces a crashed table">
+
+<ProveIt lab="14-models">
+
+```sql
+select lab.prove(
+  'a primary key lookup in a 200,000-row table touches 4 pages',
+  lab.nodes($$ select value from kv_unlogged where key = 'session:4242' $$) = '{Index Scan}'
+  and lab.buffers($$ select value from kv_unlogged where key = 'session:4242' $$) = 4);
+```
+
+</ProveIt>
+
+The two inserts:
+
+```text
+ Insert on kv_logged (actual rows=0.00 loops=1)
+   WAL: records=401315 fpi=1 bytes=41357183 buffers full=10690
+
+ Insert on kv_unlogged (actual rows=0.00 loops=1)
+   ->  Function Scan on generate_series g (actual rows=200000.00 loops=1)
+```
+
+No `WAL:` line means zero (now and then a record or two of catalog housekeeping, never the rows). Postgres keeps an empty "init fork" of each unlogged table on disk and copies it over the data during crash recovery; that's the truncation.
+
+<ProveIt lab="14-models">
+
+```sql
+select lab.prove(
+  'inserting 200,000 sessions into a logged table writes about 41 MB of WAL',
+  :logged_wal between 35e6 and 48e6);
+
+select lab.prove(
+  'the same insert into an unlogged table writes no WAL for the rows (under 64 kB, against 41 MB)',
+  :unlogged_wal < 65536);
+
+select lab.prove(
+  'an unlogged table has an init fork: the empty copy that replaces it after a crash',
+  (pg_stat_file(pg_relation_filepath('kv_unlogged') || '_init')).size = 0
+  and not exists (select 1 from pg_ls_dir(
+        regexp_replace(pg_relation_filepath('kv_logged'), '/[^/]+$', '')) as f
+      where f = regexp_replace(pg_relation_filepath('kv_logged'), '^.*/', '') || '_init'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A cache inside the database can't shield it
+
+Reach for a dedicated cache when you need very high operation rates at sub-millisecond latency, richer structures (sorted sets, pub/sub), or a shield for the database. That last job can't be done from inside: a cache inside the database it protects doesn't reduce that database's load ([Caching: a database is not a cache](/books/eight-kilobytes/limits#caching-a-database-is-not-a-cache)).
+
+## Most documents belong in a jsonb column
+
+Most "unstructured" payloads belong in a `jsonb` column next to the rows they describe, not in a document store of their own. A document database stores nested records, each read and written whole; `jsonb` ([Use jsonb, and give the keys you query their own columns](/books/eight-kilobytes/types#use-jsonb-and-give-the-keys-you-query-their-own-columns)) gives you that inside a column: `->>` reaches in, `@>` tests containment, and SQL/JSON paths handle arrays and nesting.
+
+A GIN index, which indexes every key and value of every document, serves containment queries; [For containment, jsonb_path_ops beats the default](/books/eight-kilobytes/more-indexes#for-containment-jsonb_path_ops-beats-the-default) measures its two flavors, and why it [doesn't help unselective queries](/books/eight-kilobytes/more-indexes#gin-doesnt-help-unselective-queries).
+
+### The planner can't see inside jsonb
+
+Postgres keeps statistics on columns, and the planner uses them to estimate how many rows a predicate matches. It keeps none on the keys inside a `jsonb` value, so `payload->>'status' = 'failed'` gets a hard-coded guess of 10,000 rows against 500,420 real, the kind of miss that picks the wrong join and memory budget.
+
+The modeling lesson: a `jsonb` field the planner must filter on deserves a real column. If it stays in the document, expression statistics (PostgreSQL 14+, `create statistics events_status_stats on ((payload->>'status')) from events`) or an [expression index](/books/eight-kilobytes/glossary#expression-index) fixes the estimate; [Functions hide your statistics](/books/eight-kilobytes/planner#functions-hide-your-statistics) runs the demo and both fixes.
+
+### A field you filter, join, or sort on wants a column
+
+`jsonb` is the right home for data that really varies: webhook bodies, user-defined attributes. A field becomes a column when you filter, join, or sort on it, when it needs a constraint (no foreign key points into JSON), when every row has it (a column whose name you store two million times), or when it's updated on its own (one key rewrites the whole document). A stored generated column gets you there without changing writers, though adding one rewrites the table.
+
+A document store fits huge write volumes of independent documents where nothing ever joins. If you find yourself joining documents, that's the relational model asking to come back.
+
+## Entity-attribute-value is a trap
+
+Sooner or later someone proposes a table that can hold any setting without a migration: `settings_eav (project_id, attribute, value)`, one row per project per setting. That's **entity-attribute-value** (EAV): the schema moves out of the catalog and into the data. It looks flexible. It's a key-value store built from the parts of a relational one, and it throws away what those parts were for.
+
+We stored six settings for each of 20,000 projects three ways, as columns, as one `jsonb` document per project, and as EAV, then asked the question every settings screen eventually asks: projects in `iad` with auto-deploy on. Exactly 1,333 match.
+
+| Form    | Size with indexes | Pages read | Rows estimated (actual 1,333) |
+| ------- | ----------------- | ---------- | ----------------------------- |
+| columns | 2,376 KB          | 211        | 1,333                         |
+| `jsonb` | 8,504 KB          | 548        | 1,414                         |
+| EAV     | 14 MB             | 1,833      | about 35                      |
+
+EAV took six times the space and read nine times the pages: six rows where the others store one, and a self-join per condition. The planner expected 35 rows where 1,333 came back, because it treats `attribute = 'region'` and `value = 'iad'` as independent.
+
+EAV also loses every constraint: `retention_days = 'ninety'` goes in, a typo in an attribute name is a new attribute, and "every project has a region" is a rule about a row that isn't there. `jsonb` loses the same, though a check can win some back by hand.
+
+<DeepDive title="The three tables, the measurements, and what each one accepts">
+
+The columns version, with the six settings derived from the project id so every count is exact:
+
+```sql
+create table settings_cols (
+  project_id          bigint  primary key references projects (id),
+  region              text    not null
+                      check (region in ('iad', 'sfo', 'ams', 'fra', 'syd')),
+  retention_days      int     not null check (retention_days > 0),
+  auto_deploy         boolean not null default false,
+  deploy_branch       text    not null default 'main',
+  max_parallel_builds int     not null check (max_parallel_builds between 1 and 64),
+  notify_email        text
+);
+create index on settings_cols (region, auto_deploy);
+```
+
+EAV is `primary key (project_id, attribute)` plus an index on `(attribute, value)`, filled from the columns with a `lateral (values ...)`; the document form is `to_jsonb(s) - 'project_id'` with a `jsonb_path_ops` GIN index. The three queries:
+
+```sql
+select project_id from settings_cols where region = 'iad' and auto_deploy;
+
+select project_id from settings_doc
+where settings @> '{"region": "iad", "auto_deploy": true}';
+
+select r.project_id
+from settings_eav r
+join settings_eav a using (project_id)
+where r.attribute = 'region'      and r.value = 'iad'
+  and a.attribute = 'auto_deploy' and a.value = 'true';
+```
+
+A document check has to require the key and its type together, because a check passes on null and a missing key is null:
+
+```sql
+alter table settings_doc add constraint settings_retention_days check (
+  settings ? 'retention_days'
+  and jsonb_typeof(settings -> 'retention_days') = 'number'
+);
+```
+
+<ProveIt lab="14-models">
+
+```sql
+select lab.prove('EAV stores six rows per project: 120,000 rows',
+  (select count(*) from settings_eav) = 120000);
+select lab.prove('EAV takes about six times the space of the columns; jsonb sits in between',
+  pg_total_relation_size('settings_eav') > 5 * pg_total_relation_size('settings_cols')
+  and pg_total_relation_size('settings_doc') between pg_total_relation_size('settings_cols')
+                                                 and pg_total_relation_size('settings_eav'));
+select lab.prove('EAV reads nearly nine times the pages; the planner expects about 35 rows',
+  :b_eav > 8 * :b_cols and :e_eav between 20 and 60);
+select lab.prove('1,333 projects are in iad with auto-deploy on, in all three forms',
+  (select count(*) from settings_cols where region = 'iad' and auto_deploy) = 1333
+  and (select count(*) from settings_doc
+       where settings @> '{"region": "iad", "auto_deploy": true}') = 1333
+  and (select count(*) from settings_eav r join settings_eav a using (project_id)
+       where r.attribute = 'region' and r.value = 'iad'
+         and a.attribute = 'auto_deploy' and a.value = 'true') = 1333);
+select lab.prove('the column rejects retention_days = ninety',
+  lab.try($$ update settings_cols set retention_days = 'ninety' where project_id = 1 $$)
+    like '22P02:%');
+select lab.prove('EAV accepts it',
+  lab.try($$ update settings_eav set value = 'ninety'
+             where project_id = 1 and attribute = 'retention_days' $$) = 'ok');
+select lab.prove('EAV accepts a misspelled attribute as a new setting',
+  lab.try($$ insert into settings_eav values (1, 'retension_days', '30') $$) = 'ok');
+select lab.prove('EAV lets a project lose its region; the column says no',
+  lab.try($$ delete from settings_eav where project_id = 2 and attribute = 'region' $$) = 'ok'
+  and lab.try($$ update settings_cols set region = null where project_id = 2 $$) like '23502:%');
+select lab.prove('jsonb accepts "ninety" until a check says otherwise',
+  lab.try($$ update settings_doc set settings = settings || '{"retention_days": "ninety"}'
+             where project_id = 3 $$) = 'ok');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### There's no case left where EAV wins
+
+EAV exists to avoid migrations, and in Postgres that reason no longer holds: DDL is transactional, and adding a nullable column is a catalog change that rewrites nothing ([Constant defaults are free; volatile defaults rewrite](/books/eight-kilobytes/migrations#constant-defaults-are-free-volatile-defaults-rewrite)). If your team defines the setting, make it a column. `jsonb` is right when the attributes aren't yours to define: fields your customers create, a webhook's payload. Most real tables end up hybrid: columns for what you filter and constrain, one `jsonb` column for the long tail.
+
+## Wide tables: split by how columns are read
+
+A null costs one bit ([NULLs cost one bit](/books/eight-kilobytes/storage#nulls-cost-one-bit)), so eighty mostly-null columns are cheap. What costs pages is **inline width**: a page holds whole rows, so a query that wants three columns reads pages full of all of them. Big values move out to [TOAST](/books/eight-kilobytes/glossary#toast); medium ones stay. Add a 500-byte `description` to `projects` and the table grows from 192 pages to 1,472, so the listing of project names reads more than seven times the pages, for a column it never displays.
+
+<ProveIt lab="14-models">
+
+```sql
+select lab.prove('a 500-byte inline description takes the table from 192 pages to 1,472',
+  pg_relation_size('projects_narrow') / 8192 = 192
+  and pg_relation_size('projects_wide') / 8192 = 1472);
+select lab.prove('and the listing scan reads more than seven times the pages',
+  lab.buffers($$ select name from projects_wide where account_id = 9 $$)
+  > 7 * lab.buffers($$ select name from projects_narrow where account_id = 9 $$));
+```
+
+</ProveIt>
+
+So split by how columns are read. Listing columns stay in the narrow main table, detail columns move to a [one-to-one](/books/eight-kilobytes/relationships#a-one-to-one-split-costs-a-join-so-make-it-earn-one) table, and hot counters move to a narrow table of their own ([Move hot counters to a narrow table](/books/eight-kilobytes/hot#move-hot-counters-to-a-narrow-table)).
+
+## Postgres stores a graph three ways
+
+A graph is nodes and edges: teams within teams, services depending on services. Postgres has three standard shapes.
+
+### Adjacency lists make moves cheap and walks recursive
+
+The simplest shape stores each node's `parent_id`, and a **recursive common table expression** walks it: a starting query and a recursive one joined by `union all`, repeated until no new rows appear. Each level is one join, so index `parent_id` ([A foreign key is checked both ways, at different prices](/books/eight-kilobytes/relationships#a-foreign-key-is-checked-both-ways-at-different-prices)). Moving a subtree is one update. Graphs that aren't trees can have cycles, and PostgreSQL 14's `cycle` clause stops a walk that revisits a node.
+
+<DeepDive title="A recursive walk down the team tree, and the cycle clause">
+
+```sql
+with recursive subtree as (
+  select id, name, 1 as depth, name::text as path
+  from teams where id = 1                                -- start here
+  union all
+  select t.id, t.name, s.depth + 1, s.path || ' > ' || t.name
+  from teams t join subtree s on t.parent_id = s.id      -- one level down
+)
+select id, depth, path from subtree order by path;
+```
+
+```text
+ id | depth |                     path
+----+-------+-----------------------------------------------
+  1 |     1 | Engineering
+  2 |     2 | Engineering > Platform
+  4 |     3 | Engineering > Platform > Databases
+  7 |     4 | Engineering > Platform > Databases > Postgres
+ ...
+```
+
+Make Engineering report to Postgres, and a plain recursive walk never ends. Add `cycle id set is_cycle using visited` after the CTE (the path column needs a name of its own; `path` is taken in the query above), and it returns each team once, then one extra row for Engineering marked `is_cycle`, and stops.
+
+<ProveIt lab="14-models">
+
+```sql
+-- Engineering now reports to Postgres
+update teams set parent_id = 7 where id = 1;
+
+select lab.prove(
+  'with a cycle, the cycle clause (PostgreSQL 14+) stops at the revisited node and marks it',
+  (with recursive subtree as (
+     select id, parent_id, name from teams where id = 1
+     union all
+     select t.id, t.parent_id, t.name
+     from teams t join subtree s on t.parent_id = s.id
+   ) cycle id set is_cycle using visited
+   select count(*) = 8 and count(*) filter (where is_cycle) = 1
+   from subtree));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### ltree trades cheap reads for costly moves
+
+The contrib `ltree` extension stores each node's full path, like `eng.platform.databases`, with a [GiST](/books/eight-kilobytes/glossary#gist) index. `where path <@ 'eng.platform'` ("is a descendant of") returns the whole subtree in one index scan, no recursion. The cost moves to writes: moving a subtree rewrites every path in it.
+
+### Closure tables store every ancestor pair
+
+A closure table stores every ancestor-descendant pair with its depth (seven teams make 18 rows). "Everything under Platform" is one indexed lookup on `ancestor_id`, at any depth, with real foreign keys, but every insert and move must maintain the pairs.
+
+| Shape          | Read a subtree   | Move a subtree  | Best for                    |
+| -------------- | ---------------- | --------------- | --------------------------- |
+| adjacency list | recursive query  | one update      | write-heavy, shallow trees  |
+| `ltree` path   | one index scan   | rewrite subtree | read-heavy hierarchies      |
+| closure table  | one index lookup | rewrite pairs   | deep trees, both directions |
+
+### A graph database earns its place on deep, dense graphs
+
+Recursive CTEs are fine for trees and a few hops. A graph database earns its place for graph algorithms over large, dense data: shortest paths across millions of edges, many-hop pattern matching. Each hop in SQL is a join, and an exponentially growing frontier feels it ([Graphs: every hop is still a join](/books/eight-kilobytes/limits#graphs-every-hop-is-still-a-join)).
+
+## Time series fits BRIN and monthly partitions
+
+Time-series data is append-only and time-ordered, like the running example's `events`, so the table's physical order matches `created_at`. A **BRIN** index exploits that by storing only the smallest and largest value per range of pages: 24 KB on `created_at` where a B-tree is 43 MB ([BRIN keeps one summary per range of pages](/books/eight-kilobytes/more-indexes#brin-keeps-one-summary-per-range-of-pages)).
+
+**Partitioning** by month makes retention a dropped partition instead of a huge `delete` ([Partition for the delete](/books/eight-kilobytes/partitioning)). Time-series systems pull ahead on very high ingest rates and columnar compression ([Time series: the write path is the limit](/books/eight-kilobytes/limits#time-series-the-write-path-is-the-limit)), and one of the best known, TimescaleDB, is itself a Postgres extension ([TimescaleDB is partitioning with opinions](/books/eight-kilobytes/extensions#timescaledb-is-partitioning-with-opinions)).
+
+## SKIP LOCKED gives each job to exactly one worker
+
+A job queue is a table: `select ... for update skip locked` lets many workers each claim a different job without waiting on each other, and a job enqueued in the same transaction as its order can't exist without the order. [A Postgres queue commits with the business write](/books/eight-kilobytes/concurrency#a-postgres-queue-commits-with-the-business-write) builds a full worker, including what happens to a job when its worker crashes. A broker or log fits fan-out to many consumers, replay, and tens of thousands of messages a second ([Streams: a table is not a log](/books/eight-kilobytes/limits#streams-a-table-is-not-a-log)).
+
+## Search starts without a search engine
+
+Postgres turns text into a `tsvector` of normalized words, so "failing" matches "failed", and a GIN index makes matching fast, ranked, with no `like '%deploy%'` in sight. [Search without a search engine](/books/eight-kilobytes/search) builds it on a real corpus and draws the line where a search engine earns its keep ([For most applications, Postgres search is enough](/books/eight-kilobytes/search#for-most-applications-postgres-search-is-enough), [Search: Postgres ranks without corpus statistics](/books/eight-kilobytes/limits#search-postgres-ranks-without-corpus-statistics)).
+
+## Keep vectors next to the rows they describe
+
+Embeddings turn text or images into arrays of floats where similar items sit close together. The `pgvector` extension adds a `vector` type and approximate nearest-neighbor indexes, so similarity search joins your data and filters by tenant in one statement, which a separate vector store that knows nothing of your permissions can't ([A vector search finds near points, whatever the words](/books/eight-kilobytes/search#a-vector-search-finds-near-points-whatever-the-words)).
+
+Mind the pages: a 1,536-dimension vector is about 6 KB, so it lives in TOAST, and 2,000 of them took 15 heap pages and 2,000 TOAST pages ([A 1,536-dimension vector lives in TOAST](/books/eight-kilobytes/search#a-1536-dimension-vector-lives-in-toast)). It isn't in contrib, so check your host allows it ([Extensions come from an allowlist](/books/eight-kilobytes/managed#extensions-come-from-an-allowlist)); at hundreds of millions of vectors, a dedicated system may earn its cost ([Vectors: an indexed column tops out at 2,000 dimensions](/books/eight-kilobytes/limits#vectors-an-indexed-column-tops-out-at-2000-dimensions)).
+
+## A second database has to earn its place
+
+A second system earns its place when a workload would dominate the primary, or when you need a property Postgres lacks, like in-memory latency at very high rates or columnar scans over billions of rows ([Add a second system for a measured reason](/books/eight-kilobytes/limits#add-a-second-system-for-a-measured-reason)). Weigh that against the cost: another system to back up, upgrade, and monitor, data that will drift, and no transactions across the two. A message sent to a broker can announce an order that then rolls back, or be lost if the process dies between the commit and the send, unless you add an outbox, which is itself a Postgres table ([Put the message in the same transaction as the order](/books/eight-kilobytes/acid#put-the-message-in-the-same-transaction-as-the-order)).
+
+<Callout type="tip" title="Start with one database">
+
+The choice isn't symmetric. Moving one workload out of Postgres later is a well-understood migration. Consolidating five databases back into one is not.
+
+</Callout>
+
+## The short version
+
+- A primary key lookup touches 4 pages. Unlogged tables write no WAL, and a crash empties them.
+- The planner has no statistics inside `jsonb` (10,000 guessed, 500,420 real). Promote fields you filter, join, or constrain on to columns.
+- Never build entity-attribute-value tables: six times the space, nine times the pages, and no constraints.
+- Width costs pages, nulls don't: keep listing columns narrow.
+- Hierarchies: adjacency lists, `ltree` paths, or closure tables. Time series: BRIN and partitions. Queues: `for update skip locked`.
+- Full-text search and `pgvector` live next to your data; a 1,536-dimension vector lives in TOAST.
+- Add a separate system when you can name the property Postgres lacks and the measurement that proves you need it.
+
+## Further reading
+
+- [JSON Types](https://www.postgresql.org/docs/18/datatype-json.html) and [JSON Functions and Operators](https://www.postgresql.org/docs/18/functions-json.html), PostgreSQL documentation. `jsonb` storage, indexing, operators, and the SQL/JSON path language.
+- [WITH Queries](https://www.postgresql.org/docs/18/queries-with.html), PostgreSQL documentation. Recursive CTEs, the `search` and `cycle` clauses, and materialization.
+- [ltree](https://www.postgresql.org/docs/18/ltree.html), PostgreSQL documentation. Label paths, their operators, and index support.
+- [NOTIFY](https://www.postgresql.org/docs/18/sql-notify.html), PostgreSQL documentation. Delivery semantics and the notification queue's limits.
+- [Postgres LISTEN/NOTIFY does not scale](https://www.recall.ai/blog/postgres-listen-notify-does-not-scale), Recall.ai. A production account of the commit-time lock under heavy write concurrency.
+- [What Goes Around Comes Around... And Around...](https://db.cs.cmu.edu/papers/2024/whatgoesaround-sigmodrec2024.pdf), Michael Stonebraker and Andrew Pavlo, SIGMOD Record 2024. Why the relational model keeps absorbing the alternatives.

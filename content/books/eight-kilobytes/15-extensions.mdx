@@ -1,0 +1,539 @@
+---
+title: Extensions worth knowing
+description: How Postgres extensions install, load, and upgrade, which ones earn their place, what each one costs, and how to vet one before you depend on it.
+part: Designing for it
+builds_on: [models]
+---
+
+We loaded two million events, shaped like the book's, into a table with one extension installed. One `alter table` and a loop later, the same rows took 30 MB instead of 324 MB with their indexes, and a month of deploy durations read about 300 pages instead of about 3,050. On a different server, a "who's within 50 km of Frankfurt" query went from reading every page of its table to reading 112.
+
+Neither is core Postgres. Both are extensions, which is how Postgres gets what other databases sell as separate products: new types and index methods, loaded into the server you already run ([You don't need another database (yet)](/books/eight-kilobytes/models)). They're also code you didn't write, running inside your database process. Here are the ones worth knowing as of October 2026, what they cost, and how to vet one.
+
+## An extension is a package the database tracks
+
+An extension is files on the server's disk (a control file, SQL scripts, often a compiled library) that `create extension` turns into objects in one database, tracked together so `drop extension` and `pg_dump` treat them as one. Three things follow, and each bites somebody: it installs only what the package manager put on disk (which is why a managed service hands you a list), it's per database, and the SQL objects' version can drift from the library's.
+
+### Some must be loaded at server start
+
+Extensions that need shared memory, background workers, or planner hooks must be in `shared_preload_libraries`, which takes a restart.
+
+<Callout type="warn" title="A preload library that fails to load keeps the server down">
+
+If any library in `shared_preload_libraries` is missing or won't load (a typo in the list, a package removed or not yet built for the new major version), the server refuses to start, and the restart you scheduled becomes an outage. Install the package first, and check the setting on a staging server or replica before you restart the primary.
+
+</Callout>
+
+`pg_stat_statements` is the classic trap the other way round: it installs fine without the preload, then fails when you read it with `must be loaded via "shared_preload_libraries"`.
+
+<ProveIt lab="15-extensions.sh">
+
+```sql
+create extension pg_stat_statements;
+select lab.prove('pg_stat_statements installs without being preloaded',
+  exists (select 1 from pg_extension where extname = 'pg_stat_statements'));
+select lab.prove('but reading it fails until it is in shared_preload_libraries: 55000',
+  lab.try('select count(*) from pg_stat_statements') like '55000:%');
+```
+
+</ProveIt>
+
+### Trusted extensions don't need a superuser
+
+Since PostgreSQL 13, an extension marked `trusted`, one that "cannot provide access to outside-the-database functionality", can be installed by any role with `CREATE` on the database: `citext`, `pg_trgm`, `btree_gist`, `ltree`, yes; `postgres_fdw`, which opens connections, no. On a managed service there's no superuser at all, so check the provider's list before you design around anything here ([Extensions come from an allowlist](/books/eight-kilobytes/managed#extensions-come-from-an-allowlist)).
+
+<DeepDive title="Which extensions are trusted, and what a plain role can do">
+
+```text
+     name     | version | trusted | superuser
+--------------+---------+---------+-----------
+ citext       | 1.8     | t       | t
+ pg_cron      | 1.6     | f       | t
+ plpgsql      | 1.0     | t       | t
+ plpython3u   | 1.0     | f       | t
+ postgis      | 3.6.4   | f       | t
+ postgres_fdw | 1.2     | f       | t
+```
+
+That's `pg_available_extension_versions` for each one's default version. A role with `CREATE` on the database installed `citext` and wrote PL/pgSQL; it got `42501` for `postgres_fdw` and for PL/Python.
+
+<ProveIt lab="15-extensions.sh">
+
+```sql
+create role app login;
+grant create on database lab to app;
+grant create on schema public to app;
+set role app;
+select lab.prove('a role with CREATE on the database, not a superuser, can install a trusted extension (citext)',
+  lab.try('create extension citext') = 'ok');
+select lab.prove('the same role cannot install an untrusted one (postgres_fdw): 42501',
+  lab.try('create extension postgres_fdw') like '42501:%');
+select lab.prove('it can write functions in trusted plpgsql',
+  lab.try($q$create function one_pg() returns int language plpgsql
+                 as 'begin return 1; end'$q$) = 'ok');
+select lab.prove('but not in untrusted plpython3u: 42501',
+  lab.try($q$create function one_py() returns int language plpython3u
+                 as 'return 1'$q$) like '42501:%');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Versions move with alter extension update
+
+After every package, minor, or major upgrade, run `alter extension ... update` for each extension, in each database. Nothing does it for you, managed services included ([The provider adds its own gate on CREATE EXTENSION](/books/eight-kilobytes/managed#the-provider-adds-its-own-gate-on-create-extension)). And a major upgrade waits until every extension has a build for the new major.
+
+<DeepDive title="How Postgres chains upgrade scripts">
+
+Extensions ship scripts named `extension--from--to.sql`, and Postgres chains them. From `hstore` 1.4, `pg_extension_update_paths('hstore')` gives the path to 1.8 as `1.4--1.5--1.6--1.7--1.8`, and `alter extension hstore update` runs all four. The same command moved TimescaleDB from 2.29.2 to 2.30.2 in our lab, because its image keeps older library versions on disk for exactly that. `pg_upgrade` carries the SQL objects over and writes a script for any updates still pending.
+
+<ProveIt lab="15-extensions.sh">
+
+```sql
+create extension hstore version '1.4';
+select lab.prove('there is no 1.4-to-1.8 script; Postgres chains four update scripts',
+  (select path from pg_extension_update_paths('hstore')
+    where source = '1.4' and target = '1.8') = '1.4--1.5--1.6--1.7--1.8');
+alter extension hstore update;
+select lab.prove('alter extension hstore update walks it to the default version, 1.8',
+  (select extversion from pg_extension where extname = 'hstore') = '1.8');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Contrib is the safest shelf, though some of it is obsolete
+
+About fifty extensions ship in `contrib`, on Postgres's own release cycle and license. They're the safest there are, and a few are obsolete:
+
+| Module | Use it for | Still needed? |
+| --- | --- | --- |
+| `pg_stat_statements` | per-query statistics | yes, everywhere |
+| `pg_trgm` | `like '%x%'`, similarity | yes |
+| `btree_gist` | scalars in exclusion constraints | yes |
+| `pgcrypto` | password hashing, PGP encryption | for `crypt()` and PGP only |
+| `citext` | case-insensitive text | mostly replaced by `lower()` indexes |
+| `hstore` | flat key-value column | mostly replaced by `jsonb` |
+| `uuid-ossp` | UUID generation | only for v1, v3, v5 |
+
+Core has `gen_random_uuid()`, `uuidv7()`, and `sha256()`. For case-insensitive text, our default is a unique index on `lower()`, and `citext`'s own docs point to nondeterministic collations as the other alternative ([For emails, make lower() the unique key](/books/eight-kilobytes/types#for-emails-make-lower-the-unique-key)). If you use pgcrypto's PGP functions, be on 18.6 or later: before it, a cipher OpenSSL refused (under FIPS, say) silently produced trivially breakable data ([18.6 release notes](https://www.postgresql.org/docs/18/release-18-6.html)).
+
+## PostGIS is why many teams run Postgres at all
+
+[PostGIS](https://postgis.net/) adds spatial types, functions, and [GiST](/books/eight-kilobytes/glossary#gist) spatial indexing. It's mature and widely offered: 3.6.4 (June 2026), for PostgreSQL 12 through 18, under the [GPL v2 or later](https://github.com/postgis/postgis/blob/master/LICENSE.TXT), which attaches to distributing it, not running it behind your app.
+
+### The type decides what distance means
+
+PostGIS has two families of types, and the choice decides what "distance" means. **`geometry`** works on a flat plane, in the units of its spatial reference system (**SRID**): degrees for longitude and latitude (4326), meters for a projection. **`geography`** works on the curved Earth, in meters. Frankfurt to Amsterdam, four ways:
+
+```text
+ geometry_4326 | geography | mercator_3857 | laea_3035
+---------------+-----------+---------------+-----------
+         4.404 |    364465 |        581921 |    364479
+```
+
+The real answer is about 364.5 km. `geometry` in 4326 says 4.4 "degrees", meaningless. Web Mercator, the projection of most web maps, says 582 km, 60 percent too long. Use `geography` for points spread across the world, or `geometry` in a projected SRID for regional data. Never compute distances in degrees.
+
+<DeepDive title="The four distances, as SQL">
+
+```sql
+select st_distance('SRID=4326;POINT(8.68 50.11)'::geometry,
+                   'SRID=4326;POINT(4.90 52.37)'::geometry)   as geometry_4326,
+       st_distance('SRID=4326;POINT(8.68 50.11)'::geography,
+                   'SRID=4326;POINT(4.90 52.37)'::geography)  as geography,
+       st_distance(st_transform('SRID=4326;POINT(8.68 50.11)'::geometry, 3857),
+                   st_transform('SRID=4326;POINT(4.90 52.37)'::geometry, 3857)) as mercator_3857,
+       st_distance(st_transform('SRID=4326;POINT(8.68 50.11)'::geometry, 3035),
+                   st_transform('SRID=4326;POINT(4.90 52.37)'::geometry, 3035)) as laea_3035;
+```
+
+(Output rounded.) A degree of longitude shrinks as you go north, and Mercator stretches distances more the farther you get from the equator. Store everything in one SRID; mixing them is an error at best and a wrong answer after a careless `st_transform` at worst.
+
+<ProveIt lab="15-extensions.sh">
+
+```sql
+select lab.prove('as geography: about 364.5 km, in meters, on the spheroid',
+  st_distance('SRID=4326;POINT(8.68 50.11)'::geography,
+              'SRID=4326;POINT(4.90 52.37)'::geography) between 364000 and 365000);
+select lab.prove('in Web Mercator (3857): about 582 km, 60 percent too long',
+  st_distance(st_transform('SRID=4326;POINT(8.68 50.11)'::geometry, 3857),
+              st_transform('SRID=4326;POINT(4.90 52.37)'::geometry, 3857))
+    between 575000 and 590000);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### ST_DWithin uses the index; ST_Distance doesn't
+
+Give each of the book's 100,000 users a last-seen `geography` point around one of the five seed regions, with a GiST index on it. "Users within 50 km of Frankfurt":
+
+```sql
+select count(*) from user_locations
+where st_dwithin(last_seen, 'SRID=4326;POINT(8.68 50.11)'::geography, 50000);
+```
+
+```text
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared hit=773
+   ->  Bitmap Heap Scan on user_locations (actual rows=955.00 loops=1)
+         Rows Removed by Filter: 660
+         Heap Blocks: exact=725
+         ->  Bitmap Index Scan on user_locations_gist (actual rows=1615.00 loops=1)
+               Index Cond: (last_seen && _st_expand('0101...'::geography,
+                                                    '50000'::double precision))
+               Buffers: shared hit=48
+```
+
+Read it from the bottom: a bounding-box test (`&&` against a box grown by 50 km) found 1,615 candidates in 48 index pages, then the exact distance kept 955.
+
+Now the version everybody writes first, `st_distance(last_seen, ...) < 50000`: same 955 rows, and a sequential scan of every page, because nothing tells the planner that "under 50 km" implies "inside this box". Intersecting a `st_buffer` circle uses the index but draws the circle with 32 sides, and missed 6 users. Use `ST_DWithin`. Always.
+
+### The index finds rows; physical order decides pages
+
+Look at the buffers again: 773 pages for 955 rows, from a table of 834. Nearby users were inserted in id order, so they sit on 725 different pages. `cluster user_locations using user_locations_gist` rewrote the table in spatial order, and the same query read 112 pages. `cluster` locks the table for the rewrite and the order decays as rows change, so it suits tables loaded in bulk.
+
+Nearest neighbors, the other query spatial apps live on, is `order by last_seen <-> point limit 5`, which walked the index in distance order and read 12 pages.
+
+PostGIS's own bill comes due at upgrade time: it links against the GEOS and PROJ libraries, and a major Postgres upgrade waits until PostGIS is built for the new major.
+
+<DeepDive title="The box test, proven, plus the clustered and nearest-neighbor plans and what PostGIS costs">
+
+<ProveIt lab="15-extensions.sh">
+
+```sql
+\set fra '''SRID=4326;POINT(8.68 50.11)''::geography'
+\set within 'select count(*) from user_locations where st_dwithin(last_seen, ' :fra ', 50000)'
+\set dist   'select count(*) from user_locations where st_distance(last_seen, ' :fra ') < 50000'
+\set buf    'select count(*) from user_locations where st_intersects(last_seen, st_buffer(' :fra ', 50000))'
+
+select lab.prove('the box finds 1,615 candidates; the exact distance check keeps 955',
+  (select (p -> 'Plan' -> 'Plans' -> 0 -> 'Plans' -> 0 ->> 'Actual Rows')::numeric = 1615
+          and (p -> 'Plan' -> 'Plans' -> 0 ->> 'Rows Removed by Filter')::numeric = 660
+     from lab.plan(:'within') p));
+select lab.prove('ST_Distance(...) < 50000 gives the same answer and never uses the index',
+  (:dist) = 955 and 'Seq Scan' = any (lab.nodes(:'dist'))
+  and not ('Bitmap Index Scan' = any (lab.nodes(:'dist'))));
+select lab.prove('a 50 km ST_Buffer is a 32-sided polygon, so intersecting it misses 6 of the 955',
+  st_npoints(st_buffer(:fra, 50000)::geometry) = 33 and (:buf) = 949);
+```
+
+</ProveIt>
+
+```text
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared read=112
+   ->  Bitmap Heap Scan on user_locations (actual rows=955.00 loops=1)
+         Heap Blocks: exact=62
+
+ Limit (actual rows=5.00 loops=1)
+   Buffers: shared hit=12
+   ->  Index Scan using user_locations_gist on user_locations (actual rows=5.00 loops=1)
+         Order By: (last_seen <-> '0101...'::geography)
+```
+
+The `<->` index is used only in an `order by`, and for `geography` it orders on a sphere, not the spheroid, so a near-tie can come back slightly out of order; compute `st_distance` on the rows you return.
+
+For the upgrade itself, [`postgis_extensions_upgrade()`](https://postgis.net/docs/PostGIS_Extensions_Upgrade.html) moves PostGIS and its companions together. It has many companion extensions; install only what you use. And a GiST index stores bounding boxes, so a sprawling polygon's box matches far more than the polygon; the docs recommend indexing `ST_Subdivide` pieces.
+
+<ProveIt lab="15-extensions.sh">
+
+```sql
+\set knn 'select user_id from user_locations order by last_seen <-> ' :fra ' limit 5'
+cluster user_locations using user_locations_gist;
+analyze user_locations;
+select lab.prove('after CLUSTER on the GiST index, the same query reads under 150 pages',
+  (:within) = 955 and lab.buffers(:'within') < 150);
+select lab.prove('nearest neighbors with <-> walk the index in distance order and read under 20 pages',
+  lab.nodes(:'knn') = '{Limit,"Index Scan"}' and lab.buffers(:'knn') < 20);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## TimescaleDB is partitioning with opinions
+
+[TimescaleDB](https://github.com/timescale/timescaledb) turns a table into a **hypertable** that creates child tables (**chunks**) by time on the fly, with a columnar format for older chunks and incrementally maintained rollups. We ran 2.30.2, the current release, on PostgreSQL 18; its company, formerly Timescale, is now Tiger Data.
+
+### A hypertable is automatic partitioning
+
+Native partitioning ([Partition for the delete](/books/eight-kilobytes/partitioning)) makes you create every partition before rows arrive. A hypertable makes chunks as needed: `create table events (...) with (tsdb.hypertable, tsdb.partition_column = 'created_at', tsdb.chunk_interval = '7 days')`, and inserting the book's year of events created 53 weekly chunks with no further DDL.
+
+### The columnstore: 324 MB to 30 MB
+
+The columnstore rewrites a chunk into batches of up to 1,000 rows, each column of a batch stored as one compressed array, grouped by a `segmentby` column and sorted by an `orderby`:
+
+```sql
+alter table events set (timescaledb.enable_columnstore,
+                        timescaledb.segmentby = 'kind',
+                        timescaledb.orderby   = 'created_at desc');
+-- then call convert_to_columnstore() on each chunk, or let a policy do it
+```
+
+```text
+ before | after | ratio
+--------+-------+-------
+ 324 MB | 30 MB |  10.8
+```
+
+A month of deploy durations read about 3,050 pages from row chunks and about 300 from the columnstore, which skipped batches outside the month and decompressed only the columns the query names. Our time-ordered data is the shape the format is built for; yours may compress less. The cost moves to writes: updating compressed rows decompresses and recompresses batches, so it pays off for data that's append-mostly once it's a few days old.
+
+<ProveIt lab="15-extensions.sh">
+
+```sql
+-- :q is the month-of-deploys query; :rowstore_buffers is what it read before conversion
+select lab.prove('the columnstore shrinks the events from about 324 MB to about 30 MB: a ratio over 9',
+  (select before_compression_total_bytes::numeric / after_compression_total_bytes > 9
+          and before_compression_total_bytes between 300e6 and 360e6
+     from hypertable_columnstore_stats('events')));
+select lab.prove('the same query now reads under a tenth of the pages',
+  lab.buffers(:'q') * 10 < :rowstore_buffers);
+```
+
+</ProveIt>
+
+<DeepDive title="Inside the columnar plan, and the conversion loop">
+
+```sql
+do $$ declare c regclass;
+begin
+  for c in select show_chunks('events') loop
+    call convert_to_columnstore(c);
+  end loop;
+end $$;
+```
+
+In production, `call add_columnstore_policy('events', after => interval '7 days')` does it and leaves the newest chunks as rows for fast inserts. The ratio comes from `hypertable_columnstore_stats('events')`. One chunk of the month query:
+
+```text
+ ->  Custom Scan (ColumnarScan) on _hyper_1_48_chunk (actual rows=2820.00 loops=1)
+       Vectorized Filter: (created_at >= '2026-09-01 00:00:00+00'::timestamp with time zone)
+       Buffers: shared hit=42
+       ->  Index Scan using _hyper_1_48_chunk_compressed_kind__ts_meta_v2_first_created_idx
+             on _hyper_1_48_chunk_compressed (actual rows=3.00 loops=1)
+```
+
+(The feature was called "compression" before 2.18; the old function names still work.)
+
+</DeepDive>
+
+### Continuous aggregates lag until a refresh
+
+A **continuous aggregate** is a materialized view over a hypertable that TimescaleDB refreshes incrementally, recomputing only the time buckets whose rows changed. The default since 2.13 surprises people: they're **materialized only**. An event inserted for October 5 didn't show up in our daily rollup until a refresh covered that day. Set `timescaledb.materialized_only = false` to union in fresh rows, or schedule refreshes with a policy.
+
+<DeepDive title="The daily rollup that missed one deploy">
+
+```sql
+create materialized view events_daily with (timescaledb.continuous) as
+select time_bucket('1 day', created_at) as day, kind, count(*) as n
+from events group by 1, 2
+with no data;
+call refresh_continuous_aggregate('events_daily', null, null);
+```
+
+It holds 1,826 rows, one per day and kind. After one more deploy on October 5, the view said 1,431 and the table 1,432, until the next refresh.
+
+<ProveIt lab="15-extensions.sh">
+
+```sql
+insert into events values (1, 1, 'deploy', '{}', '2026-10-05 12:00');
+select lab.prove('continuous aggregates are materialized-only by default: a new event is invisible until a refresh',
+  (select materialized_only from timescaledb_information.continuous_aggregates
+    where view_name = 'events_daily')
+  and (select n from events_daily where day = '2026-10-05' and kind = 'deploy') + 1
+    = (select count(*) from events where kind = 'deploy'
+         and created_at >= '2026-10-05' and created_at < '2026-10-06'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Off Tiger Data's cloud, expect hypertables at most
+
+Read this before you build on it. The [LICENSE](https://github.com/timescale/timescaledb/blob/main/LICENSE) splits the repository: code outside the `tsl` directory is Apache 2.0, code inside it is under the source-available [Timescale License](https://github.com/timescale/timescaledb/blob/main/tsl/LICENSE-TIMESCALE) (TSL). Use it in your own product all you like; you can't sell it as a hosted database. The columnstore, continuous aggregates, retention policies, and the job scheduler are TSL ([editions](https://www.tigerdata.com/docs/about/latest/timescaledb-editions)), so on a managed service other than Tiger Data's own, expect hypertables at most.
+
+TimescaleDB earns its place where the columnstore changes the size of the machine you need. If your time series is one events table and retention is "drop old months", native partitioning with pg_partman and BRIN is less machinery and no license question.
+
+## pg_cron and pg_partman keep time on your side
+
+**[pg_cron](https://github.com/citusdata/pg_cron)** (PostgreSQL license; 1.6.8) runs SQL on a cron schedule from a preloaded background worker, down to one-second intervals. Jobs fail over with the database, with no scheduler host to run. Every run lands in `cron.job_run_details`, which nothing cleans, so schedule a delete for it too.
+
+**[pg_partman](https://github.com/pgpartman/pg_partman)** (PostgreSQL license; 5.5.0) manages native partitions: it creates them ahead of time and drops what falls out of retention each time `run_maintenance()` runs, from pg_cron or its own worker ([Create partitions before you need them](/books/eight-kilobytes/partitioning#create-partitions-before-you-need-them)).
+
+## Rebuild bloated tables without locking them
+
+`vacuum` makes dead space reusable but rarely gives it back; `vacuum full` gives it back by rewriting the table under an `ACCESS EXCLUSIVE` lock ([VACUUM FULL is an outage on a big table](/books/eight-kilobytes/vacuum#vacuum-full-is-an-outage-on-a-big-table)). Two extensions do the same rewrite while you keep using the table.
+
+We bloated three identical tables to 85 MB, about three times their live data, and rebuilt each one while using it. `vacuum full` shrank its copy to a third, and while it ran, even a plain `select` hit its [`lock_timeout`](/books/eight-kilobytes/glossary#lock_timeout). **[pg_repack](https://github.com/reorg/pg_repack)** (BSD; 1.5.3) shrank its copy the same amount while an insert went straight through. **[pg_squeeze](https://github.com/cybertec-postgresql/pg_squeeze)** (PostgreSQL-style license; 1.9.4) did the same.
+
+Both write the whole table to [WAL](/books/eight-kilobytes/glossary#wal), which replicas and backups will feel. Fix whatever caused the bloat first.
+
+<DeepDive title="How pg_repack and pg_squeeze catch the writes, and what they need">
+
+**pg_repack** logs every change through a trigger into a side table, copies the table, builds its indexes, replays the log, and swaps the files, holding `ACCESS EXCLUSIVE` only at the start and for the swap. It needs a primary key or a not-null unique index and room for a full copy. Before it copies, it waits for every older transaction: a forgotten idle-in-transaction session stalls it indefinitely.
+
+**pg_squeeze** uses logical decoding instead, so writers pay no trigger cost. It needs `shared_preload_libraries`, `wal_level = logical` before PostgreSQL 19, and, since 18.6, its name in `output_plugin_libraries`, the new allowlist of decoding plugins; without it, `squeeze_table` fails with "may not be used as an output plugin". PostgreSQL 19, in beta as of October 2026, brings [`REPACK CONCURRENTLY`](https://www.postgresql.org/docs/devel/sql-repack.html) into core.
+
+<ProveIt lab="15-extensions.sh">
+
+```bash
+written=$(pg -c "set lock_timeout = '1s'" \
+  -c "insert into rp values (999999, 0, 'written during the repack') returning 'written'")
+prove "while pg_repack rebuilds the table, a write goes through within a 1 s lock_timeout" \
+  test "$written" = "written"
+```
+
+```sql
+select lab.prove('while VACUUM FULL runs, even a plain select waits: lock_timeout fires (55P03)',
+  (select outcome from seen) = 'blocked');
+select lab.prove('pg_repack also shrank it to about a third, and kept the row written mid-copy',
+  pg_table_size('rp') * 2.5 < (select bloated from sizes where t = 'rp')
+  and (select pad from rp where id = 999999) = 'written during the repack'
+  and (select count(*) from rp) = 200001);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## pgaudit logs who did what, at the cost of log volume
+
+**[pgaudit](https://github.com/pgaudit/pgaudit)** (PostgreSQL license; 18.0) logs statements by class (`read`, `write`, `ddl`, `role`, and more) in the fixed, parseable format auditors ask for, or narrows to particular tables through a role's grants. It must be preloaded. The cost is log volume: audit writes and DDL broadly, reads narrowly ([Start auditing with the server log; it's free](/books/eight-kilobytes/security#start-auditing-with-the-server-log-its-free)).
+
+## Ask the planner hypothetical questions
+
+**[HypoPG](https://github.com/HypoPG/hypopg)** (PostgreSQL license; 1.4.3) creates **hypothetical indexes** that plain `explain` sees and no disk holds. A lookup on `users.email` read all 1,126 pages; with a hypothetical index, `explain` picked it before we built anything. Test a column order or a partial index's predicate in seconds. **[pg_hint_plan](https://github.com/ossc-db/pg_hint_plan)** (BSD; 1.8.0) goes the other way and dictates plans through comments; keep it for incidents ([pg_hint_plan is for the night a plan flips](/books/eight-kilobytes/plans#pg_hint_plan-is-for-the-night-a-plan-flips)).
+
+<DeepDive title="What HypoPG shows, and what it doesn't">
+
+```sql
+select * from hypopg_create_index('create index on users (email)');
+explain select * from users where email = 'user4242@example.com';
+```
+
+```text
+ Index Scan using "<13640>btree_users_email" on users  (cost=0.04..8.06 rows=1 width=55)
+```
+
+`explain analyze` ignores hypothetical indexes, so the real run still read 1,126 pages; after building the real index it read under 5. `hypopg_relation_size()` estimated the index within 25 percent, and `hypopg_hide_index()` hides a real index from your session to ask "what if I dropped it?".
+
+<ProveIt lab="15-extensions.sh">
+
+```sql
+\set q 'select * from users where email = ''user4242@example.com'''
+select lab.prove('without an index on email, the lookup reads all 1,126 pages of users',
+  lab.nodes(:'q') = '{"Seq Scan"}' and lab.buffers(:'q') = 1126
+  and pg_relation_size('users') / 8192 = 1126);
+select indexrelid as hypo, hypopg_relation_size(indexrelid) as hypo_bytes
+from hypopg_create_index('create index on users (email)') \gset
+select lab.prove('with a hypothetical index, plain EXPLAIN picks it',
+  lab.plan_text(:'q') like '%btree_users_email%');
+select lab.prove('EXPLAIN ANALYZE ignores it: the query still reads all 1,126 pages',
+  lab.nodes(:'q') = '{"Seq Scan"}' and lab.buffers(:'q') = 1126);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## PGroonga searches text the built-in parser can't split
+
+pgvector and the [BM25](/books/eight-kilobytes/glossary#bm25) search extensions have their own chapter, with each one's license and where it runs ([Search extensions put BM25 in the index](/books/eight-kilobytes/search#search-extensions-put-bm25-in-the-index)). One more belongs here: **[PGroonga](https://pgroonga.github.io/)** (PostgreSQL license; 4.0.9) searches Japanese and Chinese text, which the built-in parser, finding words by spaces, can't.
+
+## Apache AGE is a nicer language for the same joins
+
+**[Apache AGE](https://github.com/apache/age)** (Apache 2.0; 1.8.0) adds openCypher, the graph query language, over ordinary tables. A match like `-[:PARENT_OF*1..]->` is the [recursive CTE](/books/eight-kilobytes/models#adjacency-lists-make-moves-cheap-and-walks-recursive) in a nicer language; each hop is still a join, so the [performance argument](/books/eight-kilobytes/models#a-graph-database-earns-its-place-on-deep-dense-graphs) stands. Every session must `load 'age'`, which fights poolers, and the project went quiet from September 2024 to May 2025 ([board reports](https://whimsy.apache.org/board/minutes/AGE.html)).
+
+<DeepDive title="The team tree in Cypher">
+
+```sql
+create extension age;
+load 'age';
+set search_path = ag_catalog, "$user", public;
+select create_graph('org');
+select * from cypher('org', $$
+  create (:Team {name: 'Engineering'})-[:PARENT_OF]->(:Team {name: 'Platform'})
+         -[:PARENT_OF]->(:Team {name: 'Databases'})-[:PARENT_OF]->(:Team {name: 'Postgres'})
+$$) as (v agtype);
+select * from cypher('org', $$
+  match (:Team {name: 'Engineering'})-[:PARENT_OF*1..]->(t:Team) return t.name
+$$) as (name agtype);
+```
+
+It returns `"Platform"`, `"Databases"`, `"Postgres"`, as `agtype`. The graph lives in one table per label, like `org."Team"` and `org."PARENT_OF"`.
+
+</DeepDive>
+
+## Run an analytics engine on a replica, never the primary
+
+Row storage reads whole rows, which is why wide scans are where Postgres loses ([Rollups and a column extension close much of the gap](/books/eight-kilobytes/limits#rollups-and-a-column-extension-close-much-of-the-gap)). **[pg_duckdb](https://github.com/duckdb/pg_duckdb)** (MIT; 1.1.1) embeds DuckDB's columnar engine and reads Parquet and Iceberg; **[pg_lake](https://github.com/Snowflake-Labs/pg_lake)** (Apache 2.0) puts lake files behind tables. Some fade: ParadeDB archived pg_analytics, and [pg_mooncake](https://github.com/Mooncake-Labs/pg_mooncake)'s last published release was in February 2025 (a v0.1.3 tag followed that December). Each is a second engine in your process; run it on a replica, never your OLTP primary.
+
+## pgmq is still a Postgres table
+
+**[pgmq](https://github.com/pgmq/pgmq)** (PostgreSQL license; 1.13.0) wraps the SKIP LOCKED queue ([A Postgres queue commits with the business write](/books/eight-kilobytes/concurrency#a-postgres-queue-commits-with-the-business-write)) in a cloud-queue API: `send()`, `read()` with a visibility timeout, `archive()`. It's still a Postgres table, with the same vacuum needs.
+
+## Untrusted languages need a superuser
+
+PL/pgSQL is trusted: it can't do anything SQL can't ([Code in the database](/books/eight-kilobytes/functions)). Untrusted languages (`plpython3u`, `plperlu`) run as the server's OS user, so only superusers write them, and managed services leave them out. Trusted JavaScript exists in [PL/v8](https://github.com/plv8/plv8) and [PLJS](https://github.com/plv8/pljs). Python in the database usually belongs in the application.
+
+## A crashing extension drops every connection, so vet it
+
+An extension's code runs inside the backend, and when a backend crashes, the server ends every other session: one bad function call, and every connection drops. Before you depend on one, ask:
+
+1. **Is it maintained?** Release dates, how fast it supported the last major version, how many people commit.
+2. **What license, for which parts?** Read the whole LICENSE: some projects split by directory.
+3. **Will it be there for the next major version?** Your upgrade waits for every extension's build.
+4. **Can you run it where you run Postgres?** The provider's list, and whether it needs preloading or a superuser.
+5. **What does it do to your process?** Workers, shared memory, hooks on every statement, WAL.
+6. **What's the exit?** An extension that owns your data's type (PostGIS, pgvector) is a long-term commitment.
+
+Then test its upgrade path in staging.
+
+<DeepDive title="Every extension in this chapter, at a glance">
+
+As of October 2026. "Preload" means `shared_preload_libraries`.
+
+| Extension | What it adds | License | Source |
+| --- | --- | --- | --- |
+| PostGIS 3.6.4 | spatial types, GiST spatial search | GPL v2+ | third party |
+| TimescaleDB 2.30.2 | hypertables, columnstore, rollups | Apache 2.0 + TSL | third party, preload |
+| pgvector 0.8.7 | vectors, HNSW and IVFFlat | PostgreSQL | third party |
+| Apache AGE 1.8.0 | openCypher graphs | Apache 2.0 | third party |
+| pg_cron 1.6.8 | SQL on a schedule | PostgreSQL | third party, preload |
+| pg_partman 5.5.0 | partition creation and retention | PostgreSQL | third party |
+| pg_repack 1.5.3 | online rebuild, trigger-based | BSD 3-clause | third party |
+| pg_squeeze 1.9.4 | online rebuild, logical decoding | PostgreSQL-style | third party, preload |
+| pgaudit 18.0 | classed, parseable audit log | PostgreSQL | third party, preload |
+| HypoPG 1.4.3 | hypothetical indexes | PostgreSQL | third party |
+| pg_hint_plan 1.8.0 | planner hints in comments | BSD 3-clause | third party, `load` or preload |
+| PGroonga 4.0.9 | full-text search for every language | PostgreSQL | third party |
+| pg_duckdb 1.1.1 | DuckDB engine, lake files | MIT | third party |
+| pgmq 1.13.0 | message-queue API on tables | PostgreSQL | third party |
+| PL/v8 3.2.5, PLJS 1.0.5 | trusted JavaScript | PostgreSQL-style | third party |
+
+Contrib (`pg_stat_statements` preloaded, `auto_explain`, `pg_prewarm`, `hstore`, `ltree`, `citext`) is PostgreSQL-licensed and ships with the server.
+
+</DeepDive>
+
+## The short version
+
+- An extension is files on the server plus SQL objects in one database. Some need `shared_preload_libraries` and a restart; all need `alter extension ... update` after upgrades.
+- Drop `uuid-ossp` and most of `pgcrypto` and `citext`: core functions and `lower()` indexes cover them.
+- In PostGIS, use `geography` or a projected SRID, and filter with `ST_DWithin`, which used the index, never `ST_Distance`, which read every page.
+- TimescaleDB's columnstore took our events from 324 MB to 30 MB and a month's query from about 3,050 pages to about 300. It's Timescale License code: free to self-host, not to resell.
+- `pg_repack` and `pg_squeeze` rebuild bloated tables online where `vacuum full` blocks even reads.
+- Test an index with HypoPG before you build it.
+- Vet every extension for maintenance, license, next-major support, availability, and crash risk.
+
+## Further reading
+
+- [Packaging Related Objects into an Extension](https://www.postgresql.org/docs/18/extend-extensions.html), PostgreSQL documentation. Control files, trusted extensions, update scripts, and how to write your own.
+- [Additional Supplied Modules and Extensions](https://www.postgresql.org/docs/18/contrib.html), PostgreSQL documentation. Every contrib module, with which ones are trusted.
+- [PostGIS manual: spatial queries](https://postgis.net/docs/using_postgis_query.html), PostGIS project. Index use, `ST_DWithin`, and nearest-neighbor search, with the reasons behind each.
+- [TimescaleDB editions](https://www.tigerdata.com/docs/about/latest/timescaledb-editions), Tiger Data. Which features are Apache 2.0 and which are under the Timescale License.
+- [pg_repack documentation](https://reorg.github.io/pg_repack/), reorg project. Requirements, locks, and options for online rebuilds.
+- [HypoPG documentation](https://hypopg.readthedocs.io/), HypoPG project. Hypothetical indexes and hidden indexes, with their limits.

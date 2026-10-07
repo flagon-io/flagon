@@ -1,0 +1,645 @@
+---
+title: Constraints, chosen on purpose
+description: Model data with constraints that hold, index your foreign keys, and measure what each one costs, so you keep them where they pay and drop them where they don't.
+part: Designing for it
+builds_on: [keys, mvcc]
+---
+
+Deleting one project from the running example takes about 100 milliseconds on our machine. Fine, until you look at what it did: it read all 35,173 pages of `events`, 275 MB, to delete one row from a different table. One missing index did that.
+
+Constraints are not paperwork. Each one is a guarantee the database enforces for every writer, forever, including the script someone runs by hand at 2 a.m. Application validation is a suggestion. A constraint is a fact.
+
+Facts have a price, though, and foreign keys charge it on every write. So, up front: we are not big fans of foreign keys. We keep them where the data is the business and take them off the firehose, and this chapter measures why.
+
+## Store each fact once
+
+Normalization is one rule wearing several names: store each fact in exactly one place. A fact stored twice can disagree with itself, and given enough writers, it will. Copy each account's `plan` onto its 20 projects and upgrading the account through one project row leaves it on two plans at once. In the normalized schema, the plan lives in one row of `accounts`.
+
+<DeepDive title="The normal forms, by the bug each prevents">
+
+| Form | The rule, plainly                        | The bug it prevents                  |
+| ---- | ---------------------------------------- | ------------------------------------ |
+| 1NF  | one value per column, no packed lists    | can't constrain or edit one item     |
+| 2NF  | columns depend on the whole key          | half-key facts copied into many rows |
+| 3NF  | columns depend on the key, not each other | a parent's fact copied into children |
+| BCNF | whatever decides a column is a key       | a rule between columns nobody checks |
+
+Copying `plan` onto projects breaks 3NF, the most common violation, and also strands a new account's plan until it has a project.
+
+<ProveIt lab="13-relationships">
+
+```sql
+select account_id as acct from projects_flat
+where account_plan <> 'team'
+group by account_id having count(*) >= 2
+order by account_id limit 1 \gset
+update projects_flat set account_plan = 'team'
+where id = (select min(id) from projects_flat where account_id = :acct);
+select lab.prove('updating one project row leaves its account on two plans at once',
+  (select count(distinct account_plan) from projects_flat where account_id = :acct) = 2);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Normalize until it hurts, then measure
+
+A join costs a few pages; a copy costs a bug you find months later. Copy only where a measurement says so: rollups ([Precompute what you show](/books/eight-kilobytes/scale#precompute-what-you-show)), facts frozen in time (an invoice line's price), and the tenant id ([Carry the tenant everywhere](/books/eight-kilobytes/keys#carry-the-tenant-everywhere)).
+
+### A copy needs exactly one writer
+
+Every copy gets exactly one thing that keeps it equal to the original: a constraint when it's part of a key, one trigger or one job when it's derived. Never "every caller remembers": that copy drifts the first time someone writes from psql. `events.account_id` copies what `project_id` implies, and a composite foreign key makes the copy provably equal. That's the one foreign key `events` keeps when the others go ([Keep foreign keys where an orphan is a bug customers see](/books/eight-kilobytes/relationships#keep-foreign-keys-where-an-orphan-is-a-bug-customers-see)).
+
+<DeepDive title="A composite foreign key makes a copy provably equal">
+
+Two statements are the whole fix:
+
+```sql
+alter table projects add constraint projects_id_account_uq unique (id, account_id);
+alter table events add constraint events_project_account_fk
+  foreign key (project_id, account_id) references projects (id, account_id) not valid;
+```
+
+The unique constraint looks redundant, since `id` alone is unique, but a foreign key can only reference columns that a unique constraint covers exactly. `not valid` skips the existing two million rows and checks every new one; validate them later without blocking writes ([Add foreign keys NOT VALID, then validate](/books/eight-kilobytes/migrations#add-foreign-keys-not-valid-then-validate)). Now moving an event to another account, or pointing it at another account's project, fails on the line that tries.
+
+<ProveIt lab="13-relationships">
+
+```sql
+begin;
+select lab.prove('without a constraint, an event can be moved to another account',
+  lab.try($$ update events set account_id = account_id + 1 where id = 1 $$) = 'ok');
+rollback;
+alter table projects add constraint projects_id_account_uq unique (id, account_id);
+alter table events add constraint events_project_account_fk
+  foreign key (project_id, account_id) references projects (id, account_id) not valid;
+select lab.prove('with the composite foreign key, the same update is rejected',
+  lab.try($$ update events set account_id = account_id + 1 where id = 1 $$) like '23503:%');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A foreign key is checked both ways, at different prices
+
+`projects.account_id bigint not null references accounts (id)` is a **foreign key**: Postgres refuses a project whose account doesn't exist, and an account delete that would orphan projects. It's checked both ways, at very different prices.
+
+**Inserting a child** looks up the parent's primary key, a few pages, and takes a `FOR KEY SHARE` [lock](/books/eight-kilobytes/glossary#lock-modes) on the parent row until you commit. **Deleting a parent** runs `select 1 from events where project_id = $1`, and nothing requires an index on `events.project_id`. Without one, that's a scan of the whole child table per deleted parent.
+
+<Callout type="warn" title="Postgres does not index foreign key columns for you">
+
+Check what your ORM generates, too. Schemas ported from MySQL, which creates the index silently, arrive without it ([Foreign keys don't index themselves](/books/eight-kilobytes/not-mysql#foreign-keys-dont-index-themselves)).
+
+</Callout>
+
+### Each deleted parent scans the whole child table
+
+The running example has no indexes on its foreign key columns. Delete a project inside a transaction we roll back:
+
+```sql
+begin;
+explain (analyze, costs off) delete from projects where id = 20001;
+rollback;
+```
+
+```text
+ Delete on projects (actual time=0.067..0.068 rows=0.00 loops=1)
+   Buffers: shared hit=10
+   ->  Index Scan using projects_pkey on projects ...
+ ...
+ Trigger for constraint events_project_id_fkey: time=98.824 calls=1
+ Execution Time: 98.964 ms
+```
+
+Read it twice. The plan is excellent: an index scan, 10 buffers. Then the trigger line: foreign keys are internal triggers, and this one took nearly all 99 milliseconds. `pg_stat_xact_user_tables` shows what it did: one sequential scan of all 2,000,000 events, to confirm that none reference the project.
+
+<ProveIt lab="13-relationships">
+
+```sql
+begin;
+select seq as s0, tup as t0 from events_scans() \gset
+select fk_ms(format('delete from projects where id = %s', :scratch_id)) as one_ms \gset
+select lab.prove('deleting one project sequentially scans events once, reading all 2,000,000 rows',
+  (select seq - :s0 = 1 and tup - :t0 = 2000000 from events_scans()));
+rollback;
+```
+
+</ProveIt>
+
+Delete 50 projects in one statement and the trigger line reads `time=4214.089 calls=50`: a full scan of `events` per project. The cost grows with the *child* table, the one that grows fastest.
+
+### One index turns 35,173 pages into 3
+
+```sql
+create index events_project_id_idx on events (project_id);
+```
+
+A 14 MB index. The check now reads 3 pages instead of 35,173, and the 50-project delete's trigger time drops from 4,214 ms to about 1. A foreign key column without an index is a mistake, unless it references rows that are never deleted.
+
+<DeepDive title="Watching the trigger's query, before and after the index">
+
+`auto_explain` with `log_nested_statements = on` (plus `log_analyze`, `log_buffers`, and `log_level = notice`) logs the trigger's own query:
+
+```text
+Query Text: SELECT 1 FROM ONLY "public"."events" x
+            WHERE $1 OPERATOR(pg_catalog.=) "project_id" FOR KEY SHARE OF x
+LockRows  ... (actual time=107.395..107.397 rows=0.00 loops=1)
+  Buffers: shared hit=2142 read=33031
+  ->  Seq Scan on events x  ...
+        Rows Removed by Filter: 2000000
+```
+
+All 35,173 pages. With the index it's a `Bitmap Index Scan on events_project_id_idx` reading 3. For 50 deletes, the checks read about 1,760,000 pages without the index and about 150 with it.
+
+<ProveIt lab="13-relationships">
+
+```sql
+begin;
+select seq as s0, tup as t0 from events_scans() \gset
+select fk_ms($$ delete from projects where name like 'scratch %' $$) as fifty_ms \gset
+select lab.prove('deleting 50 projects scans events 50 times: 100,000,000 rows read',
+  (select seq - :s0 = 50 and tup - :t0 = 100000000 from events_scans()));
+rollback;
+create index events_project_id_idx on events (project_id);
+begin;
+select seq as s0, tup as t0, idx as i0 from events_scans() \gset
+select fk_ms($$ delete from projects where name like 'scratch %' $$) as fifty_idx_ms \gset
+select lab.prove('with the index, the 50 checks scan events by index: no sequential scans',
+  (select seq - :s0 = 0 and idx - :i0 >= 50 from events_scans()));
+rollback;
+select lab.prove('and the trigger time for 50 deletes drops by more than 100 times',
+  :fifty_ms > 100 * greatest(:fifty_idx_ms, 0.001));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### One catalog query lists the unindexed foreign keys
+
+You don't have to find them by hand. Run this after every port and every new table:
+
+```sql
+select c.conrelid::regclass as table_name, pg_get_constraintdef(c.oid) as definition
+from pg_constraint c
+where c.contype = 'f'
+  and not exists (
+    select 1 from pg_index i
+    where i.indrelid = c.conrelid and i.indpred is null
+      and (i.indkey::int2[])[0:cardinality(c.conkey) - 1] @> c.conkey)
+order by 1, 2;
+```
+
+On the running example as loaded, before the index above, it lists five: `account_id` and `owner_id` on `projects`, and all three on `events`.
+
+<DeepDive title="A key is covered only when an index leads with it">
+
+The query lists each foreign key whose columns aren't the leading columns of some non-partial index. `indkey` holds an index's column numbers, starting at position 0, so the slice takes as many leading columns as the key has, and `@>` asks whether they include every key column, in any order. A key on `(a, b)` is covered by an index on `(b, a, c)`, not by one on `(c, a, b)`: the delete's lookup needs the key columns first. Partial indexes don't count, because the check's query may not match their predicate.
+
+`users.account_id` is missing from the list because the index behind `unique (account_id, email)` leads with it.
+
+<ProveIt lab="13-relationships">
+
+```sql
+select lab.prove('the query lists five unindexed foreign keys on projects and events',
+  (select count(*) from unindexed_fks) = 5
+  and (select count(*) from unindexed_fks where table_name::text in ('projects', 'events')) = 5);
+select lab.prove('users.account_id is not listed: unique (account_id, email) leads with it',
+  not exists (select 1 from unindexed_fks where table_name = 'users'::regclass));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Decide what a parent's delete does to its children
+
+The default, `no action`, refuses to delete a parent with children. `cascade` deletes them too; `set null` clears the child's column (since PostgreSQL 15, only the columns you name, which composite tenant keys need).
+
+### Use cascade deliberately
+
+`on delete cascade` is right when the child means nothing without the parent: memberships, a settings row. Across large tables it's dangerous: deleting one big account through cascades deletes millions of rows in one transaction, locking each and logging each. A cascade does the work of the `delete` statements it replaces; it only hides it. For big child tables, delete in batches from a job.
+
+## Foreign keys aren't free, and aren't always your friend
+
+Here's the half most schema advice skips. Every foreign key is a lookup on every write to the child, a lock on a parent row, and a rule that ties two tables together through every migration, load, and split you'll ever do. We measured each, and the measurements are why we keep foreign keys only where the data is the business and writes come at the speed people click.
+
+### A foreign key closes a race the app can't
+
+The pros are real. Its lock makes a parent's delete wait for the child's insert, which closes a race no application check can. It catches a bad id on the line that sent it, not weeks later in a report. And it feeds the planner: a join of `events` to `projects` on two columns was estimated at the right 2,000,000 rows with a composite foreign key, and 1,999 without one.
+
+<DeepDive title="Where the estimate comes from, and the join removal that isn't">
+
+Without the foreign key the planner multiplies the two conditions' selectivities as if independent. A thousandfold underestimate is how a nested loop ends up running over two million rows. One pro you'll hear doesn't apply: Postgres drops an unused left join on the parent's unique index alone, foreign key or not, and never removes an inner join because of a foreign key. (PostgreSQL 18's self-join elimination removes a table joined to itself on a unique key; it needs no foreign key either.)
+
+<ProveIt lab="13-relationships">
+
+```sql
+\set twocol 'select * from events e join projects p on p.id = e.project_id and p.account_id = e.account_id'
+select lab.est_rows(:'twocol') as est_with_fk \gset
+alter table events drop constraint events_project_account_fk;
+select lab.est_rows(:'twocol') as est_without_fk \gset
+select lab.prove('with the composite foreign key, the planner expects about 2,000,000 joined rows',
+  :est_with_fk between 1900000 and 2100000);
+select lab.prove('without it, the planner multiplies two selectivities and expects about 2,000',
+  :est_without_fk between 1000 and 4000);
+select lab.prove('an unused left join is removed by the unique index alone; no foreign key needed',
+  lab.est_nodes($$ select e.id from ev_nofk e left join projects p on p.id = e.project_id $$)
+    = array['Seq Scan']);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### The insert pays for every check
+
+We inserted 100,000 events into two copies of the table, with and without `events`' three foreign keys:
+
+| 100,000-row insert  | No foreign keys | Three foreign keys |
+| ------------------- | --------------- | ------------------ |
+| Time on our machine | about 100 ms    | about 1,000 ms     |
+| Buffers touched     | 305,467         | 2,103,290          |
+| WAL                 | 22 MB           | 35 MB              |
+
+About ten times the time on our machine (timings vary, so the lab checks only for more than four). The [WAL](/books/eight-kilobytes/glossary#wal) is the surprise: the `FOR KEY SHARE` lock lives in the parent row's header, so taking it is logged, once per distinct parent row. An insert into `events` writes to `users`.
+
+<ProveIt lab="13-relationships">
+
+```sql
+select lab.prove('with its three foreign keys, the same 100,000-row insert takes over 4 times as long',
+  :ins_fk_ms > 4 * :ins_nofk_ms);
+select lab.prove('the checks read over 12 extra buffers per inserted row, all parent lookups',
+  (:u2 - :u1) - (:u1 - :u0) > 12 * 100000);
+select lab.prove('and add one WAL record per distinct parent row: the FOR KEY SHARE lock on it',
+  (:r2 - :r1) - (:r1 - :r0) between :parents * 0.95 and :parents * 1.1);
+```
+
+</ProveIt>
+
+Be fair about where that bites. With 16 clients committing one event at a time, the disk capped both tables at 2,300 to 2,800 inserts a second. With `synchronous_commit = off`, the foreign keys cut throughput by a third: 88,000 to 99,000 a second without them, 60,000 to 62,000 with. They tax rows written: streams, bulk loads, backfills.
+
+<DeepDive title="Where the extra 13 MB of WAL came from">
+
+The checks touched about 18 more buffers per row, 6 per foreign key. The insert wrote 40,698 more WAL records, one per parent row it locked (1,000 accounts, 19,849 projects, 19,849 users), and those locks dirtied nearly every parent page, so the first change after a checkpoint logged each whole page ([The first change after a checkpoint logs the whole page](/books/eight-kilobytes/wal#the-first-change-after-a-checkpoint-logs-the-whole-page)): 1,330 images, most of the extra 13 MB.
+
+</DeepDive>
+
+### One hot parent makes multixacts
+
+A row's header holds one locker; a second makes Postgres swap in a **multixact**, a list of lockers, and every new locker creates a new list ([Shared row locks make multixacts, and multixacts wrap too](/books/eight-kilobytes/concurrency#shared-row-locks-make-multixacts-and-multixacts-wrap-too)). Sixteen clients inserting events for one project for ten seconds made about 400,000 multixacts; spread over random parents, about 500.
+
+At that rate the multixact freeze limit (the multixact age at which Postgres forces a vacuum of the whole table) arrives in under three hours, and your biggest customer's row sets your anti-[wraparound](/books/eight-kilobytes/glossary#wraparound) vacuum schedule.
+
+<DeepDive title="Ten open inserts on one project, member by member">
+
+Ten open inserts for project 7 left ten `FOR KEY SHARE` members on its row, and took nine multixacts holding 54 members to get there: storage grows with the square of the concurrency on one row. The full run made 389,000 to 441,000 multixacts and about a million members. A delete of the project waits for every locker.
+
+<ProveIt lab="13-relationships">
+
+```sql
+select lab.prove('ten open inserts for one project leave ten FOR KEY SHARE members on its row',
+  (select count(*) = 10 and bool_and(mode = 'keysh')
+   from pg_get_multixact_members((select xmax from projects where id = 7))));
+select lab.prove('getting there took nine multixacts, one per new locker, storing 54 members in all',
+  (select count(distinct mx::text) from hot_seen where n >= 2) = 9
+  and (select sum((select count(*) from pg_get_multixact_members(mx)))
+       from hot_seen where n >= 2) = 54);
+select lab.prove('a delete of the project waits for every open child insert',
+  lab.try($$ set local lock_timeout = '200ms'; delete from projects where id = 7 $$) like '55P03:%');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Adding one locks both tables
+
+`alter table ... add foreign key` takes a `SHARE ROW EXCLUSIVE` lock on the child *and the parent*, even with [`not valid`](/books/eight-kilobytes/glossary#not-valid): while it's held, a new project waits. Split it into `not valid` and `validate`, under a `lock_timeout` ([Add foreign keys NOT VALID, then validate](/books/eight-kilobytes/migrations#add-foreign-keys-not-valid-then-validate)). It's still a migration that touches the parent every time you add a child table.
+
+### A foreign key stops at the database boundary
+
+A foreign key can't reference another database or a service, and across shards it works only between colocated tables ([Constraints must include the distribution column](/books/eight-kilobytes/sharding#constraints-must-include-the-distribution-column)). Every foreign key across a line you'll split one day is one you'll remove then, under pressure. Bulk loads already drop them ([Foreign keys: NOT VALID, then VALIDATE](/books/eight-kilobytes/loading#foreign-keys-not-valid-then-validate)), admitting that during the load, something else kept the data straight.
+
+### Keep foreign keys where an orphan is a bug customers see
+
+**Keep** them on accounts, users, projects, memberships, money: an orphan there is a bug a customer sees. **Drop them, or declare them `not enforced`,** on events, logs, metrics, audit trails, cross-boundary references, and imported data. In the running example that's `events`, which keeps its foreign keys only because the demos need them.
+
+Pick the keyword with care. `not valid` still checks every new row. PostgreSQL 18's `not enforced` is documentation only: `\d` and diagram tools still show it, no trigger runs, orphans get in, and the planner ignores it. `alter constraint ... enforced` turns it on later, and checks every existing row as it does: it fails on the first orphan that got in, so clean them up first.
+
+```sql
+project_id bigint not null references projects (id) not enforced
+```
+
+One foreign key stays even on the firehose: the composite tenant key, `(project_id, account_id)` referencing `projects (id, account_id)`. It isn't there for tidiness. It's a security boundary that makes a cross-tenant reference impossible ([Make cross-tenant references impossible](/books/eight-kilobytes/keys#make-cross-tenant-references-impossible)), and an orphan check that runs minutes later can't take back a leak.
+
+It isn't free, and it's worth saying so. It references `projects`, so it pays everything measured above on that one parent: a lookup per row, a logged `FOR KEY SHARE` lock per distinct project per transaction, and the multixacts when many writers pile onto one busy project. Your biggest customer's project row is exactly where those land. We pay it because a leak can't be taken back; watch multixact age on `projects` so the bill never surprises you.
+
+<DeepDive title="The proofs: both tables locked, no cross-database keys, and not enforced">
+
+How each claim was checked. The lock: inside an open transaction that adds a `not valid` foreign key, `pg_locks` shows `ShareRowExclusiveLock` on both the child and `projects`, and a second session (opened with `dblink`) that tries to insert a project gives up on its 200 ms `lock_timeout`. The boundary: a `postgres_fdw` foreign table pointing at `projects` in another database can't be referenced, and neither can a view; both fail with `42809`. The keyword: one copy of the child declares its key `not enforced`, another `not valid`, and each is offered the same orphan.
+
+<ProveIt lab="13-relationships">
+
+```sql
+begin;
+alter table ev_nofk add constraint ev_nofk_project_fk
+  foreign key (project_id) references projects (id) not valid;
+select lab.prove('adding a foreign key, even not valid, takes ShareRowExclusive on the child and the parent',
+  (select array_agg(c.relname::text order by c.relname) from pg_locks l
+   join pg_class c on c.oid = l.relation
+   where l.pid = pg_backend_pid() and l.mode = 'ShareRowExclusiveLock')
+  = array['ev_nofk', 'projects']);
+select lab.prove('so a new project waits until the migration commits',
+  lab.try($$ select dblink_exec('w1', 'set lock_timeout = ''200ms''; '
+             'insert into projects (account_id, owner_id, name) values (1, 1, ''new'')') $$)
+    like '%lock timeout%');
+rollback;
+select lab.prove('a foreign key cannot reference a table in another database',
+  lab.try($$ create table t_remote (project_id bigint references remote_projects (id)) $$)
+    = '42809: referenced relation "remote_projects" is not a table');
+
+select lab.prove('a not enforced foreign key (PostgreSQL 18) creates no triggers',
+  (select count(*) from pg_trigger where tgrelid = 'ev_doc'::regclass) = 0
+  and (select not conenforced from pg_constraint where conrelid = 'ev_doc'::regclass and contype = 'f'));
+select lab.prove('and accepts an orphan',
+  lab.try($$ insert into ev_doc values (1, 999999) $$) = 'ok');
+select lab.prove('while a not valid one still checks every new row',
+  lab.try($$ insert into ev_nv values (1, 999999) $$) like '23503:%');
+select lab.prove('a not enforced foreign key gives the planner nothing: back to about 2,000',
+  :est_not_enforced = :est_without_fk);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Check what you no longer enforce
+
+Dropping the constraint moves the job; it doesn't delete it. **One write path** checks the parent it already read to authorize the request. **A scheduled orphan check** left-joins events to each parent from a high-water mark every few minutes, in full nightly, and pages someone when it finds a row. In full it read 36,500 pages; over the newest 10,000 rows, 1,534. Ids aren't handed out in commit order ([Let the database number rows, and never trust the order](/books/eight-kilobytes/keys#let-the-database-number-rows-and-never-trust-the-order)), so keep the mark a few minutes behind the newest id, and let the nightly full run catch any straggler.
+
+That's the trade: a lookup and a lock on every write, forever, or one query on a schedule. Where the data is the business, we pay for the lookup. On the firehose, we run the query.
+
+<DeepDive title="The orphan check only reads, so a replica can run it">
+
+```sql
+select e.id, e.account_id, e.project_id, e.user_id
+from events e
+left join accounts a on a.id = e.account_id
+left join projects p on p.id = e.project_id
+left join users    u on u.id = e.user_id
+where e.id > $1   -- the last id the previous run checked
+  and (a.id is null or p.id is null or (e.user_id is not null and u.id is null));
+```
+
+Advance the mark only after a clean run, and only to an id a few minutes old. Because it never writes, a replica can run it. With two planted orphans, it returned exactly those two.
+
+<ProveIt lab="13-relationships">
+
+```sql
+select lab.prove('the orphan check finds exactly the two planted orphans',
+  (select count(*) from ev_nofk e
+   left join accounts a on a.id = e.account_id
+   left join projects p on p.id = e.project_id
+   left join users    u on u.id = e.user_id
+   where e.id > 0
+     and (a.id is null or p.id is null or (e.user_id is not null and u.id is null))) = 2);
+select lab.prove('checking all 2,000,000 events reads the table once: about 36,000 pages',
+  :full_pages between 35000 and 38000);
+select lab.prove('checking only rows past the last high-water mark reads under half of that',
+  :recent_pages < :full_pages / 2);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A one-to-one split costs a join, so make it earn one
+
+A one-to-one makes the foreign key the child's primary key, as in `account_billing (account_id bigint primary key references accounts (id))`. Split a table this way only for columns that are optional as a group, large and rarely read, written at a different rate, or differently permissioned. Every split costs a join.
+
+## A join table needs an index in each direction
+
+Users and projects meet in a **join table**:
+
+```sql
+create table project_members (
+  project_id  bigint not null references projects (id) on delete cascade,
+  user_id     bigint not null references users (id)    on delete cascade,
+  primary key (project_id, user_id)
+);
+create index project_members_user_id_idx on project_members (user_id);
+```
+
+The primary key prevents duplicates and serves "members of this project". The second index serves "this user's projects" and the check when a user is deleted, which the primary key can't: `user_id` is its second column.
+
+## Replace polymorphic associations
+
+The ORM pattern of `commentable_type` plus `commentable_id` can't have a foreign key, so nothing stops a comment on a project that doesn't exist. Use one nullable foreign key per parent (`project_id`, `event_id`) and `check (num_nonnulls(project_id, event_id) = 1)`. Every reference is real, and a new parent type is a new column.
+
+## A check states a rule no code path can skip
+
+Make every column `not null` unless you can say what `null` means for it. Beyond that, a `check` states a rule about one row, like `check (status <> 'failed' or failure_reason is not null)`, which no code path can skip. Checks can't see other rows ([Rules across rows are invisible to constraints](/books/eight-kilobytes/acid#rules-across-rows-are-invisible-to-constraints)), and pass when the expression is null, so pair them with `not null`.
+
+### Nulls are distinct by default
+
+`null` never equals `null`, so a `unique` constraint allows any number of rows with nulls in its columns. When that's wrong, write `unique nulls not distinct` (PostgreSQL 15+).
+
+## An exclusion constraint makes overlaps impossible
+
+An **exclusion constraint** generalizes unique: "no two rows satisfy this combination of operators". Only one deploy may hold a project's lock at a time:
+
+```sql
+create extension if not exists btree_gist;
+create table deploy_locks (
+  project_id  bigint    not null references projects (id),
+  held_during tstzrange not null,
+  exclude using gist (project_id with =, held_during with &&)
+);
+```
+
+Same project *and* overlapping range: refused. Application code can't do this safely, because "check for an overlap, then insert" races. PostgreSQL 18's `primary key (project_id, valid_during without overlaps)` is the shorthand for temporal keys, and makes "two plans in effect at once" impossible.
+
+<DeepDive title="The temporal key, and both rejections">
+
+The temporal key behind "two plans in effect at once", as the lab builds it:
+
+```sql
+create table project_plans (
+  project_id   bigint    not null references projects (id),
+  plan         text      not null,
+  valid_during tstzrange not null,
+  primary key (project_id, valid_during without overlaps)
+);
+```
+
+Under the hood it's the same GiST exclusion constraint as `deploy_locks`, which is why the error names the primary key as an exclusion constraint, and why it needs `btree_gist` for the `bigint` column. It also refuses an empty range, which matters for the history trigger at the end of this chapter. Each table already holds a row for project 42, and an overlapping insert into either one fails with `23P01`.
+
+<ProveIt lab="13-relationships">
+
+```sql
+select lab.prove('an overlapping range for the same project is rejected',
+  lab.try($$ insert into deploy_locks values (42, tstzrange('2026-10-01 10:30+00', '2026-10-01 10:45+00')) $$)
+    like '23P01: conflicting key value violates exclusion constraint "deploy_locks_project_id_held_during_excl"');
+select lab.prove('without overlaps rejects a second plan in effect at the same time',
+  lab.try($$ insert into project_plans values (42, 'team', tstzrange('2026-05-01+00', null)) $$)
+    like '23P01: conflicting key value violates exclusion constraint "project_plans_pkey"');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Deferrable constraints let a swap finish
+
+A plain unique constraint is checked row by row, so swapping two steps' positions in one `update` fails halfway. Declare it `deferrable` and it's checked at the end of the statement, or at commit ([Constraints fire per statement, or at commit](/books/eight-kilobytes/acid#constraints-fire-per-statement-or-at-commit)). The price: no foreign key can reference it and no upsert can target it.
+
+<DeepDive title="The swap, and what deferrable gives up">
+
+The swap, on a table with two rows at positions 1 and 2:
+
+```sql
+create table steps (
+  id          bigint primary key,
+  pipeline_id bigint not null,
+  position    int    not null,
+  unique (pipeline_id, position) deferrable initially immediate
+);
+update steps set position = case position when 1 then 2 else 1 end;
+```
+
+Without `deferrable`, the same `update` fails with `23505` on whichever row it moves first. `initially immediate` still checks at the end of each statement, so most code sees no difference; `set constraints ... deferred` pushes the check to commit for a transaction that needs several statements. It gives up two things: a foreign key can't reference it (`55000`), and `on conflict` can't use it as an arbiter.
+
+<ProveIt lab="13-relationships">
+
+```sql
+select lab.prove('deferrable initially immediate checks at end of statement, so the swap works',
+  lab.try($$ update steps set position = case position when 1 then 2 else 1 end $$) = 'ok');
+select lab.prove('a deferrable unique constraint cannot be referenced by a foreign key',
+  lab.try($$ create table steps_ref (pipeline_id bigint, position int,
+             foreign key (pipeline_id, position) references steps (pipeline_id, position)) $$)
+    = '55000: cannot use a deferrable unique constraint for referenced table "steps"');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## One null makes not in return nothing
+
+`null` means unknown, and `x not in (a, null)` means `x <> a and x <> null`, which can never be true. "Users with no events in project 42" counted 99,999 until one event had a null `user_id`, and then it counted 0, with no error. `not exists` still said 99,999. Use `not exists`, always ([NOT IN is a trap; use NOT EXISTS](/books/eight-kilobytes/queries#not-in-is-a-trap-use-not-exists)).
+
+<ProveIt lab="13-relationships">
+
+```sql
+begin;
+update events set user_id = null
+where id = (select min(id) from events where project_id = 42);
+select lab.prove('one null user_id makes not in return 0 users',
+  (select count(*) from users u
+   where u.id not in (select e.user_id from events e where e.project_id = 42)) = 0);
+select lab.prove('not exists still returns 99,999',
+  (select count(*) from users u
+   where not exists (select 1 from events e
+                     where e.project_id = 42 and e.user_id = u.id)) = 99999);
+rollback;
+```
+
+</ProveIt>
+
+## A soft delete needs a partial unique index
+
+A **soft delete** sets a `deleted_at timestamptz` column instead of removing the row, and breaks unique constraints: the deleted "Project 1" still blocks a new one. A **partial unique index** enforces uniqueness among live rows only:
+
+```sql
+create unique index projects_name_live_uq
+  on projects (account_id, lower(name)) where deleted_at is null;
+```
+
+Then every query must filter `deleted_at is null` (a view or row-level security can do it centrally), and a job should purge old deleted rows.
+
+## History is a table you design
+
+An `update` replaces the row, and no query sees the old version. "What was this project called in March?" needs history you keep on purpose:
+
+| | Audit rows | Trigger history | Temporal table |
+| --- | --- | --- | --- |
+| Catches every writer | no | yes, except `replica` mode | yes |
+| Knows who and why | yes | only what the app passes in | only if you add columns |
+| "As of" query | replay | union of two tables | one range predicate |
+
+**Audit rows**, written by the app in the same transaction, know why, but only for writers that remember ([Start auditing with the server log; it's free](/books/eight-kilobytes/security#start-auditing-with-the-server-log-its-free)). A **temporal table** like `project_plans` keeps every version as a row with its range; use one when history is the product (prices, plans, entitlements).
+
+### A history trigger catches every writer, at an insert per row
+
+A trigger catches every writer: on each update and delete, it copies the old version into `projects_history` with its `valid_during` range, keyed `without overlaps`. It costs an insert per changed row on every bulk update ([A row trigger costs about a microsecond a row](/books/eight-kilobytes/functions#a-row-trigger-costs-about-a-microsecond-a-row)), and misses writers running as `replica`, as logical replication does ([COPY fires triggers; replication roles don't](/books/eight-kilobytes/functions#copy-fires-triggers-replication-roles-dont)).
+
+<DeepDive title="The history trigger, and the two details that carry it">
+
+```sql
+alter table projects add column valid_from timestamptz not null default now();
+
+create function projects_keep_history() returns trigger
+language plpgsql as $$
+begin
+  if tg_op = 'UPDATE' and old is not distinct from new then
+    return new;                         -- nothing changed: keep no history
+  end if;
+  if old.valid_from < now() then        -- skip versions born in this transaction
+    insert into projects_history
+    values (old.id, old.account_id, old.owner_id, old.name, old.archived_at,
+            old.deleted_at, tstzrange(old.valid_from, now()),
+            nullif(current_setting('app.user_id', true), '')::bigint);
+  end if;
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  new.valid_from := now();
+  return new;
+end $$;
+
+create trigger projects_keep_history
+  before update or delete on projects
+  for each row execute function projects_keep_history();
+```
+
+`now()` is the transaction's start, so two updates in one transaction would make `tstzrange(t, t)`, which is `empty`, and the `without overlaps` key refuses it; that intermediate version was never visible, so the trigger skips it. The app passes the user with `set local app.user_id`, `local` so it can't leak to the next borrower of a pooled connection ([Pooled connections leak tenants](/books/eight-kilobytes/security#pooled-connections-leak-tenants)).
+
+One edge to know about: `now()` is when each transaction *started*, not when it wrote. If a transaction that began earlier updates a row after a younger one has already committed a change to it, `old.valid_from` is later than this transaction's `now()`. The trigger then skips that version's history and moves `valid_from` backward. For history that must be exact under concurrent writers, stamp with `clock_timestamp()` instead and accept that a version can be a few microseconds long.
+
+<ProveIt lab="13-relationships">
+
+```sql
+select lab.prove('a range from a moment to itself is empty',
+  tstzrange(now(), now()) = 'empty'::tstzrange);
+-- after two earlier single-update transactions left two history rows:
+begin;
+set local app.user_id = '7';
+update projects set name = 'Checkout v3' where id = 43;
+update projects set name = 'Checkout v4' where id = 43;
+commit;
+select lab.prove('two updates in one transaction add one history row, stamped with the user',
+  (select count(*) from projects_history where project_id = 43) = 3
+  and (select changed_by from projects_history where project_id = 43
+       order by lower(valid_during) desc limit 1) = 7);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## The short version
+
+- Store each fact once; give every deliberate copy one writer.
+- Index every foreign key column on the referencing side. Without it, deleting one project scanned all 35,173 pages of `events`.
+- Foreign keys charge every write: several times the time for a 100,000-row insert with three (ten on our machine), a logged lock per parent row, multixacts on a hot parent, and a lock on both tables to add one.
+- Keep them on core business entities. On firehoses, cross-boundary references, and imports, drop them or make them `not enforced`, and run a scheduled orphan check. The composite tenant key stays everywhere: it's a security boundary, worth its lookup and its locks on `projects`.
+- Cascade only small dependent rows. `not null` by default, exclusion constraints for "no overlaps", `not exists` instead of `not in`, and history kept on purpose.
+
+## Further reading
+
+- [Constraints](https://www.postgresql.org/docs/18/ddl-constraints.html), PostgreSQL documentation. Every constraint type in one place, and the note that referencing columns aren't indexed for you.
+- [CREATE TABLE](https://www.postgresql.org/docs/18/sql-createtable.html), PostgreSQL documentation. Every constraint clause, deferrability, `not enforced`, `without overlaps`, and `period`.
+- [A Simple Guide to Five Normal Forms in Relational Database Theory](https://www.bkent.net/Doc/simple5.htm), William Kent, Communications of the ACM, 1983. The normal forms in plain language, each with the anomaly it prevents.
+

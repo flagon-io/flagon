@@ -1,0 +1,388 @@
+---
+title: Checklists
+description: One line per habit, cheapest lever first, from finding the expensive work through queries, indexes, search, schema, migrations, and production to the bigger box, scaling out, and the slow-right-now incident, each linked to the section that proves it.
+part: Back matter
+---
+
+A checklist is this book with the arguments taken out: one line per habit, each linked to the section that shows why. The sections follow the playbook's order, cheapest lever first ([The order is the method](/books/eight-kilobytes/playbook#the-order-is-the-method)). Find the expensive work. Fix plans, indexes, and schema. Keep upkeep, connections, and configuration healthy. Only then ask for a bigger box.
+
+Work top to bottom. Skip an item only when your measurements say it's fine, never because a later one looks easier. The last section is for the day it's already slow.
+
+## Find the expensive work before you fix anything
+
+The slow query you're thinking of is rarely the one costing the most. Measure first, and keep measuring after every change.
+
+- [ ] Install `pg_stat_statements` with `track_io_timing = on` ([setting it up](/books/eight-kilobytes/observability#pg_stat_statements-loads-at-server-start)), and diff two snapshots over a busy window ([snapshot and diff](/books/eight-kilobytes/observability#snapshot-and-diff-dont-reset)).
+- [ ] Rank statements by total time and by shared blocks per call ([four rankings](/books/eight-kilobytes/observability#rank-the-same-view-four-ways-total-time-first)).
+- [ ] Sample wait events under the load that hurts, and name the resource ([sample waits](/books/eight-kilobytes/observability#sample-waits-to-see-where-the-time-goes)).
+- [ ] Write one sentence before you change anything: bound by X, because Y shows Z ([find the expensive work](/books/eight-kilobytes/playbook#1-find-the-expensive-work)).
+- [ ] Change one thing at a time, and measure the same workload on production-shaped data before and after ([measure it end to end](/books/eight-kilobytes/benchmarking#change-one-thing-and-measure-it-end-to-end)).
+- [ ] Record pages per call before and after every fix; 35,249 to 91 is what a good line looks like ([the first index](/books/eight-kilobytes/btree#the-first-index-35249-pages-to-91)).
+
+## Review the plan, not the code
+
+An ORM call that looks harmless can read the whole table. Every query that runs per request gets one `explain (analyze, buffers)` before it ships.
+
+- [ ] Run the plan on production-shaped data; wrap writes in `begin` and `rollback` ([EXPLAIN guesses; EXPLAIN ANALYZE runs it](/books/eight-kilobytes/explain#explain-guesses-explain-analyze-runs-it)).
+- [ ] Read the `Buffers` line first, and compare pages touched with rows returned ([buffers are the evidence](/books/eight-kilobytes/explain#buffers-are-the-evidence)).
+- [ ] Multiply a node's `actual time` and `rows` by its `loops` before you judge it: 70 ms at `loops=20` is 1.4 seconds ([Multiply by loops; buffers are already totals](/books/eight-kilobytes/explain#multiply-by-loops-buffers-are-already-totals)).
+- [ ] Compare estimated and actual rows bottom up; at the lowest node off by 10x or more, fix that estimate before anything above it, with extended statistics for correlated columns ([extended statistics](/books/eight-kilobytes/planner#extended-statistics-measure-columns-together)).
+- [ ] Keep indexed columns bare: no function or cast on the column, parameters in its type ([functions on columns](/books/eight-kilobytes/queries#a-function-on-the-column-hides-the-index), [implicit casts](/books/eight-kilobytes/queries#a-type-mismatch-is-a-cast-on-every-row)).
+- [ ] Write time ranges half-open ([date ranges](/books/eight-kilobytes/queries#date-ranges-are-half-open)).
+- [ ] Paginate with keyset over a matching index, never deep `OFFSET` ([OFFSET reads every row it skips](/books/eight-kilobytes/queries#offset-reads-every-row-it-skips)).
+- [ ] Replace N+1 loops with a join, one `= any($1)` array, or `lateral` ([N+1 is a loop, not a slow query](/books/eight-kilobytes/queries#n1-is-a-loop-not-a-slow-query)).
+- [ ] Grep the code for `not in (select`; rewrite each as `not exists`, which is also correct when the subquery returns a NULL ([NOT IN is a trap; use NOT EXISTS](/books/eight-kilobytes/queries#not-in-is-a-trap-use-not-exists)).
+- [ ] Don't `count(*)` a big table per request: estimate, cap, or read a rollup ([exact counts](/books/eight-kilobytes/queries#exact-counts-read-everything)).
+- [ ] When a plan with an `or` across two joined tables shows a sequential scan on either side, rewrite it as a `union` of two indexed queries ([OR across a join defeats both indexes](/books/eight-kilobytes/queries#or-across-a-join-defeats-both-indexes)).
+- [ ] Write CTEs for readability, and add `materialized` only on purpose ([A CTE used once is inlined, not fenced](/books/eight-kilobytes/queries#a-cte-used-once-is-inlined-not-fenced)).
+- [ ] Use `on conflict` for application upserts, `merge` for batch jobs, and an idempotency key for retried writes ([idempotency keys](/books/eight-kilobytes/queries#let-a-unique-constraint-enforce-once)).
+- [ ] Do read-modify-write arithmetic in SQL, not in the app ([read committed](/books/eight-kilobytes/concurrency#read-committed-loses-updates-computed-in-the-app)).
+- [ ] Commit per batch, every few thousand to few hundred thousand rows on a live table, never per row, and load bulk data with `COPY` ([commit once per batch](/books/eight-kilobytes/loading#commit-once-per-batch-not-once-per-row)).
+- [ ] Select only the columns you render; wide values live in TOAST ([Large values are compressed, then moved out of the row](/books/eight-kilobytes/storage#large-values-are-compressed-then-moved-out-of-the-row)).
+- [ ] Keep logic on the primary only if it shrinks data, keeps a rule atomic, or saves a round trip; format in the app ([our position](/books/eight-kilobytes/functions#the-primary-is-your-most-expensive-cpu)).
+- [ ] Suspect the generic plan when a prepared query slows after five calls ([prepared statements](/books/eight-kilobytes/planner#prepared-statements-switch-plans-after-five-runs)).
+- [ ] Distrust a `Limit` above an index scan that throws away most of what it reads; index the filter ([Limit bets on finding rows early](/books/eight-kilobytes/explain#limit-bets-on-finding-rows-early)).
+- [ ] Never hold a transaction open across a network call or a user's think time ([long transactions](/books/eight-kilobytes/mvcc#long-transactions-hold-everything-back)).
+
+## Edges that bite once
+
+Each of these runs, returns something plausible or fails politely, and surprises most teams once. Catch them in review, so the surprise happens in a test.
+
+**SQL that runs and is wrong**
+
+- [ ] Use `clock_timestamp()` when you mean the wall clock; `now()` is the transaction's start ([timestamps](/books/eight-kilobytes/types#timestamps-always-timestamptz)).
+- [ ] Cast one side to `numeric` before dividing integers; `7/2` is 3 ([division, ||, and NULL ordering](/books/eight-kilobytes/not-mysql#integer-division-truncates-and-nulls-sort-last)).
+- [ ] Join strings that may hold a NULL with `concat_ws()` or `coalesce()`, not bare `||` (same section).
+- [ ] Add `nulls last` to newest-first sorts on nullable columns, and to the index that serves them (same section).
+- [ ] Group by every selected column or the primary key, and say `any_value()` when any value will do ([smaller things](/books/eight-kilobytes/not-mysql#a-few-more-habits-dont-transfer)).
+- [ ] Update in batches chosen by key; there is no `UPDATE ... LIMIT` ([backfills](/books/eight-kilobytes/migrations#backfill-in-short-batches-that-walk-the-primary-key)).
+- [ ] Skip updates that change nothing; a no-op still writes a row version and its WAL ([where the WAL comes from](/books/eight-kilobytes/wal#find-where-the-wal-comes-from-before-you-cut-it)).
+
+**Transactions**
+
+- [ ] Expect one error to abort the whole transaction; prevent it with `on conflict`, or contain it with a savepoint ([one error aborts](/books/eight-kilobytes/concurrency#one-error-aborts-the-whole-transaction)).
+- [ ] Keep savepoints, exception blocks, and ORM nested transactions out of loops; past 64 in one transaction, every session pays ([subtransactions](/books/eight-kilobytes/concurrency#subtransactions-are-not-free)).
+- [ ] Retry the whole transaction on `40001` and `40P01`, with capped, jittered backoff, and on nothing else ([retry](/books/eight-kilobytes/concurrency#retry-the-whole-transaction)).
+- [ ] Lock a parent row `for no key update` unless you'll delete it or change its key; `for update` blocks inserts of its children ([row locks](/books/eight-kilobytes/concurrency#row-locks-live-in-the-row-not-in-pg_locks)).
+- [ ] Keep `truncate` for staging tables and tests; an older snapshot sees the table empty ([a delete only stamps the row](/books/eight-kilobytes/mvcc#a-delete-only-stamps-the-row)).
+
+## An index earns its write tax or it goes
+
+Every index is a bet: faster reads for some queries, a tax on every write for as long as it exists. Make each one name the query it serves.
+
+- [ ] Design from the query, equality columns first, then one range or sort column, and name the query it serves ([step by step](/books/eight-kilobytes/btree#design-an-index-from-a-query-not-a-column)).
+- [ ] Don't index a column with a handful of values on its own ([Why 2% of the rows can cost 68% of the table](/books/eight-kilobytes/btree#why-2-of-the-rows-can-cost-68-of-the-table)).
+- [ ] Use a partial index for the hot subset, with its predicate written as literals ([partial indexes](/books/eight-kilobytes/btree#index-the-rows-you-ask-about-not-the-whole-table)).
+- [ ] Use an expression index when the query must use the expression, like `lower(email)` ([expression indexes](/books/eight-kilobytes/btree#an-index-stores-exactly-what-you-gave-it)).
+- [ ] Pin the time zone in date expressions, `((created_at at time zone 'UTC')::date)`, and never label a function `immutable` to pass the check ([why created_at::date can't be indexed](/books/eight-kilobytes/btree#why-created_atdate-cant-be-indexed-and-what-to-write-instead)).
+- [ ] Under a linguistic collation, serve `like 'abc%'` with a `text_pattern_ops` index, and `'%abc%'` with trigrams ([prefix search](/books/eight-kilobytes/more-indexes#prefix-search-needs-the-right-operator-class)).
+- [ ] Cover the hot query with `include`, not every query ([covering indexes](/books/eight-kilobytes/btree#covering-indexes-cover-the-hot-query-not-every-query)).
+- [ ] On every `Index Only Scan`, compare `Heap Fetches` with the rows returned; close to the row count means vacuum isn't keeping the visibility map current ([index-only scan](/books/eight-kilobytes/btree#the-best-heap-page-is-the-one-you-never-read)).
+- [ ] Pick the index type for the operator: GIN, trigram, GiST, BRIN, or hash ([choosing an index type](/books/eight-kilobytes/more-indexes#the-operator-picks-the-index-type)).
+- [ ] Use `jsonb_path_ops` for containment; no GIN serves `payload->>'key' = 'x'` ([jsonb containment](/books/eight-kilobytes/more-indexes#for-containment-jsonb_path_ops-beats-the-default)).
+- [ ] Find and index unindexed foreign keys ([the query](/books/eight-kilobytes/relationships#one-catalog-query-lists-the-unindexed-foreign-keys)).
+- [ ] Count the write tax before you add one: every index is touched by every insert and can turn updates cold ([a tax on writes](/books/eight-kilobytes/btree#every-index-is-a-tax-on-writes)).
+- [ ] Drop indexes with `idx_scan = 0` over a long window, checked on every replica, unless they back a constraint, and drop duplicates ([unused and duplicate](/books/eight-kilobytes/btree#an-idx_scan-of-zero-is-a-suspect-not-a-verdict)).
+- [ ] Ask HypoPG before building on a big table ([hypothetical questions](/books/eight-kilobytes/extensions#ask-the-planner-hypothetical-questions)).
+- [ ] Rebuild a bloated index with `reindex concurrently` ([measuring bloat](/books/eight-kilobytes/vacuum#index-bloat-often-costs-more-than-table-bloat)).
+- [ ] Use plain `create index` only on new, empty, or write-free tables; everything that takes writes gets `concurrently` ([the decision rule](/books/eight-kilobytes/migrations#if-you-have-to-ask-whether-its-busy-build-concurrently)).
+- [ ] After a concurrent build, check for an `INVALID` leftover and drop it before retrying ([when a build fails](/books/eight-kilobytes/migrations#when-a-concurrent-build-fails)).
+- [ ] Reindex text indexes after any OS, glibc, or ICU upgrade, and only then refresh the recorded collation version ([collations](/books/eight-kilobytes/types#an-os-upgrade-can-corrupt-your-indexes), [detect it](/books/eight-kilobytes/types#detect-it-before-it-bites)).
+
+## Search inside Postgres before you add an engine
+
+Full-text and vector search are indexes with their own costs. Measure recall and pages the way you'd measure any other query.
+
+- [ ] Pass the text search configuration, such as `'english'`, in every call; an index built for one doesn't serve another ([the configuration](/books/eight-kilobytes/search#the-configuration-is-part-of-the-index)).
+- [ ] Store the `tsvector` in a generated column with a GIN index; ranking through an expression index took 170 ms against 4.6 ([store the tsvector](/books/eight-kilobytes/search#store-the-tsvector-dont-index-the-expression)).
+- [ ] Parse anything a person types with `websearch_to_tsquery` ([user input](/books/eight-kilobytes/search#websearch_to_tsquery-never-raises-a-syntax-error)).
+- [ ] Narrow by tenant or date before ranking, and run `ts_headline` only on the rows you return ([snippets](/books/eight-kilobytes/search#ts_headline-parses-the-document-again)).
+- [ ] Before trusting an approximate vector index, measure recall@10 against an exact search on your own queries ([exact search](/books/eight-kilobytes/search#exact-search-is-a-sequential-scan)).
+- [ ] On HNSW, keep `hnsw.ef_search` at 40 or above (recall 0.97 in our test) and raise it per query where misses are expensive ([ef_search trades latency for recall](/books/eight-kilobytes/search#ef_search-trades-latency-for-recall)).
+- [ ] On IVFFlat, never leave `ivfflat.probes` at 1: recall@10 was 0.636 at one probe and 1.000 at five ([IVFFlat's default of one probe is a trap](/books/eight-kilobytes/search#ivfflats-default-of-one-probe-is-a-trap)).
+- [ ] With a filter on a vector search, turn on `hnsw.iterative_scan`, or let a B-tree make a selective filter exact ([filters](/books/eight-kilobytes/search#filters-and-approximate-indexes-dont-mix)).
+- [ ] Merge keyword and vector results with reciprocal rank fusion, not by adding their scores ([hybrid search](/books/eight-kilobytes/search#keywords-and-vectors-fail-differently-so-fuse-them)).
+
+## Review the schema before the first insert
+
+The schema decides what every row costs for as long as the table lives, and changing it later is a migration, not a deploy.
+
+**Types**
+
+- [ ] Use `bigint` for every id and every column that references one ([ids are bigint](/books/eight-kilobytes/types#ids-are-bigint)).
+- [ ] Use `timestamptz` for every moment, with sessions in UTC ([always timestamptz](/books/eight-kilobytes/types#timestamps-always-timestamptz)).
+- [ ] Use `text` with a check constraint, not `varchar(n)`, and never `char(n)` ([just use text](/books/eight-kilobytes/types#use-text-and-put-the-length-in-a-check)).
+- [ ] Store money as `numeric` or `bigint` cents beside a currency column, never as a float ([money](/books/eight-kilobytes/types#money-is-numeric-never-float)).
+- [ ] Prefer `archived_at` to `is_archived`, and `text` plus a check to an enum you'll want to change ([small sets](/books/eight-kilobytes/types#a-timestamp-beats-a-boolean-a-check-beats-a-new-type)).
+- [ ] Choose one case-insensitive strategy per column and enforce it in the schema ([pick one](/books/eight-kilobytes/types#for-emails-make-lower-the-unique-key)).
+- [ ] Default new databases to the builtin `C.UTF-8` collation, and ask for a linguistic one only where a person reads the order ([three providers](/books/eight-kilobytes/types#pick-a-collation-provider-whose-order-never-changes)).
+- [ ] Never quote identifiers: unquoted `snake_case`, with the ORM's naming strategy set before the first migration ([smaller things](/books/eight-kilobytes/not-mysql#a-few-more-habits-dont-transfer)).
+- [ ] Use identity columns, not `serial`; skip `money`, `char(n)`, and `timetz` ([types to avoid](/books/eight-kilobytes/types#four-types-cost-more-than-they-save)).
+
+**Keys and public ids**
+
+- [ ] Give every table a surrogate `bigint generated always as identity` key; make natural keys `unique` ([natural keys change](/books/eight-kilobytes/keys#natural-keys-change-surrogate-keys-dont)).
+- [ ] Never build invoice numbers or change feeds on a sequence: it has gaps and isn't ordered by commit ([gaps](/books/eight-kilobytes/keys#gaps-the-import-that-collides-and-logical-replication)).
+- [ ] Use `uuidv7()` stored as `uuid` if you need UUIDs; random v4 keys cost 3.8 times the WAL ([random keys](/books/eight-kilobytes/keys#increasing-keys-append-random-keys-land-anywhere)).
+- [ ] If clients mint ids, keep a server `created_at`, validate each id, and answer a conflict with `do nothing` plus a lookup scoped to the caller's account, never `do update` ([A client's UUIDv7 is input, not a clock](/books/eight-kilobytes/keys#a-clients-uuidv7-is-input-not-a-clock)).
+- [ ] Never hand out a counter: publish a separate public id, stored as `uuid`, printed with a prefix ([store the uuid, print the prefix](/books/eight-kilobytes/keys#store-the-uuid-print-the-prefix)).
+- [ ] Put `account_id` on every tenant table and lead keys with it ([carry the tenant](/books/eight-kilobytes/keys#carry-the-tenant-everywhere)).
+- [ ] Use composite foreign keys so references can't cross tenants ([make it impossible](/books/eight-kilobytes/keys#make-cross-tenant-references-impossible)).
+
+**Constraints, chosen on purpose**
+
+- [ ] Store each fact once, and give every deliberate copy exactly one writer ([one writer](/books/eight-kilobytes/relationships#a-copy-needs-exactly-one-writer)).
+- [ ] Keep foreign keys on accounts, users, projects, memberships, and money ([where we keep them](/books/eight-kilobytes/relationships#keep-foreign-keys-where-an-orphan-is-a-bug-customers-see)).
+- [ ] Drop them, or declare them `not enforced`, on events, logs, metrics, audit trails, cross-boundary references, and imports (same section).
+- [ ] Schedule an orphan check for every reference you stopped enforcing ([check what you no longer enforce](/books/eight-kilobytes/relationships#check-what-you-no-longer-enforce)).
+- [ ] Index every enforced foreign key on the referencing side ([the delete that scans](/books/eight-kilobytes/relationships#each-deleted-parent-scans-the-whole-child-table)).
+- [ ] Cascade deletes only to small dependent rows ([use cascade deliberately](/books/eight-kilobytes/relationships#use-cascade-deliberately)).
+- [ ] Make columns `not null` unless unknown is a real state, and say the rest with `check` ([check constraints](/books/eight-kilobytes/relationships#a-check-states-a-rule-no-code-path-can-skip)).
+- [ ] Don't trust `unique` on nullable columns, since it admits any number of NULLs: make the columns `not null`, or write `unique nulls not distinct` ([nulls are distinct](/books/eight-kilobytes/relationships#nulls-are-distinct-by-default)).
+- [ ] Use an exclusion constraint for "no overlaps", not application code ([exclusion constraints](/books/eight-kilobytes/relationships#an-exclusion-constraint-makes-overlaps-impossible)).
+- [ ] Give soft-deleted tables a partial unique index ([soft deletes](/books/eight-kilobytes/relationships#a-soft-delete-needs-a-partial-unique-index)).
+- [ ] Replace polymorphic `type`/`id` pairs with real foreign key columns ([polymorphic associations](/books/eight-kilobytes/relationships#replace-polymorphic-associations)).
+- [ ] Enforce rules across rows with a constraint, serializable, or a parent-row lock, never a check that reads other rows ([invisible to constraints](/books/eight-kilobytes/acid#rules-across-rows-are-invisible-to-constraints)).
+
+**Layout and HOT**
+
+- [ ] Order columns from 8-byte fixed-width down to 1-byte, variable-length last ([column order is free space](/books/eight-kilobytes/storage#column-order-is-free-space)).
+- [ ] Give update-heavy tables `fillfactor = 90`; leave append-only tables at 100 ([leave room](/books/eight-kilobytes/hot#leave-room-on-the-page-or-every-update-moves)).
+- [ ] Don't index `updated_at` or anything most updates change ([don't index updated_at](/books/eight-kilobytes/hot#dont-index-updated_at)).
+- [ ] Move constantly changing counters to a narrow table ([hot counters](/books/eight-kilobytes/hot#move-hot-counters-to-a-narrow-table)).
+- [ ] Watch the HOT share of update-heavy tables, and find out why when it falls ([measuring HOT](/books/eight-kilobytes/hot#a-busy-table-should-be-above-90-percent-hot)).
+
+**jsonb or columns**
+
+- [ ] Use `jsonb`, never `json`, for documents ([jsonb](/books/eight-kilobytes/types#use-jsonb-and-give-the-keys-you-query-their-own-columns)).
+- [ ] Promote any field you filter, join, sort, or constrain on to a typed column; the planner can't see inside `jsonb` ([when to promote](/books/eight-kilobytes/models#a-field-you-filter-join-or-sort-on-wants-a-column)).
+- [ ] Never build entity-attribute-value tables ([a trap](/books/eight-kilobytes/models#entity-attribute-value-is-a-trap)).
+
+**Functions and triggers**
+
+- [ ] Write a function that is one query in SQL, labeled `stable` or `immutable`, so the planner can inline it ([inlining](/books/eight-kilobytes/functions#sql-functions-are-inlined-plpgsql-functions-are-not)).
+- [ ] Label volatility as tightly as the truth allows, never tighter ([volatility](/books/eight-kilobytes/functions#volatility-is-a-promise-to-the-planner)).
+- [ ] Budget a row trigger at about a microsecond a row, and an audit trigger at about two, before you put one on a table that takes bulk jobs ([trigger cost](/books/eight-kilobytes/functions#a-row-trigger-costs-about-a-microsecond-a-row)).
+- [ ] Never maintain a parent's counter from a child's trigger; it serializes every writer on that parent row ([counter triggers](/books/eight-kilobytes/functions#a-counter-trigger-serializes-your-writers)).
+- [ ] Add a trigger only when the work must be atomic with the write and happen for every writer ([earn its place](/books/eight-kilobytes/functions#a-trigger-has-to-earn-its-place)).
+- [ ] Turn on `track_functions` so functions show up in `pg_stat_user_functions`, and `pg_stat_statements.track = all` so statements inside them get their own entries ([tracking](/books/eight-kilobytes/functions#functions-are-invisible-until-you-turn-tracking-on)).
+
+## Check every migration for the lock it waits on
+
+A migration is safe when it can't queue the site behind it. The `ALTER` is rarely slow; the wait for its lock is the outage.
+
+- [ ] Set `lock_timeout` to 1 to 5 seconds on every migration session, retry, and add a generous `statement_timeout` ([rule one](/books/eight-kilobytes/migrations#rule-one-lock_timeout-and-retry)).
+- [ ] Never let DDL wait in the lock queue: one waiting `ALTER` blocks every later query on its table, reads included ([the lock queue](/books/eight-kilobytes/concurrency#a-waiting-lock-blocks-everyone-behind-it)).
+- [ ] Check for long and idle-in-transaction sessions before you start ([long transactions](/books/eight-kilobytes/observability#backend_xmin-names-the-transaction-holding-vacuum-back)).
+- [ ] Label each step catalog only, scan, or rewrite before you run it ([metadata, scan, or rewrite](/books/eight-kilobytes/migrations#every-change-is-a-catalog-edit-a-scan-or-a-rewrite)).
+- [ ] Add columns with constant defaults; never a volatile default on a big table in one step ([defaults](/books/eight-kilobytes/migrations#constant-defaults-are-free-volatile-defaults-rewrite)).
+- [ ] Add `check` constraints `not valid`, then `validate` in a separate transaction ([check constraints](/books/eight-kilobytes/migrations#add-a-check-not-valid-then-validate-it)).
+- [ ] Add foreign keys `not valid`, then `validate`; both lock the child and the parent ([foreign keys](/books/eight-kilobytes/migrations#add-foreign-keys-not-valid-then-validate)).
+- [ ] Reach `not null` through a validated check, or `not null ... not valid` on PostgreSQL 18 ([NOT NULL goes through a CHECK first](/books/eight-kilobytes/migrations#not-null-goes-through-a-check-first)).
+- [ ] Choose the index build by the table's traffic ([pick the build](/books/eight-kilobytes/migrations#pick-the-index-build-that-matches-the-tables-traffic)).
+- [ ] Run concurrent builds outside a transaction, with `lock_timeout` off, then check `indisvalid` ([four rules](/books/eight-kilobytes/migrations#run-a-concurrent-build-alone-untimed-and-check-its-valid)).
+- [ ] Build unique constraints and primary keys from a concurrent unique index ([unique constraints](/books/eight-kilobytes/migrations#build-a-unique-index-concurrently-then-attach-it)).
+- [ ] Never run plain `reindex` on a live table ([Rebuild with REINDEX CONCURRENTLY; plain REINDEX blocks reads too](/books/eight-kilobytes/migrations#rebuild-with-reindex-concurrently-plain-reindex-blocks-reads-too)).
+- [ ] Treat type changes as rewrites unless they widen, and plan `int` to `bigint` as an online swap ([the int to bigint problem](/books/eight-kilobytes/migrations#the-int-to-bigint-problem)).
+- [ ] Ship renames as expand and contract, across deploys ([expand and contract](/books/eight-kilobytes/migrations#renames-ship-as-expand-and-contract)).
+- [ ] Backfill in batches by primary-key range, outside the migration, each batch its own transaction ([backfills](/books/eight-kilobytes/migrations#backfill-in-short-batches-that-walk-the-primary-key)).
+- [ ] Drop the code first, then the column ([drop code first](/books/eight-kilobytes/migrations#drop-code-first-then-the-column)).
+- [ ] Keep each migration transaction short; DDL holds every lock until commit ([transactional DDL](/books/eight-kilobytes/migrations#transactional-ddl-holds-every-lock-until-commit)).
+- [ ] Attach partitions with a validated `check`, and detach them `concurrently` ([convert a live table](/books/eight-kilobytes/partitioning#convert-a-live-table-without-downtime)).
+- [ ] Rehearse on a production-sized clone ([copy production](/books/eight-kilobytes/benchmarking#copy-production-without-copying-people)).
+
+**Bulk loads and partitions**
+
+- [ ] Load with `COPY`, or `unnest` arrays if you must `insert`; never one autocommit insert per row ([COPY is the bulk path](/books/eight-kilobytes/loading#copy-is-the-bulk-path)).
+- [ ] Load into a bare table, then build indexes and add foreign keys `not valid` plus `validate`: six times faster and half the WAL in our load ([after the load](/books/eight-kilobytes/loading#build-indexes-and-foreign-keys-after-the-load)).
+- [ ] Use `copy ... freeze` into a table created or truncated in the same transaction, so the first read doesn't write ([COPY FREEZE writes the rows finished](/books/eight-kilobytes/loading#copy-freeze-writes-the-rows-finished)).
+- [ ] Raise `max_wal_size` before a big load, and finish with `vacuum (freeze, analyze)`, or at least `analyze`, before traffic reads the table ([before you open the doors](/books/eight-kilobytes/loading#vacuum-and-analyze-before-you-open-the-doors)).
+- [ ] Upsert in bulk from a deduplicated staging table in one statement ([bulk upserts](/books/eight-kilobytes/loading#upserts-in-bulk-stage-then-one-statement)).
+- [ ] Partition by the key you delete by, usually time, and keep the count in the tens to low hundreds ([choose the key](/books/eight-kilobytes/partitioning#choose-the-key-you-delete-by)).
+- [ ] Run `explain` on every hot query against a partitioned table and confirm pruning: only the matching partitions appear, or `Subplans Removed` is above zero ([pruning](/books/eight-kilobytes/partitioning#the-bounds-are-a-free-coarse-index)).
+- [ ] Create future partitions ahead of time, and alert when they run short ([create ahead](/books/eight-kilobytes/partitioning#create-partitions-before-you-need-them)).
+- [ ] Analyze a partitioned parent yourself after loads and retention; autovacuum never does ([smaller traps](/books/eight-kilobytes/partitioning#four-smaller-traps-catch-partitioned-tables)).
+
+## Production readiness
+
+Most outages in this book grow quietly for months, then fail all at once. Check these before launch, and again every time the data grows tenfold.
+
+**Backups and recovery**
+
+- [ ] Write down RPO and RTO first; a replica is not a backup ([Write down RPO and RTO first](/books/eight-kilobytes/backups#write-down-rpo-and-rto-first)).
+- [ ] Take physical base backups plus continuous WAL archiving, to storage the database host can't delete ([use a backup tool](/books/eight-kilobytes/backups#use-a-backup-tool)).
+- [ ] Practice point-in-time recovery to a separate server with `recovery_target_action = 'pause'` ([recovering to a point in time](/books/eight-kilobytes/backups#recovery-pauses-at-the-target-so-you-can-look-first)).
+- [ ] Automate restore tests and record the real RTO ([test your restores](/books/eight-kilobytes/backups#test-your-restores)).
+- [ ] On a managed service, time a real restore; it builds a new server ([restore time](/books/eight-kilobytes/managed#restore-time-is-longer-than-the-button-suggests)).
+
+**Monitoring and alerts**
+
+- [ ] Alert on the short list: unreachable, transaction ID age, long transactions, replication, disk, archiving ([what to alert on](/books/eight-kilobytes/observability#alert-only-on-what-needs-a-human-soon)).
+- [ ] Turn on slow-query, lock-wait, temp-file, and autovacuum logging, plus `auto_explain` ([logging](/books/eight-kilobytes/configuration#cheap-logging-answers-most-3-am-questions)).
+
+**Connections and timeouts**
+
+- [ ] Use an app pool everywhere, and an external pooler for many processes or serverless ([pool in both places](/books/eight-kilobytes/connections#pool-in-the-app-and-in-front-of-the-database)).
+- [ ] Size the pool from cores and disks, not users ([size the pool](/books/eight-kilobytes/connections#size-the-pool-from-cores-not-users)).
+- [ ] Keep `max_connections` in the low hundreds, with slots reserved for admin ([max_connections](/books/eight-kilobytes/connections#max_connections-in-the-thousands-hurts)).
+- [ ] Set timeouts on the app role, starting from `statement_timeout = '5s'`, `lock_timeout = '3s'`, `idle_in_transaction_session_timeout = '30s'`, and `transaction_timeout = '5min'` on PostgreSQL 17+; run migrations and batch jobs as a separate role with their own limits ([timeouts](/books/eight-kilobytes/connections#every-timeout-defaults-to-off)).
+- [ ] Make the app reconnect and retry through a failover ([failover is DNS](/books/eight-kilobytes/managed#failover-is-dns-and-your-pool-has-to-notice)).
+- [ ] Before moving a pooler to transaction mode, replace session `set`, session advisory locks, `listen`, SQL `prepare`, and temp tables ([transaction pooling](/books/eight-kilobytes/connections#transaction-pooling-breaks-session-state)).
+- [ ] Run PgBouncer 1.21 or later for prepared statements in transaction mode; 1.24 turns it on by default ([newer PgBouncer](/books/eight-kilobytes/connections#what-newer-pgbouncer-fixes-and-what-it-still-cant)).
+- [ ] Build queues on a table claimed with `for update skip locked`, committed with the business write, and keep `listen`/`notify` modest ([the queue](/books/eight-kilobytes/concurrency#a-postgres-queue-commits-with-the-business-write)).
+
+**Configuration and the box**
+
+- [ ] Budget memory before tuning: `shared_buffers`, then `work_mem` times nodes times connections ([memory](/books/eight-kilobytes/configuration#memory-budget-it-before-you-tune-it)).
+- [ ] Raise `work_mem` per role for reports, never globally ([work_mem](/books/eight-kilobytes/configuration#work_mem-multiply-before-you-raise-it)).
+- [ ] Set `random_page_cost = 1.1` on SSDs ([cost model](/books/eight-kilobytes/configuration#random_page_cost-assumes-spinning-disks)).
+- [ ] Raise `max_wal_size` for timed checkpoints, and turn on `wal_compression` ([Space out checkpoints and size max_wal_size to your WAL rate](/books/eight-kilobytes/configuration#space-out-checkpoints-and-size-max_wal_size-to-your-wal-rate)).
+- [ ] Keep the OOM killer off the postmaster ([the OOM killer](/books/eight-kilobytes/configuration#dont-let-the-oom-killer-choose-the-postmaster)).
+- [ ] Never run with `fsync = off` or `full_page_writes = off` ([durability](/books/eight-kilobytes/acid#fsync--off-and-full_page_writes--off-belong-only-in-ci)).
+
+**Vacuum and wraparound**
+
+- [ ] Set per-table scale factors of 0.01 to 0.05 on big tables, and raise the cost limit well above 200 ([the defaults are wrong](/books/eight-kilobytes/vacuum#the-defaults-are-wrong-for-big-tables)).
+- [ ] Find whatever holds back the cleanup cutoff: sessions, slots, feedback, prepared transactions ([what blocks vacuum](/books/eight-kilobytes/vacuum#vacuum-cant-remove-what-an-old-snapshot-might-need)).
+- [ ] Alert on `age(datfrozenxid)` at 500 million to 1 billion, and never kill an anti-wraparound vacuum ([wraparound](/books/eight-kilobytes/vacuum#wraparound-stops-writes-before-anything-is-corrupted)).
+- [ ] Graph sequences against their type's maximum ([the int to bigint problem](/books/eight-kilobytes/migrations#the-int-to-bigint-problem)).
+
+**Replication and failover**
+
+- [ ] Cap every slot with `max_slot_wal_keep_size`, and alert on inactive ones ([slots](/books/eight-kilobytes/replication#replication-slots-are-a-promise-to-keep-wal)).
+- [ ] Decide how many acknowledged commits a failover may lose ([asynchronous is the default](/books/eight-kilobytes/replication#asynchronous-is-the-default-and-it-can-lose-commits)).
+- [ ] Use a failover manager, never a script, and practice on a schedule ([don't hand-roll failover](/books/eight-kilobytes/replication#dont-hand-roll-failover)).
+- [ ] Keep failover candidates apart from reporting replicas ([replica queries fight replay](/books/eight-kilobytes/replication#replica-queries-fight-replay)).
+- [ ] Route read-your-writes to the primary, or wait for the write's LSN ([read-your-writes](/books/eight-kilobytes/replication#after-a-write-a-replica-can-show-the-old-value)).
+
+**Security and tenancy**
+
+- [ ] Connect the app as a role that isn't a superuser, has no `BYPASSRLS`, and doesn't own the tables ([the app never owns its tables](/books/eight-kilobytes/security#the-app-never-owns-its-tables)).
+- [ ] Set default privileges so new tables get the right grants ([default privileges](/books/eight-kilobytes/security#grants-on-all-tables-miss-next-weeks-table)).
+- [ ] Enable and force row-level security on every tenant table ([RLS skips the table owner unless you force it](/books/eight-kilobytes/security#rls-skips-the-table-owner-unless-you-force-it)).
+- [ ] Set the tenant per transaction through one helper ([pooled connections leak tenants](/books/eight-kilobytes/security#pooled-connections-leak-tenants)).
+- [ ] Lead indexes with the tenant column; policies are predicates ([RLS performance: policies are predicates](/books/eight-kilobytes/security#rls-performance-policies-are-predicates)).
+- [ ] Pin `search_path` on every `security definer` function ([SECURITY DEFINER functions need a pinned search_path](/books/eight-kilobytes/security#security-definer-functions-need-a-pinned-search_path)).
+- [ ] Require `hostssl`, `scram-sha-256`, and `sslmode=verify-full` ([Use scram-sha-256 and verify-full, never trust](/books/eight-kilobytes/security#use-scram-sha-256-and-verify-full-never-trust)).
+
+**Managed or self-managed**
+
+- [ ] Buy as much management as you can afford; self-manage only for a named reason, with the people to own it ([what we'd do](/books/eight-kilobytes/managed#hand-a-provider-the-operations-keep-the-design-yourself)).
+- [ ] Write down the lower of your volume's and instance's I/O limits ([two ceilings](/books/eight-kilobytes/managed#two-ceilings-and-you-hit-the-lower-one)).
+- [ ] Check the extension allowlist before designing around one ([allowlist](/books/eight-kilobytes/managed#extensions-come-from-an-allowlist)).
+- [ ] Rehearse major upgrades on a clone ([upgrades](/books/eight-kilobytes/backups#take-minor-releases-promptly-rehearse-major-ones)).
+- [ ] Plan the exit before you need it ([plan the exit](/books/eight-kilobytes/providers#plan-the-exit-before-you-need-it)).
+
+## Before you ask for a bigger database
+
+Our answer to an upsize request is no until the sections above are done and the data shows it ([Earn the bigger box](/books/eight-kilobytes/scale#earn-the-bigger-box)). On one app, the playbook took pages per transaction from 91,448 to 38 on the same laptop, with no new hardware at all ([the proof](/books/eight-kilobytes/playbook#the-proof-one-app-eight-changes)).
+
+- [ ] Write next to each of the top five statements: fixed, why it can't be, or why it's already cheap ([what an upsize request brings](/books/eight-kilobytes/scale#an-upsize-request-brings-six-pieces-of-evidence)).
+- [ ] Stop if the profile says `Lock`, `LWLock`, or `Client`: a bigger box doesn't shorten a queue ([measure before you buy](/books/eight-kilobytes/scale#measure-before-you-buy-anything)).
+- [ ] Look for one hot row that every transaction updates before buying cores ([don't count with a hot row](/books/eight-kilobytes/scale#dont-count-with-a-hot-row)).
+- [ ] Measure the working set against RAM; if it fits already, more RAM buys nothing ([size RAM to the working set](/books/eight-kilobytes/latency#size-ram-to-the-working-set)).
+- [ ] Prove reads dominate before paying for faster storage ([is storage your bottleneck?](/books/eight-kilobytes/providers#prove-the-disk-is-the-problem-before-you-move)).
+- [ ] When the bound is CPU, move per-row formatting and side effects off the primary first ([the primary is your most expensive CPU](/books/eight-kilobytes/functions#the-primary-is-your-most-expensive-cpu)).
+- [ ] Rule out indexes, rewrites, round trips, pooling, configuration, vacuum, and rollups, one sentence each ([precompute what you show](/books/eight-kilobytes/scale#precompute-what-you-show)).
+- [ ] State the headroom: peak use today, what the new size gives, and how many months it lasts at your growth ([ask one question](/books/eight-kilobytes/benchmarking#ask-one-question)).
+- [ ] File it on the template ([the request, as a ticket](/books/eight-kilobytes/scale#the-request-as-a-ticket)).
+- [ ] Don't reach for replicas, partitions, or shards to fix a slow query; each answers its own signal ([the ceiling](/books/eight-kilobytes/scale#youre-done-scaling-up-when-the-evidence-says-so)).
+
+If the evidence says the box is out of a resource the work needs, buy it without argument, and keep the evidence as the baseline for next time.
+
+## Before you scale out or add a second system
+
+Each step past one primary answers one signal and multiplies operations. Name the signal and the number before you take it.
+
+- [ ] Add a read replica for read load or failover, never for a slow query, and route reads that must see their own writes to the primary ([read-your-writes](/books/eight-kilobytes/replication#after-a-write-a-replica-can-show-the-old-value)).
+- [ ] Partition for retention and maintenance, not lookup speed; queries that don't filter on the key search every partition ([not faster lookups](/books/eight-kilobytes/partitioning#partitioning-doesnt-make-lookups-faster)).
+- [ ] Shard only on a real signal: writes saturating the biggest primary after tuning and batching, data too big to restore within your RTO, or a residency rule ([when to shard](/books/eight-kilobytes/sharding#shard-when-one-primary-can-no-longer-absorb-writes-or-hold-data)).
+- [ ] Until then, keep the door open: `account_id` on every tenant table, in every key, and in every query ([keep the door open](/books/eight-kilobytes/sharding#keep-the-door-open-from-day-one)).
+- [ ] Check the hottest queries' plans for fan-out before you pick a sharding approach ([cross-shard queries](/books/eight-kilobytes/sharding#cross-shard-queries-fan-out)).
+- [ ] For analytics, try a rollup, a reporting replica, or pg_duckdb before a column store; a rollup read 12 pages where the table read 35,173 ([the middle ground](/books/eight-kilobytes/limits#rollups-and-a-column-extension-close-much-of-the-gap)).
+- [ ] Add a second system only for a property you can name and a number you measured, and keep Postgres the source of truth ([a measured reason](/books/eight-kilobytes/limits#add-a-second-system-for-a-measured-reason)).
+
+## Incident triage: the database is slow right now
+
+Look before you touch. A restart clears the evidence along with the cache, and the cause comes back with the traffic ([warm the cache after a restart](/books/eight-kilobytes/buffers#warm-the-cache-after-a-restart)). Run these in order; each answer tells you which step matters.
+
+**1. Count sessions by state and wait.** The first query on any slow server:
+
+```sql
+select state, wait_event_type, wait_event, count(*)
+  from pg_stat_activity
+ where backend_type = 'client backend'
+ group by 1, 2, 3
+ order by 4 desc;
+```
+
+- [ ] Read the result: `active` with no wait event is CPU, compared with your core count; `Lock` means go to step 2; `IO` `DataFileRead` is page reads; `LWLock` is a crowded internal structure; many `idle in transaction` is the app ([wait events](/books/eight-kilobytes/observability#an-active-session-with-no-wait-event-is-on-a-cpu)).
+- [ ] Compare the total with `max_connections`: `select count(*), current_setting('max_connections') from pg_stat_activity;` ([count connections](/books/eight-kilobytes/connections#count-connections-from-the-servers-side)).
+
+**2. Find the root blocker.** Every session waiting on a lock, and every session blocking one:
+
+```sql
+select pid, pg_blocking_pids(pid) as blocked_by, state, wait_event,
+       now() - xact_start as xact_age, left(query, 50) as query
+  from pg_stat_activity
+ where cardinality(pg_blocking_pids(pid)) > 0
+    or pid in (select unnest(pg_blocking_pids(pid)) from pg_stat_activity)
+ order by xact_start;
+```
+
+- [ ] Find the root: the row with an empty `blocked_by`, often `idle in transaction` ([find the root blocker](/books/eight-kilobytes/concurrency#find-the-root-blocker)).
+
+**3. List the oldest transactions.** They hold locks and hold back vacuum:
+
+```sql
+select pid, state, now() - xact_start as xact_age,
+       now() - state_change as in_state, left(query, 50) as query
+  from pg_stat_activity
+ where xact_start is not null and pid <> pg_backend_pid()
+ order by xact_start
+ limit 5;
+```
+
+- [ ] Treat `idle in transaction` for minutes as a bug; `query` is its last statement, not its current one ([finding long transactions](/books/eight-kilobytes/observability#backend_xmin-names-the-transaction-holding-vacuum-back)).
+
+**4. End the right session.** `select pg_cancel_backend(pid)` stops a running statement; an idle-in-transaction session has none, so use `select pg_terminate_backend(pid)`, which rolls its transaction back.
+
+- [ ] Note what you ended and why, then fix whatever left it open (same section).
+
+**5. Sample waits for a minute.** One look is a photo; ten a second for a minute is a profile.
+
+- [ ] Run the sampler and read it as average active sessions per wait event ([take the samples](/books/eight-kilobytes/observability#each-sample-must-be-its-own-transaction), [read the profile](/books/eight-kilobytes/observability#a-cpu-line-above-your-core-count-means-queuing)).
+
+**6. Rank what ran since the trouble started.** Snapshot `pg_stat_statements`, wait a minute, diff:
+
+```sql
+create temp table ss0 as
+select userid, dbid, toplevel, queryid, calls, total_exec_time
+  from pg_stat_statements;
+
+-- a minute later
+select s.calls - coalesce(o.calls, 0) as calls,
+       round((s.total_exec_time - coalesce(o.total_exec_time, 0))::numeric) as ms,
+       left(s.query, 50) as query
+  from pg_stat_statements s
+  left join ss0 o using (userid, dbid, toplevel, queryid)
+ order by ms desc
+ limit 10;
+```
+
+- [ ] Look for a trivial statement with a big mean: it's waiting, not working ([measure before you buy](/books/eight-kilobytes/scale#measure-before-you-buy-anything)).
+- [ ] Run `explain (analyze, buffers)` on the top statement with real parameters ([a method](/books/eight-kilobytes/explain#a-method-for-slow-queries)).
+- [ ] Suspect a plan that flipped: the generic plan, or stale statistics after a load ([when the plan is wrong](/books/eight-kilobytes/plans#a-wrong-plan-has-one-of-four-causes)).
+
+**7. Check what runs under the queries.**
+
+- [ ] Check vacuum progress: `select pid, relid::regclass, phase from pg_stat_progress_vacuum;` ([monitoring vacuum](/books/eight-kilobytes/vacuum#four-queries-tell-you-whether-vacuum-is-keeping-up)).
+- [ ] Check replica lag: `select application_name, state, replay_lag from pg_stat_replication;` ([watching replication](/books/eight-kilobytes/replication#four-lsns-show-where-a-standby-falls-behind)).
+- [ ] Check archiving: `select failed_count, last_failed_time from pg_stat_archiver;` ([archiving](/books/eight-kilobytes/backups#a-failing-archive-fills-the-disk-and-stops-the-primary)).
+- [ ] Check wraparound: `select datname, age(datfrozenxid) from pg_database order by 2 desc;` ([wraparound](/books/eight-kilobytes/vacuum#wraparound-stops-writes-before-anything-is-corrupted)).
+- [ ] Check the host: CPU against cores, disk latency, and IOPS flat at the volume's ceiling ([Throttled I/O shows as flat IOPS and rising latency](/books/eight-kilobytes/managed#throttled-io-shows-as-flat-iops-and-rising-latency)).
+
+**8. Close the loop.**
+
+- [ ] Write one sentence: bound by X, because Y shows Z ([find the expensive work](/books/eight-kilobytes/playbook#1-find-the-expensive-work)).
+- [ ] Add the alert or graph that would have shown it an hour earlier ([what to alert on](/books/eight-kilobytes/observability#alert-only-on-what-needs-a-human-soon)).

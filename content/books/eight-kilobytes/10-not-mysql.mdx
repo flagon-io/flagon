@@ -1,0 +1,448 @@
+---
+title: Postgres is not MySQL
+description: The two databases bet opposite ways on where rows live and where old versions go. Learn the differences that follow, and the habits to drop.
+part: The machine
+builds_on: [storage, mvcc, hot, vacuum]
+---
+
+Here is a four-statement transaction. It inserts a row, then a duplicate that violates a unique constraint, then another row, then commits. Run it on MySQL and on Postgres, and look at what is in the table afterwards.
+
+```sql
+begin;  -- "start transaction" on MySQL
+insert into users (account_id, email, name)
+  values (1, 'new1@example.com', 'New One');
+insert into users (account_id, email, name)
+  values (1, 'user1000@example.com', 'Dup');
+insert into users (account_id, email, name)
+  values (1, 'new2@example.com', 'New Two');
+commit;
+select id, email from users where email like 'new%' order by id;
+```
+
+MySQL 8.4 keeps two rows. PostgreSQL 18 keeps none.
+
+```text
+MySQL                              Postgres
++--------+------------------+       id | email
+| id     | email            |      ----+-------
++--------+------------------+      (0 rows)
+| 131071 | new1@example.com |
+| 131073 | new2@example.com |
++--------+------------------+
+```
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+prove 'MySQL 8.4 keeps two rows (the duplicate rolled back only itself)' \
+  [ "$(my -e "select count(*) from users where email like 'new%'")" = 2 ]
+prove 'Postgres turns the commit into a rollback' has "$pg_out" "ROLLBACK"
+prove 'PostgreSQL 18 keeps none' [ "$(pg -c "select count(*) from users where email like 'new%'")" = 0 ]
+```
+
+</ProveIt>
+
+Neither is wrong. They're different machines that happen to speak similar SQL. MySQL (with InnoDB, which is what everyone means by MySQL today) and Postgres made opposite bets on two questions: **where does a row live**, and **where does the old version of a row go when you change it**. Almost every difference you'll feel follows from those two bets, and seeing the other design is the fastest way to understand this one.
+
+Every example ran on MySQL 8.4.11 and PostgreSQL 18.6, defaults on both, with the same data loaded into each.
+
+## Where rows and old versions live decides the rest
+
+| Question | Postgres | MySQL (InnoDB) |
+|---|---|---|
+| Where does a row live? | In a heap: any page with room | In the primary key B-tree, in key order |
+| What does an index point at? | A physical address (`ctid`) | The primary key value |
+| Where do old versions go? | They stay in the table as dead tuples | Undo logs, outside the table |
+| Who cleans them up? | Vacuum | Purge threads |
+| Page size | 8 KB | 16 KB |
+
+Primary key choice, update cost, bloat, and what long transactions do to you all follow from the first four rows.
+
+## The table is the primary key in InnoDB
+
+In InnoDB the table **is** a B-tree, ordered by primary key, with full rows in its leaves: the **clustered index**. Think of a dictionary, where the entries *are* the book, in order. Postgres is a library: books go on whatever shelf has room (the **heap**), and every index, the primary key included, is a card catalog pointing at a shelf address, the `ctid` ([Everything is a page](/books/eight-kilobytes/storage)).
+
+<Fig name="heap-vs-clustered">
+
+**InnoDB finds rows by key, Postgres by address.** In InnoDB the table is the primary key B-tree, so a secondary index entry holds the key and every row found through it descends that tree again. In Postgres every index, the primary key included, points straight at a page in the heap.
+
+</Fig>
+
+### Secondary lookups cost two descents in InnoDB
+
+An InnoDB secondary index entry holds **the primary key value**, not an address, so every row found through it pays a second descent of the primary key tree. We counted page requests on MySQL (`Innodb_buffer_pool_read_requests`) and buffers on Postgres:
+
+| Query (100 rows) | MySQL page requests | Postgres buffers |
+|---|---|---|
+| Primary key range, `id between 5000 and 5099` | 15 | 7 |
+| Secondary lookup, `account_id = 7` | 307 | 106 |
+
+**InnoDB pays on reads through secondary indexes; Postgres, as you'll see, pays on writes.** And that 7-buffer Postgres range scan is an accident of insert order: our rows were inserted in id order (`pg_stats.correlation` for `id` is 1). On InnoDB, neighboring keys are always physical neighbors. On Postgres, only if you inserted them that way.
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+my_range=$(my_pages "select * from users where id between 5000 and 5099")
+my_sec=$(my_pages "select * from users where account_id = 7")
+pg_sec=$(pg -c "select lab.buffers('select * from users where account_id = 7')")
+prove 'InnoDB primary key range scan of 100 rows: about 15 page requests' between "$my_range" 8 30
+prove 'InnoDB secondary lookup of 100 rows: about 307 page requests, about 3 per row' between "$my_sec" 250 400
+prove 'Postgres pays roughly one buffer per row (about 106)' between "$pg_sec" 95 115
+```
+
+</ProveIt>
+
+<DeepDive title="CLUSTER is a one-off, and it decays">
+
+Postgres has a `CLUSTER` command, and its name misleads MySQL veterans. It rewrites the table once in the order of an index, under an `ACCESS EXCLUSIVE` lock, and then forgets about it. After `cluster users using users_account_id_email_key`, account 7's 100 users went from 106 buffers to 6, the primary key range scan went from 7 to 102 (a table can only be in one order), and five new users for account 7 landed at the end of the heap, at `(1123,58)`, nowhere near their neighbors on page 6. Use it rarely, on mostly read tables after a bulk load, and never as scheduled maintenance.
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+prove 'after CLUSTER, account 7 costs a handful of buffers (from about 106)' between "$cl_after" 4 15
+prove 'after CLUSTER, the primary key range scan costs about 102 buffers (from 7)' between "$cl_range" 95 115
+```
+
+</ProveIt>
+
+On the MySQL side, column types move the range-scan number: with `name` as `TEXT` instead of `varchar(255)`, the same scan costs about 107 page requests, because InnoDB stops fetching rows in batches.
+
+</DeepDive>
+
+### Covering indexes come for free in InnoDB, almost
+
+Every InnoDB secondary index carries the primary key, so `select id, email from users where account_id = 7` never touches the table: 15 page requests. Postgres indexes carry no primary key, so the same query visits 100 heap pages. Build an index on `(account_id) include (id, email)`, let vacuum mark the pages all-visible, and it drops to 7 buffers ([Covering indexes: cover the hot query, not every query](/books/eight-kilobytes/btree#covering-indexes-cover-the-hot-query-not-every-query)).
+
+### Increasing keys still matter; short ones mostly don't
+
+On InnoDB, your primary key **is** your physical layout, so MySQL teams keep keys short and increasing. On Postgres, the heap doesn't care, and other indexes store a 6-byte `ctid` however wide the key; only the primary key index feels a random key ([Pick your keys once](/books/eight-kilobytes/keys)). "Increasing" survives; "short" matters less, except in the foreign key columns of other tables, which copy the key into every referencing row and its index.
+
+<Callout type="info" title="Habits to keep, habits to drop">
+Keep: increasing keys (identity or UUIDv7). Drop: "the table is ordered by the primary key, so range scans on it are cheap"; check `pg_stats.correlation`. Drop also: "extra indexes are cheap unless their columns change". The next section explains why.
+</Callout>
+
+## An update writes one row, or every index
+
+A Postgres update writes a whole new row version at a new `ctid`, and unless it's HOT (no indexed column changed, and the page had room), every index gets a new entry, including indexes on columns that didn't change ([A cold update pays for every index](/books/eight-kilobytes/hot#a-cold-update-pays-for-every-index)). InnoDB updates the row in place, copies the before-image to undo, and touches only the secondary indexes whose columns changed. The rest point at the primary key, which didn't move.
+
+```text
+UPDATE users SET email = ... WHERE id = 100000
+
+Postgres                              InnoDB
+--------                              ------
+heap: new full row version            clustered leaf: row changed
+      at a new ctid; old one                in place; trx id and
+      gets xmax                             roll pointer updated
+users_pkey: NEW entry                 undo log: before-image of
+      (id did not change!)                  the changed column
+unique (account_id, email):           secondary (account_id, email):
+      NEW entry                             old entry delete-marked,
+                                            new entry inserted
+any other index: NEW entry            any other index: untouched
+WAL: all of the above                 redo log: all of the above
+                                      binlog: row event, before
+                                            and after images
+
+UPDATE users SET name = ... (no indexed column, page has room)
+
+Postgres: HOT. New version on the     InnoDB: in place plus undo;
+same page, no index touched.          no index touched.
+```
+
+Reading the WAL back confirms the left column: the name change was one 86-byte `HOT_UPDATE`, and the email change a heap `UPDATE` plus two index inserts, one of them into `users_pkey`. MySQL writes its own second copy: the binary log grew by 414 bytes for the name update and 422 for the email one, full before and after images, on top of the redo log.
+
+<DeepDive title="The WAL records behind the diagram">
+
+```text
+  upd  | resource_manager | record_type | record_length | fpi_length
+-------+------------------+-------------+---------------+------------
+ name  | Heap             | HOT_UPDATE  |            86 |          0
+ email | Heap             | UPDATE      |           106 |          0
+ email | Btree            | INSERT_LEAF |            64 |          0
+ email | Btree            | INSERT_LEAF |            88 |          0
+```
+
+Both rows live on the table's last page, which has free space; on a freshly loaded table every other page is full, and there an update can't be HOT. The binlog sizes come from `show binary log status` before and after.
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+prove 'the name change is one HOT_UPDATE record' [ "$(cut -d'|' -f1 <<<"$w_out")" = 1 ]
+prove 'plus two index inserts: the unique index and users_pkey, whose column did not change' \
+  [ "$(cut -d'|' -f4 <<<"$w_out")" = 2 ]
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Each design pays for writes somewhere
+
+So which design writes less? It depends on your workload, and anyone who answers without asking about your indexes is selling something. Postgres pays on writes to tables with many indexes whose updates miss HOT, and on cleanup, since dead versions sit in the table and its indexes until vacuum. InnoDB pays on reads through secondary indexes, and writes undo on every update. The practical lesson for Postgres: protect HOT ([HOT is a design decision you make once](/books/eight-kilobytes/hot#hot-is-a-design-decision-you-make-once)).
+
+### Uber hit this asymmetry, and both sides were right
+
+In July 2016 Uber published [Why Uber Engineering Switched from Postgres to MySQL](https://www.uber.com/us/en/blog/postgres-to-mysql-migration/). Its central complaint was exactly this asymmetry: their updates touched indexed columns, so each wrote entries in every index, and because Postgres replication ships the physical WAL, all of it crossed the network to every replica. The fair reading, years later: both sides of the debate that followed were right about different workloads, and you can reshape most tables that hit the worst case before anyone needs to change databases.
+
+<DeepDive title="What the responses to Uber got right">
+
+The post also cited replica query cancellations, a 9.2 replication bug, painful major upgrades, and process-per-connection. Markus Winand [pointed out](https://use-the-index-luke.com/blog/2016-07-29/on-ubers-choice-of-databases) that InnoDB moves the cost to reads and that Uber's workload (a key-value layer of their own on top of the database) was unusual. Robert Haas, a longtime Postgres committer, [accepted](http://rhaas.blogspot.com/2016/08/ubers-move-away-from-postgresql.html) that write amplification was real and in-core logical replication was needed. Simon Riggs [pointed to](https://www.enterprisedb.com/blog/thoughts-ubers-list-postgres-limitations) logical replication arriving in PostgreSQL 10, which it did.
+
+</DeepDive>
+
+## Old versions live in the table, or in undo
+
+Both databases use MVCC, so a reader sees the row as of its snapshot while a writer changes it. Postgres keeps old versions **in the table**, as dead tuples, which makes rollback instant and leaves the bill for [vacuum](/books/eight-kilobytes/vacuum). InnoDB keeps the current version in the table and old ones in **undo logs**; a reader that needs an older version walks back through the undo chain, and background **purge** threads discard undo once no snapshot needs it.
+
+Purge is InnoDB's vacuum, and most MySQL users never think about it. Treating vacuum the same way is the most expensive mistake a MySQL team makes in its first year on Postgres. And vacuum has a job purge doesn't: freezing old rows so the 32-bit transaction counter can wrap safely. InnoDB's 48-bit IDs never wrap in practice, so **wraparound** has no MySQL equivalent ([Wraparound stops writes before anything is corrupted](/books/eight-kilobytes/vacuum#wraparound-stops-writes-before-anything-is-corrupted)).
+
+### Long transactions hurt both
+
+We held a snapshot open in one session while another ran 5,000 single-row updates. On InnoDB, the history list length (undo logs waiting for purge) went from 2 to 5,000, and drained once the snapshot ended, as background purge caught up (anywhere from a second to over a minute, run to run). On Postgres, vacuum reported 5,000 versions ["dead but not yet removable"](/books/eight-kilobytes/mvcc#long-transactions-hold-everything-back). InnoDB's problem is a growing undo tablespace and slower reads down longer version chains; Postgres's is bloat that outlives the transaction. Same cure: keep transactions short. (On MySQL, the history list length comes from `information_schema.innodb_metrics`.)
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+prove 'with a snapshot open, 5,000 updates leave about 5,000 undo logs waiting for purge' between "$hll_open" 4900 5100
+prove 'once the snapshot ends, purge starts clearing them: under half are left within two minutes' [ "$hll_after" -lt $((hll_open / 2)) ]
+prove 'Postgres vacuum reports the 5,000 old versions as "dead but not yet removable"' \
+  has "$v_out" "5000 are dead but not yet removable"
+```
+
+</ProveIt>
+
+## MySQL defaults to repeatable read; Postgres doesn't
+
+MySQL defaults to `REPEATABLE-READ`, Postgres to `read committed`, and code ported between them silently changes meaning. Session A reads user 10, sleeps, and reads it again, while session B renames the user and commits:
+
+```text
+           first read   second read
+MySQL      User 10      User 10
+Postgres   User 10      Changed
+```
+
+A multi-statement report that relied on MySQL's stable snapshot sees a moving target on Postgres; give it `begin isolation level repeatable read`. The reverse surprise is the read-modify-write: read a row, compute a new value in the application, write it back. At repeatable read, if another session changed and committed that row after your snapshot, Postgres fails your write with a serialization error (`40001`) and you retry. InnoDB's repeatable read writes on top of the latest committed version instead, so your value, computed from the old snapshot, silently replaces the other session's commit. A plain `update ... set n = n + 1` is safe on both, because InnoDB's update reads the latest version. [Only serializable rules out every anomaly](/books/eight-kilobytes/acid#only-serializable-rules-out-every-anomaly) has the full matrix, and the [Hermitage](https://github.com/ept/hermitage) suite documents both behaviors.
+
+<DeepDive title="InnoDB loses the update; Postgres refuses it">
+
+At repeatable read on MySQL, session A reads user 11's name into a variable, sleeps, and writes that name back with ` +A` appended. Meanwhile session B renames the user to `B` and commits. A's write succeeds without an error, the row ends up `User 11 +A`, and B's committed rename is gone. The same shape on Postgres (A reads the row, B's update commits, A updates the row) fails A's update with `could not serialize access due to concurrent update`.
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+prove 'MySQL 8.4 defaults to REPEATABLE-READ' [ "$(my -e 'select @@transaction_isolation')" = REPEATABLE-READ ]
+prove 'Postgres defaults to read committed' [ "$(pg -c 'show transaction_isolation')" = "read committed" ]
+prove 'Postgres read committed: the second read sees the rename' [ "$(tr '\n' '|' <<<"$lk_out")" = "User 10|Changed|" ]
+prove 'Postgres repeatable read: the second writer fails with a serialization error' \
+  has "$rr_out" "could not serialize access due to concurrent update"
+prove "and B's committed update is lost (the row ends up 'User 11 +A')" \
+  [ "$(my -e 'select name from users where id = 11')" = "User 11 +A" ]
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### You can only lock a row that exists
+
+To prevent [phantoms](/books/eight-kilobytes/glossary#anomaly), InnoDB locks the **gaps between index entries** a locking read scans, not just the rows it finds. Session A selects a nonexistent user `for update`; session B inserts a *different* nonexistent user and times out with `ERROR 1205`, blocked by A's `X,GAP` lock.
+
+On Postgres, session B's insert succeeds at once. Row locks live in the tuple header, so you can only lock a row that exists. That removes a family of InnoDB deadlocks, and means that stopping two sessions from creating the same missing row takes a unique constraint, `on conflict`, or serializable.
+
+<DeepDive title="InnoDB locks a row that does not exist">
+
+`performance_schema.data_locks` shows A's lock just before the next real entry, `8, 'user10007@example.com', 10007`. That last value is the primary key, stored in the secondary index entry, as the diagram showed.
+
+```sql
+-- MySQL 8.4, session A
+start transaction;
+select id from users where account_id = 7 and email = 'zzz@example.com' for update;
+-- session B
+insert into users (account_id, email, name) values (7, 'yyy@example.com', 'Gap');
+```
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+prove 'MySQL session B waits for a different, nonexistent row and times out (1205)' \
+  has "$gap_err" "ERROR 1205 (HY000)"
+prove 'on Postgres the same insert succeeds at once: no gap locks' [ "$gap_pg" = 1 ]
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Errors abort the whole transaction
+
+Back to the opening. In MySQL, a failed statement rolls back itself and the transaction carries on. In Postgres, **any error aborts the whole transaction**: later statements get `current transaction is aborted, commands ignored until end of transaction block`, and `commit` comes back as `ROLLBACK`.
+
+That breaks the most common porting pattern there is: "try the insert, catch the duplicate, carry on". Use `on conflict do nothing` and check whether a row came back, or a savepoint ([Savepoints contain the damage](/books/eight-kilobytes/concurrency#savepoints-contain-the-damage)).
+
+<Callout type="tip" title="Your ORM may already be doing this">
+Some frameworks wrap each request or test in a transaction. On Postgres, one swallowed error inside it poisons everything after, and the error you finally see points at the wrong statement. Look for the first error in the transaction, not the last.
+</Callout>
+
+## Processes get expensive sooner than threads
+
+Postgres forks a process per connection; MySQL runs a thread per connection. Both get expensive in the thousands, but Postgres sooner: each backend keeps its own caches, and every snapshot looks at every other session. If your fleet opened 2,000 direct connections to MySQL, put a pooler in front of Postgres and size real connections by cores and disks ([Connections aren't free](/books/eight-kilobytes/connections)).
+
+## One log, not two
+
+Postgres has one log, the WAL, for crash recovery, replicas, and point-in-time recovery ([Write it down first](/books/eight-kilobytes/wal)). MySQL has a redo log for crash recovery and a binary log for replication, kept consistent by an internal two-phase commit.
+
+The bigger difference is what replicas receive. MySQL replicas apply logical row events, so they can have extra indexes or a newer version. Postgres replicas replay the WAL byte for byte: copies of the disk, not of the data, on the same major version. Plan major upgrades around `pg_upgrade` or [logical replication](/books/eight-kilobytes/glossary#logical-replication), not by promoting a newer replica.
+
+## DDL is transactional
+
+In Postgres, this leaves no trace: the insert, the table, and the column all roll back.
+
+```sql
+begin;
+insert into accounts (name) values ('Before DDL');
+create table scratch (id int);
+alter table users add column last_seen_at timestamptz;
+rollback;
+```
+
+On MySQL, DDL is atomic per statement but implicitly commits whatever transaction was open. The same sequence left account `1024 | Before DDL` in the table: `create table` had committed the insert, and `rollback` rolled back nothing.
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+prove 'Postgres rolls back the insert, the new table, and the new column' [ "$(tr '\n' '|' <<<"$ddl")" = "0|null|0|" ]
+prove "MySQL's create table committed the insert; rollback rolled back nothing (id 1024)" \
+  [ "$(my -e "select id from accounts where name = 'Before DDL'")" = 1024 ]
+```
+
+</ProveIt>
+
+The hazard on both is the same: a schema change waits behind a long query, and everything after queues behind it. Use a short `lock_timeout` and retry, and keep migrations small, because a transactional one holds every lock until it commits ([Change the schema, keep the site](/books/eight-kilobytes/migrations)).
+
+## Small dialect differences add up
+
+The rest are small differences in SQL itself. Together they're why a straight port fails its test suite in a dozen places.
+
+### Strings compare exactly
+
+MySQL 8.4's default collation, `utf8mb4_0900_ai_ci`, is accent- and case-insensitive. Postgres compares exact characters: `'abc' = 'ABC'`, `'Bob@x.com' = 'bob@x.com'`, and `'resume' = 'résumé'` are all true on MySQL and all false on Postgres. It matters most in unique constraints. MySQL rejects `USER1000@Example.com` as a duplicate of `user1000@example.com`; Postgres accepts it, and one account now has two users with the "same" email.
+
+Decide what equality means for each column, in the schema. For emails, the usual choice is a unique index on `lower(email)` ([An index stores exactly what you gave it](/books/eight-kilobytes/btree#an-index-stores-exactly-what-you-gave-it)); `citext` and ICU collations are the alternatives ([Types are a contract](/books/eight-kilobytes/types)).
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+prove "MySQL: 'abc' = 'ABC', 'Bob@x.com' = 'bob@x.com', 'resume' = 'résumé' are all true" \
+  [ "$(my -e "select concat_ws(',', 'abc' = 'ABC', 'Bob@x.com' = 'bob@x.com', 'resume' = 'résumé')")" = "1,1,1" ]
+prove 'Postgres: all three are false' \
+  [ "$(pg -c "select concat_ws(',', 'abc' = 'ABC', 'Bob@x.com' = 'bob@x.com', 'resume' = 'résumé')")" = "f,f,f" ]
+prove 'Postgres accepts it, and the opening transaction burned 100,001 and 100,002 (it gets 100,003)' \
+  [ "$(pg -c "insert into users (account_id, email, name) values (1, 'USER1000@Example.com', 'Shouty') returning id")" = 100003 ]
+```
+
+</ProveIt>
+
+### Identity, not auto_increment
+
+`AUTO_INCREMENT` becomes `generated always as identity`. Both hand out values outside transactions, so both leave gaps. This chapter already made some: MySQL's bulk insert of 100,000 users left its counter at 131,071 (it reserves in growing batches) and the failed duplicate burned 131,072; Postgres's rolled-back transaction burned 100,001 and 100,002.
+
+Never build gapless numbering on a sequence. `LAST_INSERT_ID()` becomes `returning id`, and after bulk-loading explicit ids, reset the sequence with `setval` ([Pick your keys once](/books/eight-kilobytes/keys)).
+
+### Upserts name their conflict
+
+MySQL's `on duplicate key update` fires on a conflict with **any** unique index, and its own documentation warns against it on tables with more than one. Postgres makes you name the arbiter:
+
+```sql
+insert into users (account_id, email, name)
+values (1, 'user1000@example.com', 'Renamed')
+on conflict (account_id, email)
+do update set name = excluded.name;
+```
+
+`excluded` is the row you tried to insert; leave out the conflict target and Postgres refuses. `on conflict do nothing` replaces `INSERT IGNORE`, without also ignoring data conversion errors. Postgres also has SQL-standard `MERGE` (PostgreSQL 15+), which MySQL lacks, but for the single-row "insert or update" prefer `on conflict`: it's atomic under concurrency, while two sessions running `MERGE` on the same new key can still collide ([Queries that age well](/books/eight-kilobytes/queries)).
+
+### Integer division truncates, and NULLs sort last
+
+| Expression | MySQL | Postgres |
+|---|---|---|
+| `7/2`, `3/5` | `3.5000`, `0.6000` | `3`, `0` |
+| `1/0` | `NULL`, with a warning | error: `division by zero` |
+| `'a' \|\| 'b'` | `0` (logical OR) | `ab` |
+| `order by x` with a NULL | NULL first | NULL last |
+
+Integer division truncates in Postgres, so the percentage that was 0.6 on MySQL is 0; cast one side (`3::numeric / 5`).
+
+NULL sorts as larger than every value, so a "newest first" list ordered by `completed_at desc` suddenly starts with every unfinished row. Say `nulls last`, and match it in any index that serves the sort ([sorting rows](https://www.postgresql.org/docs/18/queries-order.html)).
+
+When you port `concat()` to `||`, one rule carries over: a NULL operand makes the whole result NULL, so `first_name || ' ' || last_name` is NULL for anyone without a last name. `concat_ws(' ', first_name, last_name)` skips the NULLs. Watch the reverse port too: Postgres's own `concat()` treats NULL as an empty string, unlike MySQL's.
+
+<ProveIt lab="10-not-mysql.sh">
+
+```bash
+prove 'MySQL: 7/2 is 3.5000 and 3/5 is 0.6000' [ "$(my -e 'select concat_ws(",", 7/2, 3/5)')" = "3.5000,0.6000" ]
+prove 'Postgres: 7/2 is 3 and 3/5 is 0' [ "$(pg -c "select concat_ws(',', 7/2, 3/5)")" = "3,0" ]
+prove "MySQL: 'a' || 'b' is 0 (logical OR)" [ "$(head -1 <<<"$pipes")" = 0 ]
+prove 'MySQL sorts NULL first ascending' \
+  [ "$(my -e 'select x from (select 1 as x union all select null union all select 3) t order by x' | tr '\n' ',')" = "NULL,1,3," ]
+prove 'Postgres sorts NULL last ascending' \
+  [ "$(pg -c "select string_agg(coalesce(x::text, 'NULL'), ',' order by x) from (values (1), (null), (3)) t(x)")" = "1,3,NULL" ]
+```
+
+</ProveIt>
+
+### Foreign keys don't index themselves
+
+InnoDB creates an index on every foreign key column. Postgres creates nothing on the child side: the same `projects` table has `account_id`, `owner_id`, and `PRIMARY` indexes on MySQL, and only `projects_pkey` on Postgres. Without one, every delete of a parent row scans the child table ([Each deleted parent scans the whole child table](/books/eight-kilobytes/relationships#each-deleted-parent-scans-the-whole-child-table) reads all 2,000,000 events). Index your foreign key columns unless you've measured that you don't need to.
+
+### Postgres fixes estimates instead of taking hints
+
+MySQL has `/*+ ... */` hints and `FORCE INDEX`. Core Postgres has none, by long-standing policy. When the planner picks badly, the cause is almost always a bad estimate, and the fix is better information: `analyze`, a higher statistics target, extended statistics, or a rewritten query ([The planner is guessing](/books/eight-kilobytes/planner)). The `pg_hint_plan` extension exists for emergencies.
+
+### A few more habits don't transfer
+
+- **Identifiers fold to lower case.** Double quotes make them case-sensitive (MySQL uses backticks and treats double quotes as strings). A table created as `"Users"` must be quoted forever. Use unquoted snake_case, and set your ORM's naming strategy before the first migration ([identifiers](https://www.postgresql.org/docs/18/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS)).
+- **GROUP BY means it,** as under MySQL's `ONLY_FULL_GROUP_BY`: every selected column must be grouped, aggregated, or dependent on a grouped primary key. For "any value from the group", PostgreSQL 16 added `any_value()`.
+- **jsonb, not json.** `jsonb` is the binary type MySQL users expect. Postgres indexes whole documents with [GIN](/books/eight-kilobytes/glossary#gin), and rewrites the whole row version on every update, so keep fast-changing fields out of big documents.
+- **No `UPDATE ... LIMIT`.** Select the keys in a subquery.
+- **Types.** No `UNSIGNED`, a real `boolean`, and `DATETIME` becomes `timestamptz` ([Types are a contract](/books/eight-kilobytes/types)).
+
+## Most MySQL idioms have a direct Postgres equivalent
+
+| MySQL | Postgres |
+|---|---|
+| `AUTO_INCREMENT` | `generated always as identity` |
+| `LAST_INSERT_ID()` | `insert ... returning id` |
+| `INSERT ... ON DUPLICATE KEY UPDATE` | `insert ... on conflict (cols) do update` |
+| `INSERT IGNORE` | `insert ... on conflict do nothing` |
+| `` `backticks` `` | no quoting (or `"double quotes"`) |
+| `IFNULL(a, b)` | `coalesce(a, b)` |
+| `GROUP_CONCAT(x)` | `string_agg(x, ',')` |
+| `TINYINT(1)` | `boolean` |
+| `DATETIME` | `timestamptz` |
+| `JSON` | `jsonb` |
+| `utf8mb4_0900_ai_ci` equality | `lower(col)` index, `citext`, or ICU collation |
+| `FORCE INDEX`, `/*+ ... */` | fix statistics |
+| `SHOW PROCESSLIST` | `select * from pg_stat_activity` |
+| `OPTIMIZE TABLE` | `vacuum`, or an online rebuild to shrink |
+| purge, history list length | vacuum, `n_dead_tup` |
+| `mysqldump` | `pg_dump` |
+
+## The short version
+
+- InnoDB stores the table in primary key order and points secondary indexes at the key. Postgres stores rows in a heap and points every index at a physical address.
+- Postgres primary key range scans are cheap only if rows were inserted in key order (check `pg_stats.correlation`).
+- A Postgres update that isn't HOT writes an entry in every index. Index frequently updated columns sparingly.
+- Old versions live in the Postgres table until vacuum removes them. Treat vacuum as a first-class job, and learn wraparound.
+- Postgres defaults to read committed, has no gap locks, and its repeatable read raises errors instead of losing updates.
+- Any error aborts the whole Postgres transaction. Replace "insert and catch the duplicate" with `on conflict`.
+- Strings compare exactly, integer division truncates, NULLs sort last, and foreign keys aren't indexed for you.
+- DDL is transactional, but keep migrations short and set `lock_timeout`.
+
+## Further reading
+
+- [Concurrency control](https://www.postgresql.org/docs/18/mvcc.html), PostgreSQL documentation. Postgres's isolation levels and locking, to read next to the MySQL pages below.
+- [Clustered and Secondary Indexes](https://dev.mysql.com/doc/refman/8.4/en/innodb-index-types.html), MySQL 8.4 manual. The clustered index, the hidden row ID, and why secondary indexes carry the primary key.
+- [InnoDB Multi-Versioning](https://dev.mysql.com/doc/refman/8.4/en/innodb-multi-versioning.html), MySQL 8.4 manual. Hidden columns, undo logs, purge, and how secondary index entries are delete-marked.
+- [Transaction Isolation Levels](https://dev.mysql.com/doc/refman/8.4/en/innodb-transaction-isolation-levels.html), MySQL 8.4 manual. What InnoDB's repeatable read does, and where next-key locks come from.
+- [Hermitage](https://github.com/ept/hermitage), Martin Kleppmann and contributors. A test suite that shows exactly which anomalies each database's "repeatable read" permits.
+- [Why Uber Engineering Switched from Postgres to MySQL](https://www.uber.com/us/en/blog/postgres-to-mysql-migration/), Evan Klitzke, Uber, 2016. The write-amplification argument in full; read it alongside the responses linked above.

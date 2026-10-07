@@ -1,0 +1,59 @@
+# The sharding lab for "Eight Kilobytes": a Citus cluster (one coordinator,
+# two workers) plus one plain PostgreSQL 18 server, on a private network.
+#
+#   ./lab 39   # starts this, runs every check, tears it down
+#
+# Nothing is published to the host. The service names double as host names,
+# so the coordinator reaches the workers as citus-w1 and citus-w2, the same
+# names the chapter uses.
+name: ek-sharding
+
+x-citus: &citus
+  image: citusdata/citus:14.2.0
+  environment:
+    POSTGRES_PASSWORD: postgres
+    # The nodes connect to each other as postgres without a password.
+    POSTGRES_HOST_AUTH_METHOD: trust
+    PGUSER: postgres
+  # Shard moves and online splits use logical replication.
+  command: ["postgres", "-c", "wal_level=logical"]
+  shm_size: 256m
+  networks: [shard]
+  healthcheck:
+    # TCP only: the image's first-boot setup server listens on a socket.
+    test: ["CMD-SHELL", "psql -h 127.0.0.1 -U postgres -Atc \"select 1 from pg_extension where extname = 'citus'\" | grep -q 1"]
+    interval: 2s
+    timeout: 5s
+    retries: 60
+    start_period: 5s
+
+services:
+  citus-coord:
+    <<: *citus
+    hostname: citus-coord
+  citus-w1:
+    <<: *citus
+    hostname: citus-w1
+  citus-w2:
+    <<: *citus
+    hostname: citus-w2
+
+  # A plain PostgreSQL 18 (no Citus) for the postgres_fdw router, the
+  # tenant-move subscriber, and the schema-per-tenant catalog count.
+  pg:
+    image: postgres:18.6
+    hostname: pg
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+      PGUSER: postgres
+    networks: [shard]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+
+networks:
+  shard: {}

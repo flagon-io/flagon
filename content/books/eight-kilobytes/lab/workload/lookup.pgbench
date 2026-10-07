@@ -1,0 +1,3 @@
+-- Watch it run: the hot path, a primary key lookup.
+\set id random(1, 100000)
+select id, email, name from users where id = :id;

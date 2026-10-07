@@ -1,0 +1,501 @@
+---
+title: Measure honestly
+description: Benchmark Postgres so the numbers mean something. pgbench done right, latency percentiles that include the stalls, and test data shaped like production.
+part: Running it
+builds_on: [explain, connections]
+---
+
+Here are two measurements of the same server and the same query. The second ran at 80 percent of the first one's throughput, a lighter load. In the first, the 99th percentile latency is 0.12 ms. In the second, it's 2,038 ms. Nothing changed in Postgres between them. One benchmark asked the server how long its work took; the other asked how long a user waited.
+
+Most benchmarks lie, and almost never on purpose. They run for ten seconds on a warm cache, against uniformly random data that fits in memory, with clients that politely stop sending requests whenever the server stalls. Then the number goes into a design doc.
+
+A benchmark is an experiment: a question, a control, enough runs to see the noise, and data that looks like the thing you're predicting.
+
+## Ask one question
+
+Before you run anything, write down the question. Questions come in a few kinds, and each needs its own setup:
+
+| Question | What you hold fixed | What you report |
+|---|---|---|
+| How much can it do? | the workload mix | peak throughput, and latency at that peak |
+| How fast is it at our load? | the arrival rate (`-R`) | latency percentiles at that rate |
+| Is change B better than A? | everything except B | the difference, next to the run-to-run noise |
+| Will this plan survive production? | the data shape and statistics | the plan and its buffers |
+
+"How fast is Postgres" is not a question. "Can this box serve our checkout endpoint at 2,000 requests per second with a p99 under 20 ms" is.
+
+It's also the question behind every request for a bigger server. A benchmark that answers it honestly, after the cheap fixes, is how that request earns its yes ([Earn the bigger box](/books/eight-kilobytes/scale#earn-the-bigger-box)).
+
+The ways a benchmark lies (too short, too warm or too cold, too uniform, closed-loop, one run, two changes at once) are also how to read one someone else published: a vendor's chart is a benchmark you didn't run, on a workload you didn't choose ([Ask who ran a benchmark before you read its numbers](/books/eight-kilobytes/providers#ask-who-ran-a-benchmark-before-you-read-its-numbers)).
+
+## pgbench is already installed
+
+`pgbench` ships with PostgreSQL; if you have `psql`, you have it. It runs your scripts against any database from as many clients as you ask for, and reports throughput and latency. Earlier chapters used it for [commit cost](/books/eight-kilobytes/wal#commit-means-flush) and [connection setup](/books/eight-kilobytes/connections#setup-reconnecting-cost-a-factor-of-seventy). Our numbers come from a shared laptop; the relationships between them are what the lab proves.
+
+It also ships a TPC-B-like schema and script (`pgbench -i`). Don't quote its number. On our machine, its select-only mode ran about 99,000 transactions a second and the default script 8, because every default transaction waited for an [fsync](/books/eight-kilobytes/glossary#fsync) on a disk busy serving other databases. The second is mostly the speed of a neighbor.
+
+<DeepDive title="What the built-in scripts do">
+
+`pgbench -i -s 5` creates `pgbench_branches` (5 rows), `pgbench_tellers` (50), `pgbench_accounts` (500,000), and an empty `pgbench_history`, about 15 MB per unit of scale. The built-in scripts, chosen with `-b`, are `tpcb-like` (the default), `simple-update`, and `select-only` (`-S`). Read one before you trust it (`pgbench --show-script=tpcb-like`): every TPC-B-like transaction updates an account, a teller, and one of the `-s` branch rows, and ends in a commit. With more clients than branches, they queue on those rows and you're measuring [row lock contention](/books/eight-kilobytes/concurrency): keep the scale at least the client count. Before a run, pgbench vacuums `pgbench_tellers` and `pgbench_branches` and truncates `pgbench_history`. `-n` (`--no-vacuum`) skips that; use it for custom scripts on your own tables, where those pgbench tables don't exist.
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+# the lab runs each pgbench in the server's container; $script holds:
+pgbench --show-script=tpcb-like 2>&1
+prove "the default TPC-B-like script updates pgbench_branches, one row per branch" \
+  grep -q "UPDATE pgbench_branches" <<<"$script"
+# $tpcb, then $sel (tps_of keeps the tps figure):
+pgbench -n -M prepared -c 4 -j 4 -T 5 bench 2>&1 | tps_of
+pgbench -n -S -M prepared -c 4 -j 4 -T 5 bench 2>&1 | tps_of
+prove "select-only runs at least 5x the transactions per second of TPC-B-like" \
+  is "$sel > 5 * $tpcb"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Benchmark your own queries, with skewed keys
+
+The built-ins are a smoke test. The benchmark that matters runs your queries. A pgbench script is a file of SQL plus backslash commands that run in the client, and each execution of the whole file counts as one "transaction":
+
+```text
+-- endpoint.sql: one request to a project dashboard
+\set u random(1, 100000)
+\set p random_exponential(1, 20000, 5)
+select id, email, name from users where id = :u;
+select kind, count(*) from events where project_id = :p group by kind;
+```
+
+`\set` evaluates an expression into a variable; `:u` substitutes it. Use skewed keys: `random()` is uniform, and production traffic almost never is. The script's `random_exponential(1, 20000, 5)` is a mild skew: about 5% of draws land on the first 1% of project ids. `random_zipfian(1, 20000, 1.1)` sent 68% there, closer to a multi-tenant SaaS with a few giant tenants. Pick the one that matches your traffic.
+
+Set `-j` (threads) equal to `-c` (clients): one thread can't drive many fast clients, and on our machine 8 select-only clients ran about six times faster with `-j 8` than with `-j 1`. If CPU on the pgbench side is pinned, you're benchmarking pgbench.
+
+<DeepDive title="The skewed generators, measured">
+
+pgbench has three:
+
+- `random_zipfian(lb, ub, s)`: k is drawn `((k+1)/k)^s` times as often as k+1, with `s` from 1.001 to 1000.
+- `random_exponential(lb, ub, p)`: roughly, the lowest 1% of the range is drawn `p` percent of the time.
+- `random_gaussian(lb, ub, p)`: about 67% of draws land in the middle `1/p` of the range.
+
+Over 20,000 project ids, 40,000 draws each, recorded into a table by a pgbench script (`insert into picks values (:z, :e, :g)`):
+
+```text
+  zipfian top 1%: 68.4%  exponential top 1%: 4.8%  gaussian middle quarter: 68.5%
+```
+
+The skew is always toward the low end of the range (or the middle, for gaussian); if low ids are special in your schema, scramble with `permute(value, size)`. Size `-c` [like a pool](/books/eight-kilobytes/connections#size-the-pool-from-cores-not-users), and for a real load test run pgbench on its own machine, close to the server.
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+# with synchronous_commit=off, in the server's container
+pgbench -n -c 4 -j 4 -t 10000 -f /tmp/picks.sql book
+prove "random_zipfian(1, 20000, 1.1) sends 55 to 80% of picks to the first 1% of ids" \
+  holds book "select count(*) filter (where z <= 200) * 1.0 / count(*) between 0.55 and 0.80 from picks"
+prove "random_exponential(1, 20000, 5) sends about 5% to the first 1% (3 to 7%)" \
+  holds book "select count(*) filter (where e <= 200) * 1.0 / count(*) between 0.03 and 0.07 from picks"
+prove "random_gaussian(1, 20000, 4) puts about 67% in the middle quarter (62 to 72%)" \
+  holds book "select count(*) filter (where g between 7501 and 12500) * 1.0 / count(*) between 0.62 and 0.72 from picks"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Prepared statements are faster, by more than the noise
+
+`-M` picks how pgbench talks to the server. `simple` and `extended` (what most drivers do) make the server parse and plan every time; `prepared` parses once per connection and may switch to a cached [generic plan](/books/eight-kilobytes/planner#prepared-statements-switch-plans-after-five-runs). For a query that takes microseconds, that's a big share. A one-row lookup, three rounds of 8 seconds, the modes side by side so the machine's noise hits all three equally:
+
+```text
+  simple: min 11822  max 14407  mean 13289 tps  spread 21.9%
+  extended: min 10980  max 13266  mean 12277 tps  spread 20.8%
+  prepared: min 15563  max 18773  mean 17420 tps  spread 20.6%
+```
+
+Prepared is about a third faster. Now look at the spread: three identical runs varied by about 20 percent, so any smaller difference is not a result. This one is: the slowest prepared run beat the fastest simple run.
+
+Two rules come out of it. Benchmark with the protocol your application uses ([transaction pooling](/books/eight-kilobytes/connections#transaction-pooling-breaks-session-state) can take prepared statements away). And report comparisons as ranges, three runs a side, interleaved; a difference counts only when the ranges don't overlap.
+
+<DeepDive title="Why the runs had to be side by side">
+
+Run one after another on our busy laptop, the modes' ranges overlapped more often than not, and once simple even came out ahead on the means. So the lab vacuums and checkpoints first, then runs the three at once, one client each, on a machine with cores to spare. Extended isn't faster than simple: it does the same parsing and planning in more protocol messages.
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+for round in 1 2 3; do
+  # each round runs modes.sh in the container: the three modes at once
+  for m in simple extended prepared; do
+    pgbench -n -S -M $m -c 1 -T 8 bench > mode_$m.txt 2>&1 &
+  done
+  wait
+  # then reads each mode's tps
+done
+prove "the slowest prepared run beats the fastest simple run" is "$pmin > $smax"
+prove "prepared is at least 15% faster than simple for a one-row lookup (mean of 3)" \
+  is "$pavg > 1.15 * $savg"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Closed loops hide the stalls
+
+Back to the opening. Both runs used 4 select-only clients for 15 seconds. Five seconds in, a second session took an `ACCESS EXCLUSIVE` lock on `pgbench_accounts` for two seconds, a stand-in for any stall: a lock queued behind a migration, a failover, a checkpoint fsync, a garbage collector pause in the app.
+
+The first run is a **closed loop**, pgbench's default: each client sends a query, waits for the answer, then sends the next. The second sets `-R` to 80 percent of the rate the first achieved, so pgbench schedules transactions on a timeline and measures each one from when it was **scheduled** to start:
+
+```text
+                                      tps      p50      p95      p99       max
+  closed loop                       64385     0.05     0.09     0.12    2012.0
+  -R 51507, from schedule           51509     3.28  1879.23  2038.44    2079.1
+  -R 51507, minus lag                         0.05     0.10     0.12    2077.2
+```
+
+All latencies are in milliseconds. A lighter load, the same stall, and the p99 differs by a factor of more than ten thousand.
+
+The closed loop is wrong because of what it doesn't record. During the stall, each of the 4 clients had one query stuck: four slow samples out of a million, which don't move a percentile.
+
+But real users don't stop arriving because the server is busy. In those two seconds about 100,000 requests would have come in, and every one would have waited. The benchmark coordinated with the server to skip measuring them. This is **coordinated omission**, a term popularized by Gil Tene, and it's built into most load generators and plenty of monitoring code.
+
+With `-R`, those requests stay on the schedule. They start late, and the lateness (the **schedule lag**) counts in their latency. The damage outlasts the stall: working off the backlog, more than 5 percent of all requests waited over 1.8 seconds, and the median rose from 0.05 ms to 3 ms. Now read the third line: subtract the lag and you get the closed-loop numbers back. The server did its work fast. Your users waited anyway.
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+# co.sh, both runs: 4 clients, 15 s, a 2 s exclusive lock at the 5 s mark
+pgbench -n -S -M prepared -c 4 -j 4 -T 15 --log --log-prefix="co_$name" "$@" bench
+closed=$(sh_in "bash co.sh closed")
+# the open loop asks for 80% of the closed loop's tps
+rate=$(awk -v t="$c_tps" 'BEGIN { printf "%d", t * 0.8 }')
+open=$(sh_in "bash co.sh open -R $rate")
+prove "the -R run delivered the rate it was asked for (within 10%), 80% of the closed loop's" \
+  is "$o_tps > 0.9 * $rate && $o_tps < 1.1 * $rate"
+prove "with -R, p99 is more than 10x the closed-loop p99" is "$o99 > 10 * $c99"
+prove "subtracting the lag gives back a closed-loop-sized p99 (within 5x)" is "$s99 < 5 * $c99 + 0.5"
+```
+
+</ProveIt>
+
+So to answer "how fast at our load", use `-R` at a realistic rate, well below the peak, and report percentiles from `--log` (one line per transaction) with the lag included. If the lag keeps growing, the server can't sustain that rate, and that's your answer. Before you believe anyone's p99, your monitoring's included, ask whether it was measured from a schedule.
+
+<DeepDive title="Why 80 percent, and how to get percentiles out of the log">
+
+At the full closed-loop rate there's no headroom to catch up after a stall, and pgbench can fall behind its schedule for good, so the lab checks that the `-R` run delivered its rate (arrivals are a Poisson process at that average). `--latency-limit` with `-R` counts transactions that would have started too late as skipped, which turns "p99 under 20 ms" into a number you can test.
+
+`--log` writes one line per transaction, one file per thread:
+
+```text
+client_id  transaction_no  time  script_no  time_epoch  time_us  [schedule_lag]
+0          1               1389  0          1791261418  503984   96
+```
+
+`time` is the latency in microseconds (under `-R`, from the scheduled start, so it includes `schedule_lag`). Sort it and index into it:
+
+```bash
+cat pgbench_log.* | awk '{ print $3 }' | sort -n | awk '
+  { a[NR] = $1 }
+  END { printf "p50 %.2f  p95 %.2f  p99 %.2f  max %.1f ms\n",
+        a[int(NR*.50)]/1000, a[int(NR*.95)]/1000,
+        a[int(NR*.99)]/1000, a[NR]/1000 }'
+```
+
+For long runs, `--sampling-rate=0.1` keeps a tenth of the lines; `--aggregate-interval=1` writes one summary line per second, the right shape for "what happened when".
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+prove "in the -R log, every transaction's time includes its schedule lag (time >= lag)" is "$bad == 0"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Warm up, then run through a checkpoint
+
+A benchmark's first seconds and its tenth minute measure different servers.
+
+### Cold and warm caches are different servers
+
+The first time we ran a uniform `events` lookup, it did 2,700 tps. Minutes later, the same command did 52,900: only the cache had changed. For steady state, warm up until `-P` (pgbench's periodic progress report) shows throughput flat, then measure. For failover and deploy questions, the cold number is what users see, so measure it deliberately, with the [OS cache](/books/eight-kilobytes/latency#a-page-lives-in-one-of-three-places) dropped too.
+
+<DeepDive title="Evicting a table on purpose">
+
+Evicting `users` and its index from shared buffers, as a restart would, then running the same lookup twice: the cold run read 1,401 pages (96,014 tps), the warm run none (111,236 tps). The gap was small only because those pages were still in the OS cache. `pg_buffercache_evict_relation()` (PostgreSQL 18+) empties one relation from shared buffers; on a Linux host, `echo 3 > /proc/sys/vm/drop_caches` as root drops the OS cache too. `blocks read` comes from `pg_stat_statements`, and [hit versus read](/books/eight-kilobytes/explain#buffers-are-the-evidence) means the same as in a plan.
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+# sql <db>: psql on the lab's server
+sql book -c "select pg_buffercache_evict_relation('users'), pg_buffercache_evict_relation('users_pkey')"
+# cold
+pgbench -n -M prepared -c 4 -j 4 -T 5 -f /tmp/lookup.sql book
+# warm
+pgbench -n -M prepared -c 4 -j 4 -T 5 -f /tmp/lookup.sql book
+prove "the cold run reads over 1,000 blocks from outside shared buffers" is "$cold_read > 1000"
+prove "the warm run of the same command reads under a tenth of that" is "$warm_read * 10 < $cold_read"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A 60-second benchmark can miss every checkpoint
+
+A [checkpoint](/books/eight-kilobytes/glossary#checkpoint) runs every `checkpoint_timeout` (5 minutes by default), and right after one starts, the first change to each page writes a [full-page image](/books/eight-kilobytes/wal#the-first-change-after-a-checkpoint-logs-the-whole-page) into the WAL. A 60-second benchmark can miss every checkpoint, and then its numbers beat anything production will see. A TPC-B-like run, second by second; the columns are seconds from the checkpoint's start, transactions per second, average latency, full-page images, and WAL bytes per transaction:
+
+```text
+    -1 s   11035 tps    0.362 ms       0 fpi     420 B/tx
+    +0 s   11238 tps    0.356 ms       0 fpi     408 B/tx   <- checkpoint starts
+    +1 s   11608 tps    0.344 ms    6650 fpi    4948 B/tx
+    +2 s   10349 tps    0.386 ms    1969 fpi    1966 B/tx
+    +5 s   11511 tps    0.347 ms     118 fpi     477 B/tx
+```
+
+The same transaction wrote twelve times the WAL for a second. Here the disk absorbed it; in an earlier run, with the disk busy, throughput halved for two seconds. A benchmark without a checkpoint in it can't tell you which of those servers you have.
+
+Our rule: a run meant to predict production lasts at least two `checkpoint_timeout` intervals, at the production setting, and long enough for autovacuum to visit the big tables. Check the [checkpointer counters](/books/eight-kilobytes/observability#checkpoints-should-be-timed) and `last_autovacuum` afterwards to confirm both happened inside the window.
+
+<DeepDive title="The minute that saw a checkpoint and two autovacuums">
+
+The lab's server sets `checkpoint_timeout = 30s` (the minimum) so one lands inside a one-minute run, with `synchronous_commit = off` to keep commit fsyncs out of the picture; a sampler reads `pg_stat_wal` and `pg_stat_checkpointer` each second (scale 5, 4 clients). Before it, transactions wrote 383 to 420 bytes each; afterwards about four times that over five seconds, settling through 897 and 561 bytes as more pages had their first touch. On storage close to its limit, `tps` across a long run is a sawtooth with your checkpoint period.
+
+The same minute saw autovacuum process `pgbench_tellers` and `pgbench_branches` (small, hot tables cross their [thresholds](/books/eight-kilobytes/vacuum#autovacuum-fires-on-dead-rows-inserts-or-age) fast), but never the 500,000-row `pgbench_accounts`: it had about 25,000 dead row versions and needed about 100,000. In production, that big vacuum runs in the middle of your traffic.
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+PGOPTIONS="-c synchronous_commit=off" pgbench -n -M prepared -c 4 -j 4 -T 60 -P 10 \
+  --log --log-prefix=ck_ --aggregate-interval=1 bench
+prove "a checkpoint started inside the one-minute run" test -n "$starts"
+prove "full-page images jump after the checkpoint starts (5 s after > 5x the 5 s before)" \
+  is "$fpi_after > 5 * $fpi_before + 100"
+prove "the same transactions write more than twice the WAL each in the 5 s after it starts" \
+  is "$wal_after > 2 * $wal_before"
+prove "autovacuum processed pgbench_tellers during the run" is "$av_after > $av_before"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Change one thing, and measure it end to end
+
+Same data, same script, same duration, the change alone in between, three runs a side if the difference is less than dramatic. [The playbook's experiment](/books/eight-kilobytes/playbook#the-proof-one-app-eight-changes) is this method applied eight times in a row.
+
+Then measure from both ends. `-r` reports each script line's average latency as the client saw it. The dashboard script, before and after an index on `events (project_id)`:
+
+```text
+           latency (ms)  statement
+  before:         0.339  select id, email, name from users where id = :u;
+  before:       100.617  select kind, count(*) from events where project_id = :p ...
+  after:          0.094  select id, email, name from users where id = :u;
+  after:          0.562  select kind, count(*) from events where project_id = :p ...
+```
+
+Throughput went from 39 to 6,083 transactions a second. But the untouched primary key lookup also got three times faster, because client-side latency includes waiting for a CPU on a box saturated by sequential scans. The client's number tells you what the user felt, not why.
+
+[`pg_stat_statements`](/books/eight-kilobytes/glossary#pg_stat_statements) tells you why ([snapshot and diff](/books/eight-kilobytes/observability#snapshot-and-diff-dont-reset) it around each run):
+
+```text
+  pg_stat_statements, before -> after
+  report:  99.690 ms, 35193.6 blocks/call  ->  0.470 ms, 102.8 blocks/call
+  lookup:   0.047 ms,     3.0 blocks/call  ->  0.014 ms,   3.0 blocks/call
+```
+
+The report went from the whole table per call to about a hundred pages. The lookup did exactly 3 blocks before and after. Blocks per call say which statement does the work, time says who suffered, and only blocks are stable from run to run. When timings are noisy, compare buffers. Count the pages.
+
+<DeepDive title="The before-and-after run">
+
+The two runs bracket the index build, so the build's own I/O is in neither window. The client-side numbers are `-r`'s per-line averages. The server-side numbers come from snapshotting `pg_stat_statements` before and after each run and subtracting: `total_exec_time / calls` for time, `(shared_blks_hit + shared_blks_read) / calls` for blocks. Client-side figures swing with whatever else the machine is doing: in an earlier run on the same laptop, the lookup's `-r` latency went from 27 ms to 0.2 ms. Its blocks per call were 3 both times.
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+# before
+pgbench -n -M prepared -c 4 -j 4 -T 10 -r -f /tmp/endpoint.sql book
+# sql <db>: psql on the lab's server
+sql book -c "create index events_project_id_idx on events (project_id)"
+# after
+pgbench -n -M prepared -c 4 -j 4 -T 10 -r -f /tmp/endpoint.sql book
+prove "before the index the report reads over 30,000 blocks per call (the whole table)" \
+  is "$rep_blk_b > 30000"
+prove "after the index it reads under 1,000 blocks per call" is "$rep_blk_a < 1000"
+prove "the report's mean time in pg_stat_statements fell more than 20x" \
+  is "$rep_ms_b > 20 * $rep_ms_a"
+prove "the untouched lookup does the same 3 blocks of work before and after" \
+  is "$usr_blk_b == $usr_blk_a && $usr_blk_a == 3"
+prove "yet its client-side latency (-r) fell over 1.5x, because the box stopped being saturated" \
+  is "$lk_b > 1.5 * $lk_a"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Uniform data lies
+
+The book's seed is uniform on purpose, so every chapter's numbers reproduce: the busiest 1% of projects hold under 2% of the events. No production system looks like that.
+
+**Skew changes the cache.** Event lookups by id on a 275 MB table with 128 MB of shared buffers: uniform ids ran at 40,168 tps with an 81.4% hit ratio; zipfian ids at 97,107 tps and 98.4%. A uniform benchmark here tells you to buy RAM you don't need. (For writes, skew cuts the other way: hot rows make lock queues.)
+
+**Skew changes the plan.** Take 500,000 events twice, once as seeded and once with project ids redrawn so project 1 holds about 7% of the rows. Same indexes, same query (project 1's newest 20 events):
+
+```text
+-- uniform: about 25 rows for project 1
+         ->  Bitmap Heap Scan on ev_uniform  (cost=4.62..100.94 rows=25 width=112)
+-- skewed: about 34,000
+   ->  Index Scan Backward using ev_skewed_created_at_idx on ev_skewed
+         (cost=0.42..23091.40 rows=33483 width=111)
+         Filter: (project_id = 1)
+```
+
+With 25 rows, the planner fetches them all and sorts. With 34,000, it walks the `created_at` index from the newest end and stops at the 20th match, because [pg_stats](/books/eight-kilobytes/planner#pg_stats-is-the-planners-entire-picture) told it to. Test on uniform data and the big tenant gets the plan nobody looked at.
+
+**A month of updates can nearly double a table.** Every update leaves a [dead row version](/books/eight-kilobytes/mvcc#vacuum-frees-space-inside-the-table-not-on-disk), and vacuum rarely gives the space back. Thirty "days" of updating a third of `projects`, vacuumed weekly, took the same 20,000 rows from 224 pages to 399. Benchmark the table you'll have in six weeks, not the one you loaded this morning.
+
+A realistic test database has production's row counts, skew, value sizes (a 4 KB JSON blob is well past the roughly 2 KB row size where [TOAST](/books/eight-kilobytes/storage) takes over), and dead space. The cheapest way to get all four is to start from production.
+
+<DeepDive title="Making skewed and aged test data in SQL">
+
+Redrawing project ids log-uniformly takes one line:
+
+```sql
+update ev_skewed set project_id = floor(exp(random() * ln(20000)))::bigint;
+```
+
+`exp(random() * ln(n))` is uniform in the logarithm: project 1 gets about 7% of the rows, and the top 1% of projects over half. `power(random(), 3)` piles values toward zero, and `random_normal()` (PostgreSQL 16+) gives a bell curve. Both copies got indexes on `project_id` and `created_at` and an `analyze`; the uniform plan was a `Sort` over that bitmap scan, under a `Limit`.
+
+The aging, one statement per "day" (psql's `\gexec` runs each on its own, because `VACUUM` can't run inside a function or a `DO` block):
+
+```sql
+select format('update projects_aged set name = name || %L where id %% 3 = %s', '', d % 3),
+       case when d % 7 = 0 then 'vacuum projects_aged' end
+from generate_series(1, 30) d
+order by d
+\gexec
+```
+
+`pgstattuple('projects_aged')` then reported 49% free.
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+prove "zipfian lookups hit shared buffers at least 10 points more often than uniform ones" \
+  is "$z_ratio > $u_ratio + 10"
+prove "in the seed, the busiest 1% of projects hold under 2% of events" \
+  holds book "select sum(c) * 1.0 / 2000000 < 0.02
+              from (select count(*) as c from events group by project_id order by c desc limit 200) t"
+prove "on uniform data, project 1 plans a scan of the project_id index and a sort (about 25 rows)" \
+  grep -q "Index Scan on ev_uniform_project_id_idx" <<<"$u_plan"
+prove "on skewed data, the same query walks the created_at index backward and filters (about 35,000 rows)" \
+  grep -q "Index Scan Backward using ev_skewed_created_at_idx" <<<"$s_plan"
+prove "the aged table holds the same rows in at least 1.5x the pages" is "$aged >= 1.5 * $fresh"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Copy production without copying people
+
+Never put real personal data on a laptop, a CI runner, or a staging server with weaker access controls than production. Copy the shape and mask the people. The pattern that holds up: mask inside a clone that lives next to production, then dump the clone.
+
+Mask with a keyed hash (`hmac` from `pgcrypto`). It's deterministic, so emails stay distinct, unique constraints hold, and joins still match; an unkeyed hash of an email is reversed by hashing a list of likely addresses. Don't mask away the shape: replacing every `created_at` with `now()` destroys the skew you came for.
+
+The clone itself is not clean: the old values sit on its pages as dead row versions, and in its WAL. That's why it stays on the production side and gets dropped. Its `pg_dump` is clean, because a dump reads only live rows. Make the clone by restoring a backup: copying a live database as a template fails while anyone is connected to it.
+
+<DeepDive title="Masking a clone, and proving the dump is clean">
+
+```sql
+create database staging template book;   -- in production: restore a backup
+\c staging
+create extension pgcrypto;
+update users
+   set email = encode(hmac(email, 'secret-kept-on-server', 'sha256'), 'hex')
+               || '@example.invalid',
+       name  = 'User ' || id;
+```
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+prove "masking kept every email distinct (100,000), so unique constraints and joins still work" \
+  holds staging "select count(distinct email) = 100000 from users"
+prove "the masked clone still has the original email in a dead row version on disk" \
+  holds staging "select exists (select 1 from generate_series(0, (pg_relation_size('users') / 8192)::int - 1) b
+                                where position(convert_to('user1000@example.com', 'UTF8')
+                                               in get_raw_page('users', 'main', b)) > 0)"
+# $hits, in the server's container:
+pg_dump -t users staging | grep -c '@example.com' || true
+prove "but a pg_dump of the clone contains no original email address" is "$hits == 0"
+```
+
+</ProveIt>
+
+For more than a few columns, [PostgreSQL Anonymizer](https://postgresql-anonymizer.readthedocs.io/en/stable/), an extension maintained by Dalibo, declares masking rules on columns and produces anonymized dumps or masked clones. And `pg_dump --exclude-table-data=sessions` keeps a table's definition without its rows ([pg_dump](/books/eight-kilobytes/backups#pg_dump-is-portable-small-and-slow-to-restore)).
+
+</DeepDive>
+
+## Test the plan, not just the speed
+
+Sometimes all you need is the plan. PostgreSQL 18's `pg_dump --statistics-only` dumps the planner statistics, so it's tempting to load schema plus statistics into an empty database and plan there. It doesn't work. We asked both about alerts:
+
+```text
+-- in book, the full database
+ Seq Scan on events  (cost=0.00..60172.84 rows=245732 width=112)
+-- in shape, empty tables with book's statistics restored
+ Seq Scan on events  (cost=0.00..0.00 rows=1 width=112)
+```
+
+The statistics arrived intact. But when the planner sizes a table, it checks the table's actual size on disk and uses `reltuples / relpages` only as a density to scale by it. Zero pages, zero rows, rounded up to one.
+
+So the order of preference runs: a masked copy at full size; synthetic data at production's row counts and skew; `EXPLAIN` on a production replica (plain `EXPLAIN` doesn't run the query). Whichever you use, compare plans, not just timings ([A method for slow queries](/books/eight-kilobytes/explain#a-method-for-slow-queries)). If the plan differs, the timing comparison is meaningless.
+
+<DeepDive title="The statistics-only experiment">
+
+```bash
+createdb shape
+pg_dump --schema-only book | psql -d shape
+pg_dump --statistics-only book | psql -d shape
+```
+
+The dump is calls to `pg_restore_relation_stats()` and `pg_restore_attribute_stats()`: `relpages`, `reltuples`, and every column's `pg_stats` row, `most_common_vals` included. The column statistics still shape selectivities; the row counts don't follow. Where the statistics-only dump earns its keep is with data: restoring a full dump with `--statistics` means the restored database plans well before its first `analyze` finishes.
+
+<ProveIt lab="28-benchmarking.sh">
+
+```bash
+prove "pg_dump --statistics-only carried relpages and reltuples into the empty copy" \
+  holds shape "select relpages = $(sql book -c "select relpages from pg_class where relname = 'events'")
+               and reltuples > 1900000 from pg_class where relname = 'events'"
+prove "the full database estimates over 200,000 alert rows" is "$est_book > 200000"
+prove "the empty copy with the same statistics estimates fewer than 10" is "$est_shape < 10"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## The short version
+
+- Write the question down first: peak throughput, latency at a given rate, or A versus B.
+- Benchmark your own queries with custom pgbench scripts (`-n -f`), skewed keys, and the protocol your driver uses.
+- For latency, use `-R` at a realistic rate and take p50, p95, and p99 from `--log`. Closed-loop percentiles hide every stall.
+- Run each variant three times, interleaved, and trust a difference only when the ranges don't overlap. Change one thing at a time.
+- Warm up for steady state, measure cold starts on purpose, and run long enough to include a checkpoint and an autovacuum.
+- When timings are noisy, compare blocks per call from `pg_stat_statements`.
+- Test on production-shaped data: real row counts, skew, value sizes, and dead space. Mask a clone on the production side and dump the clone; statistics without data don't reproduce production plans.
+
+## Further reading
+
+- [pgbench](https://www.postgresql.org/docs/18/pgbench.html), PostgreSQL documentation. Every option, the script language and its functions, the log formats, and the "Good Practices" section.
+- [pg_stat_statements](https://www.postgresql.org/docs/18/pgstatstatements.html), PostgreSQL documentation. The before-and-after instrument, including targeted resets.
+- [pg_dump](https://www.postgresql.org/docs/18/app-pgdump.html), PostgreSQL documentation. `--statistics-only`, `--exclude-table-data`, and the rest of the options for building a test copy.
+- [wrk2](https://github.com/giltene/wrk2), Gil Tene. The README is the clearest short explanation of coordinated omission and why a constant-rate load generator fixes it.
+- [How NOT to Measure Latency](https://www.infoq.com/presentations/latency-response-time/), Gil Tene, QCon San Francisco 2015. The common ways latency gets measured and reported wrong, and how to do it right.
+

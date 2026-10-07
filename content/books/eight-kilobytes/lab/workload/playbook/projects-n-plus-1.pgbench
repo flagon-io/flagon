@@ -1,0 +1,31 @@
+-- The performance playbook: the projects page, as an ORM writes it (N+1).
+-- One query for the account's 20 projects, then one query per project for
+-- its latest event. pgbench can't loop over rows, so the list comes back as
+-- 20 columns (\gset); an application would loop over 20 rows instead.
+\set a random(1, 1000)
+select ids[1] as p1, ids[2] as p2, ids[3] as p3, ids[4] as p4, ids[5] as p5,
+       ids[6] as p6, ids[7] as p7, ids[8] as p8, ids[9] as p9, ids[10] as p10,
+       ids[11] as p11, ids[12] as p12, ids[13] as p13, ids[14] as p14, ids[15] as p15,
+       ids[16] as p16, ids[17] as p17, ids[18] as p18, ids[19] as p19, ids[20] as p20
+from (select array_agg(id order by created_at desc) as ids
+      from projects where account_id = :a) s \gset
+select kind, created_at from events where project_id = :p1 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p2 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p3 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p4 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p5 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p6 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p7 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p8 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p9 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p10 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p11 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p12 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p13 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p14 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p15 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p16 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p17 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p18 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p19 order by created_at desc limit 1;
+select kind, created_at from events where project_id = :p20 order by created_at desc limit 1;

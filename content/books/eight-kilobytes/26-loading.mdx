@@ -1,0 +1,515 @@
+---
+title: Load it fast
+description: Load millions of rows in seconds with COPY, FREEZE, and late indexes, and pay the WAL, checkpoint, hint-bit, and statistics bills on your schedule.
+part: Changing it
+builds_on: [wal, vacuum, migrations]
+---
+
+The import that runs all night and the one that finishes before your coffee cools can load the same million rows into the same table. The difference is what each row drags along: a commit, a round trip, a parsed statement, an entry in every index, a foreign key lookup. Strip those away and Postgres loads rows about as fast as it can write pages.
+
+Then the bill arrives. A big load writes more WAL than the table it fills, and that log forces checkpoints and lands on every replica. Its rows aren't finished, so the first query to read them writes to every page. And the planner has no idea the table changed.
+
+So do the least work per row while loading, then pay the deferred costs yourself, on purpose, before your users find them.
+
+## Load speed ranges from 1,200 rows a second to half a million
+
+We loaded the same events-shaped rows into a fresh copy of `events` ten ways, each on a server of its own with stock settings, and counted rows per second and **WAL**, the log every change is written to before it reaches the data files ([Write it down first](/books/eight-kilobytes/wal)). The two single-row methods load 1,000 rows, because a million would take hours; the rest load 1,000,000:
+
+```text
+                     method                     |  rows   | rows_per_s |  wal   | wal/row
+------------------------------------------------+---------+------------+--------+---------
+ 1. single-row INSERT, autocommit               |    1000 |       1187 | 305 kB |     312
+ 2. single-row INSERT, one transaction          |    1000 |      17224 | 273 kB |     279
+ 3. multi-row VALUES, 1,000 rows each           | 1000000 |      79735 | 228 MB |     239
+ 4. INSERT ... SELECT from unnest               | 1000000 |      84872 | 228 MB |     239
+ 5. COPY                                        | 1000000 |     507966 | 184 MB |     193
+ 6. COPY FREEZE                                 | 1000000 |     493756 | 185 MB |     194
+ 7. COPY, table created in the same transaction | 1000000 |     525823 | 184 MB |     193
+ 8a. COPY into an unlogged table                | 1000000 |     468208 | 34 kB  |       0
+ 8b. ... then ALTER TABLE SET LOGGED            | 1000000 |     959712 | 181 MB |     190
+ 9. COPY with 3 indexes and 3 FKs in place      | 1000000 |      64047 | 346 MB |     363
+ 10. COPY bare, then indexes, then FKs          | 1000000 |     431132 | 174 MB |     182
+```
+
+From about 1,200 rows a second to half a million. Each step down the table removes one kind of per-row overhead, and the rest of the chapter reads it a pair of rows at a time. (Row 8b's rate is the speed of a table rewrite, not of a load.)
+
+Treat the times as rough. They come from a quiet run; with a dozen other workloads sharing the laptop, some methods ran several times slower. The WAL never moved: within a kilobyte, every time.
+
+<DeepDive title="How the ten loads were measured">
+
+Each server ran `wal_level = replica`, `max_wal_size = 1GB`, and data checksums; WAL is counted per session with `pg_stat_get_backend_wal()` (PostgreSQL 18), after a checkpoint. Every million-row table came out 137 to 138 MB. `COPY` ranged from 125,000 to 508,000 rows a second across our runs, and autocommit from 15 to about 1,200, so the lab checks ratios, never times.
+
+</DeepDive>
+
+## Commit once per batch, not once per row
+
+Rows 1 and 2 are the same 1,000 inserts. The only difference is a `begin` and a `commit` around them. That made the load about 15 times faster here, and over a hundred times faster on busier runs, where every flush waited behind other writers.
+
+An autocommit `INSERT` is its own transaction, and every commit waits for its WAL to reach disk ([Commit means flush](/books/eight-kilobytes/wal#commit-means-flush)). The commit record is tiny. The wait is the cost of the row.
+
+One transaction for a whole load has its own problems: a failure at row 999,999 rolls back everything, and vacuum is held back while it runs. Into a live table, commit every few thousand to few hundred thousand rows, like [backfills](/books/eight-kilobytes/migrations#backfill-in-short-batches-that-walk-the-primary-key). Into an empty table, one transaction is fine, and it unlocks the fastest paths below.
+
+<DeepDive title="One extra record per row, and a flush to wait for">
+
+A single-row insert writes two WAL records, heap and primary key; autocommit adds a commit record. For 500 rows: 1,521 records in 12,884 ms against 1,021 in 88 ms. 500 more records, 17 KB more WAL, and nearly all of the 12.9 seconds was flushes on a busy laptop running Docker. A good NVMe drive flushes in well under a millisecond; the shape holds.
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove(
+  'autocommit writes one extra WAL record per row: its commit',
+  (select records from lab.runs where method = 'single-row, autocommit')
+  - (select records from lab.runs where method = 'single-row, one transaction') between 490 and 600);
+select lab.prove(
+  'the same 500 inserts in one transaction run at least 1.5 times as fast as autocommit',
+  lab.rate('single-row, one transaction') > 1.5 * lab.rate('single-row, autocommit'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Batch with arrays, not VALUES lists
+
+With the commits gone, the cost per row is the statement: a round trip, a parse, a plan. Batch a thousand rows and that cost is shared a thousand ways. How you batch still matters.
+
+Rows 3 and 4 both send 1,000 rows per statement and write identical WAL. Here `unnest` was only 6% faster; on busier runs, up to nine times.
+
+The difference is parsing. A multi-row `VALUES` list of literals, the usual shape of an ORM's "bulk insert", is 6,000 values of text that Postgres parses from scratch for every statement, and parsing is the first thing to suffer when CPU is scarce. `INSERT ... SELECT * FROM unnest($1, $2, ...)` sends one array per column: six parameters whatever the batch size, prepared once.
+
+If your driver can bind arrays, use `unnest`. Neither form saves disk: both write a heap record and an index record per row.
+
+<DeepDive title="Why a VALUES list tops out">
+
+The `unnest` form, prepared:
+
+```sql
+prepare load_events (bigint[], bigint[], bigint[], text[], jsonb[], timestamptz[]) as
+  insert into events (account_id, project_id, user_id, kind, payload, created_at)
+  select * from unnest($1, $2, $3, $4, $5, $6);
+```
+
+Bound as parameters, a `VALUES` list needs 6,000 placeholders per thousand rows, and new statement text for every batch size; the protocol caps a statement at 65,535. As literals, it was never faster than `unnest` in our runs: from about as fast on a quiet server to nine times slower on a busy one.
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove(
+  'unnest loads at least as many rows per second as multi-row VALUES of literals (within 10%)',
+  lab.rate('INSERT ... SELECT from unnest') > 0.9 * lab.rate('multi-row VALUES, 1,000 per statement'));
+select lab.prove(
+  'unnest loads at least twice as many rows per second as single-row inserts in one transaction',
+  lab.rate('INSERT ... SELECT from unnest') > 2 * lab.rate('single-row, one transaction'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## COPY is the bulk path
+
+`COPY ... FROM STDIN` streams rows in a plain format, text, CSV, or binary, with no statement per row at all. It also writes differently: it buffers rows and fills the heap a page at a time, one heap WAL record per page instead of one per row (each index entry is still logged per row). Read the `wal/row` column: 239 bytes for every `INSERT` form, 193 for `COPY`. And row 5 loads several times as fast as `unnest`.
+
+Use the client side: `COPY table FROM '/path'` reads a file on the database server and needs special privileges, while psql's `\copy` reads it on **your** machine and sends it as `COPY FROM STDIN`:
+
+```sql
+\copy events_import from 'events.csv' with (format csv)
+```
+
+Every serious driver speaks the copy protocol. From Go, pgx's `CopyFrom` sends binary `COPY`; in Node, `pg-copy-streams` pipes any stream in.
+
+<DeepDive title="What turns COPY's page-at-a-time path off">
+
+On 100,000 rows, `VALUES` and `unnest` each wrote about 203,000 WAL records (2 per row); `COPY` wrote 105,243, one per primary key entry plus one per heap page, and 19% fewer bytes.
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove(
+  'COPY writes far fewer WAL records than the 2 per row an INSERT writes (heap + primary key)',
+  (select records from lab.runs where method = 'COPY FROM STDIN')
+  < 0.7 * (select records from lab.runs where method = 'multi-row VALUES, 1,000 per statement'));
+select lab.prove(
+  'COPY writes less WAL than row-at-a-time inserts: one heap record per page, not per row',
+  lab.wal('COPY FROM STDIN') < lab.wal('multi-row VALUES, 1,000 per statement'));
+```
+
+</ProveIt>
+
+Three things send `COPY` back to one row at a time. A `BEFORE` or `INSTEAD OF` row trigger, because each row must pass through it before the next. A volatile default expression, since it might read the table being loaded (`nextval()`, behind identity and serial columns, is the one exception the source makes). And a `WHERE` clause on the `COPY` with a volatile function. `AFTER` triggers, including the ones behind foreign keys, don't stop the batching, but each row still queues an event.
+
+</DeepDive>
+
+## COPY FREEZE writes the rows finished
+
+A row loaded by a plain `COPY` isn't finished. Its header names the loading transaction, so the first reader checks that the transaction committed and saves the answer in the row's **hint bits** ([A read can write](/books/eight-kilobytes/mvcc#a-read-can-write)). That dirties the page, and with [data checksums](/books/eight-kilobytes/glossary#data-checksums) on (the PostgreSQL 18 default) logs a [full-page image](/books/eight-kilobytes/glossary#full-page-write). The first `count(*)` on 100,000 freshly copied rows, after a checkpoint:
+
+```text
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared hit=1816 dirtied=1759
+   WAL: records=1759 fpi=1759 bytes=14404959 buffers full=1253
+```
+
+A read-only query dirtied all 1,759 pages that hold rows and wrote 14.4 MB of WAL, on a 14 MB table. If that's a user's query, they wait. Later, vacuum must come back to **freeze** every row, marking it visible to all transactions for good, before the transaction ID counter [wraps around](/books/eight-kilobytes/mvcc#old-rows-must-be-frozen-before-the-xid-counter-wraps).
+
+`COPY ... WITH (FREEZE)` writes the rows already frozen and, since PostgreSQL 14, marks every page [all-visible](/books/eight-kilobytes/glossary#visibility-map). The condition: the table was created or truncated in the same transaction, so nobody else could have seen it:
+
+```sql
+begin;
+truncate events_import;
+\copy events_import from 'events.csv' with (format csv, freeze)
+commit;
+```
+
+Skip the `truncate` and Postgres refuses. The same `count(*)` on the frozen table dirties nothing, even the first time, and row 6 cost the same WAL as row 5. If you can load with `FREEZE`, do.
+
+<ProveIt lab="26-loading">
+
+```sql
+select count(distinct (ctid::text::point)[0]) as copy_pages from l_copy \gset
+select lab.prove(
+  'the first scan after a plain COPY dirties every page that holds rows (hint bits)',
+  (:'first_scan'::jsonb -> 'Plan' ->> 'Shared Dirtied Blocks')::bigint = :copy_pages);
+select lab.prove(
+  'after a checkpoint, with checksums on, that read also writes a full-page image of each of those pages',
+  (:'first_scan'::jsonb -> 'Plan' ->> 'WAL FPI')::bigint = :copy_pages);
+select lab.prove(
+  'the first scan after COPY FREEZE dirties nothing: the rows were written frozen',
+  coalesce((lab.plan('select count(*) from l_freeze') -> 'Plan' ->> 'Shared Dirtied Blocks')::bigint, 0) = 0);
+```
+
+</ProveIt>
+
+<DeepDive title="What FREEZE marks, and the one honest catch">
+
+`pg_visibility_map_summary('l_freeze')` reports 1,759 pages all-visible and 1,759 all-frozen: every page that holds rows. (The file is 1,816 pages; `COPY` extends a table several pages at a time, and an empty page has nothing to mark.) The WAL was 19.4 MB against 19.3 MB for a plain `COPY`. Without the `truncate`, the error is `cannot perform COPY FREEZE because the table was not created or truncated in the current subtransaction`.
+
+The docs flag the catch: frozen rows are visible to every snapshot, so a transaction that started before your load and reads the table after it commits sees the new rows, which normal MVCC would hide. For a table nobody reads until the load is done, that doesn't matter.
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove(
+  'after COPY FREEZE every page holding rows is all-visible and all-frozen in the visibility map',
+  (select all_visible = (select count(distinct (ctid::text::point)[0]) from l_freeze)
+      and all_frozen = all_visible
+   from pg_visibility_map_summary('l_freeze')));
+select lab.prove(
+  'COPY FREEZE costs about the same WAL as a plain COPY (within 25%)',
+  lab.wal('COPY FREEZE') < 1.25 * lab.wal('COPY FROM STDIN'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Unlogged, then SET LOGGED, moves the WAL
+
+A popular trick: create the table [`unlogged`](/books/eight-kilobytes/glossary#unlogged-table), load it with no WAL, then `alter table ... set logged`. Rows 8a and 8b: the load wrote 34 KB, then `SET LOGGED` wrote 181 MB, against 184 MB for a plain `COPY`.
+
+The detour moves the cost; it doesn't remove it. `SET LOGGED` rewrites the table and logs every row, because a replica or a restore has no other record of the data. It holds an `ACCESS EXCLUSIVE` lock while it does, and until then a crash empties the table.
+
+Unlogged tables earn their place as **staging** tables that never become permanent: load raw data, clean it with SQL, insert the result into the real table, drop the staging table. Only the final insert pays WAL ([Skip the WAL for data you can regenerate](/books/eight-kilobytes/scale#skip-the-wal-for-data-you-can-regenerate)).
+
+<DeepDive title="SET LOGGED writes the table, then its indexes">
+
+At 100,000 rows, `SET LOGGED` wrote 18 MB: 100,190 records for the rows, then the rebuilt indexes. That's about the size of the table plus its indexes, close to what a plain `COPY` writes (19.3 MB).
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove(
+  'COPY into an unlogged table writes almost no WAL (under 1% of a logged COPY)',
+  lab.wal('COPY into an unlogged table') < 0.01 * lab.wal('COPY FROM STDIN'));
+select lab.prove(
+  'SET LOGGED rewrites the table into a new file',
+  pg_relation_filenode('l_unlogged') <> :filenode_before);
+select lab.prove(
+  'SET LOGGED writes WAL about the size of the table plus its index (0.7x to 1.3x)',
+  (select wal between 0.7 * (heap + idx) and 1.3 * (heap + idx)
+   from lab.runs where method = 'ALTER TABLE ... SET LOGGED'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## wal_level = minimal skips WAL for new tables
+
+Row 7 is the trap in common loading advice. "Create the table in the same transaction as the `COPY`" saved nothing: 184 MB, the same as row 5.
+
+That trick works only under `wal_level = minimal`, where a transaction that creates or truncates a table and loads it fsyncs the new files at commit instead of logging the rows. On a server started that way, the same load wrote 38 KB instead of 184 MB, and on that server it ran about three times faster than a `COPY` into a table that already existed.
+
+Everything else about it is expensive: a restart to turn on and off, no replicas, no archiving, so no point-in-time recovery. It fits one job, building a database from scratch before anything depends on it, then taking a fresh base backup. Managed databases usually won't let you set it.
+
+<DeepDive title="The minimal-WAL run, and the crash that didn't lose it">
+
+The second server runs `wal_level=minimal` and `max_wal_senders=0` (it won't start otherwise). There, `COPY` into a table that existed before the transaction still wrote the full 184 MB (109,841 rows a second); created in the transaction, 38 KB (352,487 rows a second); truncated in it, 2,939 KB. Since PostgreSQL 13 the skip covers any write into a new or truncated table, not only `COPY`; writes under `wal_skip_threshold` (default 2 MB) are WAL-logged at commit, which is cheaper than an fsync. The lab then kills the server with `SIGKILL` and lets crash recovery run: both loads are intact, because the commit's fsync made the files durable without the log.
+
+<ProveIt lab="26-loading.sh">
+
+```bash
+prove "created in the same transaction: under 1% of that WAL" \
+  mholds "select (select wal from runs where method = 'minimal: CREATE TABLE + COPY in one transaction')
+                < 0.01 * (select wal from runs where method = 'minimal: COPY into an existing table')"
+prove "after SIGKILL and crash recovery, both WAL-skipping loads are intact: 1,000,000 rows each" \
+  mholds "select (select count(*) from m_new) = 1000000 and (select count(*) from m_existing) = 1000000"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Build indexes and foreign keys after the load
+
+Rows 9 and 10 load the same rows into the same table with a primary key, two secondary indexes, and three foreign keys. With them in place: 64,047 rows a second and 346 MB of WAL. Bare, with everything added afterwards: 431,132 rows a second and 174 MB. Six to seven times faster across our runs, half the WAL, and the indexes came out 10 MB smaller.
+
+During the load, every row writes a WAL record per index and runs a lookup per foreign key. Built afterwards, an index sorts its keys once and is written a page at a time. Give that sort memory in the building session (`set maintenance_work_mem = '1GB'`; it's per operation, so a session-level setting is safe). `pg_restore` works in this order on its own.
+
+That's for empty tables and staging tables. A live table keeps its indexes and loads in batches.
+
+### Foreign keys: NOT VALID, then VALIDATE
+
+A foreign key checks the parent for every loaded row and queues a trigger event per row until the statement ends; on loads of many millions of rows, the docs warn, that queue can exhaust memory.
+
+Add it afterwards in two steps, as [migrations](/books/eight-kilobytes/migrations#add-foreign-keys-not-valid-then-validate) do: `NOT VALID` enforces it for new rows without checking old ones, then `VALIDATE CONSTRAINT` checks the old rows in one join, under a lock that lets writes continue. Validation is a real check: in the lab, it found an orphan planted before the constraint and left the constraint unvalidated until we deleted it.
+
+<DeepDive title="Why an index grown row by row comes out bigger">
+
+At 100,000 rows, indexes in place cost 348,851 WAL records; built afterwards, 5,194. (The time margin swung between runs; in one early run without a checkpoint between methods, the bare load lost.)
+
+Rows arrive in `created_at` order, but `(project_id, created_at)` scatters them across the index, so leaf pages split in half and settle partly empty. A built index is sorted first and packed to its fillfactor (90% for B-tree leaves): 3,104 KB built against 4,328 KB grown, and the grown one stays bigger until a `REINDEX`. [Every index is a tax on writes](/books/eight-kilobytes/btree#every-index-is-a-tax-on-writes) measures the per-index cost.
+
+`CREATE INDEX` sorts in `maintenance_work_mem` (default 64 MB), shared with up to `max_parallel_maintenance_workers` (default 2), and spills to temporary files past it: the lab's build spilled with 1 MB and didn't with 256 MB. Keep the server-wide value modest; each autovacuum worker can take that much too, unless `autovacuum_work_mem` says otherwise.
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove(
+  'with indexes in place, every row writes a WAL record per index; built afterwards, under a tenth as many records',
+  (select records from lab.runs where method = 'indexes and FKs present during COPY') > 300000
+  and (select records from lab.runs where method = 'COPY, then indexes, then FKs NOT VALID + VALIDATE')
+      < 0.1 * (select records from lab.runs where method = 'indexes and FKs present during COPY'));
+select lab.prove(
+  'the (project_id, created_at) index is at least 15% bigger when it grew row by row than when built after',
+  pg_relation_size('l_before_project_created_idx') > 1.15 * pg_relation_size('l_after_project_created_idx'));
+select lab.prove(
+  'with maintenance_work_mem = 1MB the index build spills its sort to temporary files',
+  :tf1 > :tf0);
+select lab.prove(
+  'with 256MB the same build sorts in memory: no temporary files',
+  :tf2 = :tf1);
+select lab.prove(
+  'VALIDATE finds the old orphan (23503) and the constraint stays not validated',
+  (select state = '23503' from lab.errs where test = 'validate finds orphan')
+  and (select not convalidated from pg_constraint where conname = 'l_after_project_fk'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A big load forces checkpoints and floods replicas
+
+A load that writes gigabytes of WAL doesn't happen alone.
+
+**Checkpoints come early.** WAL past `max_wal_size` (1 GB by default) forces a checkpoint ([Checkpoints put a limit on recovery](/books/eight-kilobytes/wal#checkpoints-put-a-limit-on-recovery)). The heaviest load above wrote 346 MB for a million rows, so ten million rows would pass it three times over. Each early checkpoint competes with the load for the disk and makes the next change to every page log a full-page image again ([The first change after a checkpoint logs the whole page](/books/eight-kilobytes/wal#the-first-change-after-a-checkpoint-logs-the-whole-page)). Before a planned load, raise `max_wal_size` (a reload, no restart), make sure the disk under `pg_wal` has room, and put it back after.
+
+**Every replica receives every byte**, and replays it in a single process ([Replay is one process](/books/eight-kilobytes/replication#replay-is-one-process)). Write less WAL (load bare, stage in unlogged tables, turn on [wal_compression](/books/eight-kilobytes/wal#wal_compression-is-a-cheap-win)), load in batches, and pause when replica lag passes your budget. Logical subscribers apply the load row by row and lag longer still.
+
+<DeepDive title="What two forced checkpoints cost a load">
+
+The same 500,000 rows into a table with three indexes, with `max_wal_size` at 128 MB and at 16 GB:
+
+```text
+        method        |  ms  |  wal   | full_page_images | requested_checkpoints
+----------------------+------+--------+------------------+-----------------------
+ max_wal_size = 128MB | 7910 | 196 MB |              999 |                     2
+ max_wal_size = 16GB  | 6678 | 190 MB |                3 |                     0
+```
+
+Two forced checkpoints, 999 page images instead of 3. Only 6 MB here, because a load mostly writes new pages, logged in full either way; a load into a big table with existing indexes re-images thousands of scattered old pages after every checkpoint. With `log_checkpoints` on (the default since PostgreSQL 15), the log says when a checkpoint was requested by WAL volume.
+
+A long `COPY` reports progress in `pg_stat_progress_copy` (PostgreSQL 14+); track `tuples_processed`, since `bytes_total` is 0 for `STDIN`.
+
+<ProveIt lab="26-loading.sh">
+
+```bash
+prove "with max_wal_size = 128MB the load forced at least one checkpoint" \
+  holds "select checkpoints >= 1 from runs where method = 'max_wal_size = 128MB'"
+prove "the extra checkpoints cost full-page images: at least 5x as many as the run without them" \
+  holds "select (select fpi from runs where method = 'max_wal_size = 128MB')
+                > 5 * ((select fpi from runs where method = 'max_wal_size = 16GB') + 100)"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Vacuum and analyze before you open the doors
+
+Pay the deferred costs yourself, right after the load:
+
+```sql
+vacuum (freeze, analyze) events_import;
+```
+
+One pass sets the hint bits, freezes every row so no anti-wraparound vacuum has to visit these pages again (vacuum's [freeze step](/books/eight-kilobytes/vacuum#4-freeze-old-tuples)), marks pages all-visible so index-only scans work, and gathers statistics. Autovacuum would get there eventually, throttled, on its own schedule, while your users are already querying. On a `COPY FREEZE` table there's nothing left to freeze, and the same command writes almost nothing.
+
+Don't skip the `analyze`. A table that has never been analyzed has no column statistics, so the planner guesses. Asked how many of 100,000 freshly loaded events were alerts, it estimated 554. The real count was 12,621, off by a factor of 23, and a guess that far off picks nested loops where a hash join belongs. After `ANALYZE`: 12,550. Make it the last step of every load ([Three kinds of change slip past autovacuum's analyze](/books/eight-kilobytes/planner#three-kinds-of-change-slip-past-autovacuums-analyze)).
+
+<DeepDive title="Loading into an existing table goes stale the other way">
+
+A table with statistics isn't safe either: after a big load into it, they describe the table before the load until something analyzes it. Autovacuum analyzes a table once 10% of it has changed (`autovacuum_analyze_scale_factor`, plus 50 rows), so a load that adds 5% to a large table may never trigger it. And the rows you just loaded are usually the newest, the ones queries ask for, sitting past the end of the histogram the planner still holds. Analyze after every big load, not only into empty tables.
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove(
+  'the COPY FREEZE table has nothing left to freeze: under a twentieth of that WAL',
+  :vac_frozen_wal < :vac_plain_wal / 20);
+select lab.prove(
+  'never analyzed, the planner guesses alerts at under a fifth of the real count',
+  :est_before < :alerts / 5.0);
+select lab.prove(
+  'after ANALYZE the estimate is within 20% of the real count',
+  abs(:est_after - :alerts) < 0.2 * :alerts);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## One bad value fails the whole COPY
+
+By default one malformed value anywhere fails the whole `COPY`, and nothing is loaded. PostgreSQL 17 added `ON_ERROR ignore`, which skips rows whose values don't convert to the column's type; PostgreSQL 18 added `REJECT_LIMIT`, so "skip a few" can't quietly become "skip half the file". Only **data type** errors are skipped: a duplicate key or a failed constraint still stops everything.
+
+For dirtier data, `COPY` into a staging table of `text` columns, which accepts anything, and move the rows that pass your checks with one `INSERT ... SELECT`.
+
+<DeepDive title="What ON_ERROR skips, and what still stops the load">
+
+Given four rows, two with a bad integer, `on_error ignore` loads the other two and, with `log_verbosity verbose`, prints a notice per skipped row. With `reject_limit 1`, the second bad row fails the command (`skipped more than REJECT_LIMIT (1) rows due to data type incompatibility`), and nothing is loaded.
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove('REJECT_LIMIT 1 with two bad rows fails the COPY, and nothing is loaded',
+  (select msg like 'skipped more than REJECT_LIMIT (1) rows%' from lab.errs where test = 'reject_limit 1')
+  and (select count(*) from l_strict) = 0);
+select lab.prove('ON_ERROR ignore does not skip constraint violations: a duplicate key still fails the COPY (23505)',
+  (select state = '23505' from lab.errs where test = 'on_error and a duplicate')
+  and (select count(*) from l_strict) = 0);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Freeze the partition, attach it built, analyze the parent
+
+`COPY` into a partitioned table routes each row to its partition and still batches per partition. Three differences:
+
+- **`FREEZE` works only on a partition** created or truncated in the same transaction, never on the parent.
+- **Build the next partition off to the side**: load and index an ordinary table, add a `CHECK` matching the bounds, and `attach partition` skips its validation scan ([Convert a live table without downtime](/books/eight-kilobytes/partitioning#convert-a-live-table-without-downtime)).
+- **Analyze the parent.** Autovacuum never does, and its statistics plan queries across partitions.
+
+<DeepDive title="FREEZE needs the partition itself">
+
+Name the partition, not the parent, in the `COPY`:
+
+```sql
+begin;
+truncate events_2026_10;
+\copy events_2026_10 from 'october.csv' with (format csv, freeze)
+commit;
+```
+
+Loading a partition directly still checks every row against its bounds: a row for the wrong month fails the command. Truncating a partition takes an `ACCESS EXCLUSIVE` lock on it, so this fits a partition nobody reads yet, such as next month's.
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove('COPY FREEZE on a partitioned table is refused (0A000)',
+  (select state = '0A000' and msg = 'cannot perform COPY FREEZE on a partitioned table'
+   from lab.errs where test = 'freeze on parent'));
+select lab.prove('COPY FREEZE works on one partition truncated in the same transaction: same rows, all frozen',
+  (select count(*) from :"leaf") = :leaf_rows
+  and (select all_frozen >= 0.9 * pg_relation_size(:'leaf') / 8192 from pg_visibility_map_summary(:'leaf')));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Upserts in bulk: stage, then one statement
+
+Syncing a feed into an existing table usually gets written as one `INSERT ... ON CONFLICT` per incoming row: the single-row pattern from the top of the chapter, plus an index lookup. Stage it instead:
+
+```sql
+create temp table stage (project_id bigint, events bigint, last_event_at timestamptz);
+\copy stage from 'feed.csv' with (format csv)
+
+insert into project_stats
+select * from stage
+on conflict (project_id) do update
+  set events        = project_stats.events + excluded.events,
+      last_event_at = greatest(project_stats.last_event_at, excluded.last_event_at);
+```
+
+For a feed of 19,874 rows, one upsert at a time took 2,811 ms, even inside one transaction. Staged, 605 ms, same result.
+
+One rule bites every bulk upsert: a statement can't update the same row twice. A feed with a key twice fails with `ON CONFLICT DO UPDATE command cannot affect row a second time`. Deduplicate the staging table first (`group by` or `distinct on`), which you can do because it's a table.
+
+<DeepDive title="MERGE, and the table autovacuum never analyzes">
+
+`MERGE` (PostgreSQL 15+) from the same staging table produced an identical table; [MERGE races where ON CONFLICT waits](/books/eight-kilobytes/queries#merge-races-where-on-conflict-waits) explains why `ON CONFLICT` is safer when other sessions write concurrently. Autovacuum never analyzes temporary tables, so run `analyze stage` before joining against it.
+
+<ProveIt lab="26-loading">
+
+```sql
+select lab.prove('row-by-row, staged ON CONFLICT and MERGE produce identical tables',
+  not exists (select * from ps_row except select * from ps_bulk)
+  and not exists (select * from ps_bulk except select * from ps_row)
+  and not exists (select * from ps_merge except select * from ps_row)
+  and (select count(*) from ps_row) = (select count(*) from ps_merge));
+select lab.prove('staging plus one upsert is at least twice as fast as one upsert per row',
+  :bulk_ms * 2 < :row_ms);
+select lab.prove('a batch with the same key twice fails ON CONFLICT DO UPDATE (21000)',
+  (select state = '21000' and msg like 'ON CONFLICT DO UPDATE command cannot affect row a second time%'
+   from lab.errs where test = 'same key twice'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A planned load takes seven steps
+
+A planned load into a new or empty table:
+
+1. Raise `max_wal_size`, and check `pg_wal` has the disk for it.
+2. Create the table without secondary indexes or foreign keys, or `truncate` it in the loading transaction.
+3. `COPY ... WITH (FREEZE)` in that transaction.
+4. `set maintenance_work_mem` high and build the indexes.
+5. Add foreign keys `NOT VALID`, then `VALIDATE` them.
+6. `vacuum (freeze, analyze)`, or only `analyze` after `FREEZE`.
+7. Put `max_wal_size` back, and watch replica lag until it catches up.
+
+For a live table: batches through a staging table, indexes kept, pausing when lag grows.
+
+## The short version
+
+- Commit per batch, not per row: an autocommit insert waits for a disk flush every time.
+- Use `COPY` (`\copy`, or your driver's copy API): it beats any `INSERT` on speed and WAL. If you must `INSERT`, send `unnest` arrays.
+- Load bare, then build indexes and add foreign keys `NOT VALID` plus `VALIDATE`: six times faster, half the WAL.
+- `COPY ... FREEZE` into a table created or truncated in the same transaction writes rows finished, so the first read doesn't write.
+- Unlogged-then-`SET LOGGED` moves the WAL, it doesn't save it. Only `wal_level = minimal` skips it, at the cost of replicas and PITR.
+- Raise `max_wal_size` before a big load, and finish it with `vacuum (freeze, analyze)`, or at least `analyze`.
+- Upsert in bulk from a deduplicated staging table.
+
+## Further reading
+
+- [Populating a Database](https://www.postgresql.org/docs/18/populate.html), PostgreSQL documentation. The official checklist: COPY, dropping indexes and foreign keys, `maintenance_work_mem`, `max_wal_size`, `wal_level = minimal`, and analyze afterwards.
+- [COPY](https://www.postgresql.org/docs/18/sql-copy.html), PostgreSQL documentation. Every option, including `FREEZE`, `ON_ERROR`, `REJECT_LIMIT`, and `LOG_VERBOSITY`, and the file-access rules for server-side copies.
+- [Write Ahead Log settings](https://www.postgresql.org/docs/18/runtime-config-wal.html), PostgreSQL documentation. What `wal_level = minimal` removes, which commands skip WAL under it, and `wal_skip_threshold`.
+- [INSERT ... ON CONFLICT](https://www.postgresql.org/docs/18/sql-insert.html#SQL-ON-CONFLICT), PostgreSQL documentation. The upsert rules, including why one statement can't touch a row twice.

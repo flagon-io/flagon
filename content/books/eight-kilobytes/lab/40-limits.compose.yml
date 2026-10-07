@@ -1,0 +1,86 @@
+# The limits lab for "Eight Kilobytes": the same two million events in a row
+# store (PostgreSQL 18) and two column stores (ClickHouse, a server, and
+# DuckDB, an embedded engine run here through its command-line client), plus
+# a second PostgreSQL 18 with the pg_duckdb extension. 40-limits.sh starts it,
+# loads the book's seed into Postgres, exports the events with COPY, loads
+# them into the others, compares sizes and a few analytical queries, and
+# throws it all away.
+#
+#   ./lab 40
+#
+# No ports are published; the script talks to each server through
+# `docker compose exec`. Images are pinned to the versions the chapter was
+# measured with; newer ones should tell the same story with different numbers.
+name: ek-limits
+
+services:
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+    shm_size: 512m
+    mem_limit: 3g
+    volumes:
+      - ./:/lab:ro
+      # Builds the `book` template from seed.sql on first start, as the main kit does.
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - xfer:/xfer
+    healthcheck:
+      # Over TCP, so the check only passes once the real server is up: the
+      # server that runs the init scripts listens on its socket alone.
+      test: ["CMD-SHELL", "psql -h 127.0.0.1 -U postgres -Atc \"select 1 from pg_database where datname = 'book' and datistemplate\" | grep -q 1"]
+      interval: 5s
+      timeout: 5s
+      # Seeding takes one to five minutes, depending on the machine.
+      retries: 180
+      start_period: 10s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.18.2
+    # ClickHouse sizes its caches from the memory it can see; cap it so the
+    # lab stays polite on a laptop.
+    mem_limit: 3g
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      # file('xfer/...') reads from the server's user_files directory.
+      - xfer:/var/lib/clickhouse/user_files/xfer
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client -q 'select 1' >/dev/null"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+
+  pgduckdb:
+    # PostgreSQL 18 with the pg_duckdb extension preinstalled: DuckDB's
+    # executor inside Postgres, reading ordinary Postgres tables. Its own
+    # server, so the plain one above stays plain.
+    image: pgduckdb/pgduckdb:18-v1.1.1
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+    shm_size: 512m
+    mem_limit: 3g
+    volumes:
+      - xfer:/xfer
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+
+  duckdb:
+    # The official DuckDB CLI image. Not a server: the script runs it once
+    # per command with `docker compose run`, against a database file on the
+    # shared volume.
+    image: duckdb/duckdb:1.5.6
+    profiles: ["cli"]
+    mem_limit: 3g
+    volumes:
+      - xfer:/xfer
+
+volumes:
+  xfer:

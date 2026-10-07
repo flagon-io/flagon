@@ -1,0 +1,97 @@
+---
+title: Eight Kilobytes
+subtitle: PostgreSQL from the page up
+description: A free book on PostgreSQL performance and design, from the 8 KB page on disk to indexes, query plans, locking, migrations, and running it in production. Every example run against PostgreSQL 18.
+author: Chase Pierce
+publisher: Flagon
+edition: First edition
+published: 2026-10-05
+cover: field
+# The paperback's store listing. Until it's set, the landing page says "Soon".
+amazon: ""
+back_cover: |
+  Two queries, same table, seconds apart. One read 4 pages. The other read 35,173.
+
+  PostgreSQL does all of its work in 8 KB pages. A fast query touches few of them. A slow one touches many, or waits on someone who is. Learn to count them and most of the mystery goes away.
+
+  Eight Kilobytes starts at the page and works up: how Postgres stores and changes your rows, how indexes and the planner find them, why a harmless migration takes the site down, and everything to try before you buy a bigger database, or a second one.
+
+  No folklore. Every claim that matters was measured on PostgreSQL 18, and comes with a check you can rerun yourself.
+
+  For developers who use Postgres every day and are done guessing.
+# Reading order. File names don't decide it, so chapters can be added or moved
+# without renaming anything.
+chapters:
+  - preface
+  - basics
+  # The machine
+  - latency
+  - storage
+  - buffers
+  - mvcc
+  - hot
+  - wal
+  - acid
+  - vacuum
+  - not-mysql
+  # Designing for it
+  - types
+  - keys
+  - relationships
+  - models
+  - extensions
+  # Finding rows fast
+  - btree
+  - more-indexes
+  - explain
+  - planner
+  - plans
+  - queries
+  - search
+  - functions
+  # Changing it
+  - concurrency
+  - migrations
+  - loading
+  # Running it
+  - connections
+  - benchmarking
+  - configuration
+  - observability
+  - backups
+  - security
+  - managed
+  - providers
+  - playbook
+  # Scaling out
+  - scale
+  - replication
+  - partitioning
+  - sharding
+  - limits
+  # Back matter
+  - checklists
+  - glossary
+  - bibliography
+---
+
+
+Almost everything about PostgreSQL performance comes down to one number: 8,192. That's the size of a page, the unit Postgres reads, writes, and caches. A fast query touches few pages. A slow one touches many, or waits on someone else who is. Once you can see the pages, most of the mystery goes away.
+
+You've probably met the symptoms already. The dashboard that was instant at launch and crawls now. The migration that "does nothing" and took the site down anyway. The table that keeps growing faster than the data in it. And the standing offer to fix all of it with a bigger instance. This book is the alternative to that offer.
+
+## Count the pages, then earn the bigger box
+
+The book starts at the bytes on disk and works up: how rows are stored and changed, how indexes and the planner find them, how to change a schema without an outage, and how to run Postgres in production. Along the way it builds two habits. Before you add an index, raise a setting, or blame the ORM, ask how many pages the work touches. And before you buy a bigger database, or a second one, use up the cheap fixes and prove in numbers that you've outgrown them.
+
+That includes knowing where Postgres stops. On the same two million events, two column stores kept the data in under a fifth of the bytes and answered about ten times faster than a tuned Postgres. The book shows how far one Postgres goes, and the signal that tells you it's time for something else.
+
+It's written for application developers who use Postgres every day, often through an ORM. You need basic SQL, not internals.
+
+## Every claim that matters comes with a check
+
+Every query ran against PostgreSQL 18, on a sample schema you can load in a minute, and every claim that matters comes with a lab check you can rerun on your own machine. Each chapter is a short essay you can read on its own; deep dives hold the machinery and the full measurements for when you want them.
+
+## Free, and written in the open
+
+Read it here, chapter by chapter, or download the whole thing as a PDF. It's versioned in git like everything else we publish, so when Postgres changes, the book does too. If something's wrong or unclear, that's a bug: [open an issue or send a fix](https://github.com/flagon-io/flagon/issues).

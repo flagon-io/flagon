@@ -1,0 +1,641 @@
+---
+title: Types are a contract
+description: Pick column types and collations that stay correct and compact for years, and know which popular choices quietly cause bugs, bloat, or corruption.
+part: Designing for it
+builds_on: [storage]
+---
+
+This error has woken up more than one on-call engineer:
+
+```sql
+select 2147483647::int + 1;
+```
+
+```text
+ERROR:  integer out of range
+```
+
+That's the largest value a 4-byte `integer` holds. When an `integer` id's sequence reaches it, every insert fails. Not some: every one. The fix rewrites the table, its indexes, and every table whose foreign key points at it. The decision behind it took two seconds, years earlier, in a migration nobody remembers.
+
+Types are the cheapest decision you make and the most expensive to change. A type is a contract: how many bytes every row spends, which values can exist at all, and how comparison and arithmetic behave. For text, the collation is part of that contract, and it's the one part that can change under you without a migration.
+
+## Every byte is paid per row
+
+A query costs roughly the pages it touches, and a page holds 8 KB. Shrink a row from 125 bytes to 100 and every scan touches about 20 percent fewer pages. `pg_column_size()` tells you what any value costs, and alignment can pad a narrow column out to 8 bytes ([Column order is free space](/books/eight-kilobytes/storage#column-order-is-free-space)).
+
+Keep it in proportion: correctness first, then the freedom to change your mind, then bytes.
+
+## Integers run out sooner than you think
+
+| Type       | Bytes | Range                               |
+| ---------- | ----- | ----------------------------------- |
+| `smallint` | 2     | about plus or minus 32 thousand     |
+| `integer`  | 4     | about plus or minus 2.1 billion     |
+| `bigint`   | 8     | about plus or minus 9.2 quintillion |
+
+### Ids are bigint
+
+Use `bigint` for every primary key and every column that references one. Rolled-back inserts, `on conflict` attempts, and discarded bulk loads all consume sequence values, and the 4 bytes you'd save are small next to the 23-byte [row header](/books/eight-kilobytes/glossary#tuple-header). Changing `integer` to `bigint` later rewrites every referencing table, a multi-week project on a large system ([The int to bigint problem](/books/eight-kilobytes/migrations#the-int-to-bigint-problem)).
+
+The running example's `events` table holds 2,000,000 rows, leaving 2,145,483,647 values of `integer` headroom. That feels safe until you do the arithmetic: a pipeline writing 1,000 rows a second, counting retries, uses it up in about 25 days.
+
+When unsure, pick the bigger type. Nobody has been paged because a column was too wide. The one exception to `bigint` is a key that something outside the database must mint first, which is a `uuid` ([The database can't always mint the id](/books/eight-kilobytes/keys#the-database-cant-always-mint-the-id)).
+
+## Money is numeric, never float
+
+Floating-point types (`real`, `double precision`) store binary approximations, and most decimal fractions have no exact binary form. Add up a million dimes:
+
+```sql
+select sum(0.1::float8)  from generate_series(1, 1000000);
+select sum(0.1::numeric) from generate_series(1, 1000000);
+```
+
+```text
+ 100000.00000133288
+ 100000.0
+```
+
+<ProveIt lab="11-types">
+
+```sql
+select lab.prove('a million float8 0.1s sum to 100000.00000133288',
+  (select sum(0.1::float8)::text from generate_series(1, 1000000)) = '100000.00000133288');
+select lab.prove('a million numeric 0.1s sum to exactly 100000.0',
+  (select sum(0.1::numeric)::text from generate_series(1, 1000000)) = '100000.0');
+```
+
+</ProveIt>
+
+That stray `0.00000133288` is how a one-cent discrepancy in an invoice reconciliation starts. Use `numeric(p, s)` with the currency's minor-unit scale, or `bigint` cents, and either way a currency column. Floating point is for sensor readings, scores, and coordinates, where a tiny relative error is fine.
+
+<DeepDive title="Where numeric rounds, and where it doesn't">
+
+`numeric(12, 2)` rounds on input, but the declared scale applies only when a value is stored or cast, not to arithmetic:
+
+```sql
+select 1234.567::numeric(12, 2), 2.5::numeric(4, 2) * 1.15;
+```
+
+```text
+ numeric | ?column?
+---------+----------
+ 1234.57 |   2.8750
+```
+
+You decide when and how to round, which is right for money: banker's rounding, per line or per invoice, is a business rule. `numeric` is variable width (`pg_column_size` gives 8 bytes for `1`, 14 for `123456789.12`) and slower than integer math, which matters only when you sum hundreds of millions of rows. There, integer cents win.
+
+</DeepDive>
+
+## Use text, and put the length in a check
+
+`text` and `varchar(n)` are stored identically: `'hello'` takes 9 bytes as either. `char(n)` pads, and takes 54 bytes as `char(50)`. `varchar(n)` is `text` with a length check bolted onto the type, and that bolt is the problem. Length rules change, and a rule written into the type reads like a storage decision when it's really validation. Say it as a constraint:
+
+```sql
+email text not null check (length(email) <= 320)
+```
+
+A check is named, can be swapped without touching the column type, can be added `not valid` and validated later without a long lock ([Add a CHECK NOT VALID, then validate it](/books/eight-kilobytes/migrations#add-a-check-not-valid-then-validate-it)), and can say things a length can't, like "not empty". `varchar(255)` is a MySQL habit with MySQL reasons (index prefix limits) that don't exist here.
+
+<DeepDive title="char(n) pads, then forgets the padding">
+
+```sql
+select 'a '::char(3) = 'a'::char(3), length('a  '::char(3)), 'a '::char(3) || 'b';
+```
+
+```text
+ ?column? | length | ?column?
+----------+--------+----------
+ t        |      1 | ab
+```
+
+Trailing spaces are insignificant in comparisons and stripped on concatenation. Even ISO country codes are `text` with `check (length(code) = 2)`. To be fair to `varchar(n)`: raising `n` has been metadata-only for years. Lowering it still means work.
+
+</DeepDive>
+
+## Collations decide what equal means
+
+A **collation** is the set of rules for comparing and sorting text. It decides whether `'a' < 'B'`, where `'_draft'` sorts, and whether `'Ada@Example.com'` equals `'ada@example.com'`. Every text index is built in collation order, so the collation is baked into your indexes as firmly as the data.
+
+The same six words, sorted under four collations on one server:
+
+```sql
+select string_agg(x, ' ' order by x collate "C")          as c,
+       string_agg(x, ' ' order by x collate "en_US.utf8") as libc_en,
+       string_agg(x, ' ' order by x collate "unicode")    as icu,
+       string_agg(x, ' ' order by x collate "pg_c_utf8")  as builtin
+from (values ('apple'), ('Banana'), ('cherry'),
+             ('_draft'), ('Zebra'), ('éclair')) v(x);
+```
+
+```text
+ c        Banana Zebra _draft apple cherry éclair
+ libc_en  apple Banana cherry _draft éclair Zebra
+ icu      _draft apple Banana cherry éclair Zebra
+ builtin  Banana Zebra _draft apple cherry éclair
+```
+
+(Turned on its side to fit.) `C` and builtin sort by code point: capitals first, `é` after `z`. glibc's `en_US` all but ignores punctuation; ICU puts it first. Four collations, three orders: same data, three answers to "what comes next".
+
+### Pick a collation provider whose order never changes
+
+| Provider | Rules come from          | Changes when                 |
+| -------- | ------------------------ | ---------------------------- |
+| libc     | the OS C library (glibc) | you upgrade the OS           |
+| ICU      | the ICU library          | you upgrade ICU              |
+| builtin  | Postgres itself          | never, for sort order        |
+
+Unless someone chose otherwise, your database uses libc, because `initdb` copies the OS locale (this one: `en_US.utf8` on glibc 2.41). The builtin provider arrived in PostgreSQL 17. Our default for a new database is builtin `C.UTF-8`, code-point order that never changes:
+
+```sql
+create database app template template0
+  locale_provider builtin builtin_locale 'C.UTF-8';
+```
+
+Byte comparisons, a sort order that survives every OS upgrade, and a plain [B-tree](/books/eight-kilobytes/glossary#b-tree) that serves `like 'abc%'` ([Prefix search needs the right operator class](/books/eight-kilobytes/more-indexes#prefix-search-needs-the-right-operator-class)). Where people read the order, ask for it: `order by name collate "unicode"`. Linguistic sorting where you need it, stability everywhere else.
+
+<DeepDive title="Builtin sorts like C, but knows a capital letter">
+
+```sql
+select upper('éclair' collate pg_c_utf8) as builtin,
+       upper('éclair' collate "C")       as c;
+```
+
+```text
+ builtin | c
+---------+--------
+ ÉCLAIR  | éCLAIR
+```
+
+PostgreSQL 18 adds `pg_unicode_fast`, which also does full Unicode case mapping (`ß` folds to `ss`). The lab checks all four orders from the sort demo.
+
+<ProveIt lab="11-types">
+
+```sql
+create temp table words as
+  select x from (values ('apple'), ('Banana'), ('cherry'),
+                        ('_draft'), ('Zebra'), ('éclair')) v(x);
+select lab.prove('C sorts by code point: Banana Zebra _draft apple cherry éclair',
+  (select string_agg(x, ' ' order by x collate "C") from words)
+    = 'Banana Zebra _draft apple cherry éclair');
+select lab.prove('builtin pg_c_utf8 sorts exactly like C',
+  (select string_agg(x, ' ' order by x collate "pg_c_utf8") from words)
+    = (select string_agg(x, ' ' order by x collate "C") from words));
+select lab.prove('glibc en_US puts _draft after cherry: apple Banana cherry _draft éclair Zebra',
+  (select string_agg(x, ' ' order by x collate "en_US.utf8") from words)
+    = 'apple Banana cherry _draft éclair Zebra');
+select lab.prove('ICU (unicode, root locale) puts _draft first: _draft apple Banana cherry éclair Zebra',
+  (select string_agg(x, ' ' order by x collate "unicode") from words)
+    = '_draft apple Banana cherry éclair Zebra');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### For emails, make lower() the unique key
+
+Every collation above is **deterministic**: strings are equal only if their bytes are. So `where email = 'USER1@EXAMPLE.COM'` finds nothing when `user1@example.com` exists, and `unique (account_id, email)` happily accepts `Ada@x.com` next to `ada@x.com`: two accounts the user thinks are one. Four tools fix it:
+
+- **`lower()` plus a unique expression index.** Works everywhere; queries must say `lower(email)` exactly as the index does ([An index stores exactly what you gave it](/books/eight-kilobytes/btree#an-index-stores-exactly-what-you-gave-it)).
+- **`citext`**, a contrib type that calls `lower()` for you.
+- **A nondeterministic ICU collation** (PostgreSQL 12+), where different bytes can compare equal. The most correct, but `like` works on it only from PostgreSQL 18, and never through a B-tree.
+- **`casefold()`** (PostgreSQL 18+), the Unicode-correct `lower()`. Under an ICU or `pg_unicode_fast` collation, `STRASSE` and `Straße` match; under libc or builtin `C.UTF-8`, `ß` stays `ß`.
+
+For emails and usernames, `lower()` with a unique expression index is our default: boring and predictable.
+
+<Callout type="info" title="Coming from MySQL">
+
+MySQL's default collation ignores case and accents; Postgres's deterministic ones don't. Pick a tool per column before the import ([Strings compare exactly](/books/eight-kilobytes/not-mysql#strings-compare-exactly)).
+
+</Callout>
+
+<DeepDive title="A case-insensitive collation, and the scan it costs you">
+
+```sql
+create collation case_insensitive (
+  provider = icu, locale = 'und-u-ks-level2', deterministic = false
+);
+create table users_ci (
+  id bigint primary key, account_id bigint not null,
+  email text collate case_insensitive not null,
+  unique (account_id, email)
+);
+insert into users_ci select id, account_id, email from users;
+insert into users_ci values (1000001, 2, 'USER1@EXAMPLE.COM');
+```
+
+```text
+ERROR:  duplicate key value violates unique constraint "users_ci_account_id_email_key"
+```
+
+`ks-level2` ignores case; `ks-level1` ignores accents too. Equality uses the index, 7 pages for the uppercase lookup. `like` works only from PostgreSQL 18, and then as a scan:
+
+```text
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared hit=1 read=833 dirtied=1
+   ->  Seq Scan on users_ci (actual rows=1.00 loops=1)
+```
+
+All 834 pages for one row. Regular expressions and `ilike` fail outright.
+
+<ProveIt lab="11-types">
+
+```sql
+select lab.prove('the case-insensitive unique constraint rejects USER1@EXAMPLE.COM',
+  lab.try($$ insert into users_ci values (1000001, 2, 'USER1@EXAMPLE.COM') $$)
+    like '23505:%users_ci_account_id_email_key%');
+select lab.prove('but it is a sequential scan of all 834 pages',
+  'Seq Scan' = any(lab.nodes($$ select count(*) from users_ci where email like 'USER4242@%' $$))
+  and lab.buffers($$ select count(*) from users_ci where email like 'USER4242@%' $$) >= 834);
+select lab.prove('regular expressions fail: nondeterministic collations are not supported',
+  lab.try($$ select count(*) from users_ci where email ~ 'x' $$)
+    like '0A000: nondeterministic collations are not supported%');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### An OS upgrade can corrupt your indexes
+
+A B-tree on text keeps keys in the order the collation said was right on the day each was inserted. Change the rules and a search walks the old order by the new rules, down the wrong branch. Nothing errors. Rows just stop being found.
+
+This is not hypothetical. glibc 2.28 (2018) rewrote its collation data for most locales, and the OS releases that shipped it (Debian 10, RHEL 8, Ubuntu 18.10 among them) could reorder the keys of any libc-collated index (other than `C` or `POSIX`) upgraded in place or restored as a physical copy. A physical replica on a newer OS image has the same problem.
+
+We simulated it on a scratch database. The primary key stopped finding `'Zebra'`, which was still in the table. Then it accepted a second `'Zebra'`. Then `reindex`, the usual fix, failed on that duplicate. Missed rows first, then duplicates that break the repair.
+
+<DeepDive title="Watch an index lose a row it still holds">
+
+Point a collation at different rules in the catalog, which is what an OS upgrade looks like from Postgres's side (scratch database only):
+
+```sql
+create collation app_en (provider = libc, locale = 'en_US.utf8');
+create table tags (name text collate app_en primary key);
+insert into tags values ('apple'), ('Banana'), ('cherry'), ('_draft'), ('Zebra'),
+                        ('éclair'), ('delta'), ('Echo'), ('fig'), ('Golf');
+insert into tags select 'tag' || g from generate_series(1, 5000) g;
+insert into tags select 'Tag' || g from generate_series(1, 5000) g;
+
+update pg_collation set collcollate = 'C.utf8', collctype = 'C.utf8', collversion = null
+where collname = 'app_en';
+```
+
+In a new session, `name = 'Zebra'` returns nothing and `name >= 'Tag1' and name < 'Tag2'` counts 0; with index scans off, `Zebra` and 1,111 rows. Then:
+
+```text
+insert into tags values ('Zebra');   -> INSERT 0 1
+reindex index tags_pkey;             -> ERROR:  could not create unique index "tags_pkey"
+                                        DETAIL:  Key (name)=(Zebra) is duplicated.
+```
+
+<ProveIt lab="11-types">
+
+```sql
+-- in the lab's own throwaway clone, after the pg_collation update and a reconnect
+select lab.prove('after the change, the index finds no Zebra',
+  (select count(*) from tags where name = 'Zebra') = 0);
+select lab.prove('with index scans disabled, the same queries find Zebra and 1,111 rows',
+  (select count(*) from tags where name = 'Zebra') = 1
+  and (select count(*) from tags where name >= 'Tag1' and name < 'Tag2') = 1111);
+select lab.prove('the primary key accepts a second Zebra',
+  lab.try($$ insert into tags values ('Zebra') $$) = 'ok');
+select lab.prove('reindex fails: could not create unique index "tags_pkey"',
+  lab.try($$ reindex index tags_pkey $$) like '23505: could not create unique index "tags_pkey"%');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Detect it before it bites
+
+Postgres records the library's version with each collation (and, since PostgreSQL 15, the database default) and warns on use when it changes. Your application won't show that warning to anyone, so ask after every OS or image change:
+
+```sql
+select collname, collversion as recorded, pg_collation_actual_version(oid) as actual
+from pg_collation where collversion <> pg_collation_actual_version(oid);
+```
+
+```text
+ collname | recorded | actual
+----------+----------+--------
+ app_en   | 2.28     | 2.41
+```
+
+Treat any mismatch as "rebuild before trusting". Fix duplicates, `reindex` (concurrently) every text index under the collation, check with `amcheck` (which verifies each index's order under today's rules), then record the new version with `alter collation ... refresh version`.
+
+<Callout type="danger" title="Refresh the version only after reindexing">
+
+`refresh version` fixes nothing. It only silences the warning. Treat OS upgrades, base image bumps, and new replica images as collation events, or use the builtin provider and stop worrying.
+
+</Callout>
+
+<DeepDive title="The warning, the exposed indexes, and amcheck">
+
+The session that uses a stale collation gets:
+
+```text
+WARNING:  collation "app_en" has version mismatch
+DETAIL:  The collation in the database was created using version 2.28,
+but the operating system provides version 2.41.
+```
+
+<ProveIt lab="11-types">
+
+```sql
+select lab.prove('the version check finds app_en recorded at 2.28 against the library''s 2.41',
+  (select (collversion, pg_collation_actual_version(oid)) = ('2.28', '2.41')
+   from pg_collation
+   where collversion <> pg_collation_actual_version(oid) and collname = 'app_en'));
+```
+
+</ProveIt>
+
+For the database default, compare `datcollversion` with `pg_database_collation_actual_version(oid)`. Since PostgreSQL 15 the database warns on every new connection; we edited a scratch database's catalog row to claim an older glibc:
+
+```text
+WARNING:  database "w_edges" has a collation version mismatch
+DETAIL:  The database was created using collation version 2.31,
+but the operating system provides version 2.41.
+HINT:  Rebuild all objects in this database that use the default collation
+and run ALTER DATABASE w_edges REFRESH COLLATION VERSION,
+or build PostgreSQL with the right library version.
+```
+
+`alter database w_edges refresh collation version` answered `NOTICE: changing version from 2.31 to 2.41`, and fixed nothing else. Rebuild first, as the hint says, then refresh.
+
+<ProveIt lab="11-types">
+
+```sql
+select lab.prove(
+  'the recorded collation version (2.31) no longer matches the library',
+  (select datcollversion <> pg_database_collation_actual_version(oid)
+   from pg_database where datname = current_database()));
+select lab.prove(
+  'REFRESH COLLATION VERSION only rewrites the recorded number',
+  (select datcollversion = pg_database_collation_actual_version(oid)
+   from pg_database where datname = current_database()));
+```
+
+</ProveIt>
+
+The exposed indexes are those on text in a libc or ICU collation:
+
+```sql
+select i.indexrelid::regclass as index_name, i.indrelid::regclass as table_name
+from pg_index i
+join pg_class c on c.oid = i.indexrelid
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname not in ('pg_catalog', 'information_schema')
+  and exists (
+    select 1 from unnest(i.indcollation::oid[]) as k(coll)
+    join pg_collation pc on pc.oid = k.coll
+    where pc.collprovider <> 'b' and pc.collname not in ('C', 'POSIX'))
+order by 2, 1;
+```
+
+The default collation appears as provider `d`, so this lists default-collated indexes even in a builtin database. `amcheck` then verifies an index's order under today's rules, taking only a light lock:
+
+```text
+select bt_index_check('tags_pkey', true);
+ERROR:  item order invariant violated for index "tags_pkey"
+```
+
+Run it on a restored copy before an upgrade cutover, and on the big text indexes after one.
+
+</DeepDive>
+
+## Timestamps: always timestamptz
+
+Store moments as `timestamptz`, and never use `timestamp` (without time zone) for something that happened. No rule in this chapter has fewer exceptions.
+
+The names mislead. `timestamptz` doesn't store a zone; both types are 8 bytes. `timestamptz` is an absolute instant, kept as UTC. `timestamp` is a wall-clock reading: "22:51" in which city? Two app servers insert at the same instant, one session in New York time (a misconfigured pool, a forgotten cron box), one in UTC:
+
+```sql
+create table tz_demo (label text, ts timestamp, tstz timestamptz);
+set timezone = 'America/New_York';
+insert into tz_demo values ('new york', now(), now());
+set timezone = 'UTC';
+insert into tz_demo values ('utc', now(), now());
+```
+
+```text
+  label   |             ts             |             tstz
+----------+----------------------------+-------------------------------
+ new york | 2026-10-05 22:51:37.32279  | 2026-10-06 02:51:37.32279+00
+ utc      | 2026-10-06 02:51:37.327957 | 2026-10-06 02:51:37.327957+00
+```
+
+`timestamptz` recorded one instant twice. `timestamp` recorded two readings four hours apart, and every "last hour" dashboard on it is now quietly wrong. You can't repair it: the zone was never stored.
+
+Keep every connection at `timezone = UTC`, send timestamps with an explicit offset, and convert at the edge.
+
+`now()` is the moment the transaction started, so an hour-long batch stamps every row with the same time. `clock_timestamp()` is the wall clock ([date/time functions](https://www.postgresql.org/docs/18/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT)).
+
+The honest exception is a future local time that must survive zone rule changes ("opens at 09:00 local on 2027-03-01"): store `timestamp` plus the zone name.
+
+<DeepDive title="Daylight saving: one hour, one day, and 24 hours differ">
+
+On March 8, 2026, New York jumped from 02:00 to 03:00:
+
+```sql
+set timezone = 'America/New_York';
+select '2026-03-08 01:30'::timestamptz + interval '1 hour'   as plus_hour,
+       '2026-03-08 01:30'::timestamptz + interval '1 day'    as plus_day,
+       '2026-03-08 01:30'::timestamptz + interval '24 hours' as plus_24h;
+```
+
+```text
+       plus_hour        |        plus_day        |        plus_24h
+------------------------+------------------------+------------------------
+ 2026-03-08 03:30:00-04 | 2026-03-09 01:30:00-04 | 2026-03-09 02:30:00-04
+```
+
+`1 day` keeps the wall-clock time; `24 hours` adds 86,400 seconds. This works with a named session zone, not a fixed offset. A plain `timestamp` gives 02:30 for the first, a time that never existed in New York.
+
+<ProveIt lab="11-types">
+
+```sql
+select lab.prove('timestamp records the two inserts four hours apart; timestamptz under a second apart',
+  (select max(ts) - min(ts) between interval '4 hours' and interval '4 hours 1 second'
+      and max(tstz) - min(tstz) < interval '1 second' from tz_demo));
+set timezone = 'America/New_York';
+select lab.prove('across the 2026-03-08 DST jump: +1 hour is 03:30, +1 day is 01:30 next day, +24 hours is 02:30',
+  ('2026-03-08 01:30'::timestamptz + interval '1 hour')::text   = '2026-03-08 03:30:00-04'
+  and ('2026-03-08 01:30'::timestamptz + interval '1 day')::text    = '2026-03-09 01:30:00-04'
+  and ('2026-03-08 01:30'::timestamptz + interval '24 hours')::text = '2026-03-09 02:30:00-04');
+select lab.prove('a plain timestamp returns 02:30, a time that never existed in New York',
+  ('2026-03-08 01:30'::timestamp + interval '1 hour')::text = '2026-03-08 02:30:00');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="now() stands still for the whole transaction">
+
+`now()` and `clock_timestamp()`, read before and after a two-second `pg_sleep` inside one transaction:
+
+```text
+              now              |             clock
+-------------------------------+-------------------------------
+ 2026-10-06 03:47:07.379127+00 | 2026-10-06 03:47:07.379301+00
+...
+ 2026-10-06 03:47:07.379127+00 | 2026-10-06 03:47:09.381908+00
+```
+
+`statement_timestamp()` is the third option: the start of the current statement.
+
+<ProveIt lab="11-types">
+
+```sql
+begin;
+select pg_sleep(0.05) is null as slept \gset
+select lab.prove('inside a transaction now() stays at its start; clock_timestamp() moves on',
+  clock_timestamp() - now() >= interval '50 milliseconds');
+commit;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A timestamp beats a boolean; a check beats a new type
+
+`date` is for things that really are days, like a birthday, not for "created on", which is an instant you display as a day. Query time ranges half-open, `>= '2026-10-01' and < '2026-11-01'` ([Date ranges are half-open](/books/eight-kilobytes/queries#date-ranges-are-half-open)), and know that `'2026-01-31'::date + interval '1 month'` is February 28.
+
+Before adding a boolean, ask whether you'll want to know *when* it became true. `archived_at timestamptz` answers "is it archived?" with `is not null`, and also when, for 7 more bytes. For state an audit cares about (verified, archived, cancelled), the timestamp wins.
+
+To restrict a column to a set, our default is `text` plus a check, like the running example's `check (plan in ('free', 'team', 'enterprise'))`. Every tool understands it, and you can swap it online. Use a lookup table when values carry data of their own.
+
+### Enums are hard to take back
+
+An enum takes 4 bytes and sorts in declaration order: good for a set that is truly stable and ordered, like log severity. Two traps. There is no `drop value`, so retiring one means a new type and a table rewrite. And a value added inside a transaction can't be used until it commits, which breaks migration tools that add a value and seed rows in one transaction (`ERROR: unsafe use of new value "audit" of enum type event_kind`).
+
+## Store UUIDs as uuid
+
+`uuid` is 16 bytes; as `text` it takes 40, and every index grows to match ([Pick your keys once](/books/eight-kilobytes/keys) measures it).
+
+The same goes for every type that knows its domain. `inet` and `cidr` validate addresses and answer "is this IP in that network" with one operator. Range types (`tstzrange`, `daterange`) make "no two bookings overlap" an [exclusion constraint](/books/eight-kilobytes/relationships#an-exclusion-constraint-makes-overlaps-impossible). And `create domain email_address as text check (...)` writes a repeated rule once.
+
+## Arrays are for lists that live and die with the row
+
+Arrays fit small lists that belong to one row: tags, notification channels. They're wrong when the elements are rows in disguise: they reference other tables (no foreign keys on elements), you update them one at a time (each update [rewrites the whole row](/books/eight-kilobytes/mvcc)), or the list grows without bound. An array of user ids on a project is a membership table that hasn't been created yet.
+
+## Use jsonb, and give the keys you query their own columns
+
+`json` stores text and reparses it on every access; `jsonb` parses once and supports [GIN](/books/eight-kilobytes/glossary#gin) indexes. Use `jsonb`, and keep `json` only for exact input, like a webhook body whose signature you verify.
+
+`jsonb` isn't free. Every row repeats every key: `events.payload` spends 63 to 69 bytes a row spelling out `"status"`, `"duration_ms"`, and `"region"`, about five times what typed columns would take. And the planner has almost no statistics inside a document ([Most documents belong in a jsonb column](/books/eight-kilobytes/models#most-documents-belong-in-a-jsonb-column)). Keys you filter, join, sort, or constrain on deserve columns.
+
+<DeepDive title="What jsonb does to your input">
+
+```sql
+select '{"a":1, "a":2, "b" : [1,2]}'::json  as j,
+       '{"a":1, "a":2, "b" : [1,2]}'::jsonb as jb;
+```
+
+```text
+              j              |          jb
+-----------------------------+-----------------------
+ {"a":1, "a":2, "b" : [1,2]} | {"a": 2, "b": [1, 2]}
+```
+
+Nor is it smaller: `{"status":"ok","duration_ms":120,"region":"iad"}` is 52 bytes as `json`, 68 as `jsonb`.
+
+<ProveIt lab="11-types">
+
+```sql
+select lab.prove('events.payload values take 63 to 69 bytes each',
+  (select min(pg_column_size(payload)) >= 63 and max(pg_column_size(payload)) <= 69 from events));
+select lab.prove('the same facts as typed columns would take about a fifth of the space',
+  (select avg(pg_column_size(payload))
+          / avg((octet_length(payload->>'status') + 1) + 4 + (octet_length(payload->>'region') + 1))
+   from (select payload from events tablesample system (5) repeatable (42)) e) between 5 and 6);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Generated columns are virtual by default (PostgreSQL 18+)
+
+PostgreSQL 18 makes generated columns **virtual** by default: computed on read, taking no space, and impossible to index. **Stored** ones are computed on write. Use virtual for cheap values you display, stored for values you filter or sort on, like a `tsvector` ([Store the tsvector; don't index the expression](/books/eight-kilobytes/search#store-the-tsvector-dont-index-the-expression)). Before PostgreSQL 18, `stored` was required syntax, so existing migrations and upgraded columns are safe; it's new DDL written without the keyword that now gets a virtual column. Write `stored` when you mean it.
+
+<DeepDive title="Virtual by default, and why you can't index it">
+
+```sql
+create table g_demo (
+  id           bigint generated always as identity primary key,
+  price_cents  bigint not null,
+  qty          int    not null,
+  total_cents  bigint generated always as (price_cents * qty),
+  total_stored bigint generated always as (price_cents * qty) stored
+);
+create index on g_demo (total_cents);
+create index on g_demo (total_stored);
+```
+
+```text
+ERROR:  indexes on virtual generated columns are not supported
+CREATE INDEX
+```
+
+Expressions must be immutable: no `now()`, no other tables.
+
+<ProveIt lab="11-types">
+
+```sql
+select lab.prove('in PostgreSQL 18 the default is virtual (v); stored is s',
+  (select array_agg(attgenerated::text order by attnum) from pg_attribute
+   where attrelid = 'g_demo'::regclass and attgenerated <> '') = array['v', 's']);
+select lab.prove('indexes on virtual generated columns are not supported; on stored ones they are',
+  lab.try($$ create index on g_demo (total_cents) $$)
+    = '0A000: indexes on virtual generated columns are not supported'
+  and lab.try($$ create index on g_demo (total_stored) $$) = 'ok');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Four types cost more than they save
+
+### serial is a sequence, not a type
+
+`serial` isn't a type. It's a sequence plus a `nextval()` default on a 4-byte `integer`, the type this chapter opened with, and the sequence never hears about ids inserted by hand:
+
+```sql
+create table s_demo (id serial primary key, v text);
+insert into s_demo (id, v) values (1, 'manual');
+insert into s_demo (v) values ('auto');
+```
+
+```text
+ERROR:  duplicate key value violates unique constraint "s_demo_pkey"
+```
+
+`bigint generated always as identity` refuses the hand-picked id instead ([Let the database number rows, and never trust the order](/books/eight-kilobytes/keys#let-the-database-number-rows-and-never-trust-the-order)).
+
+Also avoid `money` (formatted by the server's locale, ignorant of currency), `char(n)` (see above), and `timetz` (an offset without a date can't know about daylight saving; the docs themselves discourage it).
+
+## The short version
+
+- `bigint` for every id and every reference to one.
+- Money is `numeric` or `bigint` cents, plus a currency column. Never floating point.
+- Use `text` with a check constraint, not `varchar(n)`. Never `char(n)`.
+- Default collations are case-sensitive. For emails, a unique index on `lower(email)`.
+- Treat every OS, glibc, or ICU upgrade as a collation event: check versions, reindex text indexes, then `refresh version`. Or use builtin `C.UTF-8` (PostgreSQL 17+).
+- `timestamptz` for every moment, sessions in UTC, explicit offsets on input.
+- Prefer `archived_at` to `is_archived`, `text` plus a check to an enum, `jsonb` to `json`, and columns for the JSON keys you query.
+- Identity, not `serial`. In PostgreSQL 18, generated columns are virtual unless you write `stored`.
+
+## Further reading
+
+- [Data Types](https://www.postgresql.org/docs/18/datatype.html), PostgreSQL documentation. Every built-in type, with its storage size and input rules.
+- [Collation Support](https://www.postgresql.org/docs/18/collation.html), PostgreSQL documentation. Providers, deterministic and nondeterministic collations.
+- [amcheck](https://www.postgresql.org/docs/18/amcheck.html), PostgreSQL documentation. What `bt_index_check` verifies, and the locks it takes.
+- [Locale data changes](https://wiki.postgresql.org/wiki/Locale_data_changes), PostgreSQL wiki. Which glibc and distribution versions changed sort order.
+- [How To Correct and Identify Indexes Affected by the GNU C 2.28 Update](https://www.crunchydata.com/blog/glibc-collations-and-data-corruption), Crunchy Data. A practitioner's walk through finding and rebuilding affected indexes.
+- [Case-insensitive pattern matching in PostgreSQL](https://www.cybertec-postgresql.com/en/case-insensitive-pattern-matching-in-postgresql/), Laurenz Albe, CYBERTEC. The trade-offs between `lower()`, `citext`, and nondeterministic collations, in depth.
+- [Don't Do This](https://wiki.postgresql.org/wiki/Don%27t_Do_This), PostgreSQL wiki. The community's short list of type mistakes, with when each is acceptable.

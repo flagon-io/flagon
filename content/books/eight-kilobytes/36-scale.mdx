@@ -1,0 +1,603 @@
+---
+title: Scale up before you scale out
+description: Earn every bigger box with data. Find the real bottleneck, take the cheap structural wins, and know when one big box is truly done.
+part: Scaling out
+builds_on: [wal, observability, playbook]
+---
+
+Eight clients, each inserting one event per transaction, run at about 5,000 transactions per second on our test container. Add one line to each transaction, `update account_totals set events = events + 1 where account_id = 42`, a "live counter" for a dashboard, and throughput drops to between 390 and 600. A tenth of what it was.
+
+No read replica fixes that. Neither does sharding, a bigger instance, or a new database. Eight sessions are standing in line for one row, and the fix is to stop updating that row on every insert.
+
+When a Postgres database struggles, the instinct is to buy a bigger one. One big box goes a very long way. But the work comes first, and every step up is earned with data.
+
+## Hardware comes after the work
+
+The [playbook](/books/eight-kilobytes/playbook#the-order-is-the-method) ranked the levers: measure, fix the queries, change the shape of the work, then the hardware. After the bigger box come replicas, partitioning, and sharding, each with a cost that never goes away. Climb only as far as the evidence pushes you.
+
+## Earn the bigger box
+
+When someone asks us for a bigger database, our answer is no. Not never: no until the cheaper fixes in front of them are used up, and the request comes with data that shows it. The bigger box is the first rung that costs money every month, so it's the first one with a gate.
+
+The gate isn't about being cheap. Three things make it worth holding.
+
+**A bigger box hides the query; it doesn't fix it.** A query that reads 35,249 pages to return 30 rows still reads 35,249 pages on an instance twice the size, a little faster, until the table doubles. Now the bill is bigger and the same statement is still at the top of the list. Hardware buys time. Fixing the query buys it back and keeps it.
+
+**Cost compounds.** An upsize is a line on every invoice from then on, and replicas are sized to match the primary, so a bigger primary brings bigger copies. The index that fixes the query costs nothing a month.
+
+**Most slow databases aren't short of hardware.** They have a handful of statements reading far more pages than they need. [The proof: one app, eight changes](/books/eight-kilobytes/playbook#the-proof-one-app-eight-changes) runs the whole ladder on one app: about a thousandfold more throughput, same laptop.
+
+So the request carries its evidence, and that turns a negotiation into a review. If the data says the box is out of a resource the work really needs, we buy the box, without argument, and the evidence becomes the baseline for the next request.
+
+### An upsize request brings six pieces of evidence
+
+Each is something an earlier chapter shows you how to collect:
+
+1. **The top statements, and what was done about each.** `pg_stat_statements` ranked by total time and by shared blocks ([four rankings](/books/eight-kilobytes/observability#rank-the-same-view-four-ways-total-time-first)), diffed over a busy window. Next to each of the top five: fixed, why it can't be, or why it's already cheap.
+2. **Pages per call, before and after**, for every fix. Pages, not milliseconds, because pages don't move with load. [The first index: 35,249 pages to 91](/books/eight-kilobytes/btree#the-first-index-35249-pages-to-91) is what a good line looks like.
+3. **A wait profile that names a resource**, [sampled](/books/eight-kilobytes/observability#sample-waits-to-see-where-the-time-goes) under the load that hurts. A bigger box helps sessions on CPU, waiting on `IO:DataFileRead`, or short of memory. It does nothing for `Lock` waits, connection exhaustion, or a workload shaped wrong.
+4. **[Working set](/books/eight-kilobytes/glossary#working-set) against RAM** ([Size RAM to the working set](/books/eight-kilobytes/latency#size-ram-to-the-working-set)), and how reads trend. If the working set already fits, more RAM buys nothing.
+5. **The exhausted resource and the headroom**: how close peak runs to the limit, and how many months the new size lasts at your growth rate, [measured honestly](/books/eight-kilobytes/benchmarking#ask-one-question).
+6. **What was tried and ruled out**: indexes, rewrites, [rollups](#precompute-what-you-show), pooling, configuration, vacuum, and, when the profile says CPU, [moving per-row work off the primary](/books/eight-kilobytes/functions#the-primary-is-your-most-expensive-cpu). A sentence each, not a checkbox.
+
+### The request, as a ticket
+
+Paste this into the ticket and fill it in. Every blank is a number or a sentence from the list above.
+
+```text
+UPSIZE REQUEST: <database>  <current size> -> <requested size>
+
+Bound by    <CPU | I/O | memory>, because <evidence> shows <number>
+Window      <dates, peak hours>; stats diffed, not reset
+
+Top statements (by total time, then by shared blocks)
+  <queryid, short text>  <% of time>  <blocks/call>  <done / why not>
+  ...
+
+Fixes made (blocks per call)
+  <statement>  <before> -> <after>  <index / rewrite / rollup>
+
+Wait profile at peak (average active sessions)
+  CPU <n>  IO <n>  Lock <n>  LWLock <n>  Client <n>  cores <n>
+
+Working set vs RAM
+  hot data <size>  RAM <size>  shared_buffers <size>
+  read trend <rising / flat>
+
+Headroom
+  peak use of <resource> today: <percent>
+  new size gives <x>; at <growth>/month it lasts <months>
+  measured with <script, data shape, duration, runs>
+
+Tried and ruled out
+  indexes / rewrites / rollups / pooling / config / vacuum
+  <one line each>
+```
+
+The template does its best work before anyone files it: somewhere around the second section, the person filling it in finds the query that was the problem. And a request that arrives complete is easy to say yes to, because the argument has already been made.
+
+## Measure before you buy anything
+
+"The database is slow" has at least five causes (CPU, I/O, locks, connections, one hot query), and each has a different fix. So measure before you choose one. In the opening benchmark, `pg_stat_statements` showed the counter update, a primary-key update on a 1,000-row table, averaging 14 ms and owning almost all the time.
+
+A trivial statement with a big mean time is waiting, not working. [Wait event](/books/eight-kilobytes/glossary#wait-event) samples said on what. Insert-only, then with the counter:
+
+```text
+    192 LWLock WALWrite
+     30 IO WalSync
+     14 CPU running
+     ...
+```
+
+```text
+    161 Lock transactionid
+     48 Lock tuple
+     29 IO WalSync
+     ...
+```
+
+Two different problems. The first waits on WAL flushes ([Commit means flush](/books/eight-kilobytes/wal#commit-means-flush)): batch commits, and more cores won't help. The second waits on a row lock: `Lock transactionid` is "waiting for another transaction to finish so I can touch its row", `Lock tuple` the queue behind it. Faster disks won't help. Changing the work will.
+
+<ProveIt lab="36-scale">
+
+```sql
+-- s1 updated the counter row and hasn't committed; s2, then s3, send the same update
+select lab.prove(
+  'the second writer of the counter row waits on Lock transactionid (the first writer''s transaction)',
+  (select wait_event_type = 'Lock' and wait_event = 'transactionid'
+   from pg_stat_activity where pid = :s2_pid));
+select lab.prove(
+  'the third waits on Lock tuple, queued behind the second',
+  (select wait_event_type = 'Lock' and wait_event = 'tuple'
+   from pg_stat_activity where pid = :s3_pid));
+```
+
+</ProveIt>
+
+<DeepDive title="The statement ranking and the wait sampler behind those numbers">
+
+What each bottleneck looks like, and its usual fix:
+
+| The bottleneck | What you see | The usual fix |
+|---|---|---|
+| CPU | cores pinned, wait events mostly empty | fix the query doing the work, then more cores |
+| I/O | `DataFileRead` waits, cache misses | indexes, less data per query, RAM |
+| Locks | `Lock` waits: `transactionid`, `tuple` | change the work so sessions stop colliding |
+| Connections | hundreds of idle backends, pool timeouts | a pooler and a smaller pool |
+| One hot query | one statement dominates total time | fix that query |
+
+The ranking from the opening benchmark:
+
+```sql
+select left(regexp_replace(query, '\s+', ' ', 'g'), 30) as query,
+       calls,
+       round(total_exec_time) as total_ms,
+       round(mean_exec_time::numeric, 2) as mean_ms,
+       shared_blks_hit + shared_blks_read as blks,
+       wal_bytes
+from pg_stat_statements
+where dbid = (select oid from pg_database where datname = current_database())
+order by total_exec_time desc
+limit 5;
+```
+
+```text
+             query              | calls  | total_ms | mean_ms |  blks   | wal_bytes
+--------------------------------+--------+----------+---------+---------+-----------
+ update account_totals set even |  10612 |   149895 |   14.13 |  260308 |   1378255
+ insert into events (account_id | 120225 |     6450 |    0.05 | 3059854 |  72265853
+ ...
+```
+
+The insert ran 120,225 times at 0.05 ms; the update 10,612 times at 14 ms. The samples come from `pg_stat_activity` a few times a second, where a null `wait_event` on an active session means it's on a CPU (swap the `application_name` filter for your app's):
+
+```bash
+for i in $(seq 1 30); do
+  psql -Atc "select coalesce(wait_event_type, 'CPU') || ' '
+                    || coalesce(wait_event, 'running')
+             from pg_stat_activity
+             where datname = current_database()
+               and application_name = 'pgbench' and state = 'active'"
+  sleep 0.25
+done | sort | uniq -c | sort -rn
+```
+
+The trimmed tails: `1 LWLock BufferContent` and `1 Client ClientRead` for insert-only, `2 CPU running` with the counter.
+
+</DeepDive>
+
+## Fix the query you found
+
+The measurement usually points at one query, and the fix is earlier in this book. Our September dashboard for one account read 35,249 pages to find 154 rows; an index on `(account_id, created_at)` made it 156, a 226x cut.
+
+But 149 of those are heap pages, one per event, to produce 30 rows, and every dashboard view reads them again. That cost grows with the account, and the busiest accounts look at dashboards most.
+
+<DeepDive title="The September chart, before and after the index">
+
+```sql
+explain (analyze, costs off, timing off)
+select (created_at at time zone 'UTC')::date as day,
+       count(*) as events,
+       count(*) filter (where kind = 'deploy') as deploys,
+       count(*) filter (where kind = 'deploy'
+                        and payload->>'status' = 'failed') as failed_deploys
+from events
+where account_id = 42
+  and created_at >= '2026-09-01' and created_at < '2026-10-01'
+group by 1 order by 1;
+```
+
+```text
+ GroupAggregate (actual rows=30.00 loops=1)
+   Buffers: shared hit=2124 read=33125
+   ...
+               ->  Parallel Seq Scan on events (actual rows=51.33 loops=3)
+                     Rows Removed by Filter: 666615
+```
+
+With the index:
+
+```text
+ GroupAggregate (actual rows=30.00 loops=1)
+   Buffers: shared hit=117 read=39
+   ->  Sort (actual rows=154.00 loops=1)
+         ->  Bitmap Heap Scan on events (actual rows=154.00 loops=1)
+               Heap Blocks: exact=149
+               ->  Bitmap Index Scan on events_account_created_idx ...
+                     Buffers: shared hit=3 read=4
+```
+
+<ProveIt lab="36-scale">
+
+```sql
+select lab.prove(
+  'with no index, one account''s month reads the whole table: over 35,000 pages',
+  :raw_pages > 35000);
+create index events_account_created_idx on events (account_id, created_at);
+select lab.buffers(:'dashboard') as indexed_pages \gset
+select lab.prove(
+  'with (account_id, created_at), the same chart reads under 300 pages',
+  :indexed_pages < 300);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Precompute what you show
+
+Dashboards, usage meters and billing summaries ask the same aggregate questions over and over, about data that doesn't change once written. A rollup table stores the answer instead of the inputs. Count it once, store the count, read the count.
+
+The **grain**, the columns you group by, decides whether it's worth having. Our two million events make 1.75 million project-days, barely a summary, but 363,496 account-days, about five events a row. So: `account_daily`, one row per account per day, primary key `(account_id, day)`, which is also the dashboard's index.
+
+| Query | Raw events | Rollup |
+|---|---|---|
+| One account, 30 days (no index) | 35,249 pages | 4 pages |
+| One account, 30 days (with index) | 156 pages | 4 pages |
+| Top 10 accounts by failed deploys, one quarter | 14,846 pages | 4,218 pages |
+
+Thirty days is 30 rows, whether the account had 154 events or 154,000. The raw side grows forever; the rollup grows a few thousand rows a day.
+
+<ProveIt lab="36-scale">
+
+```sql
+select lab.prove(
+  'the rollup answers the same month in under 10 pages',
+  :rollup_pages < 10);
+select lab.prove(
+  'the cross-tenant quarterly report touches under a third of the raw pages on the rollup',
+  :q_rollup < :q_raw / 3.0);
+```
+
+</ProveIt>
+
+<DeepDive title="Building the rollup, and the quarterly report on both sides">
+
+```sql
+create table account_daily (
+  account_id      bigint not null,
+  day             date   not null,
+  events          int    not null,
+  deploys         int    not null,
+  failed_deploys  int    not null,
+  builds          int    not null,
+  alerts          int    not null,
+  primary key (account_id, day)
+);
+
+insert into account_daily
+select account_id,
+       (created_at at time zone 'UTC')::date,
+       count(*),
+       count(*) filter (where kind = 'deploy'),
+       count(*) filter (where kind = 'deploy' and payload->>'status' = 'failed'),
+       count(*) filter (where kind = 'build'),
+       count(*) filter (where kind = 'alert')
+from events
+group by 1, 2;
+```
+
+It's 363,496 rows: 2,673 heap pages (21 MB), and 32 MB with its primary key. The day is UTC on purpose: a rollup needs one definition of "day", and the session's time zone isn't a stable one. If customers need their own zones, store hourly rows and sum them. (The grain check was `count(distinct (project_id, created_at::date))` against the same for `account_id`.)
+
+The September chart becomes an `Index Scan using account_daily_pkey` with `Buffers: shared hit=2 read=2`. The bulk insert wrote rows in `(account_id, day)` order, so a month sits on a page or two; a rollup filled day by day spreads 30 rows over up to 30 pages, still a few dozen at most.
+
+The quarterly "who fails the most deploys" report, raw, then from the rollup:
+
+```text
+ Limit (actual rows=10.00 loops=1)
+   Buffers: shared hit=3565 read=11281 written=8
+   ...
+         ->  Parallel Bitmap Heap Scan on events (actual rows=10543.00 loops=3)
+               Rows Removed by Filter: 157493
+```
+
+```text
+ Limit (actual rows=10.00 loops=1)
+   Buffers: shared hit=1427 read=2791 written=11
+   ...
+               ->  Bitmap Heap Scan on account_daily (actual rows=91600.00 loops=1)
+                     Heap Blocks: exact=1662
+```
+
+The planner walked the rollup's primary key once per account (a PostgreSQL 18 skip scan) and read 1,662 of its 2,673 heap pages; a plain scan would have cost about the same.
+
+</DeepDive>
+
+### Keep it fresh with an upsert
+
+A rollup is only as good as its freshness. The refresh that holds up best is a scheduled job that recomputes a recent window, from the start of yesterday, and upserts it with `on conflict (account_id, day) do update ... where (...) is distinct from (excluded...)`. It's idempotent: run it twice and you get the same table. After 5,000 new events around midnight, it recomputed 1,998 account-days in about 16 ms: 1,000 new, 299 changed, 699 identical and skipped. Run it again and nothing is rewritten.
+
+That `is distinct from` is worth its length: without it every refresh rewrites every row in the window, dead tuples and WAL included ([Updates are inserts](/books/eight-kilobytes/mvcc)). Recompute whole days, not "everything after the last id I saw", which misses transactions that committed late. Run one refresher at a time, and show "updated a minute ago".
+
+<DeepDive title="The refresh statement, and its plan run twice">
+
+It needs an index on `created_at` to find recent events:
+
+```sql
+insert into account_daily as d
+select account_id,
+       (created_at at time zone 'UTC')::date,
+       count(*),
+       count(*) filter (where kind = 'deploy'),
+       count(*) filter (where kind = 'deploy' and payload->>'status' = 'failed'),
+       count(*) filter (where kind = 'build'),
+       count(*) filter (where kind = 'alert')
+from events
+where created_at >= date_trunc('day', now() - interval '1 day', 'UTC')
+group by 1, 2
+on conflict (account_id, day) do update
+set events         = excluded.events,
+    deploys        = excluded.deploys,
+    failed_deploys = excluded.failed_deploys,
+    builds         = excluded.builds,
+    alerts         = excluded.alerts
+where (d.events, d.deploys, d.failed_deploys, d.builds, d.alerts)
+      is distinct from
+      (excluded.events, excluded.deploys, excluded.failed_deploys,
+       excluded.builds, excluded.alerts);
+```
+
+We ran it the next morning with the window start written as `'2026-10-05'`, so the demo comes out the same whenever you run it:
+
+```text
+ Insert on account_daily d (actual rows=0.00 loops=1)
+   Conflict Resolution: UPDATE
+   Rows Removed by Conflict Filter: 699
+   Tuples Inserted: 1000
+   Conflicting Tuples: 998
+   ...
+     ->  Index Scan using events_created_idx on events (actual rows=10480.00 loops=1)
+ Execution Time: 15.769 ms
+```
+
+The second run: `Rows Removed by Conflict Filter: 1998`, `Tuples Inserted: 0`. Every conflicting row is still locked, which costs a little WAL, but there are no new row versions. If events can arrive days late (mobile sync, imports), widen the window or recompute the affected days from the importer; guard the job with `pg_try_advisory_lock` ([advisory locks](/books/eight-kilobytes/concurrency#take-advisory-locks-per-transaction-not-per-session)).
+
+<ProveIt lab="36-scale">
+
+```sql
+select lab.plan(:'refresh') -> 'Plan' as second_run \gset
+select lab.prove(
+  'run it again and nothing is written: 0 rows out of the Insert node',
+  (:'second_run'::jsonb ->> 'Actual Rows')::numeric = 0
+  and (:'second_run'::jsonb ->> 'Tuples Inserted')::numeric = 0);
+select lab.prove(
+  'every conflicting row was skipped by the is distinct from filter',
+  (:'second_run'::jsonb ->> 'Rows Removed by Conflict Filter')::numeric
+  = (:'second_run'::jsonb ->> 'Conflicting Tuples')::numeric);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Don't count with a hot row
+
+The opening benchmark is the tempting alternative: bump a counter in every insert's transaction so the total is always exact. What it costs is serialization: every writer takes the same row lock and waits for the last to commit ([A counter trigger serializes your writers](/books/eight-kilobytes/functions#a-counter-trigger-serializes-your-writers)). About 5,000 transactions per second became under 600. Aggregate in batches instead, or spread the counter over several rows (`account_id, slot`, summed on read).
+
+## A materialized view recomputes everything
+
+A materialized view stores a query's result as a table. A plain `refresh` locks out every reader while it runs; `refresh ... concurrently` doesn't, by diffing against the old result, and needs a unique index. On a 30-day summary the concurrent refresh took 181 ms against 41, and wrote 27 KB of WAL against 2.1 MB, because almost no rows had changed since the last refresh. When most rows change, the plain form is cheaper on both counts.
+
+Either way, it recomputes everything. When the source grows forever, use a rollup.
+
+<DeepDive title="Plain refresh or concurrent: what each costs">
+
+```sql
+create materialized view project_activity_30d as
+select project_id,
+       count(*)                                as events,
+       count(*) filter (where kind = 'deploy') as deploys,
+       max(created_at)                         as last_event_at
+from events
+-- now() in a live system
+where created_at >= timestamptz '2026-10-06' - interval '30 days'
+group by project_id;
+
+refresh materialized view concurrently project_activity_30d;
+```
+
+```text
+ERROR:  cannot refresh materialized view "public.project_activity_30d" concurrently
+HINT:  Create a unique index with no WHERE clause on one or more columns of the materialized view.
+```
+
+After `create unique index on project_activity_30d (project_id)`, from `pg_stat_statements`:
+
+```text
+                            query                            | mean_ms | wal_bytes
+-------------------------------------------------------------+---------+-----------
+ refresh materialized view project_activity_30d              |      41 |   2152086
+ refresh materialized view concurrently project_activity_30d |     181 |     27601
+```
+
+When most rows change on every refresh, the plain form is faster and cheaper, if you can tolerate the lock. A rollup table also lets you pick your own indexes and keep history the source query would drop.
+
+<ProveIt lab="36-scale">
+
+```sql
+select lab.prove(
+  'a plain refresh holds ACCESS EXCLUSIVE on the view until it commits',
+  exists (select 1 from pg_locks where pid = :s1_pid
+          and relation = 'project_activity_30d'::regclass and mode = 'AccessExclusiveLock'));
+select lab.prove(
+  'the concurrent refresh wrote under a tenth of the plain refresh''s WAL',
+  (select sum(wal_bytes) filter (where query like '%concurrently%')
+        < sum(wal_bytes) filter (where query not like '%concurrently%') / 10
+   from pg_stat_statements
+   where dbid = (select oid from pg_database where datname = current_database())
+     and query like 'refresh materialized view%'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Cache in the app, and price the invalidation
+
+For data read far more often than it changes, a cache removes the reads entirely. The cost is invalidation: every write path must know which keys it makes stale, and delete-on-write works until a write happens somewhere you forgot. Short TTLs bound how wrong you can be; versioned keys are precise. And don't cache a primary-key lookup that costs about the round trip to the cache.
+
+## Move work off the request path
+
+Emails, webhooks, and recomputed summaries hold a connection while they run. Put them in a job queue (Postgres makes a fine one: [A Postgres queue commits with the business write](/books/eight-kilobytes/concurrency#a-postgres-queue-commits-with-the-business-write)) and they run at a fixed rate, not at whatever rate users click.
+
+## Skip the WAL for data you can regenerate
+
+Data you could rebuild from its source still pays full price in WAL. An `unlogged` table skips the WAL ([An unlogged table is emptied after a crash](/books/eight-kilobytes/models#an-unlogged-table-is-emptied-after-a-crash) has the full trade-off): the same 476,712 rows wrote 77 MB of WAL into an ordinary table and none into an unlogged one, bytes no replica receives and no archive stores. It fits a staging table for an import you can rerun.
+
+<Callout type="warn" title="Unlogged means empty after a crash">
+It's truncated after a crash and not replicated, so after a failover it's empty. Only for data you can regenerate. Making it logged later writes all of it to WAL ([Unlogged, then SET LOGGED, moves the WAL](/books/eight-kilobytes/loading#unlogged-then-set-logged-moves-the-wal)).
+</Callout>
+
+<DeepDive title="Measuring the WAL an unlogged table saves">
+
+```sql
+create table import_staging_logged   (like events);
+create unlogged table import_staging (like events);
+
+insert into import_staging_logged select * from events where created_at < '2026-01-01';
+insert into import_staging        select * from events where created_at < '2026-01-01';
+```
+
+```text
+                       query                        |  rows  |   wal
+----------------------------------------------------+--------+---------
+ insert into import_staging_logged select * from ev | 476712 | 77 MB
+ insert into import_staging        select * from ev | 476712 | 0 bytes
+```
+
+<ProveIt lab="36-scale">
+
+```sql
+select lab.prove(
+  'the same rows into the same shape: tens of megabytes of WAL logged',
+  :logged_wal > 20000000);
+select lab.prove(
+  'and next to none unlogged (under 0.1 percent of it)',
+  :unlogged_wal < :logged_wal / 1000.0);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Archive cold rows
+
+Rows nobody reads anymore still cost you: bigger indexes, more vacuum, slower restores. Moving them out in paced batches is fine once; as a nightly routine it's a delete per row, forever. If they age out by time, [partition](/books/eight-kilobytes/partitioning) and drop a month instead.
+
+<DeepDive title="One archive batch, paced like a backfill">
+
+```sql
+create table events_archive (like events including defaults);
+
+with moved as (
+  delete from events
+  where id in (
+    select id from events
+    where created_at < '2025-11-01'
+    order by id
+    limit 10000
+  )
+  returning *
+)
+insert into events_archive
+select * from moved;
+```
+
+Each batch of 10,000 rows took between 70 and 400 ms on our container (the first, with a cold cache, was the slow one). Loop with a short pause, like the [backfills](/books/eight-kilobytes/migrations#backfill-in-short-batches-that-walk-the-primary-key), so replicas and vacuum keep up.
+
+</DeepDive>
+
+## The question is which resource runs out first
+
+Earned, the bigger machine is a good step: no engineering time, reversible, and room to do the later rungs calmly. At the time of writing, the major clouds rent single machines with well over 100 vCPUs and terabytes of RAM ([Prove the disk is the problem before you move](/books/eight-kilobytes/providers#prove-the-disk-is-the-problem-before-you-move)). So the question is rarely "can one box hold us?" It's which resource runs out first.
+
+### Every write funnels into one WAL stream
+
+Reads scale with cores; every write funnels into one WAL stream. Our single-row inserts into `events` wrote about 600 bytes of WAL each: at 50,000 a second, 30 MB/s, about 2.6 TB a day, flushed, shipped, and archived. Every standby replays all of it with one process, so a busy enough primary leaves every replica behind, however big ([Replay is one process](/books/eight-kilobytes/replication#replay-is-one-process)).
+
+<DeepDive title="Where the 600 bytes per insert came from">
+
+`pg_stat_statements` recorded 72,265,853 bytes of WAL for the opening benchmark's 120,225 single-row inserts, about 601 bytes each. Each insert logs a heap record carrying the row, an insert into the primary key's index, and a commit record; now and then the first change to a page after a checkpoint logs the whole 8 KB page, and that is averaged in too. Batching rows per commit shares the commit record, but the row and index records stay. The lab repeats the measurement with 1,000 inserts.
+
+<ProveIt lab="36-scale">
+
+```sql
+-- 1,000 single-row inserts, each its own statement, then:
+select lab.prove(
+  'a single-row insert into events writes a few hundred bytes of WAL (we saw about 600)',
+  (select sum(wal_bytes) / sum(calls) from pg_stat_statements
+   where dbid = (select oid from pg_database where datname = current_database())
+     and query like 'insert into events (account_id, project_id, user_id, kind) values%')
+  between 200 and 1200);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### One process vacuums the whole table
+
+Autovacuum scans a table with one process: minutes on 50 GB, days on 5 TB, while dead rows and transaction ID age climb. Freezing our 275 MB `events` wrote 278 MB of WAL, because the first change to each page after a checkpoint logs the whole page, so a huge table writes about its own size the first time ([wraparound](/books/eight-kilobytes/vacuum#wraparound-stops-writes-before-anything-is-corrupted) is why you can't skip it). Partitions freeze once, and later vacuums skip their pages.
+
+<DeepDive title="What vacuum verbose says about freezing a whole table">
+
+```text
+frozen: 35029 pages from table (99.56% of total) had 1996020 tuples frozen
+visibility map: 4962 pages set all-visible, 35008 pages set all-frozen (30046 were all-visible)
+...
+WAL usage: 70383 records, 35190 full page images, 291082046 bytes, 2126 buffers full
+system usage: CPU: user: 0.22 s, system: 0.24 s, elapsed: 6.01 s
+```
+
+35,190 full page images for about 35,200 pages: nearly every page logged whole.
+
+<ProveIt lab="36-scale">
+
+```sql
+vacuum (freeze) events;
+select lab.prove(
+  'freezing every page of events writes WAL on the order of the table''s own size (over half of it)',
+  (select sum(wal_bytes) from pg_stat_statements
+   where dbid = (select oid from pg_database where datname = current_database())
+     and query like 'vacuum%') > :events_bytes / 2);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A bigger box fixes neither connections nor restores
+
+A bigger box doesn't fix connection counts: thousands of processes cost memory on any number of cores, so [pool](/books/eight-kilobytes/connections). And the ceiling people forget is operational: 10 TB restored at 500 MB/s takes five and a half hours before WAL replay begins. With a one-hour [recovery time objective](/books/eight-kilobytes/glossary#rpo-and-rto), that database is already too big for one instance restored from backup. [Measure your restore](/books/eight-kilobytes/backups) before it decides your architecture.
+
+## You're done scaling up when the evidence says so
+
+Each sign below is something you can measure. "The bill feels big" isn't one of them.
+
+- **WAL outruns its consumers**: replicas lag under normal load, and the lag grows.
+- **Write waits dominate on the biggest box**, with fast storage and batched commits.
+- **Vacuum can't finish** on the largest table.
+- **The working set outgrows** the largest RAM you can buy.
+- **Restore time breaks your RTO.**
+- **A hard requirement** forces data apart: residency, or a contract to isolate a tenant.
+- **Analytics over billions of rows**, which is a different engine's job ([rows against columns](/books/eight-kilobytes/limits#a-row-store-reads-every-column-to-use-two)).
+
+Not on the list: high CPU where nobody has read `pg_stat_statements`, or "we might need it someday". When a sign is real, pick the rung for what ran out: reads or failover, [replicas](/books/eight-kilobytes/replication); retention and vacuum, [partitioning](/books/eight-kilobytes/partitioning); writes or storage of one primary, [sharding](/books/eight-kilobytes/sharding).
+
+## The short version
+
+- Earn the bigger box: no upsize until the top statements are fixed and the request names the exhausted resource, with evidence.
+- A trivial statement with a big mean time is waiting, not working. Fix the wait, not the hardware.
+- Precompute what dashboards show: a rollup turned 35,249 pages into 4, and an idempotent upsert keeps it fresh.
+- Never keep an exact counter by updating one row in every transaction.
+- Unlogged tables write no WAL and are empty after a crash or failover.
+- One big box goes very far. The real ceilings are WAL and replica replay, vacuum on huge tables, and restore time.
+
+## Further reading
+
+- [pg_stat_statements](https://www.postgresql.org/docs/18/pgstatstatements.html), PostgreSQL documentation. Every column, including `wal_bytes`, and how statements are normalized.
+- [The cumulative statistics system](https://www.postgresql.org/docs/18/monitoring-stats.html), PostgreSQL documentation. The full list of wait event types and events, for decoding what your sessions are waiting on.
+- [REFRESH MATERIALIZED VIEW](https://www.postgresql.org/docs/18/sql-refreshmaterializedview.html), PostgreSQL documentation. The exact requirements for `CONCURRENTLY` and when the plain form is cheaper.
+- [Materialized views](https://www.postgresql.org/docs/18/rules-materializedviews.html), PostgreSQL documentation. How materialized views work and worked examples of using them for summaries.
+- [CREATE TABLE](https://www.postgresql.org/docs/18/sql-createtable.html), PostgreSQL documentation. The `UNLOGGED` guarantees, stated plainly: truncated after a crash, not replicated.
+- [Table partitioning](https://www.postgresql.org/docs/18/ddl-partitioning.html), PostgreSQL documentation. The next rung, and its best practices on partition counts.

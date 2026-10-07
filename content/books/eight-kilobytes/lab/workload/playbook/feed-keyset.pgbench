@@ -1,0 +1,11 @@
+-- The performance playbook: the same feed by keyset. The cursor is the
+-- (created_at, id) of the last row on the previous page; here it is a random
+-- moment in the last 90 days, the span the OFFSET version pages through.
+\set a random(1, 1000)
+\set back random(0, 90 * 86400)
+select id, project_id, kind, created_at
+from events
+where account_id = :a
+  and (created_at, id) < (timestamptz '2026-10-06' - make_interval(secs => :back), 0)
+order by created_at desc, id desc
+limit 20;

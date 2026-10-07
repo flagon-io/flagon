@@ -1,0 +1,280 @@
+---
+title: Pick a provider you can leave
+description: Where Postgres can run in October 2026, why some providers benchmark faster than others, and how to choose one you can walk away from.
+part: Running it
+builds_on: [managed]
+---
+
+Two providers, same 4 vCPU and 32 GB of RAM, same benchmark. One vendor's published run puts itself at 18,000 queries per second and its rival at 12,000. Take the numbers at face value and they still don't say either one runs a better PostgreSQL. One keeps its pages on a drive inside the machine, the other on storage across the network, and the dataset is fifteen times the size of RAM.
+
+That's most of the provider landscape. Above the buffer cache, everyone runs the same engine. Below it and around it, they bet differently: where pages live, who holds the superuser, what you pay for, and how hard it is to leave.
+
+Decide how much management to buy before you decide whose; [Buy as much management as you can afford](/books/eight-kilobytes/managed#buy-as-much-management-as-you-can-afford) makes that case. Then our advice is short: pick for the workload you have, and pick something you can leave.
+
+<Callout type="note" title="Sources and dates">
+
+Vendor facts come from each provider's documentation, pricing page, or blog as of October 2026, linked where stated; check the link before you build on one. Order is not a ranking, and our opinions are marked as ours. On versions: PostgreSQL 18 is the newest release; 19 was at Beta 4 on September 24, 2026, with the project saying GA "may also occur in October" ([PostgreSQL](https://www.postgresql.org/about/news/postgresql-19-beta-4-released-3386/)). No provider here offers 19 for production yet.
+
+</Callout>
+
+## Know the shape and you know the tradeoffs
+
+Every option is one of five architectures, or a blend, and the shape tells you most of the tradeoffs before you read a feature list.
+
+| Shape | Where the pages live | Good at | Costs you | Examples |
+|---|---|---|---|---|
+| Classic managed | VM plus network volume | Familiar, portable | A miss is a network trip | RDS, Cloud SQL, Azure |
+| Local NVMe | Drive in the machine | Fast past RAM | Replicas carry durability | PlanetScale Metal |
+| Disaggregated | Storage fed by WAL | Shared replicas, auto-growth | Proprietary storage | Aurora, AlloyDB |
+| Serverless | Disaggregated, scales to zero | Cheap idle, branches | Cold starts, busy bills | Neon |
+| Platform bundle | Any of the above | Auth, APIs, storage | More of your app on one vendor | Supabase |
+
+Most specialists are classic managed too.
+
+Self-managing, on VMs or Kubernetes, is the sixth option, and it can take any of the first three shapes.
+
+## Storage decides the benchmark
+
+When one provider posts twice the throughput of another on the same vCPU and RAM, look at the disk first. Once the [working set](/books/eight-kilobytes/glossary#working-set) no longer fits in memory, where the pages live sets the speed.
+
+The [latency chapter](/books/eight-kilobytes/latency#memory-is-cheap-everything-else-is-expensive) has the ladder: RAM in nanoseconds, local NVMe in tens of microseconds, network storage in hundreds of microseconds or more. And the ladder only matters for misses ([shared_buffers is an array of pages](/books/eight-kilobytes/buffers#shared_buffers-is-an-array-of-pages)). If your hot pages fit in memory, all three storage designs look alike.
+
+### Network block storage: every miss is a round trip
+
+RDS, Cloud SQL, Azure, and most specialists put the data directory on a network volume, so a read that misses memory becomes a request to storage servers elsewhere in the data center. The volume has an [IOPS](/books/eight-kilobytes/glossary#iops) ceiling, and the instance in front of it often has a lower one: an EC2 `r8g.xlarge` (4 vCPU, 32 GiB) sustains 6,000 IOPS once its burst is spent, whatever volume you bought ([Two ceilings, and you hit the lower one](/books/eight-kilobytes/managed#two-ceilings-and-you-hit-the-lower-one)).
+
+It earns its place as the default anyway. The volume outlives the instance, so a dead host means reattaching, not rebuilding. Snapshots are cheap, storage and compute resize independently, and even a single instance survives a dead disk, because the storage replicates underneath it (not forever: AWS rates gp3 at 99.8 to 99.9 percent durability a year).
+
+### Local NVMe: fast, and gone with the host
+
+Instance storage is a drive in the same machine. AWS rates an `i8g.xlarge`, the same 4 vCPU and 32 GiB, at 150,000 random-read IOPS on its one 937 GB drive: twenty-five times the network path's 6,000.
+
+The price is durability. AWS: "the data does not persist if the instance is stopped, hibernated, or terminated". So a database on local NVMe gets its durability from [replication](/books/eight-kilobytes/replication), and that has consequences. A commit must reach a replica in another zone before it's safe, which [costs a round trip](/books/eight-kilobytes/replication#synchronous-commit-costs-a-round-trip). A lost node is rebuilt by copying the whole database, hours for terabytes. And disk size is instance size: outgrowing the drive means migrating to a bigger node.
+
+<DeepDive title="The volume and instance numbers, as AWS and Google publish them">
+
+As of October 2026, per AWS:
+
+- **gp3** includes a 3,000 IOPS baseline ([the managed chapter](/books/eight-kilobytes/managed#the-volume-is-your-bottleneck-now) shows what that ceiling looks like), can be provisioned up to 80,000 IOPS and 2,000 MiB/s, and does not burst ([AWS](https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html)). Its durability is listed as "99.8% - 99.9%" ([AWS](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-volume-types.html)).
+- **io2 Block Express** is "designed to deliver an average latency of under 500 microseconds for 16KiB I/O operations", reaches 256,000 IOPS on Nitro instances, and is rated "99.999% durability", priced per provisioned IOPS.
+- **`r8g.xlarge`** has a baseline of 6,000 IOPS and 156.25 MB/s and a maximum of 40,000 IOPS and 1,250 MB/s; instances in its tier "can sustain the maximum performance for 30 minutes at least once every 24 hours, after which they revert to their baseline performance" ([AWS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-optimized.html)).
+- **`i8g.xlarge`** is rated at 150,000 random-read and 82,500 write IOPS, at 4 KiB and full queue depth ([AWS](https://docs.aws.amazon.com/ec2/latest/instancetypes/so.html)). AWS says "do not rely on instance store volumes for valuable, long-term data" ([AWS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-store-lifetime.html)).
+
+Google's Local SSD, "physically attached to the server", "can provide only temporary storage" ([Google](https://docs.cloud.google.com/compute/docs/disks/local-ssd)). AWS also uses local NVMe for a narrower job: RDS Optimized Reads puts temporary tables on local storage for "up to 50% faster query performance" while the data stays on EBS ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PostgreSQL.optimizedreads.html)).
+
+</DeepDive>
+
+### Log-structured storage: ship WAL, not pages
+
+Aurora, AlloyDB, Neon, and Azure's HorizonDB (in preview) send WAL to a storage service that builds pages from it, so a write waits on a network quorum and a read miss is a network fetch, softened by a local cache. What that changes for tuning is in [Disaggregated storage changes some rules](/books/eight-kilobytes/managed#disaggregated-storage-changes-some-rules). For choosing, the difference is the bill: Aurora Standard charges per million I/O requests, AlloyDB has no I/O charges, and Neon's local cache can spill to NVMe.
+
+### The best-known benchmark tested storage at fifteen times RAM
+
+The best-known comparison is PlanetScale's, published July 1, 2025 with its Postgres launch and still on its [benchmarks page](https://planetscale.com/benchmarks) as of October 2026. On a TPCC-like test with a roughly 500 GB database on 32 GB machines, it reports itself, on local NVMe, at about 18,000 QPS, and Aurora at about 12,000. All of it is vendor-reported; we have not reproduced it.
+
+The architecture explains the shape. With the dataset fifteen times RAM, most reads miss memory: a local read on NVMe, a network round trip under an IOPS policy everywhere else. PlanetScale pays the network on every commit instead, waiting for a replica in another zone, and saves it on every read miss. The rivals' replies confirm the physics: put the hot pages on local flash or in RAM, and the network penalty shrinks.
+
+<DeepDive title="The PlanetScale benchmark, its method, and the replies">
+
+Per its [methodology post](https://planetscale.com/blog/benchmarking-postgres):
+
+- **System under test:** PlanetScale's `M-320`, an `i8g` node (4 vCPU, 32 GB RAM, 937 GB local NVMe), as a primary and two replicas across three zones; only the primary served the benchmark.
+- **The others:** single instances matching or exceeding that vCPU and RAM, such as Aurora on `db.r8g.xlarge` and Neon at 8 compute units, all of which "use network-attached storage".
+- **Workloads:** Percona's TPCC-like sysbench script at a scale that "produces a ~500 gigabyte Postgres database", 5 minutes at 32 and 64 connections; sysbench read-only on "a ~300 gigabyte" dataset; and `SELECT 1` repeated for round-trip latency. Settings "left at each platform's defaults" except connection limits and timeouts; cost compared as its three-node price against each rival with replicas added.
+
+Headline TPCC-like results, as PlanetScale states them: about 18,000 QPS for itself, Aurora about 12,000 ([Aurora page](https://planetscale.com/benchmarks/aurora)), Neon about 12,500 ([Neon page](https://planetscale.com/benchmarks/neon-lakebase)), and lower figures for AlloyDB, Crunchy Data, Supabase, TigerData, and Heroku. Read-only: PlanetScale and Aurora both "around ~35,000 QPS", PlanetScale steadier at p99. Its [architecture page](https://planetscale.com/docs/postgres/postgres-architecture) says changes are "confirmed by at least one replica".
+
+- **Xata** ([July 16, 2025](https://xata.io/blog/reaction-to-the-planetscale-postgresql-benchmarks)) ran the test on its own NVMe-over-Fabrics network storage and reported about 25,000 QPS at 64 connections on 8 vCPU with Postgres tuned for the run, and about 20,000 on 4 vCPU. It calls its chart "not an apples-to-apples comparison", and faulted the method: no checkpoint or vacuum before the run, untuned defaults, a "very write heavy" workload. PlanetScale [replied](https://planetscale.com/benchmarks/xata) that Xata tuned for the workload and declined to give PlanetScale access to reproduce it.
+- **Neon** ([July 11, 2025](https://neon.com/blog/separation-of-storage-and-compute-perf)) reran the test with a 500 GB local cache on NVMe and reported 17,030 QPS against 12,512 at its defaults, and about 10 percent less peak QPS with a 180 GB cache sized to the working set. Its counterpoint: fixed local disks make you buy the next size up.
+
+</DeepDive>
+
+### Ask who ran a benchmark before you read its numbers
+
+These questions apply to every vendor benchmark, including the ones that flatter a service you like:
+
+- **Who ran it?** A vendor tunes its own product and tests rivals' defaults; "vendor-reported" belongs next to every number.
+- **Which workload?** Percona's README says its script "is NOT an implementation of TPCC workload" and asks that vendor comparisons say so ([Percona](https://github.com/Percona-Lab/sysbench-tpcc)).
+- **Dataset against RAM?** A dataset 15 times RAM tests storage. Production is usually sized so the working set fits in memory.
+- **Same durability, same tuning?** Synchronous replicas, quorum storage, and one volume promise different things, and [provider defaults differ widely](/books/eight-kilobytes/managed#the-defaults-are-not-the-books-defaults).
+- **Normalized and reproducible?** Price per query depends on tier, region, and replica count; published scripts make a claim checkable.
+
+A day with your schema and your ten heaviest queries on two candidate services tells you more than every published chart ([how to run it](/books/eight-kilobytes/benchmarking)).
+
+### Prove the disk is the problem before you move
+
+A benchmark can tell you a faster disk exists. Only your own numbers can tell you that you need one. Compare the working set to RAM ([size RAM to the working set](/books/eight-kilobytes/latency#size-ram-to-the-working-set)). [Sample wait events](/books/eight-kilobytes/observability#sample-waits-to-see-where-the-time-goes): sessions mostly in `IO` / `DataFileRead` mean reads are leaving memory. Rank `pg_stat_statements` by `shared_blks_read` ([four rankings](/books/eight-kilobytes/observability#rank-the-same-view-four-ways-total-time-first)); often one query reads most of the pages. And look for a cap: IOPS flat while latency climbs ([how to tell](/books/eight-kilobytes/managed#throttled-io-shows-as-flat-iops-and-rising-latency)).
+
+Then try the cheap fixes in order: fewer pages read, more RAM, provisioned IOPS, a bigger instance ([Earn the bigger box](/books/eight-kilobytes/scale#earn-the-bigger-box)). Move architectures only when storage reads still dominate after all that.
+
+## Hyperscalers win on breadth and cost you complexity
+
+Each big cloud sells a classic managed service and a disaggregated one. They win on breadth: regions, compliance programs, private networking to everything else you run there. They cost you complexity: bills with many line items, and paid extended support if you fall behind on major versions.
+
+<DeepDive title="RDS, Aurora, Cloud SQL, AlloyDB, and Azure, entry by entry">
+
+As of October 2026:
+
+**Amazon RDS for PostgreSQL.** A VM on EBS, up to 64 TiB ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Storage.html)). 14 to 18 in standard support, 18.6 current; 19 only in a preview environment where "you can't use a Preview version for production" ([release calendar](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-release-calendar.html), [preview](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/working-with-the-database-preview-environment.html)); new majors targeted within 30 days of the community's first minor. A long extension list ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html)); a Multi-AZ standby that "doesn't serve read traffic", or a cluster with two readable semisynchronous standbys ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/multi-az-db-clusters-concepts.html)); up to 15 read replicas. Without a superuser, roles come out with `pg_dumpall --globals-only --no-role-passwords`, passwords reset by hand. Old majors move to paid Extended Support, per vCPU-hour, up to three years, standbys included ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/extended-support.html)). Priced by instance-hour, storage, extra IOPS, and backup storage ([AWS](https://aws.amazon.com/rds/postgresql/pricing/)).
+
+**Amazon Aurora PostgreSQL.** A shared volume across three zones that "can grow up to 256 tebibytes (TiB)", up to 15 replicas on it ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Overview.html)). PostgreSQL 18 arrived June 11, 2026; majors are targeted within eight months of the community's first minor ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/aurorapostgresql-release-calendar.html)). Global Database reaches "up to 10 read-only secondary AWS Regions" with lag "typically under a second" ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database.html)). Aurora serverless scales "from 0 ACUs to 256 ACUs", about 2 GiB each, and auto-pauses on 13.15, 14.12, 15.7, 16.3 and later ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.how-it-works.html), [auto-pause](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html)). Limitless Database, GA since October 2024, shards ([managed sharded Postgres](/books/eight-kilobytes/sharding#managed-sharding-costs-you-features-and-an-easy-exit)). Exits are logical only, with Aurora as publisher ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.Replication.Logical.html)). I/O-Optimized drops per-request I/O billing and can be switched "once every 30 days" ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Overview.StorageReliability.html); [when it pays off](/books/eight-kilobytes/managed#disaggregated-storage-changes-some-rules)).
+
+**Aurora DSQL is a different database.** GA since May 2025 and based on PostgreSQL 16, but isolation "is fixed at PostgreSQL Repeatable Read", conflicts error instead of waiting, and there are no temporary tables, triggers, or PL/pgSQL ([AWS](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/working-with-postgresql-compatibility-migration-guide.html)). A migration, like the [distributed SQL databases](/books/eight-kilobytes/sharding#distributed-sql-speaks-postgres-but-isnt-postgres).
+
+**Google Cloud SQL.** "Each Cloud SQL instance is powered by a virtual machine" on a network disk ([Google](https://docs.cloud.google.com/sql/docs/postgres/introduction)); 9.6 to 18, 18.6 the default ([Google](https://docs.cloud.google.com/sql/docs/postgres/db-versions)). Enterprise Plus, the default from 16, adds a local-SSD cache, read pools, "Sub-second downtime" maintenance, PITR logs "Up to 35 days" (7 on Enterprise), and a 99.99% SLA ([Google](https://docs.cloud.google.com/sql/docs/postgres/editions-intro)). HA writes synchronously to two zones' disks ([Google](https://docs.cloud.google.com/sql/docs/postgres/high-availability)). Extended support has been charged since May 1, 2025 ([Google](https://docs.cloud.google.com/sql/docs/postgres/extended-support)). vCPU and memory, doubled for HA ([pricing](https://cloud.google.com/sql/pricing)).
+
+**AlloyDB.** "A disaggregated compute and storage architecture that spans multiple availability zones" ([Google](https://docs.cloud.google.com/alloydb/docs/overview)) with a columnar engine for analytics ([Google](https://docs.cloud.google.com/alloydb/docs/columnar-engine/about)). 18 GA on March 18, 2026; majors "within five months" of community GA ([Google](https://docs.cloud.google.com/alloydb/docs/db-version-policies)). Continuous backup, 1 to 35 days, "RPO of zero" ([Google](https://docs.cloud.google.com/alloydb/docs/backup/overview)); no I/O charges ([pricing](https://cloud.google.com/alloydb/pricing)). AlloyDB Omni runs the same engine in your own data center, on any public cloud, or on a laptop, licensed per vCPU ([Google](https://docs.cloud.google.com/alloydb/omni/docs/overview)). Leaving is logical, via pglogical or `pg_dump` ([extensions](https://docs.cloud.google.com/alloydb/docs/reference/extensions), [export](https://docs.cloud.google.com/alloydb/docs/export-dmp-file)).
+
+**Azure flexible server.** "The database engine runs on a container inside a Linux virtual machine", data in "three locally redundant synchronous copies" ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/overview)). Storage to 64 TiB ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/compute-storage/concepts-compute)); 18.6 current ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/configure-maintain/concepts-supported-versions)). Zone-redundant HA with "zero data loss", five read replicas ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/read-replica/concepts-read-replicas)), and elastic clusters, "a managed offering of the open-source Citus extension" ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/elastic-clusters/concepts-elastic-clusters)). On 18, "You can't configure the server to use the new Async I/O io_method = io_uring". Microsoft says extended support for 11 to 13 bills from "September 1, 2026", with no opt-out ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/configure-maintain/extended-support)). Per vCore plus storage ([Microsoft](https://azure.microsoft.com/en-us/pricing/details/postgresql/flexible-server/)). **Azure HorizonDB**, "currently in preview", is the disaggregated one: "Data pages aren't written from the compute replicas to the storage layer" ([Microsoft](https://learn.microsoft.com/en-us/azure/horizondb/overview)).
+
+</DeepDive>
+
+## Specialists buy you closer support and fewer regions
+
+These companies sell Postgres and little else. Our view: that focus buys Postgres-specific features and closer support, at the cost of fewer regions and a smaller company behind the service.
+
+Read the HA and backup lines closely; they vary far more here than among the hyperscalers, from 2 days of [PITR](/books/eight-kilobytes/glossary#pitr) to 30, and from hot standbys to asynchronous ones that can lose the last commits. Of those that say, only Crunchy Bridge gives you superuser.
+
+<DeepDive title="Ten specialist services, entry by entry">
+
+As of October 2026:
+
+**Crunchy Bridge and Snowflake Postgres.** Snowflake announced its intent to acquire Crunchy Data on June 2, 2025; its blog later says "In June 2025, Snowflake acquired Crunchy Data" ([press release](https://www.snowflake.com/en/news/press-releases/snowflake-acquires-crunchy-data-to-bring-enterprise-ready-postgres-offering-to-the-ai-data-cloud/), [blog](https://www.snowflake.com/en/blog/engineering/meet-the-team-behind-snowflake-postgres/)). **Crunchy Bridge** runs VMs on AWS, Google Cloud, and Azure, 15 to 18 (15 retired for new clusters in May 2026), and gives "your Postgres super user account" ([versions](https://docs.crunchybridge.com/concepts/postgres-versions), [users](https://docs.crunchybridge.com/concepts/users)); WAL every 60 seconds, 10 days kept; HA "doubles the cluster price" ([HA](https://docs.crunchybridge.com/concepts/high-availability), [plans](https://docs.crunchybridge.com/concepts/plans-pricing)). **Snowflake Postgres**, GA February 24, 2026, runs 16 to 18 with 10-day PITR, and its admin "is not a full Postgres superuser" ([Snowflake](https://docs.snowflake.com/en/user-guide/snowflake-postgres/about), [roles](https://docs.snowflake.com/en/user-guide/snowflake-postgres/postgres-roles)).
+
+**Aiven.** VMs in the major clouds, 13 to 18, retired at upstream end of life ([Aiven](https://aiven.io/docs/platform/reference/eol-for-major-versions)); one standby on Business, two on Premium ([Aiven](https://aiven.io/docs/products/postgresql/concepts/high-availability)). "Superuser-only and untrusted extensions ... cannot be installed with a few exceptions"; backups 2 to 30 days by plan ([Aiven](https://aiven.io/docs/products/postgresql/concepts/pg-backups)); a free tier ([Aiven](https://aiven.io/pricing/postgresql)).
+
+**EDB Postgres AI Cloud Service.** EDB "will no longer offer the Hosted Cloud Service option for new customers"; managing clusters in your own cloud account continues ([EDB](https://www.enterprisedb.com/docs/edb-postgres-ai/cloud-service/)). Advanced Server is now "Enterprise Postgres (Oracle Compatible)" ([EDB](https://www.enterprisedb.com/docs/epas/latest/)), priced at three times community PostgreSQL per vCPU-hour ([EDB](https://www.enterprisedb.com/docs/edb-postgres-ai/cloud-service/references/pricing_and_billing/)); its Oracle features don't move to community Postgres.
+
+**Fly.io Managed Postgres.** "A primary and replica, pg bouncers, and backups" on every plan, 16 and 17, to 1 TB ([Fly.io](https://docs.fly.io/postgres)); Fly.io lists "Security patches and version upgrades" as "under development". The old unmanaged Fly Postgres "is no longer maintained" ([Fly.io](https://docs.fly.io/unmanaged-postgres/index.md)).
+
+**PlanetScale Postgres.** GA September 22, 2025: a primary and two replicas across zones, on local NVMe ("Metal") or network storage, 17 and 18 ([GA](https://planetscale.com/blog/planetscale-for-postgres-is-generally-available), [versions](https://planetscale.com/docs/postgres/cluster-configuration/versions)), CDC through logical replication ([PlanetScale](https://planetscale.com/docs/postgres/integrations/logical-cdc)). Metal is "Fixed storage capacity based on instance size"; backups "retained for 2 days" by default ([PlanetScale](https://planetscale.com/docs/postgres/backups/point-in-time-recovery)); Neki sharding is "currently in Platform Preview" ([PlanetScale](https://planetscale.com/docs/postgres/sharding)); priced by cluster size ([PlanetScale](https://planetscale.com/pricing)).
+
+**Tiger Cloud.** "Timescale is now Tiger Data" (June 17, 2025, [Tiger Data](https://www.tigerdata.com/blog/timescale-becomes-tigerdata)): TimescaleDB on 16 to 18 ([Tiger Data](https://www.tigerdata.com/docs/deploy/tiger-cloud/tiger-cloud-aws/upgrades)), for event data past what the [models chapter's](/books/eight-kilobytes/models) BRIN and partitions handle. "Tiger Cloud does not provide superuser access" ([Tiger Data](https://www.tigerdata.com/docs/deploy/tiger-cloud/tiger-cloud-aws/security/read-only-role)); PITR 3 or 14 days; hourly compute plus storage ([Tiger Data](https://www.tigerdata.com/pricing)).
+
+**DigitalOcean.** 14 to 18 ([DigitalOcean](https://docs.digitalocean.com/products/databases/postgresql/details/limits/)), PITR "within the previous seven days" ([DigitalOcean](https://docs.digitalocean.com/products/databases/postgresql/details/features/)), no superuser. From October 15, 2026 for new accounts and November 30 for all, new Standard Edition clusters "cannot use plans with more than 4 GiB of RAM or add standby or read-only nodes"; HA moves to the pricier Advanced Edition.
+
+**Render.** 13 to 18 ([Render](https://render.com/docs/postgresql-upgrading)); HA is an asynchronous standby taking over after 30 seconds ([Render](https://render.com/docs/postgresql-high-availability)), which [can lose the last commits](/books/eight-kilobytes/replication#asynchronous-is-the-default-and-it-can-lose-commits); PITR 3 or 7 days ([Render](https://render.com/docs/postgresql-backups)); free databases "expire 30 days after creation" ([Render](https://render.com/docs/free)).
+
+**Heroku Postgres.** Its Advanced tier, "decoupled compute and storage" to 100 TB, is in "limited general availability" ([Heroku](https://devcenter.heroku.com/articles/heroku-postgres-plans), [Advanced](https://devcenter.heroku.com/articles/heroku-postgres-advanced)); 18 is the default ([Heroku](https://devcenter.heroku.com/articles/heroku-postgres-version-support)). The owner is "one step below the superuser" ([Heroku](https://devcenter.heroku.com/articles/heroku-postgresql-credentials)); failover can lose "a small, but bounded, amount of recently committed data" ([Heroku](https://devcenter.heroku.com/articles/heroku-postgres-ha)). On February 6, 2026, Heroku said it "is transitioning to a sustaining engineering model ... rather than introducing new features" ([Heroku](https://www.heroku.com/blog/an-update-on-heroku/)).
+
+</DeepDive>
+
+## Serverless platforms optimize for the developer's day
+
+Their pitch: databases that cost nothing when idle, branches per pull request, and sometimes a whole backend around the database. The tradeoffs are cold starts, unit-based bills that are harder to forecast, and, for bundles, more of your app tied to one vendor.
+
+<DeepDive title="Neon, Supabase, Xata, Nile, and Railway, entry by entry">
+
+As of October 2026:
+
+**Neon.** Compute and storage linked by "a stream of write-ahead log (WAL) records", now branded Lakebase Postgres ([Neon](https://neon.com/docs/introduction/architecture-overview)); Databricks announced its intent to acquire Neon on May 14, 2025, and Neon "is part of the Databricks Platform" ([Databricks](https://www.databricks.com/company/newsroom/press-releases/databricks-agrees-acquire-neon-help-developers-deliver-ai-systems)). 14 to 18 ([Neon](https://neon.com/docs/postgresql/postgres-version-policy)). Scales to zero after 5 idle minutes, waking "within a few hundred milliseconds" ([Neon](https://neon.com/docs/introduction/scale-to-zero)); branches "from a current or past state" ([Neon](https://neon.com/docs/introduction/branching)); restore windows up to 30 days by plan. A major upgrade means a new project; a connected logical replication subscriber keeps compute awake, and inactive slots go after about 40 hours ([Neon](https://neon.com/docs/guides/logical-replication-neon)). Billed by compute-unit hours, with a free plan ([Neon](https://neon.com/docs/introduction/plans)).
+
+**Supabase.** A platform bundle on a Postgres instance per project: Auth, a REST API via PostgREST, Realtime, Storage, and Edge Functions ([Supabase](https://supabase.com/docs/guides/getting-started/architecture)), on PostgreSQL 15 or 17 ([Supabase](https://supabase.com/docs/guides/platform/upgrading)). Built on [row-level security](/books/eight-kilobytes/security), with documented logical replication out ([Supabase](https://supabase.com/docs/guides/database/postgres/setup-replication-external)). Branches start "Data-less by default" ([Supabase](https://supabase.com/docs/guides/deployment/branching)); PITR is an add-on needing at least Small compute; OrioleDB, a storage engine without vacuum, "is in public beta" ([Supabase](https://supabase.com/docs/guides/database/orioledb)). Plan plus compute plus usage ([Supabase](https://supabase.com/pricing)).
+
+**Xata.** "Branch-native Postgres": each branch is "a Copy-on-Write snapshot of the underlying logical volume" ([Xata](https://xata.io/docs/core-concepts/branching)), with anonymized clones; 14 to 18 ([Xata](https://xata.io/docs/platform/extensions)); in Xata's cloud, yours, or self-hosted ([Xata](https://xata.io/pricing)). Only minor upgrades in place; Xata's public docs don't describe backups or PITR.
+
+**Nile.** Postgres for multi-tenant SaaS: each storage page belongs to one tenant, and tenants go on shared or dedicated compute ([Nile](https://www.thenile.dev/docs/getting-started/architecture)), what the [sharding chapter](/books/eight-kilobytes/sharding) does by hand. PostgreSQL 15 only, and no user-defined functions, triggers, or sequences on tenant tables ([Nile](https://www.thenile.dev/docs/postgres/postgres-compatibility)).
+
+**Railway.** Not managed: its templates are "unmanaged services", leaving you "responsible for" backups, tuning, security, and monitoring ([Railway](https://docs.railway.com/databases)). Optional Patroni HA ([Railway](https://docs.railway.com/databases/postgresql-ha)); backups are volume snapshots, not WAL-based recovery ([Railway](https://docs.railway.com/volumes/backups)).
+
+Smaller entries exist too, such as Prisma Postgres, billed per operation ([Prisma](https://www.prisma.io/docs/postgres/faq)).
+
+</DeepDive>
+
+## Self-managing gives you the superuser and the pager
+
+Self-managing on VMs or Kubernetes gives you the superuser, every extension, any version on release day, and the cheapest path at large, steady scale. It costs you the on-call rotation, and everything in the [replication](/books/eight-kilobytes/replication#dont-hand-roll-failover) and [backups](/books/eight-kilobytes/backups#test-your-restores) chapters becomes yours. The standard parts are Patroni for HA, pgBackRest, WAL-G, or Barman for backups, and an operator such as CloudNativePG on Kubernetes.
+
+<DeepDive title="The self-managed toolkit, with licenses">
+
+As of October 2026:
+
+- **Patroni**: "a Python template for building PostgreSQL high availability (HA) clusters", with etcd, Consul, ZooKeeper, or Kubernetes for leader election; MIT, PostgreSQL 9.3 to 18 ([GitHub](https://github.com/patroni/patroni)).
+- **pgBackRest**: full, differential, and incremental backups to S3, Azure, or GCS-compatible storage, with PITR ([pgbackrest.org](https://pgbackrest.org/)). Its maintainer announced on April 27, 2026 that it was "no longer being maintained", then on May 18 that "a coalition of sponsors has come together to fund ongoing development" ([news](https://pgbackrest.org/news.html)).
+- **WAL-G** (Apache-2.0) and **Barman** (GPL-3.0) ([WAL-G](https://github.com/wal-g/wal-g), [Barman](https://pgbarman.org/)).
+- **CloudNativePG**: an operator that "integrates directly with the Kubernetes API" instead of using Patroni; Apache-2.0, a CNCF Sandbox project since January 2025, backups through its Barman Cloud plugin ([GitHub](https://github.com/cloudnative-pg/cloudnative-pg), [CNCF](https://www.cncf.io/projects/cloudnativepg/)).
+- **Crunchy Postgres for Kubernetes (PGO)**: Patroni plus pgBackRest, Apache-2.0; its default images fall under the Crunchy Data Developer Program terms, so read those first ([GitHub](https://github.com/CrunchyData/postgres-operator)).
+- **Zalando postgres-operator**: Patroni via its Spilo image, MIT, PostgreSQL 14 to 18 ([GitHub](https://github.com/zalando/postgres-operator)).
+- **StackGres**: AGPL-3.0, Patroni-based, with a web console and a large extension catalog ([StackGres](https://stackgres.io/)). **Percona Operator for PostgreSQL** is "based on Postgres Operator developed by Crunchy Data", Apache-2.0 ([GitHub](https://github.com/percona/percona-postgresql-operator)).
+
+</DeepDive>
+
+## Superuser access and retention rule services out
+
+The major services in one table, as of October 2026, from the sources in the entries. "Versions" means majors offered for new databases. Read it for the columns that rule services out: only one hands you a superuser, and backup retention runs from a couple of days to five weeks.
+
+| Service | Shape | Versions | Superuser | PITR window |
+|---|---|---|---|---|
+| RDS | classic | 14 to 18 | no | 0 to 35 days |
+| Aurora | disaggregated | 14 to 18 | no | 1 to 35 days |
+| Cloud SQL | classic | 9.6 to 18 | no | 7 or 35 days |
+| AlloyDB | disaggregated | 14 to 18 | no | 1 to 35 days |
+| Azure | classic | 14 to 18 | no | 7 to 35 days |
+| Crunchy Bridge | classic | 15 to 18 | yes | 10 days |
+| PlanetScale | NVMe or network | 17, 18 | no | 2 days default |
+| Neon | serverless | 14 to 18 | no | up to 30 days |
+| Supabase | bundle | 15, 17 | no | add-on |
+
+Supabase takes daily backups on every plan; point-in-time recovery is the add-on. Azure still runs 11 to 13 for existing servers, under paid extended support.
+
+## Choose by elimination
+
+Work through these in order. The early answers rule out most of the list.
+
+1. **How big, and how fast is it growing?** Check the storage ceiling (1 TB on Fly.io Managed Postgres, 64 TiB on RDS and Azure, 256 TiB on Aurora), whether disk is tied to instance size, and your working set against affordable RAM.
+2. **How much do you write?** Writes care about commit latency and WAL volume; reads about replicas and cache misses.
+3. **Superuser or a specific extension?** Check the exact version and [footnotes](/books/eight-kilobytes/managed#extensions-come-from-an-allowlist). Superuser narrows the list to Crunchy Bridge, your own containers, or self-managed.
+4. **What compliance?** Certifications and data residency differ per provider and region. Ask for the reports, not the logo wall.
+5. **Which regions?** The app's region. Cross-region round trips undo everything else in this book ([round trips cost more than queries](/books/eight-kilobytes/latency#round-trips-cost-more-than-queries)).
+6. **What RPO and RTO?** [Write them down first](/books/eight-kilobytes/backups#write-down-rpo-and-rto-first): asynchronous HA can lose recent commits, and a 2-day PITR window won't cover a bug found on day 3.
+7. **Which budget model?** Fixed instances are predictable; usage-based compute is cheap idle and surprising busy; I/O-priced storage bills you for a missing index.
+8. **How do you leave?** Answer the next section before you sign.
+
+Our opinion: most teams starting today do well with a classic managed service on the cloud their app already runs on, sized so the working set fits in RAM. Reach for local NVMe, disaggregated storage, or serverless when you can name the problem they solve for you.
+
+## Plan the exit before you need it
+
+Every provider makes leaving possible. Few make it easy. The cost depends on how much of your system speaks something other than PostgreSQL.
+
+### Community Postgres moves cleanly
+
+Your schema, data, roles (mostly), and SQL come with you, as long as they stay on community PostgreSQL and community extensions. Two paths carry them.
+
+**`pg_dump`** ([pg_dump](https://www.postgresql.org/docs/18/app-pgdump.html)) works everywhere, but the database is read-only or diverging for the hours it takes ([logical backups](/books/eight-kilobytes/backups#pg_dump-is-portable-small-and-slow-to-restore)), and roles may need scripting, since `pg_dumpall` needs superuser.
+
+**Logical replication** then a cutover ([logical replication](/books/eight-kilobytes/replication#logical-replication-copies-rows-not-pages)) takes minutes of downtime instead of hours, if the old provider lets you publish. RDS, Aurora, Cloud SQL, AlloyDB (via pglogical), Azure, Neon, Supabase, and PlanetScale document it; mind its [limits](/books/eight-kilobytes/replication#logical-replication-skips-ddl-and-sequences).
+
+### Proprietary storage, features, and glue stay behind
+
+- **Proprietary storage.** Aurora, AlloyDB, and HorizonDB run Postgres on storage you can't take with you; only logical paths leave. AlloyDB Omni, the same engine licensed to run on your own machines, is the partial exception. Neon's storage is open source, but running it yourself is a project of its own.
+- **Proprietary features.** EDB's Oracle-compatible syntax, AlloyDB's columnar engine for analytics, Aurora's Babelfish (SQL Server wire compatibility), and the sharded tables of Aurora Limitless Database. Fine to use; count each as work to redo.
+- **Platform services.** Supabase Auth, Storage, and generated APIs; Heroku's add-on wiring; Nile's per-tenant storage model. The data comes out with `pg_dump`. The application around it does not.
+- **Provider extensions, roles, and glue.** One-service extensions, `rds_superuser`-style roles, dashboards, IAM authentication, private networking, backup policies. Not code, but weeks of work.
+
+### Keep the door open
+
+- **Stay on community PostgreSQL features** unless a proprietary one is worth its exit cost, and write that decision down.
+- **Run a logical export on a schedule** to storage the provider account can't delete, and restore it somewhere else once a quarter. That's your exit rehearsal and your [tested backup](/books/eight-kilobytes/backups#test-your-restores) in one.
+- **Check publisher support now**: subscribe a plain PostgreSQL server you control to staging.
+- **Keep major versions current.** Each major gets five years: 13 reached end of life on November 13, 2025 and 14 follows on November 12, 2026 ([PostgreSQL](https://www.postgresql.org/support/versioning/)). Extended support charges you for staying behind, and a current version widens where you can move.
+
+## The short version
+
+- Above the buffer cache, every provider runs the same PostgreSQL. Below it, where the pages live dominates benchmarks once the working set exceeds RAM.
+- Network storage costs a round trip per miss but survives the host; local NVMe is far faster per read and dies with it.
+- Treat every published benchmark as vendor-reported, and run your own on your queries.
+- Before moving for faster storage, prove reads dominate: working set against RAM, `IO` waits, `shared_blks_read`. Fix queries and buy RAM first.
+- Hyperscalers win on breadth, specialists on Postgres focus, serverless platforms on idle cost and branching. Find each one's documented limit before you commit.
+- Choose by data size, write volume, extension and superuser needs, compliance, region, RPO and RTO, and budget model, in that order.
+- Plan the exit up front: logical replication out, a scheduled `pg_dump` you control, and a written list of every proprietary feature you depend on.
+
+## Further reading
+
+- [Amazon EBS volume types](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-volume-types.html), AWS documentation. IOPS, throughput, latency, and durability for each network volume type.
+- [Amazon EBS-optimized instance types](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-optimized.html), AWS documentation. The per-instance storage ceilings and burst windows that often bind first.
+- [Data persistence for instance store volumes](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-store-lifetime.html), AWS documentation. Exactly when local NVMe data disappears.
+- [Benchmarking Postgres](https://planetscale.com/blog/benchmarking-postgres), PlanetScale blog. The methodology behind the most-cited provider comparison; read it with the caveats above.
+- [Reaction to the PlanetScale PostgreSQL benchmarks](https://xata.io/blog/reaction-to-the-planetscale-postgresql-benchmarks), Xata blog. A competitor's critique of the same method, and the case for fast network storage.
+- [sysbench-tpcc README](https://github.com/Percona-Lab/sysbench-tpcc), Percona. What the most-used TPCC-like script is, and isn't, in its authors' words.
+- [Logical replication](https://www.postgresql.org/docs/18/logical-replication.html), PostgreSQL documentation. The exit path every provider decision should be checked against.
+- [Versioning policy](https://www.postgresql.org/support/versioning/), PostgreSQL. Five years per major; the dates every provider's support calendar hangs off.

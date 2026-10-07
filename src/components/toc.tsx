@@ -42,11 +42,11 @@ export function Toc({ items }: { items: TocItem[] }) {
       </p>
       <ul className="flex flex-col gap-1 border-l border-hairline">
         {items.map((item) => (
-          <li key={item.id}>
+          <li key={item.id} data-toc-deep={item.deep ? "" : undefined}>
             <a
               href={`#${item.id}`}
               className={cn(
-                "-ml-px block border-l-2 py-1 text-sm transition-colors",
+                "-ml-px block break-words border-l-2 py-1 text-sm transition-colors",
                 item.depth === 3 ? "pl-7" : "pl-4",
                 activeId === item.id
                   ? "border-brand font-medium text-foreground"

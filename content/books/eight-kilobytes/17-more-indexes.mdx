@@ -1,0 +1,614 @@
+---
+title: Beyond the B-tree
+description: When to reach for GIN, GiST, SP-GiST, BRIN, or hash indexes, what each one costs, and how to prove it helped with a measured plan.
+part: Finding rows fast
+builds_on: [storage, btree]
+---
+
+Two indexes on the same column of the same two-million-row table. Both turn a 35,000-page sequential scan into a few hundred pages or less. One is an eighteen-hundredth the size of the other:
+
+```text
+        relname        | pg_size_pretty
+-----------------------+----------------
+ events_created_brin   | 24 kB
+ events_created_btree  | 43 MB
+```
+
+The small one is a BRIN index, and whether it's brilliant or useless depends entirely on how your rows sit on disk. That's the whole chapter in one example. Every index type answers one question. Ask it that question and it's the fastest thing in the building. Ask it another and it's dead weight you pay for on every write.
+
+[The B-tree](/books/eight-kilobytes/btree) answers "which rows have this value, in order?" Postgres ships five other index types:
+
+| Access method | The question it answers |
+|---|---|
+| GIN | Which rows *contain* this element? (jsonb keys, array members, words, trigrams) |
+| GiST | Which rows *overlap*, are *near*, or *contain* this shape? (ranges, geometry, similarity) |
+| SP-GiST | Same family as GiST, for data that partitions cleanly (prefixes, points, IP ranges) |
+| BRIN | Which *page ranges* could hold this value? (naturally ordered data) |
+| Hash | Which rows *equal* this value? Nothing else. |
+
+As in the B-tree chapter, the evidence is the `Buffers:` line: 8 KB pages ([Buffers are the evidence](/books/eight-kilobytes/explain#buffers-are-the-evidence)).
+
+## GIN is fast to search and expensive to update
+
+A B-tree has one entry per row, which is useless when you search *inside* a value: a key in a `jsonb` document, a tag in an array, a word in a comment. A **GIN** (Generalized Inverted iNdex) stores one entry per *distinct element*, followed by the rows that contain it, like the index at the back of a book:
+
+```text
+  rows                                 GIN index
+  ────────────────────────────         ──────────────────────────────
+  (0,1) {region: ams, status: ok}      "ams"     → (0,1) (0,7) ...
+  (0,2) {region: iad, status: failed}  "failed"  → (0,2) (0,5) ...
+  (0,3) {region: iad, status: ok}      "iad"     → (0,2) (0,3) ...
+  ...                                  "ok"      → (0,1) (0,3) ...
+                                       "region"  → every row
+                                       "status"  → every row
+```
+
+The catch runs the other way: one row produces many entries, so GIN is fast to search and expensive to update.
+
+### For containment, jsonb_path_ops beats the default
+
+`payload` holds documents like `{"region": "syd", "status": "failed", "duration_ms": 4242}`. Find one duration in one region:
+
+```sql
+select id from events
+where payload @> '{"duration_ms": 4242, "region": "syd"}';
+```
+
+`@>` means "contains". GIN has two operator classes for jsonb, and the choice matters:
+
+| Operator class | Index size | Pages, index only | Pages, whole query |
+|---|---|---|---|
+| no index | | | 35,173 |
+| `jsonb_ops` (default) | 20 MB | 987 | 1,068 |
+| `jsonb_path_ops` | 14 MB | 121 | 202 |
+
+The default indexes keys and values separately, so this query reads the lists for `"region"` and `"duration_ms"`, which appear in every row. `jsonb_path_ops` (`using gin (payload jsonb_path_ops)`) hashes each value *with its path*, so `duration_ms = 4242` is one rare element.
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+select lab.prove(
+  'with jsonb_path_ops, the index reads about 121 pages for the same query',
+  lab.node_pages($$ select id from events
+                where payload @> '{"duration_ms": 4242, "region": "syd"}' $$,
+             'Bitmap Index Scan') between 90 and 160);
+```
+
+</ProveIt>
+
+The price: it serves containment and jsonpath (`@>`, `@?`, `@@`) but not key existence (`?` and friends). Keep the default only if you ask "does this key exist?"
+
+<DeepDive title="What each jsonb operator class can and can't serve">
+
+Without an index, the containment query is a parallel sequential scan (`Buffers: shared hit=900 read=34273`) for 81 rows. With `events_payload_pathops` in place, a jsonpath query uses the index:
+
+```text
+ Bitmap Heap Scan on events
+   Recheck Cond: (payload @? '$."duration_ms"?(@ == 4242)'::jsonpath)
+   ->  Bitmap Index Scan on events_payload_pathops
+```
+
+A key-existence test can't, and falls back to the sequential scan:
+
+```text
+ Gather
+   Workers Planned: 2
+   ->  Parallel Seq Scan on events
+         Filter: (payload ? 'seen'::text)
+```
+
+The default class's numbers, measured:
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+select lab.prove(
+  'the default jsonb_ops GIN index is about 20 MB',
+  pg_relation_size('events_payload_gin') between 18e6 and 23e6);
+
+select lab.prove(
+  'with jsonb_ops, the index alone reads about 987 pages for 81 rows',
+  lab.node_pages($$ select id from events
+                where payload @> '{"duration_ms": 4242, "region": "syd"}' $$,
+             'Bitmap Index Scan') between 850 and 1150);
+
+select lab.prove(
+  'the jsonb_path_ops index is about 14 MB',
+  pg_relation_size('events_payload_pathops') between 12.5e6 and 16e6);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<Callout type="note" title="GIN does not index the arrow operators">
+A GIN index on `payload` can't serve `payload->>'status' = 'failed'` or `(payload->>'duration_ms')::int > 1000`. Extract-then-compare needs a B-tree [expression index](/books/eight-kilobytes/btree#an-index-stores-exactly-what-you-gave-it) on that exact expression. Write the test as containment (`payload @> '{"status": "failed"}'`) to use GIN, or promote a hot field to a real column ([You don't need another database (yet)](/books/eight-kilobytes/models)).
+</Callout>
+
+### GIN doesn't help unselective queries
+
+An index is a shortcut to a few rows. `payload @> '{"status": "failed", "region": "syd"}'` matches about 100,000 events, 5% of the table, and they sat on 33,343 of its 35,173 pages (`Heap Blocks: exact=33343`). The "index scan" read nearly everything and was slower than the sequential scan it replaced. "Failures per region" wants a sequential scan, a summary table, or a partial B-tree on the slice you care about.
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+select lab.prove(
+  'those rows sit on about 33,343 of the 35,173 heap pages (over 90 percent)',
+  lab.node_sum($$ select count(*) from events
+              where payload @> '{"status": "failed", "region": "syd"}' $$,
+           'Bitmap Heap Scan', 'Exact Heap Blocks')
+    > 0.9 * (select relpages from pg_class where relname = 'events'));
+```
+
+</ProveIt>
+
+### Arrays: spell it as containment
+
+GIN works the same way on arrays: on a `tags text[]` column of `projects`, `tags @> '{gdpr}'` read 53 pages instead of 507. The trap is the spelling. `'gdpr' = any (tags)` isn't a GIN operator, so it's a sequential scan. Write `tags @> array['gdpr']` (or `&&` for "any of").
+
+<DeepDive title="The same question, two spellings, two plans">
+
+```sql
+alter table projects add column tags text[] not null default '{}';
+-- 1 to 4 random tags per project from a list of 20, plus 'gdpr' on 50 projects
+-- (the lab has the exact update)
+create index projects_tags_idx on projects using gin (tags);
+```
+
+```text
+ Bitmap Heap Scan on projects (actual ... rows=50.00 loops=1)
+   Heap Blocks: exact=50
+   Buffers: shared hit=53
+   ->  Bitmap Index Scan on projects_tags_idx (actual ... rows=50.00 loops=1)
+         Buffers: shared hit=3
+```
+
+Three index pages, then one heap page per tagged project. The `= any` spelling:
+
+```text
+ Seq Scan on projects
+   Filter: ('gdpr'::text = ANY (tags))
+```
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+select lab.prove(
+  'with a GIN index on tags, the index reads 3 pages and the heap one page per match: 53 in all',
+  lab.node_pages($$ select id from projects where tags @> '{gdpr}' $$, 'Bitmap Index Scan') <= 4
+  and lab.buffers($$ select id from projects where tags @> '{gdpr}' $$) between 45 and 56);
+
+select lab.prove(
+  '''gdpr'' = any (tags) cannot use the GIN index: a sequential scan',
+  lab.nodes($$ select id from projects where 'gdpr' = any (tags) $$) = '{Seq Scan}');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A full-text GIN search read 51 pages, not 6,671
+
+Full-text search turns text into a `tsvector`, a sorted list of normalized words (**lexemes**: "The deploys failed" becomes `'deploy' 'fail'`), and GIN indexes the lexemes. On a test table of a quarter-million short comments, a search for "deadlock" read 51 pages instead of all 6,671. The recipe is a stored `tsvector` column, a GIN index, and `@@` to match. Parsing what users type ([websearch_to_tsquery](/books/eight-kilobytes/search#websearch_to_tsquery-never-raises-a-syntax-error)) and ranking ([which reads every match](/books/eight-kilobytes/search#ranking-reads-every-match)) belong to [Search without a search engine](/books/eight-kilobytes/search).
+
+<DeepDive title="A full-text index in five lines">
+
+```sql
+create table comments (
+  id        bigint generated always as identity primary key,
+  event_id  bigint not null references events (id),
+  body      text not null,
+  search    tsvector generated always as (to_tsvector('english', body)) stored
+);
+-- one per comment event: 249,934 comments of 6 to 15 words,
+-- 49 of them mention "deadlock" (the lab has the generator)
+
+create index comments_search_idx on comments using gin (search);
+```
+
+```text
+ Bitmap Heap Scan on comments (actual ... rows=49.00 loops=1)
+   Heap Blocks: exact=49
+   Buffers: shared hit=27 read=24
+   ->  Bitmap Index Scan on comments_search_idx (actual ... rows=49.00 loops=1)
+         Buffers: shared hit=2
+```
+
+Two index pages; the other 49 are one heap page per matching comment. Pass the configuration (`'english'`) explicitly, for both vector and query, so stemming matches and the generated column stays immutable.
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+select lab.prove(
+  'without an index, a search reads every page of comments (about 6,700)',
+  lab.buffers($$ select id, body from comments
+                 where search @@ to_tsquery('english', 'deadlock') $$) between 6400 and 7000);
+
+create index comments_search_idx on comments using gin (search);
+
+select lab.prove(
+  'with a GIN index, the search finds all 49 and the index reads under 5 pages',
+  lab.node_sum($$ select id, body from comments where search @@ to_tsquery('english', 'deadlock') $$,
+           'Bitmap Heap Scan', 'Actual Rows') = 49
+  and lab.node_pages($$ select id, body from comments where search @@ to_tsquery('english', 'deadlock') $$,
+                 'Bitmap Index Scan') < 5);
+
+select lab.prove(
+  'the full-text index is about 2.4 MB for a quarter-million comments',
+  pg_relation_size('comments_search_idx') between 2.0e6 and 3.0e6);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### The pending list makes one insert pay for many
+
+GIN parks new entries in an unsorted **pending list** and merges them in bulk. The list is on by default (`fastupdate`) and grows to `gin_pending_list_limit`, 4 MB. Whichever insert overflows it pays to merge all four megabytes. The symptom: fast inserts, and the occasional one that takes hundreds of milliseconds. The fix: a smaller `gin_pending_list_limit` on that index, or `fastupdate = off` to pay a steady cost instead of a spiky one.
+
+<DeepDive title="Watching the pending list grow">
+
+Insert 5,000 events (copies of the newest ones) and look at the `jsonb_path_ops` index with `pgstatginindex` from `pgstattuple`:
+
+```text
+ version | pending_pages | pending_tuples
+---------+---------------+----------------
+       2 |            37 |           5000
+```
+
+Every search now scans those 37 pages linearly as well: the containment query went from 121 index pages to 158. Vacuum merges the list, as does `select gin_clean_pending_list('events_payload_pathops')`.
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+select lab.prove(
+  'after 5,000 inserts the pending list holds 5,000 tuples on a few dozen pages',
+  (select pending_tuples = 5000 and pending_pages between 25 and 60
+   from pgstatginindex('events_payload_pathops')));
+
+select lab.prove(
+  'every search now scans the pending pages too (121 index pages became about 158)',
+  lab.node_pages($$ select id from events
+                where payload @> '{"duration_ms": 4242, "region": "syd"}' $$,
+             'Bitmap Index Scan')
+    - :pages_before >= (select pending_pages - 2 from pgstatginindex('events_payload_pathops')));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## pg_trgm makes a leading wildcard indexable
+
+A B-tree is sorted from the start of the string, so at best it serves a prefix like `like 'user42%'` (and only with the right operator class, as the next section shows), never `like '%r4242@%'`. The `pg_trgm` extension makes substring search indexable by breaking strings into **trigrams**, every three-character sequence (`show_trgm('user4242')`):
+
+```text
+ {"  u"," us",242,"42 ",424,er4,r42,ser,use}
+```
+
+A string containing `r4242@` must contain that fragment's trigrams, so the index intersects their lists and rechecks the few candidates. Without it, searching by an email fragment read all 1,126 pages of `users`. With it:
+
+```sql
+create index users_email_trgm_gin on users using gin (email gin_trgm_ops);
+```
+
+```text
+ Bitmap Heap Scan on users (actual time=0.025..0.025 rows=1.00 loops=1)
+   Recheck Cond: (email ~~* '%R4242@%'::text)
+   Buffers: shared hit=10
+```
+
+Ten pages, and that was `ilike` (`~~*`): the same index serves case-insensitive matches and regular expressions. A pattern needs three fixed characters to have a trigram to look up.
+
+### Prefix search needs the right operator class
+
+Even `like 'user4242@%'` couldn't use a plain B-tree on `email`. Under a non-C [collation](/books/eight-kilobytes/glossary#collation) like this database's `en_US.utf8`, B-tree order isn't byte order, so a prefix isn't guaranteed to be one contiguous range. Build the index with `text_pattern_ops` (byte-wise order) and the prefix becomes a range:
+
+```text
+ Index Scan using users_email_pattern on users (actual ... rows=1.00 loops=1)
+   Index Cond: ((email ~>=~ 'user4242@'::text) AND (email ~<~ 'user4242A'::text))
+```
+
+That index can't serve `<`, `>`, or `order by` in the database collation. Need both? Build both, or use the C collation on the column.
+
+### GIN filters trigrams; GiST ranks by similarity
+
+`pg_trgm` also has a GiST operator class. For `like` and regex, GIN wins outright: the GiST index was three times the size (11 MB against 3,504 KB) and read 163 pages where GIN read 10.
+
+But GiST does one thing GIN can't: return rows in order of **similarity** (`order by email <-> 'usr4242@exmaple.com' limit 5`), the "did you mean" query. That's a **nearest-neighbor** search, walking the tree in distance order (PostGIS does the same for geography). GIN for filtering, GiST for nearest-match ordering.
+
+<DeepDive title="Did you mean: similarity ordering with GiST">
+
+`<->` is trigram distance (1 minus similarity):
+
+```sql
+select email, round((email <-> 'usr4242@exmaple.com')::numeric, 3) as dist
+from users
+order by email <-> 'usr4242@exmaple.com'
+limit 5;
+```
+
+```text
+         email         | dist
+-----------------------+-------
+ user4242@example.com  | 0.481
+ user42424@example.com | 0.536
+ user24242@example.com | 0.536
+ ...
+```
+
+With the GiST index, the plan is an index scan ordered by distance:
+
+```text
+ Limit (actual time=14.166..14.184 rows=5.00 loops=1)
+   Buffers: shared hit=1427
+   ->  Index Scan using users_email_trgm_gist on users (actual ... rows=5.00 loops=1)
+         Order By: (email <-> 'usr4242@exmaple.com'::text)
+```
+
+| Trigram index on `users.email` | Size | Build time (our machine) | Pages for `like '%r4242@%'` |
+|---|---|---|---|
+| GIN (`gin_trgm_ops`) | 3,504 KB | 140 ms | 10 |
+| GiST (`gist_trgm_ops`) | 11 MB | 550 ms | 163 |
+
+Without the GiST index, Postgres computes all 100,000 distances and sorts: about 90 ms against 15 ms on our machine. The index touched *more* pages (1,427) than a sequential scan of the 1,126-page table, because these synthetic emails look alike; it saved CPU, since computing similarity is the expensive part. Data with more variety should prune better.
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+select lab.prove(
+  'trigram GiST on email is about 11 MB, over 2.5 times the GIN',
+  pg_relation_size('users_email_trgm_gist') between 10e6 and 13.5e6
+  and pg_relation_size('users_email_trgm_gist')::numeric
+      / pg_relation_size('users_email_trgm_gin') > 2.5);
+
+select lab.prove(
+  'with GiST, the similarity search is an index scan ordered by distance',
+  lab.nodes($$ select email from users order by email <-> 'usr4242@exmaple.com' limit 5 $$)
+    = '{Limit,Index Scan}');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## GiST indexes values that have no order
+
+A B-tree needs a total order, and many types don't have one: which comes first, 9:00 to 17:00 or 12:00 to 13:00? **GiST** (Generalized Search Tree) indexes them anyway. Each internal entry stores a *bounding* value covering everything beneath it, and a search descends into every child whose bound could match.
+
+Its best-known job is enforcing "no two of these may overlap", the [exclusion constraint](/books/eight-kilobytes/relationships#an-exclusion-constraint-makes-overlaps-impossible), which builds a GiST index to check every insert against. Say projects can declare deploy freezes, at most one at a time per project:
+
+```sql
+create extension if not exists btree_gist;  -- lets GiST compare plain bigints
+
+create table deploy_freezes (
+  id          bigint generated always as identity primary key,
+  project_id  bigint not null references projects (id),
+  during      tstzrange not null,
+  reason      text not null,
+  exclude using gist (project_id with =, during with &&)
+);
+```
+
+That index hides a lesson. With 480,000 freezes loaded, "which projects were frozen at this moment?" read 7,188 pages through the constraint's index, which leads with `project_id`: more than a sequential scan's 4,548. A GiST index on `during` alone needed 460, only 7 of them in the index. **The index behind a constraint isn't automatically a good index for your queries.**
+
+<DeepDive title="Why the constraint's index lost to a sequential scan">
+
+```text
+ Bitmap Heap Scan on deploy_freezes (actual time=81.942..84.276 rows=470.00 loops=1)
+   Buffers: shared hit=35 read=7153
+   ->  Bitmap Index Scan on deploy_freezes_project_id_during_excl (actual ...)
+         Index Cond: (during @> (now() - '100 days'::interval))
+         Buffers: shared read=6735
+```
+
+GiST has no strict "leading column", but the first column still decides how entries group into pages, so a query on `during` alone explores nearly the whole index. With `create index deploy_freezes_during_idx on deploy_freezes using gist (during)`:
+
+```text
+ Bitmap Heap Scan on deploy_freezes (actual time=1.418..9.701 rows=470.00 loops=1)
+   Buffers: shared read=460
+   ->  Bitmap Index Scan on deploy_freezes_during_idx (actual ... rows=470.00 loops=1)
+         Buffers: shared read=7
+```
+
+GiST range operators include `&&` (overlaps), `@>` (contains), `<@` (contained by), and the adjacency and strictly-left/right operators. The checks below also confirm that the constraint does its job: a New Year freeze inside an existing holiday freeze is refused with `exclusion_violation`.
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+do $$
+begin
+  insert into deploy_freezes (project_id, during, reason)
+  values (4242, tstzrange('2026-12-31', '2027-01-02'), 'new year');
+  raise exception 'NOT PROVED: the overlapping freeze was accepted';
+exception when exclusion_violation then
+  perform set_config('lab.freeze_rejected', 'yes', false);
+end $$;
+select lab.prove(
+  'an overlapping freeze for the same project is rejected (exclusion_violation)',
+  current_setting('lab.freeze_rejected', true) = 'yes');
+
+select lab.prove(
+  'the constraint''s index, led by project_id, reads more pages than the sequential scan',
+  lab.buffers($$ select project_id, reason from deploy_freezes
+                 where during @> now() - interval '100 days' $$) > :seq_pages);
+
+create index deploy_freezes_during_idx on deploy_freezes using gist (during);
+
+select lab.prove(
+  'a GiST index on the range alone answers in about 7 index pages',
+  lab.node_pages($$ select project_id, reason from deploy_freezes
+                where during @> now() - interval '100 days' $$, 'Bitmap Index Scan') < 20);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## You'll rarely need SP-GiST
+
+Where SP-GiST fits, a B-tree or GiST usually does about as well, and you already know how those behave. **SP-GiST** (space-partitioned GiST) is for data that splits into non-overlapping regions (prefixes, points, IP networks), so a search follows one path. On `users.email` it answered a starts-with query (`email ^@ 'user4242@'`) in 5 pages from a 4,672 KB index, about a B-tree's size. For `inet` containment and ranges it's an alternative to GiST; benchmark both.
+
+## BRIN keeps one summary per range of pages
+
+Back to the opening. `events` is append-only: rows arrive in `created_at` order and never move. `pg_stats.correlation` measures how well a column's order matches the physical row order: 1 for `created_at` and `id`, about 0.003 for `project_id`.
+
+A **BRIN** (Block Range INdex) cashes in on it. It stores one summary per range of `pages_per_range` pages (128 by default): the smallest and largest value. Think of labels on moving boxes. A query for one day skips every box whose label can't match, opens the one or two that might, and checks every row inside.
+
+```text
+  heap pages     0..127   128..255  256..383  ...  34944..35071 35072..
+               ┌────────┬─────────┬─────────┬─────┬────────────┬──────┐
+  BRIN entry   │ Oct 06 │ Oct 07  │ Oct 08  │ ... │  Oct 04    │Oct 05│
+               │ -Oct 07│ -Oct 08 │ -Oct 09 │     │  -Oct 05   │-06   │
+               └────────┴─────────┴─────────┴─────┴────────────┴──────┘
+  query "May 1": skip, skip, skip, ..., read 2 ranges, ..., skip
+```
+
+Each label covers about a day and a third of events. About 275 labels for 35,000 pages: hence 24 KB.
+
+### A thousandth of the size, nearly the same pages
+
+A per-kind summary of one day of events:
+
+| Index on `created_at` | Size | Pages for one day |
+|---|---|---|
+| none | 0 | 35,272 |
+| BRIN, 128 pages per range | 24 KB | 261 |
+| BRIN, 32 pages per range | 48 KB | 133 |
+| BRIN, 8 pages per range | 168 KB | 130 |
+| B-tree | 43 MB | 115 |
+
+The B-tree wins on pages, narrowly. But it's 1,800 times larger than the default BRIN, competes with your data for cache, and every insert descends it. BRIN at 32 pages per range comes within 20 pages of it at under a nine-hundredth of the size. Smaller ranges stop paying: at 8 pages per range, the index itself read 26 pages instead of the 5 it read at 32 pages per range, nearly cancelling the 24 heap pages it saved.
+
+<DeepDive title="Reading a BRIN plan: lossy pages and rows that aren't rows">
+
+The day is `created_at >= '2026-05-01' and created_at < '2026-05-02'`, grouped by `kind`. With `create index events_created_brin on events using brin (created_at)` and parallelism off:
+
+```text
+ HashAggregate (actual time=2.638..2.640 rows=5.00 loops=1)
+   Buffers: shared hit=261
+   ->  Bitmap Heap Scan on events (actual ... rows=5480.00 loops=1)
+         Rows Removed by Index Recheck: 9078
+         Heap Blocks: lossy=256
+         ->  Bitmap Index Scan on events_created_brin (actual ... rows=2560.00 loops=1)
+               Buffers: shared hit=5
+```
+
+BRIN bitmaps are always lossy (they name pages, never rows), so the heap scan reads every row on 256 pages and the recheck discards 9,078. The `rows=2560` on the BRIN node isn't a row count: BRIN reports ten per matching page as a placeholder (`totalpages * 10` in [brin.c](https://github.com/postgres/postgres/blob/master/src/backend/access/brin/brin.c)). `pageinspect` shows the labels themselves (`brin_page_items(get_raw_page('events_created_brin', 2), 'events_created_brin')`):
+
+```text
+ blknum |                           value
+--------+------------------------------------------------------------
+      0 | {2025-10-06 00:00:15.768+00 .. 2025-10-07 07:52:39.504+00}
+    128 | {2025-10-07 07:52:55.272+00 .. 2025-10-08 15:46:06.312+00}
+    ...
+```
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+select lab.prove(
+  'with BRIN (128 pages per range), the one-day summary reads about 261 pages',
+  lab.buffers(:'day_query') between 200 and 320);
+
+select lab.prove(
+  'BRIN at 32 pages per range gets within 20 pages of the B-tree',
+  :brin32_pages - :btree_pages <= 20);
+
+select lab.prove(
+  'the B-tree is over 1,000 times larger than the BRIN (about 1,800)',
+  pg_relation_size('events_created_btree')::numeric / pg_relation_size('events_created_brin') > 1000);
+
+select lab.prove(
+  'the BRIN node''s "rows" is ten per matching page, not a row count',
+  lab.node_sum(:'day_query', 'Bitmap Index Scan', 'Actual Rows')
+    = 10 * lab.node_sum(:'day_query', 'Bitmap Heap Scan', 'Lossy Heap Blocks'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### BRIN is useless without physical order
+
+On `project_id`, whose correlation is zero, every box holds nearly every project, so every box "might match". Force a BRIN index there and it reads every page of the table anyway (`Buffers: shared hit=50 read=35266`).
+
+Use BRIN for columns that track insertion order: timestamps on append-only tables, sequence ids, log offsets ([Partition for the delete](/books/eight-kilobytes/partitioning) pairs it with time partitions). Protect the order: rows moved by updates, backfilled old data, and new rows reusing freed space all widen the labels until the index stops pruning.
+
+<Callout type="note" title="New pages are not summarized immediately">
+Vacuum, or `brin_summarize_new_values()`, summarizes page ranges filled after the index was built; until then, those ranges are always scanned. On a busy append-only table, create BRIN indexes `with (autosummarize = on)`.
+</Callout>
+
+## A hash index wins only on equality over long keys
+
+Use a hash index for equality on long random values like tokens and content hashes. Everywhere else, use a B-tree.
+
+A hash index stores a 32-bit hash of each key and supports exactly one operator: `=`. No ranges, ordering, uniqueness, or index-only scans. In exchange, its size doesn't depend on the key's width. On a 128-character API key, the B-tree was 16 MB and the hash index 4,112 KB, and a lookup touched 3 pages instead of 5. On `email`, about 20 characters, the hash index was the same 4,112 KB and the B-tree smaller. Hash indexes have been crash-safe since PostgreSQL 10; their bad reputation is older.
+
+<DeepDive title="How the hash index was measured">
+
+```sql
+alter table users add column api_key text;
+-- 128 hex characters
+update users set api_key = encode(sha512(('key' || id)::bytea), 'hex');
+create index users_api_key_btree on users (api_key);
+create index users_api_key_hash  on users using hash (api_key);
+```
+
+<ProveIt lab="17-more-indexes">
+
+```sql
+select lab.prove(
+  'on the long key, the hash index is about a quarter of the B-tree',
+  pg_relation_size('users_api_key_hash')::numeric / pg_relation_size('users_api_key_btree')
+    between 0.2 and 0.3);
+
+select lab.prove(
+  'the hash index size does not depend on key width: same size on email',
+  pg_relation_size('users_email_hash') = pg_relation_size('users_api_key_hash'));
+
+select lab.prove(
+  'a hash lookup on api_key touches 3 pages (metapage, bucket, heap)',
+  lab.buffers($$ select id from users where api_key = encode(sha512('key4242'::bytea), 'hex') $$) = 3);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## The operator picks the index type
+
+| You query with | Use |
+|---|---|
+| `=`, `<`, `>`, `order by`, prefix `like` | B-tree (`text_pattern_ops` for prefixes in non-C collations) |
+| jsonb `@>`, `@?` | GIN `jsonb_path_ops` |
+| jsonb key existence (`?`) | GIN `jsonb_ops` (the default) |
+| jsonb `->>` with `=`, `<`, sort | B-tree expression index, or a real column |
+| array `@>`, `&&` | GIN (not `x = any (col)`) |
+| full-text `@@` | GIN on a stored `tsvector` |
+| `like '%x%'`, `ilike`, regex | GIN `gin_trgm_ops` |
+| "did you mean" | GiST `gist_trgm_ops` |
+| range overlap, exclusion | GiST (plus `btree_gist` to mix in `=`) |
+| time or id on append-only data | BRIN, if correlation is near 1 |
+| `=` on long random keys | hash |
+
+Whichever you pick, measure pages before and after. Every one of these, GIN most of all, makes writes more expensive, so keep only the ones that earn an order of magnitude.
+
+## The short version
+
+- GIN indexes the elements inside a value. Fast to search, expensive to update; spiky insert latency means the pending list.
+- For jsonb containment use `jsonb_path_ops`: 121 index pages instead of 987. GIN can't serve `payload->>'key' = 'x'`.
+- For `like '%x%'` use a trigram GIN index; trigram GiST only for similarity ordering.
+- GiST handles overlap and distance. The index behind a constraint isn't automatically a good one for your queries.
+- BRIN on a naturally ordered column is tiny (24 KB against a 43 MB B-tree) and nearly as good for ranges; on an uncorrelated column it reads the whole table.
+- Hash indexes are worth it only for equality on long keys.
+- Any index helps only selective queries: a GIN lookup matching 5% of the rows still read 95% of the pages.
+
+## Further reading
+
+- [Index Types](https://www.postgresql.org/docs/18/indexes-types.html), PostgreSQL documentation. The official overview of every access method and its operators.
+- [GIN Indexes](https://www.postgresql.org/docs/18/gin.html), [GiST Indexes](https://www.postgresql.org/docs/18/gist.html), [SP-GiST Indexes](https://www.postgresql.org/docs/18/spgist.html), [BRIN Indexes](https://www.postgresql.org/docs/18/brin.html), and [Hash Indexes](https://www.postgresql.org/docs/18/hash-index.html), PostgreSQL documentation. One reference page per type, including the built-in operator classes.
+- [src/backend/access/brin/README](https://github.com/postgres/postgres/blob/master/src/backend/access/brin/README), PostgreSQL source. How the range map and summaries are laid out, and why a summarizing index can be so small.
+- [pg_trgm](https://www.postgresql.org/docs/18/pgtrgm.html), PostgreSQL documentation. Trigram operators, similarity thresholds, and the GIN and GiST operator classes.
+- [jsonb Indexing](https://www.postgresql.org/docs/18/datatype-json.html#JSON-INDEXING), PostgreSQL documentation. `jsonb_ops` versus `jsonb_path_ops`, with the operators each supports.
+- [Operator Classes and Operator Families](https://www.postgresql.org/docs/18/indexes-opclass.html), PostgreSQL documentation. Where `text_pattern_ops` and friends are explained.

@@ -1,0 +1,517 @@
+---
+title: Keep your updates HOT
+description: Measure what a non-HOT update really costs, learn the exact rules for HOT, and design tables, indexes, and fillfactor so updates stay cheap.
+part: The machine
+builds_on: [storage, mvcc]
+---
+
+Take a copy of `users` with six indexes and update 5,000 rows, bumping a counter that no index covers. Postgres writes 438 KB of [WAL](/books/eight-kilobytes/glossary#wal). Bump the same counter plus `updated_at`, which is indexed, the way most ORMs do on every save, and the same 5,000 rows write 2.96 MB: almost seven times as much. One row at a time, the gap swings wider still: 127 bytes for one update, 15,327 for the other, when two of the index pages it touched had to be logged whole. The difference is whether the update was **HOT**.
+
+Every update writes a whole new version of the row at a new address ([An update writes a whole new row](/books/eight-kilobytes/mvcc#an-update-writes-a-whole-new-row)), and indexes point at addresses. Left alone, every update would write a new entry into every index. **HOT**, short for heap-only tuple, is the escape hatch: the new version stays on the same page, and the indexes never hear about it.
+
+You never turn HOT on. It's always on, and your schema decides how often it works: which columns you index, how full you pack your pages, and how long your transactions stay open. Get those three right and nearly every update skips the indexes.
+
+## A cold update pays for every index
+
+Call an update that isn't HOT a **cold** update. It writes a new tuple (the whole row), plus one new entry in every index, even indexes whose columns didn't change, plus WAL for all of it. A HOT update writes the tuple and its WAL. That's it.
+
+<Fig name="hot-vs-cold">
+
+**HOT keeps the new version where the indexes can already find it.** A cold update puts the new version on another page and adds an entry to every index. A HOT update writes it on the same page, chained from the old one through t_ctid, and no index changes; after pruning, lp1 becomes a redirect to the new version.
+
+</Fig>
+
+Here is the opening experiment in full. We updated 5,000 rows of a `users` copy, built with 10 percent free space on every page (fillfactor 90, below), two ways, with one, three, and six indexes on the table, away from any [checkpoint](/books/eight-kilobytes/glossary#checkpoint). The HOT update bumped `login_count`, which no index covers. The cold one also bumped `updated_at`, which is indexed (with one index, that index is on `updated_at`):
+
+| Indexes | HOT WAL | Cold WAL | Cold vs HOT | Buffers, HOT | Buffers, cold |
+|---|---|---|---|---|---|
+| 1 | 438 KB | 999 KB | 2.3x | 11,370 | 21,504 |
+| 3 | 438 KB | 1.91 MB | 4.5x | 11,370 | 46,906 |
+| 6 | 438 KB | 2.96 MB | 6.9x | 11,370 | 87,026 |
+
+Read the HOT columns: 438 KB and 11,370 buffers whatever the index count. HOT updates don't see your indexes. Each index adds about one HOT update's worth of WAL to the cold side, and with six the cold batch touched 7.7 times the buffers.
+
+Then the bill keeps coming. Vacuum after the HOT updates had nothing to remove from any index; after the cold ones it read every page of all six. And every replica replays the same WAL ([Uber hit this asymmetry, and both sides were right](/books/eight-kilobytes/not-mysql#uber-hit-this-asymmetry-and-both-sides-were-right)).
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove(
+  'second batch, cold vs HOT: about 6.9x with six indexes',
+  m('c6 batch 2', 'bytes') / m('h6 batch 2', 'bytes') between 6.2 and 7.6);
+select lab.prove(
+  'the HOT batch touches the same buffers in every configuration; cold with six indexes about 7.7 times as many',
+  m('h1 batch 2', 'buffers') = m('h6 batch 2', 'buffers')
+  and m('c6 batch 2', 'buffers') / m('h6 batch 2', 'buffers') between 7.0 and 8.3);
+select lab.prove(
+  'after cold updates, vacuum reads every page of all six indexes',
+  (select idx_blocks from vacuum_cost where tbl = 'c6')
+    >= pg_indexes_size('c6') / 8192 - 5);
+```
+
+</ProveIt>
+
+<DeepDive title="Right after a checkpoint, each index entry is a lottery ticket">
+
+The `pg_walinspect` extension (PostgreSQL 15+) reads records back out of the log. After a checkpoint we ran four single-row updates on the six-index table, alternating HOT and cold:
+
+```text
+ update |   record_type   |         relname          | record_length | fpi_length
+--------+-----------------+--------------------------+---------------+------------
+ 1 HOT  | HOT_UPDATE      | users_hot                |         15694 |      15616
+ 2 cold | UPDATE          | users_hot                |          7497 |       7424
+ 2 cold | INSERT_LEAF     | users_hot_updated_at_idx |          7453 |       7400
+ ...      (five more index records, each about 7,450 bytes)
+ 3 HOT  | PRUNE_ON_ACCESS | users_hot                |            56 |          0
+ 3 HOT  | HOT_UPDATE      | users_hot                |            71 |          0
+ 4 cold | PRUNE_ON_ACCESS | users_hot                |            58 |          0
+ 4 cold | UPDATE          | users_hot                |            81 |          0
+ 4 cold | INSERT_LEAF     | users_hot_updated_at_idx |          7453 |       7400
+ 4 cold | INSERT_LEAF     | users_hot_pkey           |            64 |          0
+ ...
+```
+
+- **Update 1, HOT:** one record carrying two full-page images (heap and visibility map), because both pages were touched for the first time since the checkpoint ([The first change after a checkpoint logs the whole page](/books/eight-kilobytes/wal#the-first-change-after-a-checkpoint-logs-the-whole-page)).
+- **Update 2, cold:** seven records, one heap and one per index, each with its own 8 KB image. 52,359 bytes, about 51 KB.
+- **Update 3, HOT:** 71 bytes plus a 56-byte prune record. 127 bytes.
+- **Update 4, cold:** seven records plus the prune. Four index inserts hit leaves already imaged (64 to 80 bytes); two didn't and paid 7,400 bytes each. 15,327 bytes.
+
+A cold update costs one extra record per index, and each is a chance at an 8 KB image. In the first 5,000-row batch after a checkpoint, images dominate both kinds: HOT wrote 10.0 MB, cold with six indexes 24.3 MB in 35,250 records (per row, one heap record plus one per index, and 250 deduplication passes on top). That's 24.3 MB to every replica.
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove(
+  'right after a checkpoint, the HOT update is one record carrying two full-page images (heap and visibility map)',
+  m('row 1 hot', 'records') = 1 and m('row 1 hot', 'fpi') = 2);
+select lab.prove(
+  'every one of those seven records carried an 8 KB page image: about 51 KB',
+  m('row 2 cold', 'fpi') = 7 and m('row 2 cold', 'bytes') between 50000 and 55000);
+select lab.prove(
+  'a moment later a HOT update costs about 127 bytes: the update plus a small prune record, no images',
+  m('row 3 hot', 'records') = 2 and m('row 3 hot', 'fpi') = 0
+  and m('row 3 hot', 'bytes') between 100 and 160);
+select lab.prove(
+  'cold batches write one more record per row per index: 10,000, about 20,250 and about 35,250',
+  m('c1 batch 1', 'records') = 10000
+  and m('c3 batch 1', 'records') between 20000 and 20500
+  and m('c6 batch 1', 'records') between 35000 and 35500);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## HOT needs an unindexed change and room on the page
+
+An update misses HOT for one of two reasons, and the fix depends on which. We'll name them and use the names for the rest of this chapter:
+
+- An update is **HOT-safe** when it changes no indexed column. (Since PostgreSQL 16, columns covered only by [BRIN](/books/eight-kilobytes/glossary#brin) indexes don't count.)
+- An update is **HOT** when it's HOT-safe *and* the new version fits on the same page as the old one.
+
+### Every column an index mentions is indexed
+
+"Indexed" means anywhere in any index definition, not just key columns. We gave a copy of `projects` five kinds of index:
+
+```sql
+create index on projects_hot (account_id) where archived_at is null;  -- partial
+create index on projects_hot (account_id) include (name);             -- covering
+create index on projects_hot (lower(slug));                           -- expression
+create index on projects_hot using brin (created_at);                 -- summarizing
+create index on projects_hot (budget);
+```
+
+Then ran one update at a time, watching `n_tup_hot_upd` in `pg_stat_user_tables`:
+
+| Update | Why you might expect HOT | HOT? |
+|---|---|---|
+| `set archived_at = now()` | no index stores `archived_at` | no |
+| `set name = name \|\| ' (old)'` | `name` is only in `INCLUDE` | no |
+| `set slug = upper(slug)` | `lower(upper(slug))` is the same value | no |
+| `set created_at = created_at - interval '1 day'` | only a BRIN index covers it | yes |
+| `set budget = 1.00` (was `1.0`) | equal as numbers | no |
+| `set name = name, account_id = account_id, budget = budget` | nothing changed | yes |
+
+Read the "no" rows as warnings. A partial index's predicate counts, so a soft-delete column used in partial indexes makes every archive and restore cold. `INCLUDE` columns count: a covering index costs you HOT on its passengers. Expression indexes count the column, not the result. BRIN points at ranges of pages, not rows, so it needs no new pointer.
+
+### Changed means different bytes
+
+"Changed" isn't the `SET` list, and it isn't SQL equality: Postgres compares each indexed column's old and new bytes. So `set name = name` is HOT-safe, good news for ORMs that write every column back. And `1.0` to `1.00` is cold although the numbers are equal, because the bytes aren't.
+
+### A HOT version never leaves its page
+
+The second condition is physical. A HOT version never leaves its page, so a lookup that lands on the page finds it there. If the new version doesn't fit, it goes elsewhere and gets an entry in every index. You control that room with fillfactor, below.
+
+<DeepDive title="An index starts costing HOT before it's finished">
+
+The moment an index exists on a column, even one still being built with `create index concurrently` and not yet valid, updates of that column stop being HOT. The concurrent build waits out running transactions precisely so that every session treats the column as indexed before it starts. If a build fails and leaves an invalid index behind, drop it: ours was never finished and still made updates of its column cold.
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove('an invalid, never-finished index still makes updates of its column cold',
+  m('invalid indexed', 'hot') = 0 and m('invalid indexed', 'newpage') = 0);
+select lab.prove('(control) updating an unindexed column of the same table is HOT',
+  m('invalid other', 'hot') = 1);
+```
+
+</ProveIt>
+
+The lab also checks every row of the rules table.
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove('INCLUDE columns count: renaming is cold',
+  m('include', 'updated') = 1 and m('include', 'hot') = 0);
+select lab.prove('a column covered only by BRIN stays HOT (PostgreSQL 16+)',
+  m('brin', 'hot') = 1);
+select lab.prove('numeric 1.0 to 1.00 is cold: equal as numbers, different bytes',
+  m('scale', 'hot') = 0
+  and 1.0::numeric = 1.00::numeric
+  and numeric_send(1.0) <> numeric_send(1.00));
+select lab.prove('set x = x on indexed columns stays HOT: the bytes did not change',
+  m('same', 'hot') = 1);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A HOT lookup follows the chain without leaving the page
+
+A HOT update works like a forwarding note taped to an old apartment door. The index keeps the old address; the old version says "moved to slot 3, same building", and the lookup follows the note without leaving the page. The versions, linked through their `t_ctid` fields, form a **HOT chain**. The `lp` numbers are **line pointers**, the numbered slots at the top of a page ([A line pointer lets a tuple move without changing its address](/books/eight-kilobytes/storage#a-line-pointer-lets-a-tuple-move-without-changing-its-address)):
+
+```text
+ 1  INSERT              index ──► lp1 [v1]
+
+ 2  HOT UPDATE x2       index ──► lp1 [v1] ─► lp2 [v2] ─► lp3 [v3]
+                                     t_ctid       t_ctid
+
+ 3  prune               index ──► lp1 REDIRECT ──────────► lp3 [v3]
+    (v1, v2 dead              lp2 UNUSED (free, reusable)
+     to everyone)
+
+ 4  DELETE, prune       index ──► lp1 DEAD     lp3 UNUSED
+
+ 5  VACUUM              index entry removed; lp1 UNUSED
+
+ cold UPDATE at any step: new version on another page, plus a
+ new entry in EVERY index; old entries wait for vacuum.
+```
+
+- **The index never moves.** A lookup lands on `lp1` and walks the chain to the version its snapshot can see: one index page, one heap page, however long the chain.
+- **Pruning turns the chain into a redirect.** Once old versions are dead to every snapshot, the next visitor prunes them ([A version is dead only when no snapshot can see it](/books/eight-kilobytes/mvcc#a-version-is-dead-only-when-no-snapshot-can-see-it)), leaving `lp1` as a redirect to the newest version, with no index touched. That's half of HOT's value: space comes back during normal traffic.
+- **Only vacuum finishes the job.** When the whole chain dies, `lp1` stays as a dead stub until vacuum removes the index entry.
+
+<DeepDive title="No index points at a heap-only tuple">
+
+A `counters` table with 128 short rows fills one page to within 488 bytes. With another session holding a repeatable-read snapshot, we updated row 1 three times:
+
+```text
+ lp  | t_xmin  | t_xmax  | t_ctid  |                 raw_flags
+-----+---------+---------+---------+---------------------------------------------
+   1 | 1534621 | 1534622 | (0,129) | {...,HEAP_XMAX_COMMITTED,HEAP_HOT_UPDATED}
+ 129 | 1534622 | 1534623 | (0,130) | {...,HEAP_HOT_UPDATED,HEAP_ONLY_TUPLE}
+ 130 | 1534623 | 1534624 | (0,131) | {...,HEAP_HOT_UPDATED,HEAP_ONLY_TUPLE}
+ 131 | 1534624 |       0 | (0,131) | {...,HEAP_ONLY_TUPLE}
+```
+
+`HEAP_HOT_UPDATED` means "my successor is heap-only, follow my `t_ctid`"; `HEAP_ONLY_TUPLE` means "no index points at me". `bt_page_items` shows one index entry for key 1, still at `(0,1)`, and an index scan reads 2 buffers. Following a link, the scan checks that the next version's `xmin` matches the previous `xmax`, because a slot can be freed and reused between visits: a `ctid` is an address, not an identity.
+
+When the other session commits, the same `select` prints `WAL: records=1 bytes=64`. A read pruned the page: slot 1 is now a redirect (`lp_flags` 2) to 131, and 129 and 130 are unused (`lp_flags` 0). A page holds at most 291 line pointers, which keeps tiny rows from filling it with stubs.
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove('four versions of row 1, linked by t_ctid: slot 1 to 129 to 130 to 131',
+  (select array_agg(t_ctid::text order by lp) from page0 where lp in (1, 129, 130, 131))
+  = array['(0,129)', '(0,130)', '(0,131)', '(0,131)']);
+select lab.prove('an index scan follows the chain in two buffers: one index page, one heap page',
+  lab.buffers($$ select * from counters where id = 1 $$) = 2);
+
+-- session A commits; the next read prunes
+select lab.prove('a read query wrote WAL: one small prune record',
+  m('prune read', 'records') = 1 and m('prune read', 'bytes') < 100);
+select lab.prove('slot 1 is now a redirect (lp_flags 2) to slot 131',
+  (select lp_flags = 2 and lp_off = 131 from page0 where lp = 1));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Pruning waits for a nearly full page
+
+Whatever query touches the page prunes it, `select`s included, when two things hold. The page carries a hint, set by any update or delete, that it may hold dead versions. **And** it has less free space than the larger of its fillfactor reserve and 10 percent of the page (819 bytes). A roomy page isn't pruned on access; vacuum gets it eventually.
+
+Pruning is WAL-logged, so reads write. Don't be surprised by WAL from a read-only workload ([With checksums, even a read writes WAL](/books/eight-kilobytes/wal#with-checksums-even-a-read-writes-wal) has the other reason).
+
+<DeepDive title="A roomy page is left alone">
+
+Three rows, two updates of row 1, then an index scan: no WAL, and `page_header()` shows 7,988 bytes free with a prune hint set. All five versions stay. The `counters` page started with 488 bytes free, under the 819-byte line, so its first visit pruned it. The rule is `heap_page_prune_opt` in the source.
+
+Two more wrinkles. Pruning needs a **cleanup lock** (nobody else has the page pinned) and doesn't wait for one, so a very busy page can skip pruning and send a HOT-safe update elsewhere. And an `update` can't prune the page under the row it's updating at that moment, so room for the next HOT update usually comes from an earlier visit.
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove('a roomy page is not pruned on access: no WAL, the old versions stay',
+  m('roomy read', 'records') = 0
+  and (select count(*) from heap_page_items(get_raw_page('roomy', 0)) where lp_flags = 1) = 5);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Leave room on the page, or every update moves
+
+A freshly loaded table is packed. **Fillfactor** is the percentage of each page that inserts may fill before moving on to the next one; the rest is held back for updates. It defaults to 100, so a freshly loaded page has no room to spare, and its first update goes cold, HOT-safe or not. You set it per table:
+
+```sql
+alter table users set (fillfactor = 90);
+```
+
+We made three copies of `users` with a `login_count` (two indexes) at fillfactor 100, 90, and 70, and ran 200,000 single-row updates on random users from four `pgbench` clients (`pgbench` is the load generator that ships with Postgres), autovacuum on:
+
+| Fillfactor | HOT | Moved to a new page | Pages before / after | Index size after |
+|---|---|---|---|---|
+| 100 | 92.2% | 15,542 | 1,137 / 1,311 | 8,336 KB to 8,624 KB |
+| 90 | 100% | 0 | 1,266 / 1,266 | 8,336 KB, unchanged |
+| 70 | 100% | 0 | 1,613 / 1,613 | 8,336 KB, unchanged |
+
+At fillfactor 100, 15,542 updates went cold, and the packed table ended up **bigger** than the fillfactor 90 one, with grown indexes on top. It paid for the headroom anyway, in the worst currency. Batch jobs are harsher: one `update` of 10 percent of the rows at fillfactor 100 got 0 of 10,000 HOT and wrote five times the WAL of the same statement at 90.
+
+<ProveIt lab="06-hot">
+
+```sql
+call random_updates('users_ff100', 50000);
+call random_updates('users_ff90', 50000);
+select from pg_stat_force_next_flush();
+
+select lab.prove('fillfactor 90: every one of 50,000 single-row updates was HOT, none moved',
+  (select n_tup_upd = 50000 and n_tup_hot_upd = 50000 and n_tup_newpage_upd = 0
+   from pg_stat_user_tables where relname = 'users_ff90'));
+select lab.prove('fillfactor 100: thousands of HOT-safe updates moved to new pages and went cold',
+  (select n_tup_newpage_upd between 1000 and 5000
+       and n_tup_hot_upd + n_tup_newpage_upd = n_tup_upd
+   from pg_stat_user_tables where relname = 'users_ff100'));
+```
+
+</ProveIt>
+
+<DeepDive title="Five batches later, the packed table is the same size anyway">
+
+Fillfactor 100 did better than you might expect in the pgbench run because pruning frees a slot or two per page once the first update moves a row off it. Concurrency and autovacuum timing move those numbers, so the lab runs a repeatable version: 50,000 random single-row updates from one session. Fillfactor 90 stays at 100 percent HOT; fillfactor 100 lands around 95 percent and starts to grow. Batches can't lean on pruning, because one statement updates many rows on a page before anything is pruned.
+
+The batch run, `update ... set login_count = login_count + 1 where id % 10 = 0` on fresh copies:
+
+| Fillfactor | HOT | WAL records | WAL | Buffers touched |
+|---|---|---|---|---|
+| 100 | 0 of 10,000 | 40,471 | 3.5 MB | 103,024 |
+| 90 | 10,000 of 10,000 | 10,000 | 703 KB | 22,532 |
+
+After five such batches, the fillfactor 100 table had worked up to 77 percent HOT and to exactly 1,266 pages, the size of the fillfactor 90 table, after paying 11,365 cold updates and 43 extra index pages to get there.
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove('the packed table wrote about five times the WAL (3.5 MB vs 703 KB)',
+  m('bulk_ff100 0', 'bytes') / m('bulk_ff90 0', 'bytes') between 4.5 and 5.6);
+select lab.prove('and touched almost five times the buffers (103,024 vs 22,532)',
+  m('bulk_ff100 0', 'buffers') / m('bulk_ff90 0', 'buffers') between 4.2 and 5.0);
+select lab.prove('and grew to the size of the fillfactor 90 table, 1,266 pages',
+  abs(pg_relation_size('bulk_ff100') / 8192 - pg_relation_size('bulk_ff90') / 8192) <= 5);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Headroom costs space before it pays off
+
+The reserve is empty on day one: fillfactor 90 made the table 11 percent bigger, 70 made it 42 percent bigger, and bloat estimators will call the reserve bloat. Leave append-only tables like `events` at 100. Start update-heavy tables at 90, and go to 70 or 80 for rows of several hundred bytes, or if `n_tup_newpage_upd` keeps climbing.
+
+Setting it later applies only to new pages. Existing ones stay packed until a rewrite ([Rebuild bloated tables without locking them](/books/eight-kilobytes/extensions#rebuild-bloated-tables-without-locking-them)); on a big live table, skip the rewrite and let new pages pick it up.
+
+<Callout type="tip" title="Fix the index before the fillfactor">
+Fillfactor only helps HOT-safe updates. If an index covers the column you update, no amount of free space makes those updates HOT. Check which half of the rule you're failing before you resize a table.
+</Callout>
+
+## A busy table should be above 90 percent HOT
+
+Postgres counts this for you. `pg_stat_user_tables` has `n_tup_upd` (all updates), `n_tup_hot_upd` (HOT ones), and `n_tup_newpage_upd` (PostgreSQL 16+: the new version went to another page, so it's cold). A cold update that stayed on its page had room, so it changed an indexed column. One that moved had no room:
+
+```sql
+select relname,
+       n_tup_upd,
+       n_tup_hot_upd                                 as hot,
+       n_tup_newpage_upd                             as no_room,
+       n_tup_upd - n_tup_hot_upd - n_tup_newpage_upd as index_changed,
+       round(100.0 * n_tup_hot_upd / nullif(n_tup_upd, 0), 1) as hot_pct
+from pg_stat_user_tables
+where n_tup_upd > 0
+order by n_tup_upd desc
+limit 20;
+```
+
+High `index_changed`: an index covers a column your updates change, and fillfactor won't help. High `no_room`: the pages are full; lower fillfactor or hunt for long transactions (next section). Both: fix the indexes first, because a move counts as `no_room` even when an indexed column changed too.
+
+Watch the change over a day, not lifetime totals. Above 90 percent is healthy on a table with real update traffic; a low number on a busy table is the first thing to fix.
+
+<DeepDive title="The split on this chapter's tables, and counters that read zero">
+
+On the lab database:
+
+```text
+   relname    | n_tup_upd |  hot  | no_room | index_changed | hot_pct
+--------------+-----------+-------+---------+---------------+---------
+ churn        |    300000 |     0 |  127233 |        172767 |     0.0
+ users_ff100  |     50000 | 47623 |    2377 |             0 |    95.2
+ projects_hot |         7 |     3 |       0 |             4 |    42.9
+...
+```
+
+`churn` changes an indexed column on every update, and 127,233 of those also moved page, which is why "fix the indexes first". Backends flush statistics up to about a second after a transaction ends. In a script, call `select pg_stat_force_next_flush();` first, or read `pg_stat_xact_user_tables` inside the transaction. For one statement, `explain (analyze, buffers, wal)` inside a rolled-back transaction shows about one WAL record per row for HOT, one plus one per index for cold; across the workload, `pg_stat_statements` ranks statements by `wal_bytes`.
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove('projects_hot: four cold updates, all because an indexed column changed',
+  (select index_changed = 4 and no_room = 0 and hot = 3 from hot_report where relname = 'projects_hot'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A long transaction turns HOT off
+
+Pruning can only remove versions that are dead to every snapshot. One old snapshot anywhere in the database, and nothing newer can be pruned. Old versions pile up, pages fill, and HOT-safe updates start moving and writing index entries.
+
+We repeated the five batches on a fresh fillfactor 90 table while another session sat in an open repeatable-read transaction:
+
+| 50,000 updates, fillfactor 90 | HOT | Heap pages | Index pages |
+|---|---|---|---|
+| No open transaction | 100% | 1,266 to 1,266 | 1,042 to 1,042 |
+| Another session holding a snapshot | 22.8% | 1,266 to 1,755 | 1,042 to 1,429 |
+
+The other session never touched the table. It held a snapshot for a few seconds, and the HOT rate fell to 23 percent while the table and its indexes grew by more than a third, for good. The same snapshot blocks vacuum too ([Vacuum can't remove what an old snapshot might need](/books/eight-kilobytes/vacuum#vacuum-cant-remove-what-an-old-snapshot-might-need)). Keep transactions short and set `idle_in_transaction_session_timeout`.
+
+<ProveIt lab="06-hot">
+
+```sql
+-- session A, over dblink
+-- ... five batches of 10,000 updates on held_ff90, then session A commits
+
+select lab.prove('with session A holding a snapshot, the HOT rate fell to about 23 percent',
+  (select sum((m ->> 'hot')::int) from measurements where name like 'held_ff90 %')
+    between 9000 and 14000);
+select lab.prove('the table grew about 39 percent (1,266 to about 1,755 pages)',
+  pg_relation_size('held_ff90') / 8192.0
+    / (select heap_pages from bulk_before where relname = 'held_ff90') between 1.3 and 1.45);
+```
+
+</ProveIt>
+
+## HOT is a design decision you make once
+
+Every cold update in this chapter came from an index or a full page. Both are schema choices, so you fix them once.
+
+### Don't index updated_at
+
+Almost every ORM sets `updated_at` on every save. Index it, and every update to that table is cold, on every index. Before indexing any column that changes on most updates (`updated_at`, `last_seen_at`, `status`, counters, `locked_by`), name the query that needs it:
+
+- **"What changed since my last sync?"** is better served by an append-only change log or outbox table.
+- **A BRIN index on `updated_at`** is HOT-safe (PostgreSQL 16+), but HOT keeps rows where they are, so the values drift out of physical order fast. Measure first.
+- **A rarely run admin query** can scan. Ten seconds a day beats making millions of updates cold.
+
+### Move hot counters to a narrow table
+
+A counter on a wide row copies the whole row on every increment and drags it through the cache for eight bytes. We put a `view_count` on a `profiles` table with a 416-byte `bio` (6,667 pages), and the same counter in a two-column side table (599 pages). Both stayed 100 percent HOT, but right after a checkpoint, 10,000 increments wrote 49.3 MB of WAL on the wide table and 4.9 MB on the narrow one: a tenth of the page images, and counters that stay in cache.
+
+Do it for `last_seen_at`, `login_count`, rate limits, heartbeats: anything written far more often than its row. Batch very frequent increments. And don't keep a count with a trigger on a busy table ([A counter trigger serializes your writers](/books/eight-kilobytes/functions#a-counter-trigger-serializes-your-writers)).
+
+<DeepDive title="A narrow table doesn't make HOT more likely">
+
+In steady state the WAL gap closes (1.06 MB against 764 KB for the second batch), because an update that stays on its page logs only the changed bytes, unless `wal_level` is `logical`. And the 10 percent reserve is shared by ten times as many narrow rows: one statement bumping every fifth row kept 67 percent HOT on the wide table and 54 percent on the narrow one.
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove('right after a checkpoint the side table writes about a tenth of the WAL',
+  m('wide 1', 'bytes') / m('narrow 1', 'bytes') between 8 and 12);
+select lab.prove('in steady state the gap is small: a same-page update logs only the bytes that changed',
+  m('wide 2', 'bytes') / m('narrow 2', 'bytes') < 2);
+select lab.prove('a burst of 20,000 updates in one statement costs both tables HOT: about 67 and 54 percent',
+  m('wide burst', 'hot') between 12000 and 14400
+  and m('narrow burst', 'hot') between 9000 and 13000);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Make your ORM write less
+
+An unconditional `updated_at` bump is a new row version, and cold if `updated_at` is indexed. A save with no real change is HOT-safe but still writes a version, WAL, and future vacuum work. Use dirty tracking, and in plain SQL, guard it:
+
+```sql
+update users
+set name = $1
+where id = $2
+  and name is distinct from $1;
+```
+
+### Bottom-up index deletion is the safety net
+
+Since PostgreSQL 14, a B-tree whose key didn't change cleans up after cold updates: before splitting a leaf, it deletes entries there that point at dead versions. It's a safety net, not a substitute for HOT. Every cold update still wrote and logged its entries, and the index whose key changed keeps its garbage until vacuum.
+
+<DeepDive title="Bottom-up deletion, counted">
+
+The `churn` table (`id`, `email`, and `updated_at`, each indexed; no vacuum) took 300,000 cold updates in 30 batches, all changing `updated_at`:
+
+| Index | Key changed? | Heap pointers held | Pages before / after |
+|---|---|---|---|
+| `churn_updated_at_idx` | yes | 400,000 | 276 / 1,098 |
+| `churn_pkey` | no | 196,685 | 276 / 551 |
+| `churn_email_idx` | no | 189,244 | 499 / 975 |
+
+The `updated_at` index holds every live and stale entry. The other two deleted 68 and 70 percent of their stale entries on the fly.
+
+<ProveIt lab="06-hot">
+
+```sql
+select lab.prove('the updated_at index holds all 400,000 pointers: live and stale',
+  heap_pointers('churn_updated_at_idx') = 400000);
+select lab.prove('the primary key, whose key never changed, deleted over half its stale entries on the fly',
+  heap_pointers('churn_pkey') < 250000);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## This is the trade Postgres made
+
+Postgres indexes point at physical addresses: lookups are direct, and every cold update writes to every index. MySQL's InnoDB made the opposite bet: an update there touches only the indexes whose columns changed, so indexing `updated_at` costs one index write per update, and here it can cost every index ([An update writes one row, or every index](/books/eight-kilobytes/not-mysql#an-update-writes-one-row-or-every-index)). HOT narrows the gap, which is why the cost depends so much on your schema. You can nearly always reshape the tables that hurt. Do that before blaming the database.
+
+## The short version
+
+- A cold update writes an entry in every index, plus WAL, vacuum work, and the same on every replica: 6.9 times a HOT update's WAL with six indexes.
+- HOT-safe means no indexed column changed; HOT means that plus room on the page. Know which half you're failing.
+- Indexed means anywhere in an index: key, `INCLUDE`, expression, or partial predicate (BRIN-only columns excepted, PostgreSQL 16+).
+- Don't index `updated_at` or other columns that change on most updates without a query you can name.
+- Give update-heavy tables `fillfactor = 90` (lower for wide rows); leave append-only tables at 100.
+- Track `n_tup_hot_upd` and `n_tup_newpage_upd` against `n_tup_upd` to see whether to fix indexes or room.
+- One held snapshot dropped our HOT rate from 100 to 23 percent and grew every index. Keep transactions short.
+- Move constantly changing counters to a narrow table, and don't write rows that didn't change.
+
+## Further reading
+
+- [src/backend/access/heap/README.HOT](https://github.com/postgres/postgres/blob/master/src/backend/access/heap/README.HOT), PGDG source. The design document: chains, redirects, pruning, and how `CREATE INDEX` copes with existing chains.
+- [Heap-Only Tuples (HOT)](https://www.postgresql.org/docs/18/storage-hot.html), PostgreSQL documentation. The two official conditions, including the summarizing-index exception.
+- [B-tree bottom-up index deletion](https://www.postgresql.org/docs/18/btree.html#BTREE-DELETION), PostgreSQL documentation. How PostgreSQL 14+ limits index bloat from cold updates.
+- [HOT updates in PostgreSQL for better performance](https://www.cybertec-postgresql.com/en/hot-updates-in-postgresql-for-better-performance/), Laurenz Albe, CYBERTEC. A compact practitioner's walk-through of the conditions and fillfactor.
+- [The Part of PostgreSQL We Hate the Most](https://www.cs.cmu.edu/~pavlo/blog/2023/04/the-part-of-postgresql-we-hate-the-most.html), Andy Pavlo and Bohan Zhang. A researcher's case against append-only versioning, with fleet data on how often updates are HOT.

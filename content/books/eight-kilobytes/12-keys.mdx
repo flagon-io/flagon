@@ -1,0 +1,674 @@
+---
+title: Pick your keys once
+description: Choose primary keys and public ids with real numbers on index size, page density, and WAL for bigint, random UUIDs, and UUIDv7.
+part: Designing for it
+builds_on: [types, wal]
+---
+
+Take three tables of a million rows that differ only in their primary key, and insert a second million into each, with [checkpoints](/books/eight-kilobytes/glossary#checkpoint) along the way as on a real server. With a random UUID key, that million wrote **551 MB** of [write-ahead log](/books/eight-kilobytes/glossary#wal). With a time-ordered UUIDv7, **143 MB**. With a plain `bigint`, **130 MB**.
+
+Nearly four times the WAL, all from where each new key lands in the index. And that's only the half of key design that happens inside the database. The other half is the id you show the world, which, if it's a counter, tells strangers how big you are.
+
+A key is the column you can't cheaply change later. Decide two things, once and separately: what you join on, and what you publish.
+
+## Natural keys change; surrogate keys don't
+
+A **natural key** identifies the thing in the real world, like an email. A **surrogate key** is invented by the database, like an identity column. Natural keys change (and a changed primary key means updating every child row), they're wide, and they leak personal data into URLs and logs.
+
+Our rule: every table gets a surrogate primary key, and natural keys become `unique` constraints, like `unique (account_id, email)` on `users`. The exceptions are codes that never change (`'USD'`) and join tables, whose **composite key** (`primary key (project_id, user_id)`) is the pair of foreign keys ([A join table needs an index in each direction](/books/eight-kilobytes/relationships#a-join-table-needs-an-index-in-each-direction)).
+
+## Let the database number rows, and never trust the order
+
+Postgres generates integer keys with a **sequence**, a tiny relation that hands out increasing numbers, attached with an identity column: `id bigint generated always as identity primary key`. `generated always` refuses hand-picked ids that would later collide with the sequence ([serial](/books/eight-kilobytes/types#serial-is-a-sequence-not-a-type) shows the bug), and every foreign key column is `bigint` to match ([Ids are bigint](/books/eight-kilobytes/types#ids-are-bigint)).
+
+The numbers are for identity, not order. Sequences have gaps, because `nextval()` is never rolled back. They aren't ordered by commit either: A takes 100, B takes 101 and commits first, and a poller reading `where id > last_seen_id` skips 100 forever. Build neither invoice numbering nor a change feed on them.
+
+<DeepDive title="Gaps, the import that collides, and logical replication">
+
+A rolled-back transaction never returns its sequence value, and neither does an insert that `on conflict` skips ([sequence functions](https://www.postgresql.org/docs/18/functions-sequence.html)). Cached values die with their session, and a crash can skip some. A gapless counter is a separate row updated under a lock.
+
+Importing rows that keep their old ids (`overriding system value`) leaves the sequence behind, so the next normal insert collides on id 1. After every bulk load, `select setval(pg_get_serial_sequence('imported', 'id'), (select max(id) from imported));`. And logical replication doesn't copy sequence state (as of PostgreSQL 18), so reset each one after a logical-replication upgrade ([Take minor releases promptly; rehearse major ones](/books/eight-kilobytes/backups#take-minor-releases-promptly-rehearse-major-ones)).
+
+<ProveIt lab="12-keys">
+
+```sql
+create sequence gap_demo;
+select nextval('gap_demo') is not null as first \gset
+begin;
+select nextval('gap_demo') is not null as taken \gset
+rollback;
+select lab.prove('nextval is never rolled back: after an aborted transaction took 2, the next value is 3',
+  nextval('gap_demo') = 3);
+select lab.prove('after importing ids 1 to 3, the next normal insert collides on id 1',
+  lab.try($$ insert into imported (v) values ('d') $$)
+    like '23505: duplicate key value violates unique constraint "imported_pkey"%');
+select lab.prove('after setval to max(id), the next insert gets 4',
+  (select max(id) from imported) = 4);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Increasing keys append; random keys land anywhere
+
+A UUID is a 128-bit number stored in 16 bytes. One digit names its **version**: version 4 is 122 random bits, version 7 starts with a 48-bit millisecond timestamp, then random bits. Four of each:
+
+```text
+01a10f20-21b7-71a1-8d90-e6f8de20e3c7      b1a6404e-028b-4ade-8feb-7f86e74e2b51
+01a10f20-21b7-71bf-bbef-258ac7147265      b47e0075-6a9c-4f5e-8fb7-a5c9d4a02509
+01a10f20-21b7-71c2-bf17-8708d1b74560      0f4464c6-706d-48d9-b9a5-48e946db9a74
+01a10f20-21b7-71c4-bf35-fefb06056477      68f1407b-2358-4853-8892-061d566ee2ac
+```
+
+The v7 values on the left share a prefix and increase. The v4 values on the right land anywhere. That's the whole story, because a B-tree keeps its keys sorted across 8 KB leaf pages ([The B-tree does the heavy lifting](/books/eight-kilobytes/btree)), so where a new key goes depends only on its value.
+
+**Increasing keys** (identity, UUIDv7) always land on the rightmost leaf, which stays in memory, like a ledger you only append to. **Random keys** (UUIDv4) land anywhere, like slipping each new page into a random spot in a binder. Three things follow:
+
+1. **Half-full pages.** A full page in the middle splits 50/50; pages settle around 70 percent full, against 90 for appends.
+2. **A huge hot set.** Any leaf might be written next, so the whole index must stay cached.
+3. **Full-page writes.** The first change to a page after a checkpoint logs an image of the whole page ([The first change after a checkpoint logs the whole page](/books/eight-kilobytes/wal#the-first-change-after-a-checkpoint-logs-the-whole-page)). Appends pay that for a few right-edge pages per checkpoint. Random keys pay it for every leaf they touch for the first time since the last checkpoint, and in a big index that's thousands of leaves per checkpoint: up to 8 KB of WAL for a 16-byte key.
+
+<Fig name="append-vs-random">
+
+**Increasing keys append; random keys scatter.** New identity or UUIDv7 keys all land on the rightmost leaf, which stays in memory. UUIDv4 keys land on any leaf, a full leaf splits 50/50, and pages settle around 70 percent full against 90 for appends.
+
+</Fig>
+
+<DeepDive title="What's inside a UUIDv7, and why one session's ids never go backward">
+
+RFC 9562 (2024) defines the versions; besides 4 and 7, version 1 leaks a MAC address and 3 and 5 hash a name. `gen_random_uuid()` makes v4; PostgreSQL 18 adds `uuidv7()` and the alias `uuidv4()`, and 17 added functions to look inside:
+
+```sql
+select u, uuid_extract_version(u), uuid_extract_timestamp(u)
+from (select uuidv7() as u) x;
+```
+
+```text
+                  u                   | uuid_extract_version |   uuid_extract_timestamp
+--------------------------------------+----------------------+----------------------------
+ 01a10f20-21b6-7697-8e50-2eeedd76f055 |                    7 | 2026-10-06 02:52:06.454+00
+```
+
+For a v4 it returns null: there's no time inside. Postgres fills the 12 bits after a v7's version digit with sub-millisecond time and guarantees each value is a step past the last on that backend, so a tight loop never goes backward. A million calls in one statement spanned about 500 milliseconds, roughly 2,000 ids each, every one larger than the last.
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('uuid_extract_timestamp of a v7 is its creation time; of a v4 it is null',
+  abs(extract(epoch from uuid_extract_timestamp(uuidv7()) - now())) < 60
+  and uuid_extract_timestamp(gen_random_uuid()) is null);
+select lab.prove('1,000,000 uuidv7() calls in one session strictly increase, though thousands share a millisecond',
+  (select bool_and(u > prev) and count(distinct uuid_extract_timestamp(u)) < count(*) / 10
+   from (select u, lag(u) over (order by g) as prev
+         from (select g, uuidv7() as u from generate_series(1, 1000000) g) s) x
+   where prev is not null));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Random keys write nearly four times the WAL
+
+Three tables, identical except for the key. We inserted a million rows into each, then another million in ten batches with a `checkpoint` before each, a stand-in for a busy server's 5-minute `checkpoint_timeout`, and read each batch's WAL from `explain (analyze, wal, buffers)`. The second million:
+
+| Second 1,000,000 rows | bigint | UUIDv4     | UUIDv7 |
+| --------------------- | ------ | ---------- | ------ |
+| WAL generated         | 130 MB | **551 MB** | 143 MB |
+| full-page images      | 43     | 72,753     | 40     |
+| buffers dirtied       | 8,199  | 84,058     | 10,259 |
+
+Each bigint and UUIDv7 batch wrote about 4 full-page images, the right edge of the heap and the index. Each UUIDv4 batch wrote thousands: 3.8 times the WAL of v7, 8 times the dirtied buffers. With other work on the server, we measured 590 to 630 MB. UUIDv7 behaved almost exactly like `bigint`.
+
+The penalty repeats for every index on a v4 column, including every indexed foreign key pointing at it. Reads suffer too: the recent rows your app reads most are spread across the whole index instead of a few cached leaves.
+
+<DeepDive title="The first million, the index sizes, and the benchmark that fools you">
+
+The tables were `id bigint generated always as identity`, `id uuid default gen_random_uuid()`, and `id uuid default uuidv7()`, each beside an `n int`. The first million went in as one statement per table, after a checkpoint:
+
+| 1,000,000 rows     | bigint | UUIDv4 | UUIDv7 |
+| ------------------ | ------ | ------ | ------ |
+| PK index size      | 21 MB  | 38 MB  | 30 MB  |
+| avg leaf density   | 90.0%  | 72.0%  | 90.0%  |
+| WAL for the insert | 130 MB | 157 MB | 143 MB |
+
+Here the WAL gap is modest, and that's how a benchmark fools you: one statement between two checkpoints, the whole index in 128 MB of shared buffers, so each random leaf got at most one full-page image. The difference appears in steady state: big indexes, regular checkpoints, memory smaller than the data ([A 60-second benchmark can miss every checkpoint](/books/eight-kilobytes/benchmarking#a-60-second-benchmark-can-miss-every-checkpoint)). In the checkpointed batches, the `WAL:` line's `fpi` (full-page images) was 4 per batch for bigint and v7, while v4's climbed from 4,818 in the first batch to 9,443 in the last as the growing index gave random inserts more pages to hit.
+
+After two million rows, `pgstatindex` gave the primary keys as 43, 76, and 60 MB; leaves 90, 71.6, and 90 percent full; and `leaf_fragmentation` 0, 50, and 0 percent, meaning half of v4's leaves are out of order on disk. UUIDv4 needs about 25 percent more leaf pages than UUIDv7 at the same key width, purely from half-split pages. The lab reruns everything at a fifth of the scale and checks the ratios.
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('with checkpoints in play, UUIDv4 writes more than 3 times the WAL of UUIDv7',
+  (select wal from k2 where k = 'v4') > 3 * (select wal from k2 where k = 'v7'));
+select lab.prove('UUIDv7 WAL is within 20 percent of bigint''s',
+  (select (select wal from k2 where k = 'v7') / (select wal from k2 where k = 'bigint') between 1.0 and 1.2));
+select lab.prove('UUIDv4 dirties more than 5 times the buffers of UUIDv7',
+  (select dirtied from k2 where k = 'v4') > 5 * (select dirtied from k2 where k = 'v7'));
+select lab.prove('bigint and UUIDv7 pack leaves about 90 percent full',
+  (select bool_and(density between 88 and 92) from k_index1 where k in ('bigint', 'v7')));
+select lab.prove('UUIDv4 leaves settle around 70 percent full (between 60 and 78)',
+  (select density between 60 and 78 from k_index1 where k = 'v4'));
+select lab.prove('UUIDv4 needs at least 20 percent more leaf pages than UUIDv7 for the same key width',
+  (select (select leaf_pages from k_index1 where k = 'v4')::numeric
+        / (select leaf_pages from k_index1 where k = 'v7') > 1.2));
+select lab.prove('bigint and UUIDv7 batches write a handful of full-page images; UUIDv4 batches write hundreds or more',
+  (select max(fpi) from k_res where phase = 2 and k in ('bigint', 'v7')) < 50
+  and (select min(fpi) from k_res where phase = 2 and k = 'v4') > 500);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## The database can't always mint the id
+
+An identity column works because one writer does the counting: the database, at insert time. Everything that needs the id waits for `returning id`, and most of the time that wait is free. It stops being free when something has to know the id before the row reaches the database:
+
+- **Offline and local-first clients.** A phone on a plane creates a project and three tasks that point at it. There's no database to ask until it lands.
+- **Optimistic UI.** The app shows the new comment, and links to it, before the request returns.
+- **A graph in one request.** An import creates parents and children, and every child needs its parent's id. With identity that's a round trip per level, or a `returning` dance to match rows back up.
+- **Retries.** A client that minted the id can resend the same row safely, because the id doubles as the [idempotency key](/books/eight-kilobytes/queries#let-a-unique-constraint-enforce-once).
+- **More than one database writing.** Regions, shards, or two databases you'll merge each have their own sequence, and each hands out 42 ([Counters collide across environments](#counters-collide-across-environments)).
+
+"UUIDs are modern" isn't on the list, and neither is "it hides our row count". Hiding the count is the [public id's](#join-on-a-bigint-publish-a-uuid) job, whatever the key is.
+
+When one of those is real, you have two ways out. Try the cheaper one first.
+
+**Keep the `bigint` key and accept a client id beside it.** The client mints a `uuid`, the table stores it as `client_id uuid not null` with `unique (account_id, client_id)`, and the server inserts with `on conflict do nothing`, so a retry inserts nothing. Joins stay at 8 bytes. This fits when nothing else unsynced points at the client's new row: a comment, a form submission, a log line from a device.
+
+**Make the key a `uuid` when references cross the boundary.** If offline children point at offline parents, or rows move between databases with their references intact, then translating client ids into server ids at sync time is a mapping table you'll maintain forever. Let the client's id be the key. Make it a UUIDv7 so it inserts like a sequence (143 MB of WAL per million rows against 130 MB for `bigint`), and accept that every foreign key pointing at it is 16 bytes instead of 8. For these apps, that's the right price.
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('a retry with the same client id inserts nothing, and the first row stands',
+  :retry_inserted = 0
+  and (select count(*) = 1 and min(body) = 'first try' from client_rows));
+```
+
+</ProveIt>
+
+## If you need UUIDs, use UUIDv7
+
+If you need UUIDs, PostgreSQL 18 builds the right one in: `id uuid primary key default uuidv7()` (on older versions, generate v7 in the app). Two caveats. **A UUIDv7 reveals when the row was created**, to the millisecond, to anyone holding it. And **its order is per generator**, so ids from two machines don't give you exact event order.
+
+Store it as `uuid`, never `text`. As text, a million of them made the primary key 87 percent bigger, and text compares case-sensitively through a [collation](/books/eight-kilobytes/types#collations-decide-what-equal-means), so an uppercase copy of an id is a new "unique" value.
+
+<DeepDive title="The same million UUIDs as text and as uuid">
+
+One million UUIDv7 values, copied in sorted order into a `text` primary key and a `uuid` one, so only the type differs:
+
+```text
+ text_idx | uuid_idx | text_heap | uuid_heap
+----------+----------+-----------+-----------
+ 56 MB    | 30 MB    | 65 MB     | 42 MB
+```
+
+An uppercase UUID equals its lowercase form as `uuid`; as text it doesn't.
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('the text primary key index is more than 70 percent bigger than the uuid one',
+  pg_relation_size('k_text_pkey') > 1.7 * pg_relation_size('k_uuid2_pkey'));
+select lab.prove('the text table is more than 40 percent bigger',
+  pg_relation_size('k_text') > 1.4 * pg_relation_size('k_uuid2'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A client's UUIDv7 is input, not a clock
+
+Postgres promises that the `uuidv7()` values one session mints never go backward. It promises nothing about ids your clients mint, because a UUIDv7 carries the clock of whatever device made it, and a device clock is whatever its owner set it to.
+
+A phone set five years fast mints ids that sort after everything your servers will mint for five years.
+
+A laptop that syncs a week of offline work inserts a week of old ids into the middle of the index, where they split pages like random keys. In the lab, two indexes started with the same 100,000 UUIDv7s spread over a week; one then got 20,000 ids minted now, the other 20,000 minted at random moments in that week, the shape of an offline client catching up. The 20,000 late ids left the leaves 54 percent full and the index 767 leaf pages, where the same ids arriving on time kept them 90 percent full in 460. A few late syncs are noise. An app where most writes arrive late pays the UUIDv4 price on them.
+
+Three rules:
+
+- **Keep a server timestamp.** `created_at timestamptz not null default now()` is when the row arrived. The time inside a client's id is a claim. Order feeds and [keyset cursors](/books/eight-kilobytes/queries#offset-reads-every-row-it-skips) by `(created_at, id)`, never by a client-minted id alone.
+- **Validate it like any input.** Accept a well-formed UUID. Reject versions you didn't ask for, and timestamps further in the future than the clock skew you'll tolerate.
+- **A collision is a conflict, never an overwrite.** Ids appear in URLs, so a client can send an id it didn't mint. With `on conflict (id) do update`, that rewrites someone else's row, in someone else's account. Insert with `on conflict (id) do nothing` instead, and if nothing came back, look the id up with the caller's `account_id`. Found means it's a retry: return that row. Not found means someone else holds the id: reject it with an error that says nothing about whose.
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('a UUIDv7 minted on a clock five years fast sorts after every id minted today',
+  uuidv7(interval '5 years') > uuidv7()
+  and uuid_extract_timestamp(uuidv7(interval '5 years')) > now() + interval '4 years');
+select lab.prove('ids synced a week late split pages mid-index: leaves end up at least 10 points less full',
+  (select avg_leaf_density from pgstatindex('v7_late_pkey'))
+    < (select avg_leaf_density from pgstatindex('v7_ontime_pkey')) - 10);
+```
+
+</ProveIt>
+
+<DeepDive title="The upsert that writes into another account">
+
+Account 1 owns a note. Account 2 sends a row with the same id, which it saw in a URL, through the upsert a sync endpoint usually starts with:
+
+```sql
+insert into notes
+values ('01a10f20-21b7-71bf-bbef-258ac7147265', 2, 'written by account 2')
+on conflict (id) do update set body = excluded.body;
+```
+
+The row still says `account_id = 1`, and its body is now account 2's. Nothing failed, so nothing was logged. With `do nothing`, the insert returns no row, the note is untouched, and the follow-up lookup under account 2 finds nothing, which is the signal to refuse.
+
+The safe version of the sync insert, in full:
+
+```sql
+insert into notes (id, account_id, body) values ($1, $2, $3)
+on conflict (id) do nothing
+returning id;
+-- no row back: select * from notes where id = $1 and account_id = $2
+-- found: a retry, return it; not found: reject without saying whose it is
+```
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('on conflict do update with a client-sent id rewrites a row in another account',
+  (select account_id = 1 and body = 'written by account 2' from notes));
+select lab.prove('on conflict do nothing inserts nothing, and the caller''s account holds no row with that id',
+  :note_inserted = 0
+  and (select body = 'account 1''s note' from notes)
+  and not exists (select 1 from notes
+                  where id = '01a10f20-21b7-71bf-bbef-258ac7147265' and account_id = 2));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Never hand out a counter
+
+Most scaffolds put the primary key in the URL. The tutorial generates `/invoices/10442`, and that tells anyone who sees it more than you meant to say. A sequential id is a counter, and a counter answers questions: how many, how fast, what comes next.
+
+Keep the counter for joins. Give the world something else.
+
+### A counter is an invitation
+
+Change one digit in the URL and see what comes back. That's the whole attack, and it has a name: an **insecure direct object reference** (IDOR), an endpoint that loads whatever id it's handed without checking that the caller may see it. With sequential ids the attacker doesn't guess. They count: 10443, 10444, and a loop for the rest.
+
+The fix isn't a different id. It's an authorization check on every lookup (`where account_id = $1 and id = $2`), or [row-level security](/books/eight-kilobytes/security#a-policy-makes-other-tenants-rows-invisible) adding it for you. OWASP's guidance is blunt: unguessable ids are defense in depth, and access control is required regardless.
+
+So why bother? Because defense in depth is real. A missing check on one endpoint out of two hundred is an ordinary bug. With sequential ids, that bug leaks the whole table by the end of the afternoon. With unguessable ids, it leaks only the ids that were already lying around in logs and screenshots.
+
+<Callout type="danger" title="An id is not a password">
+
+Ids land in browser history, analytics, and support tickets. For "anyone with the link" sharing, issue a separate random token with a scope and an expiry, and check it like a credential.
+
+</Callout>
+
+### Five ids give away your total
+
+In the Second World War, Allied statisticians estimated German tank production from the serial numbers on captured tanks. Conventional intelligence said about 1,400 a month. The serial numbers said 246. Production records found after the war said 245 ([the German tank problem](https://en.wikipedia.org/wiki/German_tank_problem)).
+
+The estimator is one line: having seen `k` ids with largest `m`, guess `m + m/k - 1`. Account 42 receives webhooks carrying event ids, and kept five:
+
+```sql
+with seen as (
+  select id from events where account_id = 42 order by md5(id::text) limit 5
+)
+select array_agg(id order by id)                         as seen,
+       round(max(id) + max(id)::numeric / count(*) - 1) as estimate,
+       (select count(*) from events)                     as actual
+from seen;
+```
+
+```text
+                  seen                  | estimate | actual
+----------------------------------------+----------+---------
+ {183289,377266,464367,1188068,1632355} |  1958825 | 2000000
+```
+
+Five ids from one customer estimate your whole platform's event volume within about 2 percent (1,958,825 against 2,000,000). With all 2,084 of their own ids, within 0.1 percent.
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('five event ids seen by one customer estimate the table''s 2,000,000 rows within 5 percent',
+  (with seen as (select id from events where account_id = 42 order by md5(id::text) limit 5)
+   select abs(max(id) + max(id)::numeric / count(*) - 1 - 2000000) / 2000000 < 0.05 from seen));
+select lab.prove('all 2,084 of account 42''s event ids estimate it within 0.1 percent',
+  (select count(*) = 2084
+          and abs(max(id) + max(id)::numeric / count(*) - 1 - 2000000) / 2000000 < 0.001
+   from events where account_id = 42));
+```
+
+</ProveIt>
+
+### Two ids give away your growth
+
+One id is a count. Two ids a known time apart are a rate: sign up today, sign up next week, subtract your user ids. On the book's events it's exact:
+
+```sql
+select (select min(id) from events where created_at >= '2026-09-08')
+     - (select min(id) from events where created_at >= '2026-09-01') as id_gap,
+       (select count(*) from events
+        where created_at >= '2026-09-01' and created_at < '2026-09-08') as actual;
+```
+
+```text
+ id_gap | actual
+--------+--------
+  38356 |  38356
+```
+
+Repeat it monthly and you have someone else's growth chart. Sometimes that's harmless. Sometimes it's exactly what a competitor wanted to know.
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('the gap between two event ids a week apart is exactly the number of events created that week',
+  (select min(id) from events where created_at >= '2026-09-08')
+  - (select min(id) from events where created_at >= '2026-09-01')
+  = (select count(*) from events where created_at >= '2026-09-01' and created_at < '2026-09-08'));
+```
+
+</ProveIt>
+
+### Counters collide across environments
+
+Every environment has a project 1234, so a bug report about it doesn't say which. Merging two databases means renumbering every key and reference ([Route by tenant, never by id](/books/eight-kilobytes/sharding#route-by-tenant-never-by-id)). Offline clients can't mint ids. And `42` is a valid project id, user id, and invoice id, so the wrong one returns the wrong row instead of an error.
+
+### Every id format trades order against what it leaks
+
+| Format      | Sorts by time | Leaks              | Store as |
+| ----------- | ------------- | ------------------ | -------- |
+| identity    | by insert     | volume, rate       | `bigint` |
+| UUIDv4      | no            | nothing            | `uuid`   |
+| UUIDv7      | yes           | creation time      | `uuid`   |
+| [ULID](/books/eight-kilobytes/glossary#ulid) | yes (ms)      | creation time      | `uuid`   |
+| KSUID       | yes (s)       | creation time      | `bytea`  |
+| Snowflake   | roughly       | time, machine      | `bigint` |
+| NanoID      | no            | nothing            | `text`   |
+| [TypeID](/books/eight-kilobytes/glossary#typeid) | yes           | creation time      | `uuid`   |
+| Sqids       | no            | volume, if decoded | `bigint` |
+
+What sorts by time inserts like a sequence; what's random inserts like v4. Pick by what you can afford to leak.
+
+<DeepDive title="Each format, briefly">
+
+Details as of October 2026.
+
+### UUIDv4 hides creation time, at 3.8 times the WAL
+
+122 random bits. As a primary key it's the 3.8 times WAL measured above; as a public id beside the key, it's the one that hides creation time. 36 characters in a URL, 26 in base32.
+
+### UUIDv7 is the default, and it reveals creation time
+
+The default for any new id that must be unique outside one database. Anyone holding it can read its creation time, so a user's id says when they signed up. A fixed `uuidv7(interval ...)` shift hides nothing, and a random one per row destroys the order you chose v7 for.
+
+### A ULID fits a uuid column byte for byte
+
+The [ULID spec](https://github.com/ulid/spec) has v7's shape (48-bit milliseconds, 80 random bits) without version bits, written as 26 characters of Crockford base32. It fits a `uuid` column byte for byte, and the lab's 200,000 ULID-shaped values packed leaves 90 percent full. Extensions that add a native type are third-party: [vet them](/books/eight-kilobytes/extensions#a-crashing-extension-drops-every-connection-so-vet-it).
+
+### A KSUID is too wide for uuid
+
+[KSUID](https://github.com/segmentio/ksuid) is 160 bits (32-bit seconds, then 128 random bits), too wide for `uuid`: store `bytea`, or text compared under `C`, since base62 needs uppercase sorted before lowercase.
+
+### A Snowflake id needs a unique machine id per writer
+
+Twitter's [original Snowflake](https://github.com/twitter-archive/snowflake/tree/snowflake-2010) packed 41 bits of milliseconds, a 10-bit machine id, and a 12-bit sequence into a `bigint`. Every writer needs a unique machine id, and JavaScript loses precision above 2 to the 53rd, so APIs send these as strings. The shard-in-the-high-bits cousin is in [Route by tenant, never by id](/books/eight-kilobytes/sharding#route-by-tenant-never-by-id).
+
+### A NanoID's length is its collision budget
+
+[NanoID](https://github.com/ai/nanoid) is 21 URL-safe random characters, stored as `text`. The length is your collision budget: by the birthday bound, one-in-a-billion odds arrive after about 750 ids at 8 characters and 410 trillion at 21. Good for invite codes and short links, behind a unique index; not for keys.
+
+### A prefix makes an id say what it is
+
+A prefix names the type (`cus_`, `prj_`). A person can tell what an id is, a customer id pasted where an account id belongs is caught on sight, and a scanner can match `sk_live_` to catch leaked secrets ([Stripe's write-up](https://dev.to/stripe/designing-apis-for-humans-object-ids-3o5a)). The [TypeID spec](https://github.com/jetify-com/typeid) (0.3.0) standardizes it: a lowercase prefix, an underscore, and a UUIDv7 in 26 characters of lowercase Crockford base32.
+
+### Sqids and Hashids decode back to the counter
+
+[Sqids](https://sqids.org/) turns integers into short strings and back. The project says plainly it isn't encryption, and once decoded, the counter leaks again.
+
+</DeepDive>
+
+### Join on a bigint, publish a uuid
+
+Two columns:
+
+- **The key** is `bigint generated always as identity`, compact and cheap to join on. If ids must be minted outside the database and other rows point at them before they arrive, make the key `uuidv7()` instead ([The database can't always mint the id](#the-database-cant-always-mint-the-id)).
+- **The public id** is a separate `uuid` defaulting to `uuidv7()`, on every table whose rows appear in URLs, APIs, or webhooks. The app renders it with a type prefix, `prj_01j6b7yh69fq2vyabwvmba4nr5`, and parses it back.
+
+```sql
+create table projects (
+  id          bigint generated always as identity primary key, -- joins
+  public_id   uuid not null default uuidv7() unique,           -- URLs, APIs
+  account_id  bigint not null references accounts (id),
+  ...
+);
+```
+
+Joins stay at 8 bytes, the public id costs one index built in order, and you can change its format later without touching a foreign key. Use v4 for it where creation time is sensitive. Admin-only tables need no public id, and per-project issue numbers are fine: scoped to the tenant, they count only what the tenant already knows.
+
+### Encode in the app; SQL can do it for a report
+
+Encode in the app, where TypeID libraries exist for most languages. For a view or a report, two short SQL functions do it: `b32_encode(uuid)` returns the 26 lowercase base32 characters, and `b32_decode(text)` turns them back into a `uuid`, or into null if the string is malformed. Both are `immutable`.
+
+<DeepDive title="b32_encode and b32_decode">
+
+The encoder prepends two zero bits to the 128 to make 130, then reads them five at a time:
+
+```sql
+create function b32_encode(u uuid) returns text
+language sql immutable strict parallel safe as $$
+  select string_agg(
+           substr('0123456789abcdefghjkmnpqrstvwxyz',
+                  substring(b from i * 5 + 1 for 5)::bit(5)::int + 1, 1),
+           '' order by i)
+  from (select B'00' || ('x' || replace(u::text, '-', ''))::bit(128) as b) s,
+       generate_series(0, 25) as i
+$$;
+
+create function b32_decode(t text) returns uuid
+language sql immutable strict parallel safe as $$
+  select case when t ~ '^[0-7][0-9a-hjkmnp-tv-z]{25}$' then
+    (select (lpad(to_hex(substring(b from 3 for 64)::bigint), 16, '0')
+          || lpad(to_hex(substring(b from 67 for 64)::bigint), 16, '0'))::uuid
+     from (select string_agg(
+                    (strpos('0123456789abcdefghjkmnpqrstvwxyz',
+                            substr(t, i, 1)) - 1)::bit(5)::text,
+                    '' order by i)::bit(130) as b
+           from generate_series(1, 26) as i) s)
+  end
+$$;
+```
+
+It matches the TypeID spec's test vectors, and with an ascending alphabet and a fixed length, the strings sort exactly like the uuids. Malformed input decodes to null, so a mangled URL becomes a 404, not a 500. It isn't free: 200,000 inserts with `b32_encode` in a column default took about 6 seconds, against under 1 with plain `uuidv7()`. On a hot write path, encode in the app.
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('b32_encode matches the TypeID spec''s test vectors',
+  b32_encode('01890a5d-ac96-774b-bcce-b302099a8057') = '01h455vb4pex5vsknk084sn02q'
+  and b32_encode('ffffffff-ffff-ffff-ffff-ffffffffffff') = '7zzzzzzzzzzzzzzzzzzzzzzzzz'
+  and b32_encode('00000000-0000-0000-0000-000000000020') = '00000000000000000000000010');
+select lab.prove('the encoding preserves sort order: base32 strings compare like the uuids they encode',
+  (select bool_and((u < v) = (b32_encode(u) < b32_encode(v)))
+   from (select gen_random_uuid() as u, gen_random_uuid() as v
+         from generate_series(1, 50000)) x));
+select lab.prove('garbage, uppercase, and out-of-range strings decode to null, not an error',
+  b32_decode('not-an-id') is null
+  and b32_decode('01ARZ3NDEKTSV4RRFFQ69G5FAV') is null
+  and b32_decode('8zzzzzzzzzzzzzzzzzzzzzzzzz') is null);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Store the uuid, print the prefix
+
+Storing the finished `prj_...` string as `text` took 31 bytes a value against 16 and made the unique index 57 percent bigger, for nothing. Store the `uuid`. On the way in, check the prefix matches the endpoint (a `cus_` id sent to `/projects` is a 404), strip it, decode, and query:
+
+```sql
+select id, name from projects
+where public_id = b32_decode(substr('prj_01j6b7yh69fq2vyabwvmba4nr5', 5));
+```
+
+An index scan of 3 pages: `b32_decode` is immutable, so the planner folds it into a constant. Add the tenant to the same `where` clause. The public id makes the row hard to guess; the `account_id` check makes it impossible to read.
+
+<DeepDive title="The text and uuid public ids, measured">
+
+```sql
+create table pid_text (id bigint generated always as identity primary key,
+  public_id text not null unique default 'prj_' || b32_encode(uuidv7()));
+create table pid_uuid (id bigint generated always as identity primary key,
+  public_id uuid not null unique default uuidv7());
+```
+
+```text
+ text_bytes | uuid_bytes | text_index | uuid_index | text_heap | uuid_heap
+------------+------------+------------+------------+-----------+-----------
+         31 |         16 | 9728 kB    | 6184 kB    | 13 MB     | 10192 kB
+```
+
+Both indexes pack leaves about 90 percent full, because the encoding preserves order. The cost is pure width, plus text comparisons through a collation. The lookup:
+
+```text
+ Index Scan using projects_public_id_key on projects (actual rows=1.00 loops=1)
+   Index Cond: (public_id = '0191967f-44c9-7dc5-bf29-7cdd16a25705'::uuid)
+   Buffers: shared hit=3
+```
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('prj_ plus 26 characters takes 31 bytes in the row; the uuid takes 16',
+  (select pg_column_size(public_id) from pid_text limit 1) = 31
+  and (select pg_column_size(public_id) from pid_uuid limit 1) = 16);
+select lab.prove('the text public id index is more than 40 percent bigger than the uuid one',
+  pg_relation_size('pid_text_public_id_key') > 1.4 * pg_relation_size('pid_uuid_public_id_key'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Move an API off integer ids by accepting both
+
+Already shipped `/projects/4242`? Moving off it is an ordinary [expand and contract](/books/eight-kilobytes/migrations#renames-ship-as-expand-and-contract) migration. Add `public_id uuid` with no default, then `set default uuidv7()` so every new row gets one. Backfill the old rows in batches with `uuidv7(created_at - clock_timestamp())`, so each embeds its own creation time. Then add a concurrent unique index and `not null`:
+
+```sql
+alter table projects add column public_id uuid;
+alter table projects alter column public_id set default uuidv7();
+update projects set public_id = uuidv7(created_at - clock_timestamp())
+where id > 0 and id <= 5000 and public_id is null;  -- and so on, batch by batch
+create unique index concurrently projects_public_id_key on projects (public_id);
+```
+
+Then the app **accepts both** forms for a published deprecation period while emitting only the new one, **counts** the old form per client, and **stops accepting integers** when the count reaches zero. Until then, the authorization check keeps you safe, as it always did.
+
+<DeepDive title="The migration, step by step">
+
+```sql
+alter table projects add column public_id uuid;
+-- the default first, so rows inserted during the backfill get an id too
+alter table projects alter column public_id set default uuidv7();
+
+do $$
+declare
+  lo bigint := 0;
+  hi bigint;
+begin
+  select max(id) into hi from projects;
+  while lo < hi loop
+    update projects
+    set    public_id = uuidv7(created_at - clock_timestamp())
+    where  id > lo and id <= lo + 5000 and public_id is null;
+    lo := lo + 5000;
+    commit;
+  end loop;
+end $$;
+
+create unique index concurrently projects_public_id_key on projects (public_id);
+-- then set not null, through a validated check constraint
+```
+
+A volatile default added with the column would [rewrite the table](/books/eight-kilobytes/migrations#constant-defaults-are-free-volatile-defaults-rewrite), hence the separate steps; `set default` on its own only changes the catalog, and it goes first so that rows inserted while the backfill runs don't end up null. The batches follow [Backfill in short batches that walk the primary key](/books/eight-kilobytes/migrations#backfill-in-short-batches-that-walk-the-primary-key); the index comes after the backfill, which wrote ids in key order rather than time order; and `not null` goes [through a CHECK first](/books/eight-kilobytes/migrations#not-null-goes-through-a-check-first). Project 4242, created at 01:00:08.77786, became `prj_01j6b7yh69fq2vyabwvmba4nr5`, which embeds 01:00:08.777. So every creation date is readable from the id; use plain `uuidv7()` if the dates are sensitive. In the app, an all-digits ref increments a `legacy_id` metric and looks up by `id`; anything else is parsed and looked up by `public_id`, always with `account_id` in the `where`.
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('after the batched backfill every project has a public id, and they are unique',
+  (select count(*) = 20000 and count(distinct public_id) = 20000 from projects));
+select lab.prove('each backfilled id embeds its row''s created_at, to within a few milliseconds',
+  (select max(abs(extract(epoch from uuid_extract_timestamp(public_id) - created_at))) < 0.05
+   from projects));
+select 'prj_' || b32_encode(public_id) as pid from projects where id = 4242 \gset
+select lab.prove('looking up a project by its prefixed public id is one index scan of a few pages',
+  lab.nodes(format($$ select id, name from projects where public_id = b32_decode(substr(%L, 5)) $$, :'pid'))
+    @> array['Index Scan']
+  and lab.buffers(format($$ select id, name from projects where public_id = b32_decode(substr(%L, 5)) $$, :'pid')) <= 4);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Put the tenant in the key
+
+In a multi-tenant app, the tenant is part of every key, whether the schema says so or not. Say it.
+
+### Carry the tenant everywhere
+
+Put `account_id` on every tenant-owned table, even when a join could derive it. Eight bytes a row buy filters without joins, indexes that lead with `account_id` so a tenant's rows sit together, one-line [row-level security](/books/eight-kilobytes/security#a-policy-makes-other-tenants-rows-invisible) policies, and a shard key that's already everywhere ([Keep the door open from day one](/books/eight-kilobytes/sharding#keep-the-door-open-from-day-one)).
+
+### Make cross-tenant references impossible
+
+The running example has a quiet hole: nothing stops a project in account 1 from naming user 295, who belongs to account 296, as its `owner_id`. One buggy endpoint writes that, and a later query that trusts it leaks data across tenants. Put the tenant in the foreign key:
+
+```sql
+alter table users
+  add constraint users_account_id_id_key unique (account_id, id);
+alter table projects
+  add constraint projects_owner_same_account
+  foreign key (account_id, owner_id) references users (account_id, id);
+
+insert into projects (account_id, owner_id, name) values (1, 295, 'cross-tenant');
+```
+
+```text
+ERROR:  insert or update on table "projects" violates foreign key constraint
+"projects_owner_same_account"
+```
+
+<ProveIt lab="12-keys">
+
+```sql
+select lab.prove('with the composite foreign key, the cross-tenant owner is refused',
+  lab.try($$ insert into projects (account_id, owner_id, name) values (1, 295, 'cross-tenant') $$)
+    = '23503: insert or update on table "projects" violates foreign key constraint "projects_owner_same_account"');
+```
+
+</ProveIt>
+
+The extra unique constraint looks redundant, since `id` alone is unique, but it's what lets the foreign key check both columns. One index per referenced table is some of the cheapest insurance a multi-tenant system can buy, and it's worth keeping even on tables whose other foreign keys you drop ([Keep foreign keys where an orphan is a bug customers see](/books/eight-kilobytes/relationships#keep-foreign-keys-where-an-orphan-is-a-bug-customers-see)).
+
+## The short version
+
+- Surrogate primary keys, `bigint generated always as identity`; natural keys become `unique` constraints. Never rely on sequences being gapless or commit-ordered.
+- With regular checkpoints, random UUIDv4 keys cost 3.8 times the WAL of UUIDv7 (551 MB against 143 MB per million rows) and 8 times the dirtied buffers.
+- If you need UUIDs, use `uuidv7()` stored as `uuid`. It inserts like a sequence, and it reveals its creation time.
+- Identity breaks down when something must know the id before the database does: offline clients, optimistic UI, graphs built in one request, many writers. Accept a client id beside a `bigint` key, or make the key a UUIDv7 when references cross the boundary.
+- Treat a client's UUIDv7 as input: keep a server `created_at`, validate the id, and never let a conflict on it update another account's row.
+- Never put a counter in a URL: five ids estimated our 2,000,000-row total within about 2 percent; two ids a week apart gave the exact weekly volume.
+- Join on `bigint`; publish a separate `uuidv7()` public id, rendered as `prj_` plus base32, stored as `uuid`. It's defense in depth; the authorization check on every lookup is still the fix.
+- Put `account_id` on every tenant table, lead indexes with it, and use composite foreign keys so cross-tenant references are impossible, even on tables whose other foreign keys you drop.
+
+## Further reading
+
+- [RFC 9562: Universally Unique IDentifiers (UUIDs)](https://www.rfc-editor.org/rfc/rfc9562), IETF. The standard that defines UUIDv7, its monotonicity methods, and why UUIDs aren't security capabilities.
+- [UUID Functions](https://www.postgresql.org/docs/18/functions-uuid.html), PostgreSQL documentation. `uuidv7()` and its `shift` argument, `uuidv4()`, and the extraction functions.
+- [Insecure Direct Object Reference Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html), OWASP. Why guessable ids turn one missing check into a breach.
+- [TypeID specification](https://github.com/jetify-com/typeid), Jetify. Type prefixes on a base32 UUIDv7, with the test vectors our SQL encoder checks against.
+

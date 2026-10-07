@@ -1,0 +1,598 @@
+---
+title: Code in the database
+description: Keep per-row work off the primary, write functions the planner can see through, label them honestly, and know what every trigger costs and hides.
+part: Finding rows fast
+builds_on: [planner, queries]
+---
+
+Two functions return the same rows: every event for one account. One is written in SQL, the other in PL/pgSQL, with the same query inside. Ask each for the last day of that account's events, and the SQL version reads 7 pages through an index. The PL/pgSQL version reads 2,040, fetching all 2,084 of the account's events and throwing away 2,080 of them.
+
+Nothing is wrong with either function. The difference is what the planner can see. At its best, code in the database is the fastest code you own: it runs next to the data, with no round trips. At its worst, it hides a lock that serializes your writers, a stale plan, or a trigger that taxes every bulk update, all on the one server you can't add more of.
+
+## The primary is your most expensive CPU
+
+Every other tier of your system scales by adding machines: web servers, workers, caches, read replicas. The primary is the one you can't scale out. Every write goes through one box, and making it bigger is the most expensive rung on the ladder ([Earn the bigger box](/books/eight-kilobytes/scale#earn-the-bigger-box)). Every cycle a function or trigger spends there competes with every query: a millisecond spent formatting a report is a millisecond the checkout insert waits for a core.
+
+Our position: **the database does the work that makes the data smaller, keeps it correct, or saves a round trip. Everything else goes to the application tier, even when SQL can express it. Especially then.**
+
+- **Keep in the database:** filtering, joining, and aggregating (counting two million events in the app ships the whole table to compute one number); set-based writes; invariants that must be atomic with the write; anything that saves round trips.
+- **Move to the application:** per-row formatting (dates in the user's locale, currency, HTML); business rules that change often, which deserve feature flags and a rollback measured in minutes, not a migration; anything that calls the outside world, since a function can't un-send an email when its transaction rolls back ([Move work off the request path](/books/eight-kilobytes/scale#move-work-off-the-request-path)); anything you'd want to unit test.
+
+Here's what formatting costs. A reporting endpoint turns 200,000 events into sentences in SQL with `format()` and `to_char()`; the alternative returns the six fields the sentence is made of:
+
+| 200,000 rows                     | Raw fields   | Formatted in SQL |
+| -------------------------------- | ------------ | ---------------- |
+| Server time on our machine       | about 60 ms  | about 230 ms     |
+| Text sent                        | 9.2 MB       | 18 MB            |
+| End to end, through psql         | about 110 ms | about 280 ms     |
+
+Four times the server time, and twice the bytes. The app would spend about the same CPU; the difference is where. App servers you add in a minute. At ten calls a second, those 170 extra milliseconds keep nearly two of the primary's cores formatting dates all day, and every other query waits behind them.
+
+If the logic protects the data or shrinks it, put it next to the data. If it serves a feature or a person, keep it with the feature. (A `jsonb_agg` response that replaces a loop of queries is saving round trips, not formatting.)
+
+<DeepDive title="The formatting query, and finding CPU-bound statements">
+
+```sql
+select format('%s: %s by user %s in project %s took %s ms (%s)',
+         to_char(created_at at time zone 'America/New_York',
+                 'FMDay, FMMonth FMDD YYYY at FMHH12:MI AM'),
+         initcap(kind), coalesce(user_id::text, 'system'), project_id,
+         to_char((payload ->> 'duration_ms')::int, 'FM999,999'),
+         upper(payload ->> 'status')) as line
+from events
+where id <= 200000;
+```
+
+```text
+Sunday, October 5 2025 at 8:00 PM: Build by user 46936 in project 6705
+took 3,454 ms (FAILED)
+```
+
+(One line of output, wrapped here.)
+
+We timed both with `explain (analyze, timing off)`, best of five, casting the raw fields to text so both sides pay for the conversion the server does anyway to send a row. Formatting cost about 0.9 µs more per row. In the app, `Intl.DateTimeFormat` does the same job in the user's own locale.
+
+<ProveIt lab="23-functions">
+
+```sql
+select exec_ms(:'raw_rows') as raw_ms \gset
+select exec_ms(:'formatted_rows') as fmt_ms \gset
+
+select lab.prove(
+  'formatting 200,000 rows into sentences in SQL costs the server over 2.5 times the time of returning the fields',
+  :fmt_ms > 2.5 * :raw_ms);
+
+select lab.prove(
+  'and the formatted text is over 1.5 times the bytes of the raw fields',
+  :fmt_bytes > 1.5 * :raw_bytes);
+```
+
+</ProveIt>
+
+To find candidates: in `pg_stat_statements`, a statement with high total time but few shared blocks per call isn't reading pages, it's computing ([Rank the same view four ways, total time first](/books/eight-kilobytes/observability#rank-the-same-view-four-ways-total-time-first)). A wait sample where many sessions show no wait event means they're on CPU ([Sample waits to see where the time goes](/books/eight-kilobytes/observability#sample-waits-to-see-where-the-time-goes)). And `track_functions` times each function ([Functions are invisible until you turn tracking on](#functions-are-invisible-until-you-turn-tracking-on)).
+
+</DeepDive>
+
+## SQL functions are inlined; PL/pgSQL functions are not
+
+Here are the two functions from the opening, over an index on `(account_id, created_at)`:
+
+```sql
+create function account_events(acct bigint) returns setof events
+language sql stable
+as $$ select * from events where account_id = acct $$;
+
+create function account_events_pl(acct bigint) returns setof events
+language plpgsql stable
+as $$ begin return query select * from events where account_id = acct; end $$;
+```
+
+The caller asks for one day, `select * from account_events(42) where created_at > '2026-10-05'`, and each twin's plan:
+
+```text
+ Index Scan using events_account_id_created_at_idx on events (actual rows=4.00 ...)
+   Buffers: shared hit=7
+
+ Function Scan on account_events_pl  ... rows=333 ... (actual rows=4.00 loops=1)
+   Rows Removed by Filter: 2080
+   Buffers: shared hit=2040
+```
+
+The SQL version has no function in its plan: the planner pasted in the query, merged the caller's filter, and used the index. A **Function Scan** runs the function to completion, then filters, and the planner can only guess at what's inside ([Functions hide your statistics](/books/eight-kilobytes/planner#functions-hide-your-statistics)). For your biggest tenant, it reads every event they've ever had to show one day.
+
+<ProveIt lab="23-functions">
+
+```sql
+select lab.prove(
+  'the SQL function is inlined: an index scan on (account_id, created_at), under 20 pages',
+  lab.nodes($$ select * from account_events(42) where created_at > '2026-10-05' $$)
+    = array['Index Scan']
+  and lab.buffers($$ select * from account_events(42)
+                    where created_at > '2026-10-05' $$) < 20);
+
+select lab.prove(
+  'the PL/pgSQL twin is a Function Scan that reads the whole account, over 1,000 pages',
+  lab.nodes($$ select * from account_events_pl(42) where created_at > '2026-10-05' $$)
+    = array['Function Scan']
+  and lab.buffers($$ select * from account_events_pl(42)
+                    where created_at > '2026-10-05' $$) > 1000);
+```
+
+</ProveIt>
+
+**If a function is one query, write it in SQL.** Reach for PL/pgSQL when you need variables, loops, or exception handling, and expect it to behave like a call, not a view.
+
+### STRICT, SECURITY DEFINER, or a SET clause stops inlining
+
+A set-returning SQL function is inlined only when its body is a single `SELECT` and it's `STABLE` or `IMMUTABLE` (not the default `VOLATILE`), not `STRICT`, not `SECURITY DEFINER`, and has no `SET` clause. We tried each; each came back as a `Function Scan`. So a definer function with a pinned `search_path` ([as it should have](/books/eight-kilobytes/security#security-definer-functions-need-a-pinned-search_path)) is a black box: keep those for narrow operations.
+
+<DeepDive title="Scalar functions inline too, with tighter rules">
+
+A scalar SQL function inlines when its body is a single expression (`select <expression>`, no `FROM`) and its declared volatility isn't stricter than the body's. `is_failed(p jsonb)` with body `select p ->> 'status' = 'failed'` shows up in the plan as `((payload ->> 'status'::text) = 'failed'::text)`, which an expression index on `(payload ->> 'status')` can serve. The PL/pgSQL version shows up as `Filter: is_failed_pl(payload)`, called once per row. The PostgreSQL wiki keeps the full list of conditions on its [Inlining of SQL functions](https://wiki.postgresql.org/wiki/Inlining_of_SQL_functions) page.
+
+</DeepDive>
+
+## PL/pgSQL caches plans per session
+
+PL/pgSQL prepares each statement once per session and keeps the plan, so it inherits the switch of [prepared statements](/books/eight-kilobytes/planner#prepared-statements-switch-plans-after-five-runs): five custom plans, then a generic one if it looks no worse on average. That's the same trap, now hidden inside a function. Wrap the planner chapter's `latest` query in `latest_ids(k text)`, call it five times for a common kind, and the sixth call locks in the generic plan that reads 34,536 pages for the rare `incident` kind instead of 23.
+
+Nothing in the function changed; only the session's history did, which is why this bug is so hard to reproduce. Pin the fix to the function: `alter function latest_ids(text) set plan_cache_mode = force_custom_plan` plans every call for its actual value.
+
+<DeepDive title="SQL functions cache plans too, since PostgreSQL 18">
+
+```sql
+create function latest_ids(k text) returns setof bigint
+language plpgsql stable
+as $$
+begin
+  return query
+    select id from events where kind = k order by created_at desc limit 10;
+end
+$$;
+```
+
+PostgreSQL 18 extended plan caching to SQL functions that aren't inlined: a SQL version declared `strict` (so it can't inline) flipped the same way after five calls, to over 30,000 pages for `incident`. Dynamic SQL (`return query execute ... using k`) plans fresh every call. And per the [PL/pgSQL docs](https://www.postgresql.org/docs/18/plpgsql-implementation.html), a statement is only syntax-checked when the function is created; it's analyzed the first time it runs. A misspelled table or column in a branch that never runs surfaces only when that branch finally does.
+
+<ProveIt lab="23-functions">
+
+```sql
+select lab.prove(
+  'after five calls the function switched to a generic plan: the rare kind now reads over 30,000 pages',
+  lab.buffers($$ select * from latest_ids('incident') $$) > 30000);
+
+alter function latest_ids(text) set plan_cache_mode = force_custom_plan;
+
+select lab.prove(
+  'with SET plan_cache_mode = force_custom_plan on the function, the rare kind is cheap on every call',
+  lab.buffers($$ select * from latest_ids('incident') $$) < 50);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Volatility is a promise to the planner
+
+Every function is `IMMUTABLE` (same arguments, same result, forever), `STABLE` (same result within one statement, writes nothing), or `VOLATILE` (no promise, and the default), and the planner takes the label at its word. One pure function, a cutoff `n` days back, written with each label in turn and used to filter `projects`:
+
+```text
+   ->  Index Only Scan using projects_created_at_idx on projects  ...
+         Index Cond: (created_at > '2026-09-29 00:00:00+00'::timestamp ...)
+
+   ->  Index Only Scan using projects_created_at_idx on projects  ...
+         Index Cond: (created_at > days_ago_s(7))
+
+   ->  Seq Scan on projects  ...
+         Filter: (created_at > days_ago_v(7))
+```
+
+Immutable, first, was folded into a literal at plan time ([Constants are folded](/books/eight-kilobytes/plans#constants-are-folded)). Stable stayed a call and drove the same index. Volatile might change from row to row, so a sequential scan called it 20,000 times. Label every function as tightly as the truth allows.
+
+### A false IMMUTABLE serves stale answers
+
+Never label tighter than the truth. A settings lookup that reads a table, marked `IMMUTABLE`, feeds a PL/pgSQL function counting expired projects: 19,271 at 30 days. Change the setting to 365 and the same session still says 19,271, because the "constant" 30 was folded into its cached plan; a new session says 10,913. The bug lives as long as your pooled connections. `IMMUTABLE` never reads a table, a setting, the time zone, or the clock.
+
+<DeepDive title="The three plans, the call counts, and the stale lookup">
+
+```sql
+create function days_ago_i(n int) returns timestamptz
+language plpgsql immutable
+as $$ begin return timestamptz '2026-10-06' - n * interval '1 day'; end $$;
+-- days_ago_s: the same body, labeled stable
+-- days_ago_v: the same body, labeled volatile
+```
+
+The stable version's estimate came from peeking at its value: 173 rows from the histogram (the real count is 163). The volatile one fell back to the one-third default, 6,667. With `track_functions = 'pl'`, the immutable version ran once, the stable version twice (once for the estimate, once for the scan), the volatile version 20,000 times.
+
+<ProveIt lab="23-functions">
+
+```sql
+select lab.prove(
+  'IMMUTABLE is folded to a constant at plan time: the index condition holds a literal timestamp',
+  lab.plan_text($$ select count(*) from projects where created_at > days_ago_i(7) $$)
+    ~ 'Index Cond: \(created_at > ''\d{4}-\d\d-\d\d [^'']+''::timestamp with time zone\)');
+
+select lab.prove(
+  'VOLATILE cannot be an index condition: a sequential scan with a filter',
+  lab.plan_text($$ select count(*) from projects where created_at > days_ago_v(7) $$)
+    like '%Seq Scan on projects%Filter: (created_at > days_ago_v(7))%');
+
+select lab.prove(
+  'calls per query: IMMUTABLE once, STABLE at most twice, VOLATILE once per row (20,000)',
+  (select array_agg(calls order by funcname) from pg_stat_xact_user_functions
+   where funcname in ('days_ago_i', 'days_ago_s', 'days_ago_v'))
+  in (array[1, 1, 20000]::bigint[], array[1, 2, 20000]::bigint[]));
+```
+
+</ProveIt>
+
+The stale lookup:
+
+```sql
+create function setting(k text) returns int
+language sql immutable  -- a lie: it reads a table
+as $$ select value from settings where key = k $$;
+```
+
+`alter function setting(text) stable` invalidates the cached plan, and the next call is right. In an index expression, a false `IMMUTABLE` leaves stale entries until you `REINDEX`. One more difference: a `VOLATILE` function takes a fresh snapshot for each query inside it, so it sees changes made by the statement calling it; `STABLE` and `IMMUTABLE` use the caller's snapshot.
+
+<ProveIt lab="23-functions">
+
+```sql
+select lab.prove(
+  'a mislabeled IMMUTABLE function goes stale: the session keeps the old answer, a new session sees the new one',
+  :same_session = :before_change and :other_session < :before_change);
+
+alter function setting(text) stable;
+select lab.prove(
+  'relabeling it STABLE invalidates the cached plan and the answer is right again',
+  expired_projects() = :other_session);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Parallel safety is opt-in
+
+User functions are `PARALLEL UNSAFE` by default, so one unlabeled helper in a `where` clause runs a two-million-row scan in one process ([One unlabeled function keeps a query serial](/books/eight-kilobytes/plans#one-unlabeled-function-keeps-a-query-serial)). Mark pure helpers `PARALLEL SAFE`. Don't lie: a function that writes must stay `UNSAFE` (labeled safe, ours failed with `cannot execute INSERT during a parallel operation`), and one that touches temporary tables or backend-local state is `RESTRICTED`.
+
+## The planner believes three more labels
+
+Volatility isn't the only label the planner takes at its word. **`LEAKPROOF`** (which only a superuser can set) lets a function run ahead of [row-level security](/books/eight-kilobytes/glossary#row-level-security) filters, so a policy can use an index ([A function that isn't leakproof runs after the policy](/books/eight-kilobytes/security#a-function-that-isnt-leakproof-runs-after-the-policy)). A high **`COST`** makes the planner run cheaper conditions first. **`ROWS`** replaces the default 1,000-row estimate of a set-returning function ([A function in FROM is guessed at 1,000 rows](/books/eight-kilobytes/planner#a-function-in-from-is-guessed-at-1000-rows)); better, write it as inlinable SQL.
+
+## Triggers run once per row unless you say otherwise
+
+A trigger is a function the database calls when a table changes, and every foreign key you have is already a few of them. `BEFORE ... FOR EACH ROW` adjusts the row in flight; `AFTER` reacts to a change that happened. A `FOR EACH STATEMENT` trigger runs once and reads every changed row through **transition tables**. A `WHEN` clause makes the cheapest trigger of all: the one that doesn't fire.
+
+### A row trigger costs about a microsecond a row
+
+We updated 100,000 rows of an unlogged copy of `events`, best of five:
+
+| 100,000-row update | Time on our machine | Per row, over baseline |
+|---|---|---|
+| No trigger, `updated_at = now()` in the statement | 150 to 185 ms | |
+| `BEFORE` row trigger setting `updated_at` | 240 to 300 ms | about 1 µs |
+| `AFTER` row trigger writing one audit row | 360 to 400 ms | about 2 µs |
+
+About a microsecond a row: noise for one row at a time, most of a minute of CPU for a nightly job over 50 million. The `BEFORE` trigger also adds a [WAL](/books/eight-kilobytes/glossary#wal) record per row, a lock taken before the trigger sees the row. Setting the column in the statement does the same work without the trigger's cost.
+
+<DeepDive title="Counting the WAL records a trigger adds">
+
+The `BEFORE` trigger is a one-liner, `new.updated_at := now()`. On a logged copy, 20,000 rows per run, from `pg_stat_get_backend_wal` (PostgreSQL 18+): no trigger wrote 60,264 WAL records; the `BEFORE` trigger, the row audit trigger, and the statement audit trigger each wrote 80,264. The audit triggers add one heap insert per audit row, row-level or statement-level alike. The `BEFORE` trigger writes nothing of its own; `pg_walinspect` shows its extra records are `Heap LOCK`: 19,994 for the bare update and 39,994 with the trigger. (The bare update has lock records too, because each new version here goes to a different page.)
+
+For a plain audit log, a statement-level trigger writing all audit rows from transition tables took 270 to 320 ms, about 1.3 µs a row: 10 to 30 percent saved, since the same rows still get written. The big win comes when per-row work collapses, as in the counter below. `AFTER` row events queue in memory until the statement ends, so a huge update queues a huge list.
+
+<ProveIt lab="23-functions">
+
+```sql
+select lab.prove(
+  'a one-line BEFORE row trigger makes a 100,000-row update measurably slower (over 15%)',
+  :t_before > :t_none * 1.15);
+
+select lab.prove(
+  'a row-level audit trigger makes the same update at least 1.4x slower',
+  :t_row > :t_none * 1.4);
+
+select lab.prove(
+  'a BEFORE UPDATE row trigger adds one WAL record per row: it locks each row before updating it',
+  :recs_before - :recs_none between 19000 and 21000);
+
+select lab.prove(
+  'an audit trigger adds one insert per row to the WAL, row-level or statement-level alike',
+  :recs_row - :recs_none between 19000 and 21500
+  and abs(:recs_row - :recs_stmt) < :recs_row * 0.02);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A counter trigger serializes your writers
+
+The usual way to keep an exact per-project count ([Exact counts read everything](/books/eight-kilobytes/queries#exact-counts-read-everything)) is a row trigger on `events` that runs `update projects set event_count = event_count + 1`. It's correct, and it has two problems you won't see in development.
+
+**Every insert now locks the parent row.** Two sessions inserting events for project 7 used to proceed side by side. Now each updates project 7, which stays locked until commit, so session B waits for session A's whole transaction ([Row locks live in the row, not in pg_locks](/books/eight-kilobytes/concurrency#row-locks-live-in-the-row-not-in-pg_locks)). Your busiest project gets the most contention.
+
+**A bulk insert rewrites one row thousands of times**, each update walking past the versions before it. 500 events for one project took about 16 ms; 4,000 took about 260 ms. Eight times the rows, sixteen times the time.
+
+A statement-level trigger fixes the bulk case. Nothing fixes the lock. Count with an index when asked, or append deltas to a narrow table, which never blocks, and roll them up later ([Move hot counters to a narrow table](/books/eight-kilobytes/hot#move-hot-counters-to-a-narrow-table)).
+
+<DeepDive title="The counter trigger, both ways, and what HOT did">
+
+```sql
+create function bump_event_counts() returns trigger
+language plpgsql
+as $$
+begin
+  update projects p
+  set event_count = p.event_count + n.added
+  from (select project_id, count(*) as added from new_rows group by project_id) n
+  where p.id = n.project_id;
+  return null;
+end
+$$;
+
+create trigger events_count after insert on events
+  referencing new table as new_rows
+  for each statement execute function bump_event_counts();
+```
+
+One `update` per statement, computed from the transition table `new_rows`. The blocked session, seen from a third:
+
+```text
+ wait_event_type |  wait_event   | blocked_by
+-----------------+---------------+------------
+ Lock            | transactionid | {3798}
+```
+
+The row-level version's 1,000 updates were mostly HOT (988 of 1,000): a [HOT](/books/eight-kilobytes/hot) chain grows on one page until the page is full of versions nobody can prune yet, then one update moves to a fresh page and the chain restarts. That happened 12 times, and `projects` grew from 191 pages to 202 to hold 1,000 copies of one row. The cost isn't lost HOT updates; it's the lock, the growth, and the quadratic time.
+
+<ProveIt lab="23-functions">
+
+```sql
+select lab.prove(
+  'without a counter trigger, a second insert for the same project does not wait',
+  dblink_is_busy('b') = 0);
+
+-- after create trigger events_count ... for each row execute function bump_event_count()
+select lab.prove(
+  'with the counter trigger, the second insert waits on the first transaction (a transactionid lock)',
+  dblink_is_busy('b') = 1
+  and (select wait_event_type = 'Lock' and wait_event = 'transactionid'
+       from pg_stat_activity where pid = :b_pid)
+  and cardinality(pg_blocking_pids(:b_pid)) = 1);
+
+select lab.prove(
+  'a 1,000-row insert for one project makes 1,000 updates of one counter row, and projects grows',
+  :upd = 1000 and :pages_after > :pages_before);
+
+select lab.prove(
+  'with a row-level counter trigger, eight times the rows for one project takes over 12 times as long',
+  :t_4000 > :t_500 * 12);
+
+select lab.prove(
+  'a statement-level trigger over the transition table updates the counter once, HOT',
+  :upd2 = 1 and :hot2 = 1 and (select event_count from projects where id = 9) = 1000);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### COPY fires triggers; replication roles don't
+
+`COPY FROM` fires triggers like `INSERT` does, so a million-row load pays the trigger a million times. `session_replication_role = replica` skips triggers (setting it needs superuser, or a grant of `SET` on it in PostgreSQL 15+, which managed services often withhold); [logical replication](/books/eight-kilobytes/glossary#logical-replication) sets it so they don't fire twice.
+
+<Callout type="danger" title="replica turns off foreign keys too">
+Foreign keys are triggers, and `replica` turns them all off. We inserted an event for project 999,999, which doesn't exist, and it went in. Use this to speed up a bulk load and you leave orphaned rows no constraint will ever report.
+</Callout>
+
+<DeepDive title="Triggers on a logical replication subscriber">
+
+Per trigger, `alter table ... enable replica trigger t` fires only under `replica`, and `enable always trigger t` fires in both modes. On a logical replication subscriber, a trigger that should run when replicated rows arrive (to maintain a local summary table, say) needs one of them, or it silently does nothing.
+
+<ProveIt lab="23-functions">
+
+```sql
+set session_replication_role = replica;
+insert into events (account_id, project_id, user_id, kind) values (9, 10, 8, 'build');
+insert into events (account_id, project_id, user_id, kind) values (9, 999999, 8, 'orphan');
+reset session_replication_role;
+
+select lab.prove(
+  'with session_replication_role = replica, ordinary triggers do not fire',
+  (select event_count from projects where id = 10) = 2);
+
+select lab.prove(
+  'and neither do foreign keys: an event for a project that does not exist got in',
+  exists (select 1 from events where project_id = 999999));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A trigger has to earn its place
+
+Every trigger in this chapter does what it says. Whether it should exist is a separate question, and our answer is: fewer of them than you think.
+
+**What they buy.**
+
+- **Atomicity.** The trigger's work commits or rolls back with the change. An audit row can't be half-written.
+- **No forgetful callers.** Every write fires it: the app, the second service, the migration, the fix someone runs from psql at 2 a.m.
+- **History that covers every writer** ([A history trigger catches every writer, at an insert per row](/books/eight-kilobytes/relationships#a-history-trigger-catches-every-writer-at-an-insert-per-row)).
+
+**What they hide.**
+
+- **Behavior.** An `insert` that reports one row may have bumped a counter, written an audit row, and queued a job. Nothing at the call site says so, and a search of the application code finds none of it.
+- **Cost and serialization.** Every backfill pays the per-row cost, and a trigger that updates a parent row turns parallel inserts into a queue.
+- **Order.** Triggers on the same event fire in name order, not creation order. We created `z_normalize`, `a_validate`, and `m_stamp`, in that order; they ran a, m, z. Rename one and you've reordered your business logic.
+- **Deploys and debugging.** They ship as migrations, change behavior for every session at once, and fail as an `INSERT` with a PL/pgSQL context line instead of a stack trace.
+
+**Our rule.** Use a trigger when the work must be atomic with the change and must happen for every writer: audit and history rows, a derived column you can't trust callers to set, a cross-row invariant no constraint can express. Make it statement-level when bulk writes are likely.
+
+Everything else goes to the application, after commit: notifications, emails, webhooks, cache invalidation, search indexing, counters on hot rows, business workflow. Write an [outbox](/books/eight-kilobytes/acid#put-the-message-in-the-same-transaction-as-the-order) row in the transaction if the side effect must not be lost. A trigger is a hidden write you pay for on every row, forever, so each one should be a trigger you'd defend in a design review.
+
+<DeepDive title="Firing order, chains, and constraint triggers">
+
+<ProveIt lab="23-functions">
+
+```sql
+create trigger z_normalize before insert on trig_order
+  for each row execute function append_note('z');
+create trigger a_validate before insert on trig_order
+  for each row execute function append_note('a');
+create trigger m_stamp before insert on trig_order
+  for each row execute function append_note('m');
+insert into trig_order (id) values (1);
+
+select lab.prove(
+  'triggers on the same event fire in name order, not creation order',
+  (select note from trig_order where id = 1) = 'amz');
+```
+
+</ProveIt>
+
+A trigger that writes another table fires that table's triggers too, so a chain can run several deep before anyone notices.
+
+A **constraint trigger** can be deferred to commit (`deferrable initially deferred`), for a cross-row rule that may be briefly false inside a transaction. Two concurrent transactions can still both pass a check that reads other rows ([Pick an isolation level on purpose](/books/eight-kilobytes/concurrency#pick-an-isolation-level-on-purpose)).
+
+</DeepDive>
+
+## Procedures can commit
+
+A **procedure** (PostgreSQL 11+), called with `CALL`, can commit as it goes; a function can't. That makes it the right shape for backfills and purges, where one long transaction would hold locks, keep [vacuum](/books/eight-kilobytes/vacuum) from cleaning up, and lose everything on any error. Our backfill updated 100,000 rows in ten committed batches. Run procedures in autocommit mode: inside a `BEGIN`, which many drivers add for you, the first `COMMIT` fails with `invalid transaction termination`.
+
+<DeepDive title="A batched backfill procedure">
+
+```sql
+create procedure backfill_kind_upper(batch int)
+language plpgsql
+as $$
+declare
+  last_id bigint := 0;
+  max_id  bigint;
+begin
+  select max(id) into max_id from backfill_demo;
+  while last_id < max_id loop
+    update backfill_demo set kind_upper = upper(kind)
+    where id > last_id and id <= last_id + batch;
+    last_id := last_id + batch;
+    commit;
+  end loop;
+end
+$$;
+
+call backfill_kind_upper(10000);
+```
+
+Walk the key range rather than using `OFFSET`, as in [Backfill in short batches that walk the primary key](/books/eight-kilobytes/migrations#backfill-in-short-batches-that-walk-the-primary-key). A procedure can't commit from inside a block with an `EXCEPTION` clause.
+
+<ProveIt lab="23-functions">
+
+```sql
+call backfill_kind_upper(10000);
+
+select lab.prove(
+  'the procedure filled every row, in ten separately committed transactions',
+  (select count(*) filter (where kind_upper is null) = 0
+          and count(distinct xmin::text) = 10
+   from backfill_demo));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Exception blocks are subtransactions
+
+A PL/pgSQL block with an `EXCEPTION` clause sets a savepoint every time it's entered, a subtransaction with the costs [Subtransactions are not free](/books/eight-kilobytes/concurrency#subtransactions-are-not-free) describes. Entering one 100,000 times took about 18 ms against 3 for a plain block, with no error raised. A loop inserting 1,000 rows, each in a guarded block, used 1,000 subtransaction IDs, past the 64-entry cache from row 65. Use `on conflict do nothing` so the error never happens, or put one handler around the whole loop.
+
+<DeepDive title="The guarded insert">
+
+```sql
+create function insert_guarded(n int) returns void
+language plpgsql
+as $$
+begin
+  for i in 1..n loop
+    begin
+      insert into guarded_insert values (i);
+    exception when unique_violation then
+      null;
+    end;
+  end loop;
+end
+$$;
+```
+
+The 1,000 rows carry 1,000 distinct `xmin` values; without the exception block, they all share one.
+
+<ProveIt lab="23-functions">
+
+```sql
+select lab.prove(
+  'entering a block with an EXCEPTION clause costs at least 3x a plain block',
+  :t_guarded > :t_plain * 3);
+
+select insert_guarded(1000);
+select lab.prove(
+  'with one per row, each insert gets its own subtransaction ID: 1,000 of them',
+  (select count(distinct xmin::text) from guarded_insert) = 1000);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Functions are invisible until you turn tracking on
+
+Every problem in this chapter is easier to fix once you can see it, and the default statistics leave functions invisible. **`track_functions`** counts calls and time per function in `pg_stat_user_functions`. **`pg_stat_statements.track = all`** gives statements inside functions their own entries instead of hiding them in a slow `INSERT` ([Start with pg_stat_statements](/books/eight-kilobytes/observability#start-with-pg_stat_statements)). **`auto_explain.log_nested_statements`** logs the plans inside functions that `EXPLAIN` never shows.
+
+<DeepDive title="Catching the generic plan with auto_explain">
+
+```sql
+load 'auto_explain';
+set auto_explain.log_min_duration = 10;
+set auto_explain.log_nested_statements = on;
+set auto_explain.log_level = notice;  -- send plans to this session, not the log
+select count(*) from latest_ids('incident');
+select count(*) from latest_ids('build');  -- five times
+select count(*) from latest_ids('incident');
+```
+
+The fast calls log nothing. The seventh logs the nested plan:
+
+```text
+NOTICE:  duration: 242.283 ms  plan:
+Query Text: select id from events where kind = k order by created_at desc limit 10
+Limit  (cost=0.43..2.73 rows=10 width=16)
+  ->  Index Scan Backward using events_created_at_idx on events  ...
+        Filter: (kind = $1)
+```
+
+`Filter: (kind = $1)` is the generic plan, caught in the act. In production, log to the server log at your slow-query threshold and look for `$1` where a literal should be.
+
+</DeepDive>
+
+## The short version
+
+- The primary is the one CPU you can't scale out. Keep work there that shrinks data, keeps a rule atomic, or saves round trips.
+- If a function is one query, write it in SQL, labeled `STABLE` or `IMMUTABLE`.
+- PL/pgSQL can go generic after five calls; `force_custom_plan` fixes skewed arguments.
+- Label volatility as tightly as the truth allows, never tighter.
+- Use a trigger only when the work must be atomic and happen for every writer.
+- A counter trigger serializes every writer to its parent row.
+- `session_replication_role = replica` disables foreign keys too.
+- Keep `EXCEPTION` blocks out of row loops.
+
+## Further reading
+
+- [User-Defined Functions](https://www.postgresql.org/docs/18/xfunc.html), PostgreSQL documentation. SQL functions, procedures, and the `SUPPORT`, `ROWS`, and `COST` hooks.
+- [Function Volatility Categories](https://www.postgresql.org/docs/18/xfunc-volatility.html), PostgreSQL documentation. The promises behind each label, including the stale-plan hazard.
+- [Inlining of SQL functions](https://wiki.postgresql.org/wiki/Inlining_of_SQL_functions), PostgreSQL wiki. Every condition for inlining.
+- [PL/pgSQL: Plan Caching](https://www.postgresql.org/docs/18/plpgsql-implementation.html), PostgreSQL documentation. How PL/pgSQL prepares statements and when it goes generic.
+- [Transaction Management in PL/pgSQL](https://www.postgresql.org/docs/18/plpgsql-transactions.html), PostgreSQL documentation. Where `COMMIT` works inside a procedure.
+- [Triggers](https://www.postgresql.org/docs/18/triggers.html) and [CREATE TRIGGER](https://www.postgresql.org/docs/18/sql-createtrigger.html), PostgreSQL documentation. Firing order, transition tables, constraint triggers.
+- [auto_explain](https://www.postgresql.org/docs/18/auto-explain.html), PostgreSQL documentation. Logging plans of nested statements.

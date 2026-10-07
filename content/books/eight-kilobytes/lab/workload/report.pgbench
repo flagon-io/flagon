@@ -1,0 +1,3 @@
+-- Watch it run: a small report on one project, with no index to help it.
+\set p random(1, 20000)
+select kind, count(*) from events where project_id = :p group by kind;

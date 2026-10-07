@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { MDXRemote } from "next-mdx-remote/rsc";
+import { MDXRemote, type MDXRemoteProps } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
@@ -14,6 +14,7 @@ import rehypePrettyCode from "rehype-pretty-code";
 import {
   ArrowRight,
   ArrowUpRight,
+  FlaskConical,
   Info,
   Lightbulb,
   OctagonAlert,
@@ -24,6 +25,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { TabsClient } from "@/components/mdx-tabs";
+import { DeepDive } from "@/components/deep-dive";
+import { Fig } from "@/components/book-art";
 import { CompCalculator } from "@/components/comp-calculator";
 import {
   MarkTreatments,
@@ -249,6 +252,59 @@ function Tab({ children }: { title: string; children?: ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * "Prove it": a claim's receipts, folded away until a reader wants them.
+ * <ProveIt lab="16-btree">the exact SQL, usually with lab.prove(...)</ProveIt>.
+ * The `book` prop is filled in by the page that renders the chapter, so the
+ * footer can link the chapter's whole lab script; without it the box still
+ * works, just without the link.
+ */
+export function ProveIt({
+  children,
+  lab,
+  book,
+  title = "Prove it",
+}: {
+  children?: ReactNode;
+  /** The chapter's lab script: "16-btree" (a .sql lab) or "37-replication.sh". */
+  lab?: string;
+  book?: string;
+  title?: string;
+}) {
+  return (
+    <details className="prove-it group my-6 rounded-lg border border-hairline bg-panel text-sm [&[open]]:bg-card">
+      <summary className="flex cursor-pointer list-none items-center gap-2.5 rounded-lg px-4 py-2.5 outline-none select-none focus-visible:ring-2 focus-visible:ring-brand [&::-webkit-details-marker]:hidden">
+        <FlaskConical className="h-4 w-4 shrink-0 text-brand" strokeWidth={2} aria-hidden />
+        <span className="font-medium text-foreground">{title}</span>
+        <span className="hidden text-muted-foreground sm:inline">Run it yourself and check our numbers</span>
+        <ArrowRight
+          className="ml-auto h-3.5 w-3.5 shrink-0 text-subtle transition-transform group-open:rotate-90"
+          strokeWidth={2}
+          aria-hidden
+        />
+      </summary>
+      <div className="border-t border-hairline px-4 pb-4 pt-1 [&>*+*]:mt-3 [&_pre]:my-3">
+        {children}
+        {lab ? <LabFooter lab={lab} book={book} /> : null}
+      </div>
+    </details>
+  );
+}
+
+/** Where the claim's full check lives, and the one command that runs it. */
+function LabFooter({ lab, book }: { lab: string; book?: string }) {
+  const shell = lab.endsWith(".sh");
+  const file = shell ? lab : `${lab}.sql`;
+  const command = `./lab ${lab}`;
+  return (
+    <p className="text-xs leading-relaxed text-muted-foreground">
+      Every claim in this chapter is checked by{" "}
+      {book ? <a href={`/books/${book}/lab/${file}`}>{file}</a> : <code>{file}</code>}. From the{" "}
+      {book ? <a href={`/books/${book}/lab`}>lab</a> : "lab"} folder: <code>{command}</code>
+    </p>
+  );
+}
+
 /** Internal links go through next/link; external links open in a new tab. */
 function Anchor({ href = "", children, ...props }: React.ComponentProps<"a">) {
   const external = /^https?:\/\//.test(href);
@@ -275,6 +331,9 @@ const components = {
   Step,
   Tabs,
   Tab,
+  ProveIt,
+  DeepDive,
+  Fig,
   CompCalculator,
   MarkTreatments,
   MarkSizes,
@@ -294,11 +353,18 @@ const prettyCodeOptions = {
  * slugged + linkable headings, and dual-theme code highlighting. Wrap the output
  * in a `.prose` container for typographic styling.
  */
-export function Mdx({ source }: { source: string }) {
+export function Mdx({
+  source,
+  overrides,
+}: {
+  source: string;
+  /** Replace or add components for one surface, e.g. the print edition's links. */
+  overrides?: MDXRemoteProps["components"];
+}) {
   return (
     <MDXRemote
       source={source}
-      components={components}
+      components={{ ...components, ...overrides }}
       options={{
         mdxOptions: {
           remarkPlugins: [remarkGfm],

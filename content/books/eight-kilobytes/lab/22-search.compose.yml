@@ -1,0 +1,28 @@
+# The search lab for "Eight Kilobytes": PostgreSQL 18 with pgvector, the
+# vector extension that isn't in contrib. 22-search.sh starts it, loads the
+# book's accounts, users, and projects plus a synthetic help-center corpus
+# with text and embeddings, runs the chapter's checks, and throws it all away.
+# No ports are published; the script talks to the server through
+# `docker compose exec`.
+#
+#   ./lab 22
+name: ek-search
+
+services:
+  postgres:
+    # PostgreSQL 18 with pgvector preinstalled (create extension vector).
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+    # Parallel HNSW builds put the graph in shared memory; Docker's default
+    # 64 MB /dev/shm is too small for them.
+    shm_size: 1g
+    volumes:
+      - ./:/lab:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 5s

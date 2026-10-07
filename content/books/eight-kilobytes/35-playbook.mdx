@@ -1,0 +1,368 @@
+---
+title: Fix the work, then the box
+description: The order to make Postgres fast, lever by lever, each with the number that says you need it, proven end to end on one small app.
+part: Running it
+builds_on: [btree, explain, queries, observability]
+---
+
+We took a small app's workload, ran it against the book's sample data on one laptop, and changed one thing at a time. Same machine, same data, same requests. It started at 91,448 pages per transaction and 13 transactions per second. Eight changes later it read 38 pages per transaction and ran more than ten thousand transactions per second.
+
+None of those changes was a bigger machine. Not one was a replica, a partition, or a new database. They were three indexes, two rewrites, a table setting, one query in place of twenty-one, a connection pool, a few settings, and a rollup.
+
+The machine was never the problem.
+
+That's this chapter's argument: making Postgres fast is mostly a matter of order. Find the expensive work, fix it where it's cheapest, and measure after every change. Hardware comes near the end. Scaling out comes after that.
+
+## The order is the method
+
+The sections below are the levers, ranked by what they typically buy per hour of effort: cheap, big, and reversible first; expensive, small, and hard to undo last. You skip the ones your measurements say are fine. You don't skip ahead.
+
+The ranking isn't a law of nature: a system with 3,000 unpooled clients should pool before it touches an index. That's why lever 1 is measurement.
+
+Two rules hold across the list. Change one thing at a time and measure the same workload before and after ([Change one thing, and measure it end to end](/books/eight-kilobytes/benchmarking#change-one-thing-and-measure-it-end-to-end)). And count pages, not milliseconds: pages touched per call barely move between runs, so they tell you what a change did even on a noisy machine ([Buffers are the evidence](/books/eight-kilobytes/explain#buffers-are-the-evidence)). The [checklists](/books/eight-kilobytes/checklists) at the back of the book follow the same order, one line per habit.
+
+## 1. Find the expensive work
+
+The slow query you're thinking of is rarely the one costing the most. Rank `pg_stat_statements` by total time and by blocks per call, and sample wait events to learn whether sessions are working, reading, or queueing. Then write one sentence before you change anything: "we are bound by X, because Y shows Z."
+
+**Learn it:** [Rank the same view four ways, total time first](/books/eight-kilobytes/observability#rank-the-same-view-four-ways-total-time-first), [Sample waits to see where the time goes](/books/eight-kilobytes/observability#sample-waits-to-see-where-the-time-goes), [A method for slow queries](/books/eight-kilobytes/explain#a-method-for-slow-queries).
+
+## 2. Fix the query and the index
+
+Most wins live here. A query that reads 35,000 pages to return 20 rows is a missing index or an unusable predicate, and the fix is one line of DDL or one changed `where`: the book's first index took a query [from 35,249 pages to 91](/books/eight-kilobytes/btree#the-first-index-35249-pages-to-91). Deep `OFFSET` pagination belongs here too: it reads every row it skips, and keyset pagination reads only the page it returns. The signal: high blocks per call, `Rows Removed by Filter` far above the rows returned.
+
+**Learn it:** [Design an index from a query, not a column](/books/eight-kilobytes/btree#design-an-index-from-a-query-not-a-column), [Keep the indexed column bare](/books/eight-kilobytes/queries#keep-the-indexed-column-bare), [OFFSET reads every row it skips](/books/eight-kilobytes/queries#offset-reads-every-row-it-skips), [A wrong plan has one of four causes](/books/eight-kilobytes/plans#a-wrong-plan-has-one-of-four-causes).
+
+## 3. Fix the schema
+
+The schema decides how many pages every row costs, forever. The levers: narrow types, columns ordered by alignment, 8-byte types first ([27 percent saved](/books/eight-kilobytes/storage#column-order-is-free-space) on one table), sequential or [UUIDv7](/books/eight-kilobytes/glossary#uuidv7) keys, [HOT](/books/eight-kilobytes/glossary#hot-update)-friendly tables. It ranks below queries only because reshaping a big table is a migration, not a deploy. The signal: a low HOT share, wide rows, WAL per insert.
+
+**Learn it:** [Every byte is paid per row](/books/eight-kilobytes/types#every-byte-is-paid-per-row), [Pick your keys once](/books/eight-kilobytes/keys), [HOT is a design decision you make once](/books/eight-kilobytes/hot#hot-is-a-design-decision-you-make-once).
+
+## 4. Fix the round trips
+
+A request that sends 21 fast queries pays 21 round trips, and `pg_stat_statements` never flags it because no single statement is slow. The fixes are all "fewer, bigger statements": a join or `lateral` instead of the N+1 loop, batched writes instead of one insert per row. The signal: queries per request.
+
+**Learn it:** [N+1 is a loop, not a slow query](/books/eight-kilobytes/queries#n1-is-a-loop-not-a-slow-query), [Load it fast](/books/eight-kilobytes/loading).
+
+## 5. Keep vacuum and statistics healthy
+
+This isn't tuning; it's upkeep. When it falls behind, every lever above stops working: dead rows bloat every scan, and stale statistics plan for a table that no longer exists. The signal: `n_dead_tup`, the oldest transaction's age, `Heap Fetches`.
+
+**Learn it:** [The defaults are wrong for big tables](/books/eight-kilobytes/vacuum#the-defaults-are-wrong-for-big-tables), [Vacuum can't remove what an old snapshot might need](/books/eight-kilobytes/vacuum#vacuum-cant-remove-what-an-old-snapshot-might-need), [Three kinds of change slip past autovacuum's analyze](/books/eight-kilobytes/planner#three-kinds-of-change-slip-past-autovacuums-analyze).
+
+## 6. Pool connections
+
+Every connection is a process. Connect per request and you pay a fork, authentication, and cold caches every time; keep thousands open and you pay in memory and contention. Pool, and size the pool from cores, not users. The signal: connection rate and connections by state.
+
+**Learn it:** [Every connection is a process](/books/eight-kilobytes/connections#every-connection-is-a-process), [Size the pool from cores, not users](/books/eight-kilobytes/connections#size-the-pool-from-cores-not-users).
+
+## 7. Tune the configuration
+
+Configuration sets the budget the work runs in. It can't make a query read fewer pages: a 35,000-page scan reads 35,000 pages with any `shared_buffers`. What it does is remove ceilings, so tune when you can name one: temp files, requested checkpoints, a [working set](/books/eight-kilobytes/glossary#working-set) missing the cache.
+
+**Learn it:** [Memory: budget it before you tune it](/books/eight-kilobytes/configuration#memory-budget-it-before-you-tune-it), [Start from this config for 4 vCPU and 16 GB, then measure](/books/eight-kilobytes/configuration#start-from-this-config-for-4-vcpu-and-16-gb-then-measure).
+
+## 8. Precompute and cache
+
+Once every query reads only what it needs, stop asking the same expensive question twice. It comes this late because a rollup or cache is a second copy of the truth, with a freshness story to maintain. The signal: blocks per call that grow with tenant size.
+
+**Learn it:** [Precompute what you show](/books/eight-kilobytes/scale#precompute-what-you-show), [Move work off the request path](/books/eight-kilobytes/scale#move-work-off-the-request-path).
+
+## 9. Buy the resource that ran out
+
+Now, and only now, the box: the resource your measurements say is exhausted, not the next size up.
+
+**Learn it:** [Earn the bigger box](/books/eight-kilobytes/scale#earn-the-bigger-box), [Prove the disk is the problem before you move](/books/eight-kilobytes/providers#prove-the-disk-is-the-problem-before-you-move).
+
+## 10. Scale out only for the signal that asks for it
+
+Replicas, partitioning, and sharding each carry a cost that never goes away, so each waits for its own signal.
+
+**Learn it:** [You're done scaling up when the evidence says so](/books/eight-kilobytes/scale#youre-done-scaling-up-when-the-evidence-says-so).
+
+<DeepDive title="What each lever typically buys, and what it costs to undo">
+
+Typical outcomes, from this book's measurements where we have them. Your gains depend on how far from right you start.
+
+| Lever | Typical gain | Effort | Undo |
+|---|---|---|---|
+| Query and index | 10x to 1,000x fewer pages for the statement | hours | drop the index |
+| Schema | up to about 30% fewer pages; fewer cold updates | a migration | another migration |
+| Round trips | N queries become 1; latency falls with network distance | a code change | easy |
+| Vacuum and statistics | prevents decay; fixes bad plans | per-table settings | easy |
+| Pooling | 5x to 70x throughput if connecting per request | a day | easy |
+| Configuration | ceilings removed; pages unchanged | hours, maybe a restart | easy |
+| Rollups and caches | aggregates stop growing with data | days, plus freshness | moderate |
+| Bigger instance or storage | headroom for the exhausted resource | money, monthly | resize back |
+| Replicas | read capacity; failover | days, plus routing | moderate |
+| Partitioning | cheap retention and vacuum | a migration project | hard |
+| Sharding | write and storage capacity | months | very hard |
+
+And where to look for the number that says each lever is next: `pg_stat_statements` and `EXPLAIN` for queries and indexes; `pg_stat_user_tables` and `pg_column_size` for the schema; app tracing for round trips; `pg_stat_activity` and pooler stats for connections; logs and `pg_stat_checkpointer` for configuration; `pg_stat_statements` over time for rollups; wait samples and `pg_stat_io` for hardware; `pg_stat_progress_vacuum` for partitioning; `pg_stat_wal` and write waits for sharding.
+
+</DeepDive>
+
+## The proof: one app, eight changes
+
+A list costs nothing to write. So we ran this one on the book's sample data: one workload, changed one lever at a time in the playbook's order, measured after each change. Every claim below is a check in the lab.
+
+The app has four endpoints, each written the way a first version often is. A **dashboard** counts an account's events per day for 30 days, filtering on a cast (`created_at::date >= ...`). A **feed** pages with `OFFSET`. A **projects page** loads 20 projects, then asks for each one's latest event in its own query: the N+1 loop an ORM writes for you. An **ingest** endpoint inserts a deploy and bumps the project's counter. And the app opens a new connection per request, like a serverless function. `events` starts with only its primary key.
+
+<Callout type="note" title="Pages are the evidence; throughput is ours">
+
+Page counts are deterministic: you'll get the same numbers within a few percent. Throughput belongs to our laptop, and at the fast end it varied two- to threefold between executions of the lab, so the table shows two complete executions side by side. The lab proves only directions with wide margins.
+
+The lab also runs with `synchronous_commit = off`, because inside Docker Desktop each commit's flush takes tens of milliseconds and would bury every other effect. That inflates throughput, especially for the writes, but changes how long a commit waits, not how many pages anything reads ([Commit means flush](/books/eight-kilobytes/wal#commit-means-flush)). With durable commits on real disks, expect lower numbers and the same shape.
+
+</Callout>
+
+<DeepDive title="The four endpoints, and how we measured them">
+
+Each endpoint is a `pgbench` script in the lab's `workload/playbook` folder, mixed by weight: 30 percent dashboard, 30 percent feed, 10 percent projects page, 30 percent ingest.
+
+```sql
+-- dashboard: an account's events per day, filter on a cast
+select created_at::date as day,
+       count(*) as events,
+       count(*) filter (where kind = 'deploy'
+                          and payload->>'status' = 'failed') as failed_deploys
+from events
+where account_id = :a
+  and created_at::date >= date '2026-09-06'
+group by 1
+order by 1;
+
+-- feed: OFFSET pagination, pages 1 to 25
+select id, project_id, kind, created_at
+from events
+where account_id = :a
+order by created_at desc, id desc
+limit 20 offset :skip;
+
+-- projects page: 20 of these, one per project
+select kind, created_at from events
+where project_id = :p1 order by created_at desc limit 1;
+
+-- ingest: a deploy plus the project's counter
+begin;
+insert into events (account_id, project_id, user_id, kind, payload, created_at)
+select account_id, id, owner_id, 'deploy', '{"status": "ok"}',
+       timestamptz '2026-10-06 12:00'
+from projects where id = :p;
+update projects
+   set event_count = event_count + 1, last_event_at = timestamptz '2026-10-06 12:00'
+ where id = :p;
+commit;
+```
+
+A new connection per request is `pgbench -C`. Every run sends the same requests in the same order. "Pages per transaction" is shared hit plus read for each endpoint's statements, divided by its transactions, weighted by the mix.
+
+Every `pgbench` run uses 4 clients. Within one execution of the lab, the baseline runs once with 120 transactions in total, because it's slow; the index step runs once with 1,000; every later step runs three times with 4,000, and its throughput is the median of the three. The whole lab takes two and a half to four minutes, so a fast step's run lasts only a second or two, which is part of why throughput wobbles. Each throughput column in the results table is one complete execution of the lab.
+
+</DeepDive>
+
+### The baseline: 91,448 pages per transaction
+
+With no indexes, the dashboard and the feed each read the entire `events` table, 35,173 pages, to return 30 rows and 20 rows. The projects page reads it 20 times over: 21 statements and about 703,000 pages for one page view. The mix averaged 91,448 pages per transaction and ran at 13 transactions per second.
+
+<ProveIt lab="35-playbook">
+
+```sql
+select lab.prove('with no index, the dashboard and the feed each read the whole events table: over 35,000 pages a call',
+  :s0_dash > 35000 and :s0_feed > 35000);
+select lab.prove('the N+1 projects page sends 21 statements and reads over 700,000 pages',
+  :s0_stmts = 21 and :s0_proj > 700000);
+select lab.prove('the baseline mix averages over 80,000 pages per transaction',
+  :s0_mix > 80000);
+```
+
+</ProveIt>
+
+### Tuning first changes nothing that matters
+
+First we did the obvious thing and tuned the server. `work_mem = 64MB`, `random_page_cost = 1.1`, `effective_cache_size = 8GB`, `jit = off`, four parallel workers per query.
+
+Pages per transaction: 91,510, within a tenth of a percent of the baseline. Throughput: 8 in one run, 17 in the other, against 13. Noise. Configuration changes how the work runs, not how much work there is.
+
+<ProveIt lab="35-playbook">
+
+```sql
+select lab.prove('tuning the configuration first leaves pages per transaction where they were (within 2%)',
+  abs(:s_tuned_mix - :s0_mix) < 0.02 * :s0_mix);
+select lab.prove('the indexes alone beat the tuned baseline''s throughput by more than 3x',
+  :s1_tps > 3 * :s_tuned_tps);
+```
+
+</ProveIt>
+
+### Eight changes, in the playbook's order
+
+Each step keeps everything before it. The two throughput columns are two complete executions of the lab; each figure is the median of that step's runs.
+
+| Step | Lever | Pages per txn | Txn/s, lab 1 | Txn/s, lab 2 |
+|---|---|---|---|---|
+| 0 | Baseline | 91,448 | 13 | 13 |
+| | Tuning first (not kept) | 91,510 | 8 | 17 |
+| 1 | Indexes | 752 | 299 | 329 |
+| 2 | Bare-column date range | 214 | 1,024 | 1,197 |
+| 3 | Keyset pagination | 143 | 1,128 | 1,005 |
+| 4 | Fillfactor 90 | 143 | 1,185 | 1,260 |
+| 5 | One query, not 21 | 144 | 1,113 | 1,273 |
+| 6 | Pooled connections | 81 | 10,624 | 9,076 |
+| 7 | Configuration | 82 | 4,135 | 11,297 |
+| 8 | Daily rollup | 38 | 13,978 | 17,028 |
+
+Pages are from the first execution; the second matched within one percent.
+
+<ProveIt lab="35-playbook">
+
+```sql
+select lab.prove('pages per transaction fell more than 1,000x from the baseline',
+  :s8_mix * 1000 < :s0_mix);
+select lab.prove('throughput rose more than 100x on the same machine',
+  :s8_tps > 100 * :s0_tps);
+```
+
+</ProveIt>
+
+<DeepDive title="Steps 1 to 3: three indexes, one cast, and keyset">
+
+**Step 1, indexes.** Each designed from the queries that need it, equality first and then the sort column:
+
+```sql
+create index events_account_created_idx on events (account_id, created_at, id);
+create index events_project_created_idx on events (project_id, created_at);
+create index projects_account_idx on projects (account_id);
+```
+
+Pages per transaction fell from 91,448 to 752, a 120x cut. The projects page now reads about 108 pages: four per project lookup (three index pages, one heap page) plus the list. The dashboard still reads about 1,960 per call: `created_at::date` puts a function on the column, so the index finds the account's 2,000 or so rows for the year but can't narrow them to 30 days.
+
+**Step 2, the bare column.** The same filter written as `and created_at >= '2026-09-06'` (the lab's sessions run in UTC, so the results are identical). The dashboard drops to about 172 pages, and throughput more than triples.
+
+**Step 3, keyset.** With an average offset of 240, `OFFSET` read about 260 pages per page of 20 rows, growing with depth. Starting from the last row the user saw, the same index serves any page in about 22:
+
+```sql
+select id, project_id, kind, created_at
+from events
+where account_id = :a
+  and (created_at, id) < (:last_created_at, :last_id)
+order by created_at desc, id desc
+limit 20;
+```
+
+Pages per transaction dropped from 214 to 143. Throughput barely moved, and step 6 shows why.
+
+<ProveIt lab="35-playbook">
+
+```sql
+select lab.prove('step 1, indexes: pages per transaction fall more than 100x',
+  :s1_mix * 100 < :s0_mix);
+select lab.prove('step 1: throughput rises more than 5x',
+  :s1_tps > 5 * :s0_tps);
+select lab.prove('step 1: the dashboard still reads every event of the account (1,500 to 2,500 pages), because of the ::date cast',
+  :s1_dash between 1500 and 2500);
+select lab.prove('step 2, a bare-column range: the dashboard reads under 250 pages, 8x fewer',
+  :s2_dash < 250 and :s2_dash * 8 < :s1_dash);
+select lab.prove('step 2: throughput rises more than 2x',
+  :s2_tps > 2 * :s1_tps);
+select lab.prove('step 1 to 2: OFFSET pagination reads 200 to 300 pages for 20 rows',
+  :s2_feed between 200 and 300);
+select lab.prove('step 3, keyset: the feed reads under 30 pages, 8x fewer',
+  :s3_feed < 30 and :s3_feed * 8 < :s2_feed);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="Steps 4 to 8: HOT, one query, a pool, settings, a rollup">
+
+**Step 4, fillfactor.** The counter update changes no indexed column, so it's HOT-safe. But `projects` was loaded packed, at fillfactor 100, so the first update on most pages found no room and went cold, writing a new entry in every index. Over steps 0 to 3, hundreds did.
+
+```sql
+alter table projects set (fillfactor = 90);
+vacuum full projects;   -- rewrites at the new fillfactor; pg_repack in production
+```
+
+From then on every counter update was HOT. Pages per transaction didn't move in a run this short; the payoff is indexes that don't grow, less WAL, less vacuum ([Keep your updates HOT](/books/eight-kilobytes/hot)).
+
+**Step 5, one query.** The projects page as a single `left join lateral (... order by created_at desc limit 1)`. Same pages, about 108, because the database does the same 20 index lookups; what disappeared is 20 round trips, parses, and plans. Mean latency fell in both runs (3.3 ms to 1.5 ms, and 3.0 ms to 2.4 ms) with `pgbench` on the same host. Across a real network at half a millisecond a round trip, that's 10 ms or more per page view.
+
+**Step 6, the pool.** Through steps 2 to 5 throughput sat near 1,000 to 1,200 while pages fell by a third. Opening a connection, about 2 ms on our machine, was the bottleneck. Keeping four connections open took throughput to between 9,000 and 10,600. Pages fell too, from 144 to 81, because ingest dropped from about 239 pages to 36: a fresh session reads catalog pages to set up the insert's foreign-key checks, and a pooled one does it once.
+
+**Step 7, configuration.** The same five settings as "tuning first". Pages: 82 against 81. Nothing here sorts enough to spill, scans enough to go parallel, or costs enough for JIT. That's not an argument against [the settings that matter](/books/eight-kilobytes/configuration), which prevent problems that a lab lasting a few minutes can't show. It's an argument against tuning instead of fixing.
+
+**Step 8, the rollup.** A table of `(account_id, day, events, failed_deploys)` with primary key `(account_id, day)`, built day by day as an incremental refresh writes it, serves the dashboard in about 34 pages. Its refresh job isn't in the mix; it's the scheduled upsert in [Keep it fresh with an upsert](/books/eight-kilobytes/scale#keep-it-fresh-with-an-upsert).
+
+Where the pages went, per call of each endpoint:
+
+| Step | Dashboard | Feed | Projects page | Ingest |
+|---|---|---|---|---|
+| 0 Baseline | 35,182 | 35,208 | 702,683 | 207 |
+| 1 Indexes | 1,963 | 262 | 108 | 247 |
+| 2 Bare-column range | 172 | 261 | 108 | 245 |
+| 3 Keyset | 175 | 23 | 109 | 242 |
+| 4 Fillfactor 90 | 178 | 23 | 108 | 239 |
+| 5 One query | 182 | 23 | 108 | 239 |
+| 6 Pooled | 179 | 23 | 102 | 36 |
+| 7 Configuration | 182 | 23 | 102 | 36 |
+| 8 Rollup | 34 | 23 | 102 | 36 |
+
+<ProveIt lab="35-playbook">
+
+```sql
+select lab.prove('steps 0 to 3: over 100 counter updates went cold on packed pages',
+  :s0_cold + :s1_cold + :s2_cold + :s3_cold > 100);
+select lab.prove('step 4, fillfactor 90: over 99.5% of the counter updates are HOT',
+  :s4_hot > 99.5);
+select lab.prove('step 5, one lateral query: 1 statement instead of 21, the same pages within 10%',
+  :s5_stmts = 1 and abs(:s5_proj - :s4_proj) < 0.1 * :s4_proj);
+select lab.prove('step 5: the projects page got faster (mean latency below step 4''s)',
+  :s5_ms < :s4_ms);
+select lab.prove('step 6, pooled connections: throughput rises more than 3x',
+  :s6_tps > 3 * :s5_tps);
+select lab.prove('step 6: a warm session''s ingest touches under a third of the pages a fresh connection''s does',
+  :s6_ingest * 3 < :s5_ingest);
+select lab.prove('step 7, configuration: pages per transaction stay within 5%',
+  abs(:s7_mix - :s6_mix) < 0.05 * :s6_mix);
+select lab.prove('step 8, the rollup: the dashboard reads under 50 pages, over 3x fewer',
+  :s8_dash < 50 and :s8_dash * 3 < :s7_dash);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### What the table says
+
+**The first lever did most of the work.** Indexes cut pages per transaction 120-fold; everything after them, another 20-fold. That's the shape on almost every system: one or two statements own most of the cost, and fixing them is cheap.
+
+**Throughput moves where the bottleneck moves.** It jumped at the indexes, the date rewrite, and pooling. In between, keyset and the N+1 fix cut real work, but throughput stood still because every request still paid for a new connection, which `pg_stat_statements` never sees. Measure the whole request.
+
+**Some levers pay later.** Fillfactor moved nothing here. It changes what the indexes look like after a month of updates.
+
+**A bigger machine wouldn't have helped.** It would still have read 91,448 pages per transaction. The same laptop, after an afternoon of the playbook, ran three orders of magnitude more transactions. When someone asks for a bigger database, run this experiment first.
+
+## Before you scale out
+
+You've run the playbook. If the measurements still say a resource is exhausted, now consider a bigger box. The next part of the book starts there: [Scale up before you scale out](/books/eight-kilobytes/scale) turns that evidence into an upsize request, then climbs the rungs that come after it.
+
+## The short version
+
+- Fix in order: find the expensive work, queries and indexes, schema, round trips, upkeep, pooling, configuration, precomputing. Only then buy hardware or scale out.
+- Start with `pg_stat_statements` and a wait sample, and write down what you're bound by.
+- Change one thing at a time; count pages, which don't move with noise.
+- Indexes alone cut pages per transaction 120-fold; eight changes took them from 91,448 to 38 and throughput up about a thousandfold, on the same laptop.
+- Tuning first left pages where they were. Configuration sets ceilings; it can't make a scan read less.
+- Throughput moves where the bottleneck moves: a connection per request hid every query fix until we pooled.
+- Earn the bigger box: an upsize request comes with its evidence.
+
+## Further reading
+
+- [Performance Tips](https://www.postgresql.org/docs/18/performance-tips.html), PostgreSQL documentation. EXPLAIN, statistics, and populating a database, from the source.
+- [pg_stat_statements](https://www.postgresql.org/docs/18/pgstatstatements.html), PostgreSQL documentation. Every column, including the buffer counts this chapter divides by calls.
+- [pgbench](https://www.postgresql.org/docs/18/pgbench.html), PostgreSQL documentation. Custom scripts, weights, `--random-seed`, and `-C`, all used in the experiment.
+- [The cumulative statistics system](https://www.postgresql.org/docs/18/monitoring-stats.html), PostgreSQL documentation. Wait events and the table statistics behind the HOT share.
+- [Server configuration: query planning](https://www.postgresql.org/docs/18/runtime-config-query.html), PostgreSQL documentation. `random_page_cost`, `effective_cache_size`, and the rest of the cost model.
+- [Routine vacuuming](https://www.postgresql.org/docs/18/routine-vacuuming.html), PostgreSQL documentation. Why vacuum is upkeep, not tuning.

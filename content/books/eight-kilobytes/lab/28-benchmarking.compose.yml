@@ -1,0 +1,50 @@
+# One PostgreSQL 18 server for "Measure honestly", the benchmarking chapter.
+# 28-benchmarking.sh starts it, loads the book's seed and pgbench's own
+# tables, runs every benchmark in the chapter with pgbench (which ships in the
+# postgres image), proves the claims, and throws it all away. No ports are
+# published; the script talks to the server through `docker compose exec`.
+#
+#   ./lab 28
+#
+# Settings that differ from the defaults, and why:
+#   shared_preload_libraries=pg_stat_statements   before/after measurements
+#   track_io_timing=on                            read times in the stats
+#   checkpoint_timeout=30s                        a checkpoint (the minimum
+#                                                 interval) lands inside a
+#                                                 one-minute run, so you can
+#                                                 see it; the default is 5min
+#   autovacuum_naptime=5s                         autovacuum gets a look at the
+#                                                 tables inside that minute too
+#                                                 (the default is 1min)
+# shared_buffers stays at the default 128 MB on purpose: the events table is
+# bigger than that, the way production data is bigger than memory.
+name: ek-bench
+
+services:
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - track_io_timing=on
+      - -c
+      - checkpoint_timeout=30s
+      - -c
+      - autovacuum_naptime=5s
+    shm_size: 512m
+    volumes:
+      - ./seed.sql:/seed.sql:ro
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
+      interval: 1s
+      timeout: 5s
+      retries: 120
+
+volumes:
+  pgdata:

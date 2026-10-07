@@ -1,0 +1,648 @@
+---
+title: Change the schema, keep the site
+description: Ship schema changes to a busy database without stalls, using lock timeouts, NOT VALID constraints, concurrent indexes, and expand and contract.
+part: Changing it
+builds_on: [mvcc, concurrency]
+---
+
+You know why the line forms now. One `ALTER` waits for an exclusive lock behind a report, and every request after it waits too, even plain reads ([A waiting lock blocks everyone behind it](/books/eight-kilobytes/concurrency#a-waiting-lock-blocks-everyone-behind-it)). Your pool fills and the site is down over a migration that "does nothing". GoCardless [wrote up](https://gocardless.com/blog/zero-downtime-postgres-migrations-the-hard-parts) exactly this: a quick foreign-key migration queued behind a long read, API requests queued behind the migration, and the API was down for about 15 seconds.
+
+This chapter is the other half: shipping schema changes at 2 p.m. on a Tuesday without ever forming that line.
+
+Schema changes don't hurt because they're slow. They hurt because of what they lock and for how long, so ask two questions of every statement: **which lock does it take**, and **how long does it hold it**? Almost every dangerous change has a safe version: the same change, split into steps that hold a weak lock for minutes or a strong one for milliseconds. What follows is those splits, measured.
+
+So the first rule of migrations has nothing to do with the DDL.
+
+## Rule one: lock_timeout and retry
+
+Set [`lock_timeout`](/books/eight-kilobytes/glossary#lock_timeout) on every migration session. When it expires, the statement fails (`canceling statement due to lock timeout`), leaves the queue, and the traffic behind it flows again, even while the report is still open.
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('after the lock timeout, the lookup completes while the report is still open',
+  (select id from dblink_get_result('web') t(id bigint)) = 42
+  and (select state from pg_stat_activity where pid = :report_pid) = 'idle in transaction');
+```
+
+</ProveIt>
+
+That error is the system working. A few seconds of queued requests go unnoticed; an unbounded wait is an outage. The failed statement changed nothing, so retry it a bounded number of times (a timeout without a retry only turns working migrations into failed deploys):
+
+```bash
+# retry a DDL statement up to 10 times with a short lock_timeout
+for i in $(seq 1 10); do
+  if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+       -c "set lock_timeout = '2s'" \
+       -c "alter table events add column note text"; then
+    exit 0
+  fi
+  echo "attempt $i failed, retrying" >&2
+  sleep $((i * 2))
+done
+exit 1
+```
+
+Put it in your migration tool's connection setup, at one to five seconds: long enough to slip between short transactions, short enough that a stall is invisible. If retries keep failing, find the blocker, usually a long transaction or a session `idle in transaction` ([backend_xmin names the transaction holding vacuum back](/books/eight-kilobytes/observability#backend_xmin-names-the-transaction-holding-vacuum-back)).
+
+Add a generous [`statement_timeout`](/books/eight-kilobytes/glossary#statement_timeout) too, so an accidental rewrite of a 500 GB table fails in minutes instead of holding an exclusive lock for an hour. Only concurrent index builds (and their siblings, `reindex concurrently` and `drop index concurrently`) turn both off ([Run a concurrent build alone, untimed, and check it's valid](#run-a-concurrent-build-alone-untimed-and-check-its-valid)).
+
+## Every change is a catalog edit, a scan, or a rewrite
+
+Once you hold the lock, what matters is how long. A change either edits a few **catalog** rows (milliseconds at any size), **scans** every row to check something, or **rewrites** the table and its indexes, with time, disk, and WAL growing with the table. On `events` (275 MB, 2 million rows) that's a deploy nobody notices against a nine-second freeze; on CI's 1,000 rows you can't tell them apart.
+
+So test migrations on a restored copy of production (it [tests your backups](/books/eight-kilobytes/backups) too), and watch two numbers. A rewrite changes `pg_relation_filenode`, the file the table lives in; a scan bumps `seq_scan`, the table's count of full scans.
+
+The lock to aim for is `ShareUpdateExclusive`, which blocks neither reads nor writes ([Most ALTER TABLE forms take ACCESS EXCLUSIVE](/books/eight-kilobytes/concurrency#most-alter-table-forms-take-access-exclusive)). Every safe pattern below moves the slow part of a change under it.
+
+## Constant defaults are free; volatile defaults rewrite
+
+Since PostgreSQL 11, a column with a constant default is catalog only. A volatile default is not:
+
+```sql
+alter table events add column source text not null default 'web';
+select pg_relation_filenode('events');
+alter table events add column ingest_id uuid default gen_random_uuid();
+select pg_relation_filenode('events');
+```
+
+```text
+Time: 65.657 ms
+ pg_relation_filenode
+                16943
+...
+Time: 9236.902 ms (00:09.237)
+ pg_relation_filenode
+                17220
+```
+
+The first filenode is the one the table already had: the constant touched no rows. Postgres stored `'web'` in the catalog and supplies it when it reads an older row. The UUID needs a different value per row, so Postgres rewrote all 2 million rows, for nine seconds under `AccessExclusive`. The rule is [volatility](/books/eight-kilobytes/glossary#volatility), not functions: `now()` is stable, evaluated once, and stored like a constant.
+
+For a per-row value, split it: add the column bare (catalog only), `set default` so new rows get one (catalog only), then [backfill](#backfill-in-short-batches-that-walk-the-primary-key) the old rows in batches.
+
+<DeepDive title="Where a default lives when no row has it">
+
+The constant went into `pg_attribute` as the column's "missing value": `atthasmissing = t`, `attmissingval = {web}`. Old tuples have fewer attributes than the table, and Postgres fills the gap from there. `add column ts2 timestamptz default now()` took 17 ms and kept filenode 17220, and every existing row reports the moment of the migration, which may not be what you wanted. Generated columns follow the same logic: a virtual one (the default in PostgreSQL 18+) is catalog only, a stored one rewrites (filenode 19978 to 19986 on a small test table).
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('a constant default does not rewrite: same filenode',
+  pg_relation_filenode('events') = :fn0);
+select lab.prove('every existing row reports the moment of the migration',
+  (select count(distinct ts2) from events) = 1);
+-- the rewrite is shown on a 200,000 row copy of events to keep the lab quick
+select lab.prove('a volatile default (gen_random_uuid()) rewrites: new filenode',
+  pg_relation_filenode('events_copy') <> :cfn);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## NOT NULL goes through a CHECK first
+
+`set not null` has to prove there are no nulls, so it scans the whole table under `AccessExclusive`, blocking reads while it pulls every page off disk. Use a CHECK as a stepping stone:
+
+```sql
+-- 1. brief AccessExclusive, no scan: new rows are checked from now on
+alter table events
+  add constraint events_user_id_nn check (user_id is not null) not valid;
+-- 2. ShareUpdateExclusive: scans, but reads and writes continue
+alter table events validate constraint events_user_id_nn;
+-- 3. brief AccessExclusive, no scan: Postgres trusts the validated CHECK
+alter table events alter column user_id set not null;
+-- 4. the CHECK is now redundant
+alter table events drop constraint events_user_id_nn;
+```
+
+Step 3 is the clever bit (PostgreSQL 12+): a valid CHECK proving `col is not null` lets `SET NOT NULL` skip the scan. On PostgreSQL 18 you can skip the CHECK: add the NOT NULL itself `NOT VALID`, then validate it.
+
+<DeepDive title="Counting the scans, and the PostgreSQL 18 route">
+
+`seq_scan` in `pg_stat_user_tables` counts full scans. A bare `set not null` bumped it from 11 to 12 (130 ms on our cached table). In the pattern, step 2 bumped it (87 ms, under a lock traffic passes) and step 3 didn't, finishing in under 4 ms.
+
+<ProveIt lab="25-migrations">
+
+```sql
+begin;
+select xact_seq_scans('events') as s0 \gset
+alter table events add constraint events_user_id_nn check (user_id is not null) not valid;
+select lab.prove('step 1, add check ... not valid: no scan',
+  xact_seq_scans('events') = :s0);
+alter table events validate constraint events_user_id_nn;
+select lab.prove('step 2, validate: one scan',
+  xact_seq_scans('events') = :s0 + 1);
+alter table events alter column user_id set not null;
+select lab.prove('step 3, set not null with a valid CHECK in place: no scan',
+  xact_seq_scans('events') = :s0 + 1);
+rollback;
+```
+
+</ProveIt>
+
+On 18:
+
+```sql
+-- no scan
+alter table events
+  add constraint events_user_id_not_null not null user_id not valid;
+-- scans, under a weak lock
+alter table events validate constraint events_user_id_not_null;
+```
+
+Between the two, inserting a null is already rejected. The quirk: before validation, `\d` already shows `not null` and `pg_attribute.attnotnull` is true. Check `pg_constraint.convalidated` instead.
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('18: add not null ... not valid takes AccessExclusive',
+  my_strongest('events') = 'AccessExclusiveLock');
+select lab.prove('before validation, pg_constraint.convalidated is false',
+  (select not convalidated from pg_constraint where conname = 'events_user_id_not_null'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Add a CHECK NOT VALID, then validate it
+
+Never add a CHECK to a large table in one step. Add it `NOT VALID` (brief lock, no scan, enforced for new writes at once), then `VALIDATE CONSTRAINT` (a scan under `ShareUpdateExclusive`), exactly as steps 1 and 2 above. If validation finds a bad row it fails, and the constraint stays, guarding new writes while you fix the old data.
+
+<ProveIt lab="25-migrations">
+
+```sql
+alter table events add constraint events_no_login check (kind <> 'login') not valid;
+-- validate fails with check_violation (caught in the lab)
+select lab.prove('if validation hits a violating row it fails, and the constraint stays, not valid',
+  (select not convalidated from pg_constraint where conname = 'events_no_login'));
+```
+
+</ProveIt>
+
+## Add foreign keys NOT VALID, then validate
+
+A one-step foreign key scans the child table while blocking writes on both tables. Split it the same way:
+
+```sql
+-- ShareRowExclusive on both tables: blocks writes briefly, no scan
+alter table events add constraint events_project_fk2
+  foreign key (project_id) references projects (id) not valid;
+-- ShareUpdateExclusive on events, RowShare on projects: traffic continues
+alter table events validate constraint events_project_fk2;
+```
+
+The `add` still blocks writes on the parent, maybe your hottest table, and queues like anything else (that's what bit GoCardless), so it gets `lock_timeout`. And index the referencing column yourself, concurrently; without it every delete on `projects` scans `events` ([Constraints, chosen on purpose](/books/eight-kilobytes/relationships)).
+
+## Pick the index build that matches the table's traffic
+
+Postgres builds an index two ways, and the choice fits in a sentence. A plain `CREATE INDEX` does the least work and stops every write to the table until it finishes; `CREATE INDEX CONCURRENTLY` lets writes through and pays for it with twice the reading, a lot of waiting, and a way to fail halfway.
+
+The same `(project_id, created_at)` index on `events`, built both ways with nothing else running:
+
+```text
+   build    | table_scans | pages_read |  wal  | index_pages
+------------+-------------+------------+-------+-------------
+ plain      |           1 |      35175 | 54 MB |        7703
+ concurrent |           2 |      70348 | 54 MB |        7703
+```
+
+Same index, same WAL, twice the table reads: on our machine the concurrent build took about one and a half times as long as the plain one.
+
+That's the cost a benchmark sees. The cost your users feel is what happens to writes. Four clients inserted into `events` as fast as they could while we built the index:
+
+| Build | Inserts completed during the build | Slowest insert |
+|---|---|---|
+| `create index` | 41 to 56 | 723 to 751 ms |
+| `create index concurrently` | 1,848 to 2,119 | 16 to 103 ms |
+
+Every insert that arrived during the plain build waited for all of it. On `events` that's under a second. On a 200 GB table it's the whole build, with every checkout, signup, and webhook in line.
+
+The difference is one lock. A plain build's `ShareLock` lets reads through but blocks the `RowExclusiveLock` every write needs; a concurrent build's `ShareUpdateExclusiveLock` blocks neither.
+
+<DeepDive title="How we measured the write stall, and the lock caught mid-build">
+
+Four `pgbench` clients ran a one-row insert for 5 seconds, with the build starting 1.5 seconds in; `pgbench -l` logs each insert's latency. Builds were serial (no parallel workers), so every page and WAL byte above belongs to the build; timings are medians of five, table cached.
+
+The plain build's slowest insert is the build itself: each waiting insert finished the moment the build committed, and the few that completed "during" it landed just before it took its lock. The concurrent build's 16 to 103 ms are ordinary contention for disk and CPU. Holding the migration's transaction open after a plain build froze the moment:
+
+```text
+ pid  |             query              |       mode       | granted | blocked_by
+------+--------------------------------+------------------+---------+------------
+ 3932 | create index plain_idx on even | ShareLock        | t       | {}
+ 3933 | insert into events (account_id | RowExclusiveLock | f       | {3932}
+```
+
+A primary key lookup sent at the same moment returned at once.
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('a plain build holds a Share lock on events',
+  exists (select 1 from pg_locks where pid = :b_mig and relation = 'events'::regclass
+             and mode = 'ShareLock' and granted));
+select lab.prove('an INSERT waits for it, on a relation lock',
+  (select wait_event_type || ':' || wait_event from pg_stat_activity where pid = :b_web) = 'Lock:relation'
+  and exists (select 1 from pg_locks where pid = :b_web and relation = 'events'::regclass
+                 and mode = 'RowExclusiveLock' and not granted));
+select lab.prove('a concurrent build reads it twice',
+  :cic_scans = 2 and :cic_pages between 1.9 * :events_pages and 2.1 * :events_pages);
+select lab.prove('while a primary key lookup goes straight through',
+  (select k from dblink('b_hold', 'select kind from events where id = 42') t(k text)) is not null);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="Parallel builds: memory buys workers, workers buy time">
+
+B-tree builds split the scan and sort across `max_parallel_maintenance_workers` (default 2), but `maintenance_work_mem` (default 64 MB) budgets the whole build, and each process, leader included, needs 32 MB of it. So at the defaults, two workers allowed means one used. Medians of seven builds on our 8-core machine:
+
+| maintenance_work_mem | workers allowed | processes | median build |
+|---|---|---|---|
+| 64 MB | 0 | 1 | 0.82 s |
+| 1 GB | 0 | 1 | 1.06 s |
+| 64 MB | 2 | 2 | 0.53 s |
+| 256 MB | 2 | 3 | 0.50 s |
+| 1 GB | 4 | 5 | 0.37 s |
+
+Memory alone bought nothing (sorting 2 million keys spills cheaply). It buys workers, and workers bought time: 2.2 times faster with five processes. For a big build on a server with idle cores, raise both in the migration session. A concurrent build parallelizes only its first scan. For server-wide sizing, see [Each autovacuum worker takes maintenance_work_mem too](/books/eight-kilobytes/configuration#each-autovacuum-worker-takes-maintenance_work_mem-too).
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('at the defaults (64 MB, 2 workers allowed) the build gets only one worker: each needs 32 MB',
+  current_setting('maintenance_work_mem') = '64MB'
+  and current_setting('max_parallel_maintenance_workers') = '2'
+  and (select scans - :s0 = 2 from events_reads()));
+select lab.prove('with 256 MB it gets both workers: three processes scan the table',
+  (select scans - :s0 = 3 from events_reads()));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### If you have to ask whether it's busy, build concurrently
+
+Use a plain `CREATE INDEX` only when nobody is writing to the table: a **new or empty table** (including one created earlier in the same migration, where a plain build keeps table, index, and constraints atomic), a **real maintenance window** with writes actually stopped, not "usually quiet", or a **table nobody writes**, like a lookup table, an archive, or a partition that stopped receiving rows.
+
+Everything that takes writes in production gets `CREATE INDEX CONCURRENTLY`. If you have to ask whether a table is busy, treat it as busy.
+
+The plain build isn't a bad default: it's faster, transactional, and fails cleanly. It's a bad default for the big, busy tables you most often need to index.
+
+### Run a concurrent build alone, untimed, and check it's valid
+
+1. **Turn `lock_timeout` off for this one statement**, the exception to [Rule one: lock_timeout and retry](#rule-one-lock_timeout-and-retry). A concurrent build's lock blocks no reads or writes, even while it waits, so the timeout protects no traffic. Worse, Postgres applies it to the build's waits for other transactions: a 1 s timeout cancels a build stuck behind a slow report and leaves an invalid index. Set `lock_timeout = 0` and `statement_timeout = 0` for the build. (Plain builds keep it: one merely *waiting* for its lock already blocks the writes behind it.)
+2. **Run it alone.** It refuses to run in a transaction block, so give it its own migration with your tool's "no transaction" switch. A second concurrent build on the same table queues behind the first.
+3. **Watch it.** `pg_stat_progress_create_index` shows the phase, the pages done, and the session it waits on (`current_locker_pid`), from anywhere in the database: an uncommitted write to the table, a repeatable read transaction, an open cursor, or a running query. An idle read committed session doesn't count.
+4. **Check `indisvalid` when it's done.** A failed, canceled, or timed-out build leaves an invalid index behind ([When a concurrent build fails](#when-a-concurrent-build-fails)). Drop it concurrently before you retry.
+
+<Callout type="tip" title="Write concurrent index migrations to be rerunnable">
+
+`create index concurrently if not exists` is a trap after a failure: the invalid index exists, so it does nothing and reports success. Drop any invalid index of that name first, then create it, and check `indisvalid` after every deploy.
+
+</Callout>
+
+<DeepDive title="What a concurrent build does, phase by phase">
+
+A plain build is one pass: lock, scan, sort, write the tree, commit. A concurrent build indexes a table that keeps changing, so it runs in stages ([the docs](https://www.postgresql.org/docs/18/sql-createindex.html#SQL-CREATEINDEX-CONCURRENTLY)). We sampled `pg_stat_progress_create_index` every few milliseconds during one, with an uncommitted insert into `events` and an idle repeatable read transaction open at the start, each released after 0.3 s:
+
+```text
+                 phase                  | blocks_done | blocks_total | locker
+----------------------------------------+-------------+--------------+--------
+ waiting for writers before build       |           0 |            0 |   2081
+ building index: scanning table         |       34375 |        35173 |
+ building index: sorting live tuples    |       35173 |        35173 |
+ building index: loading tuples in tree |           0 |            0 |
+ index validation: scanning index       |        7415 |         7703 |
+ index validation: sorting tuples       |           0 |            0 |
+ index validation: scanning table       |       34855 |        35173 |
+ waiting for old snapshots              |       35172 |        35173 |   2082
+```
+
+(`locker` is `current_locker_pid`; each row is the last sample seen in that phase.)
+
+Read it top to bottom. The index enters the catalog invalid, so new transactions know it exists. The build waits for transactions already writing the table (the insert, pid 2081), scans all 35,173 pages, sorts 2 million entries, and marks the index ready (`indisready`): writes now maintain it. Validation reads the new index's 7,703 pages and the table again, adding rows that arrived meanwhile. Last, it waits for every older snapshot (the repeatable read session, pid 2082) and marks itself valid. A plain build shows only the three "building index" phases.
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('a plain build that is only waiting for its lock already blocks the inserts behind it',
+  (select not granted from pg_locks where pid = :b_web and relation = 'events'::regclass));
+select lab.prove('a 1s lock_timeout cancels a concurrent build waiting on an old snapshot, leaving an invalid index',
+  (select indisready and not indisvalid from pg_index where indexrelid = 'kind_idx'::regclass));
+select lab.prove('a second concurrent build on the same table queues behind the first',
+  exists (select 1 from pg_locks where pid = :b_mig and relation = 'events'::regclass
+             and mode = 'ShareUpdateExclusiveLock' and not granted));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="Which sessions hold a concurrent build up">
+
+The final wait covers every transaction in the database whose snapshot predates the validation pass, whatever table it touched. We tested each kind of session:
+
+| Session open when the build started | Holds it up? |
+|---|---|
+| Idle in transaction, read committed, read or wrote `accounts` | no |
+| Idle in transaction, repeatable read, read `accounts` | yes: "waiting for old snapshots" |
+| Read committed with an open cursor on `accounts` | yes: "waiting for old snapshots" |
+| A query still running on any table | yes: "waiting for old snapshots" |
+| Uncommitted insert into `events` | yes: "waiting for writers before build" |
+
+Read committed takes a fresh snapshot per statement, so an idle one holds nothing; repeatable read keeps its snapshot until it ends. The tell is `backend_xmin` in `pg_stat_activity`: any session with one older than the build is in the way, a monitoring loop written as one long statement included. The build is harmless while it waits (inserts went straight through); it just won't finish.
+
+Two more surprises. The build's lock conflicts with vacuum on that table: autovacuum steps aside, an anti-wraparound vacuum doesn't, and the build waits. And a unique build enforces uniqueness from its second pass on: while ours sat invalid in "waiting for old snapshots", a duplicate insert failed with `23505`. Left behind by a failure, that invalid index keeps rejecting duplicates until you drop it.
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('an idle read committed transaction that read another table does not hold it up',
+  (select indisvalid from pg_index where indexrelid = 'kind_idx'::regclass)
+  and (select state from pg_stat_activity where pid = :b_hold) = 'idle in transaction');
+select lab.prove('an idle repeatable read transaction on another table parks it in "waiting for old snapshots"',
+  (select current_locker_pid = :b_hold and wait_event = 'virtualxid' from build_progress)
+  and pg_blocking_pids(:b_cic) = array[:b_hold]);
+select lab.prove('while the unique build waits, still invalid, a duplicate insert is already rejected (23505)',
+  (select not indisvalid from pg_index where indexrelid = 'handles_handle_key'::regclass));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="When a concurrent build fails">
+
+A plain build that fails rolls back. A concurrent one that fails (a duplicate in a unique index, a deadlock, a cancel, a timeout) leaves an **invalid** index, marked `INVALID` in `\d`. Queries never use it; if it got past its first scan, every write still maintains it (one we canceled late grew through 20,000 inserts); and its name collides with your retry. Find them, drop them concurrently, fix the cause, build again:
+
+```sql
+select indexrelid::regclass, indisvalid, indisready
+  from pg_index where not indisvalid;
+
+drop index concurrently projects_account_name_key;  -- a failed unique build
+```
+
+`indisready` says which kind you have. A unique build that hits a duplicate fails in its first scan, so its leftover is not ready and writes skip it. One that fails or is canceled in validation is ready, and writes pay for it until you drop it.
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('every write still maintains it: it grew with 20,000 inserts',
+  pg_relation_size('kind_idx') > :k0);
+select lab.prove('and leaves an index behind, indisvalid = false (and here indisready = false)',
+  (select not indisvalid and not indisready from pg_index
+    where indexrelid = 'projects_account_name_key'::regclass));
+create unique index concurrently if not exists projects_account_name_key
+  on projects (account_id, name);
+select lab.prove('"if not exists" after a failure does nothing and reports success: still invalid',
+  (select not indisvalid from pg_index where indexrelid = 'projects_account_name_key'::regclass));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Build a unique index concurrently, then attach it
+
+Adding a unique constraint directly builds its index under `AccessExclusive`. Build the index concurrently, then attach it. The attach is catalog only but still takes a brief `AccessExclusive`, so it runs under `lock_timeout` like any other `ALTER`:
+
+```sql
+create unique index concurrently users_email_key on users (email);
+alter table users add constraint users_email_key unique using index users_email_key;
+```
+
+A primary key works the same way (`primary key using index`) once its columns are NOT NULL; if they aren't, the attach runs `SET NOT NULL` and scans the table under that lock.
+
+Never run a plain `REINDEX` on a live table. It takes `AccessExclusive` on the index, and because planning any query locks every index of its table, even a primary key lookup that never touches the rebuilt index waits until it commits. Rebuild with `reindex index concurrently` (PostgreSQL 12+) instead. A partitioned table refuses `concurrently` outright, so build each partition's index concurrently and attach them to the parent's.
+
+<DeepDive title="Rebuild with REINDEX CONCURRENTLY; plain REINDEX blocks reads too">
+
+For a bloated index ([when to rebuild](/books/eight-kilobytes/vacuum#index-bloat-often-costs-more-than-table-bloat)) or one hit by a collation library change, `reindex index concurrently` (PostgreSQL 12+) builds a `..._ccnew` copy beside the old index and swaps them, with a concurrent create's lock and caveats. If it fails, drop a leftover `_ccnew` and retry; a leftover `_ccold` means it succeeded and only the old copy needs dropping.
+
+Plain `REINDEX`, the one people reach for in an emergency, is worse than a plain `CREATE INDEX`: it also takes `AccessExclusiveLock` on the index, and planning any query locks every index on the table. A plain reindex of `events_created_at_idx` made `select kind from events where id = 42`, which never uses that index, wait until it committed, as the [REINDEX docs](https://www.postgresql.org/docs/18/sql-reindex.html) warn.
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('and that blocks even a primary key lookup: planning it opens every index on the table',
+  (select wait_event from pg_stat_activity where pid = :b_web) = 'relation');
+select lab.prove('reindex concurrently builds a second copy beside the old one, named _ccnew',
+  (select command = 'REINDEX CONCURRENTLY' from build_progress)
+  and to_regclass('events_created_at_idx_ccnew') is not null);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="Partitioned tables: build each partition, then attach">
+
+`create index concurrently` on a partitioned table fails (`cannot create index on partitioned table "events_m" concurrently`), and a plain one on the parent takes `ShareLock` on every partition at once. Build the pieces concurrently and assemble them. On three monthly partitions of `events`:
+
+```sql
+-- 1. the parent's index: catalog only, 2 ms, marked invalid
+create index events_m_kind_idx on only events_m (kind);
+
+-- 2. each partition, concurrently, then attach it (one pair per partition)
+create index concurrently events_m_2026_07_kind_idx on events_m_2026_07 (kind);
+alter index events_m_kind_idx attach partition events_m_2026_07_kind_idx;
+-- ... and the same for events_m_2026_08 and events_m_2026_09
+```
+
+The parent turns valid on its own when the last partition is attached. Partitions created later with `partition of` get a matching index automatically, built plain, which is fine because they're empty. `attach partition` of a table that already holds rows also builds any missing index plain, under lock, so give a table its indexes before you attach it. The [partitioning chapter](/books/eight-kilobytes/partitioning#constraints-must-carry-the-partition-key) has a generator for the statements.
+
+<ProveIt lab="25-migrations">
+
+```sql
+select lab.prove('a plain create index on the parent takes Share on every partition',
+  strongest(:'pm_locks', 'events_m_2026_07') = 'ShareLock'
+  and strongest(:'pm_locks', 'events_m_2026_08') = 'ShareLock'
+  and strongest(:'pm_locks', 'events_m_2026_09') = 'ShareLock');
+select lab.prove('after the last attach, it turns valid on its own',
+  (select indisvalid from pg_index where indexrelid = 'events_m_kind_idx'::regclass)
+  and (select count(*) from pg_inherits where inhparent = 'events_m_kind_idx'::regclass) = 3);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Widening a type is free; most other type changes rewrite
+
+Loosening a limit is free. Adding a limit, changing scale, or changing representation rewrites the table and every index on the column. On a 100,000 row table:
+
+| Change | Rewrites? |
+|---|---|
+| `varchar(20)` to `varchar(50)`, `varchar(n)` to `text` | no |
+| `text` to `varchar(100)`, even when every value fits | **yes** |
+| `int` to `bigint` | **yes** |
+| `numeric(12,2)` to `numeric(12,4)` | **yes** |
+| `timestamp` to `timestamptz`, session in UTC | no |
+| `timestamp` to `timestamptz`, any other time zone | **yes** |
+
+So express length limits as CHECK constraints. For timestamps, the conversion reads each old value as a time in the session's zone. If the stored values really are UTC, set `timezone = 'UTC'` first: the bytes don't change and nothing is rewritten. If they were written as local wall-clock time, set the session to that zone and accept the rewrite: converting them as UTC would skip the rewrite but shift every value by the offset.
+
+An `integer` primary key fails inserts at 2.1 billion, and `alter column id type bigint` rewrites the table and every index under `AccessExclusive`: hours of outage at that size. The online fix is a small project built from this chapter's parts, it takes weeks to do safely, and it's entirely avoidable: [use bigint](/books/eight-kilobytes/keys) from day one.
+
+For the tables you already have, graph every sequence against its maximum and alert long before it gets there:
+
+```sql
+select schemaname, sequencename, data_type, last_value, max_value,
+       round(100.0 * last_value / max_value, 1) as pct_used
+  from pg_sequences
+ order by pct_used desc nulls last;
+```
+
+One trap: a database upgraded from before PostgreSQL 10 can have `serial` columns of type `integer` backed by `bigint` sequences. Those report a fraction of a percent while the column itself is close to overflowing, so compare `last_value` against the column's type, not just the sequence's `max_value`.
+
+<DeepDive title="The int to bigint problem">
+
+The online swap, in the order that keeps a foreign key in force the whole time:
+
+1. **Add and sync.** Add `id_new bigint`, nullable, no default (catalog only), and a trigger that sets `new.id_new := new.id` on every insert and update.
+2. **Backfill** the existing rows in batches that walk the primary key.
+3. **Make it NOT NULL without a long lock**: `add constraint ... check (id_new is not null) not valid`, then `validate constraint`, as in steps 1 and 2 of the NOT NULL pattern above. (On PostgreSQL 18, `not null id_new not valid` and `validate`.)
+4. **Build a unique index on `id_new` concurrently.**
+5. **Do the same to every referencing column.** Each child's `parent_id` gets a `bigint` twin with its own trigger, backfill, and NOT NULL, then a foreign key from the twin to the parent's `id_new`, added `NOT VALID` and validated. A foreign key can reference a unique index, so this doesn't wait for the new primary key.
+6. **Swap in one short transaction**, with `lock_timeout` and a retry: drop the old foreign keys and the old primary key, `add primary key using index` on the new index (no scan: the validated check, or the PostgreSQL 18 not-null constraint, already proves there are no nulls), rename the columns in the parent and every child, move the identity or sequence to the new column (`alter sequence ... as bigint` first, since an `int` sequence stops at 2,147,483,647), and drop the triggers. The new foreign keys are already validated, so integrity never lapses.
+7. **Drop the old columns** a release later, once no code reads them.
+
+The type table above, checked by comparing `pg_relation_filenode` before and after each change. Every "no" kept the table's file; every "yes" got a new one.
+
+<ProveIt lab="25-migrations">
+
+```sql
+-- rewrites() compares pg_relation_filenode('tc') before and after the change
+select lab.prove('varchar(20) to varchar(50): no rewrite', not rewrites('alter column v20 type varchar(50)'));
+select lab.prove('text to varchar(100): rewrite, even though every value fits', rewrites('alter column t2 type varchar(100)'));
+select lab.prove('int to bigint: rewrite', rewrites('alter column i type bigint'));
+select lab.prove('numeric(12,2) to numeric(12,4): rewrite', rewrites('alter column n2 type numeric(12,4)'));
+select lab.prove('timestamp to timestamptz with the session in UTC: no rewrite',
+  not rewrites('alter column ts1 type timestamptz', 'UTC'));
+select lab.prove('timestamp to timestamptz in another time zone: rewrite',
+  rewrites('alter column ts2 type timestamptz', 'America/New_York'));
+```
+
+</ProveIt>
+
+Start the swap while the sequence still has years left. An `int` identity restarted at 2,147,483,646 takes two rows, then refuses every insert after them:
+
+```text
+ERROR:  nextval: reached maximum value of sequence "tickets_id_seq" (2147483647)
+```
+
+The monitoring query from the essay then shows `tickets_id_seq` at 100 percent.
+
+<ProveIt lab="25-migrations">
+
+```sql
+do $$
+begin
+  insert into tickets (title) values ('c');
+  raise exception 'no error';
+exception when sqlstate '2200H' then
+  if sqlerrm <> 'nextval: reached maximum value of sequence "tickets_id_seq" (2147483647)' then
+    raise exception 'NOT PROVED: %', sqlerrm;
+  end if;
+end $$;
+select lab.prove('the third insert fails: nextval reached the int maximum (2147483647)', true);
+select lab.prove('pg_sequences shows tickets_id_seq at 100 percent of its maximum',
+  (select round(100.0 * last_value / max_value, 1) = 100.0
+   from pg_sequences where sequencename = 'tickets_id_seq'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Renames ship as expand and contract
+
+`rename column` is catalog only. The problem is the dozens of app processes that know the old name: code and schema can't change at the same instant, so whichever goes first breaks the other. Never make a change that old and new code can't both survive. Split it into [**expand** and **contract**](/books/eight-kilobytes/glossary#expand-and-contract), with deploys between:
+
+```text
+  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+  │ 1. expand    │  │ 2. deploy    │  │ 3. backfill  │  │ 4. deploy    │
+  │ add new col  │─▶│ write both,  │─▶│ copy old to  │─▶│ read new,    │
+  │ (nullable)   │  │ read old     │  │ new, batched │  │ write both   │
+  └──────────────┘  └──────────────┘  └──────────────┘  └──────┬───────┘
+                                                               │
+                    ┌──────────────┐  ┌──────────────┐         │
+                    │ 6. contract  │  │ 5. deploy    │         │
+                    │ drop old col │◀─│ stop writing │◀────────┘
+                    │              │  │ old column   │
+                    └──────────────┘  └──────────────┘
+```
+
+Renaming `events.kind` to `event_type` this way takes three migrations and three deploys. That's the real price of zero downtime, and the best argument for choosing names carefully. A trigger or a view can stand in for some app code, but neither removes the phases. The same shape splits columns, merges tables, and changes the ids your API hands out ([Move an API off integer ids by accepting both](/books/eight-kilobytes/keys#move-an-api-off-integer-ids-by-accepting-both)).
+
+## Backfill in short batches that walk the primary key
+
+`update events set status = payload->>'status'` is one transaction over 2 million rows: 2 million new row versions and 2 million dead ones ([Updates are inserts](/books/eight-kilobytes/mvcc)), every row locked until commit, vacuum held back, a table's worth of WAL fired at your replicas, and if it fails at the last row, all of it rolls back. Batch it:
+
+- **Walk the primary key in ranges** (`id > $1 and id <= $1 + 10000 and status is null`), never `OFFSET`. Every batch costs the same, and `status is null` makes the job restartable.
+- **Commit each batch**, keeping each well under a second. A procedure can ([Procedures can commit](/books/eight-kilobytes/functions#procedures-can-commit)); ours filled 2 million rows in about 16 seconds.
+- **Expect bloat**: a fast backfill can double the table before autovacuum catches up, so vacuum partway through a big one.
+- **Run it as a resumable job** outside the schema migration, and pause it when replicas lag.
+
+Loading new rows in bulk is a different job with better tools ([Freeze the partition, attach it built, analyze the parent](/books/eight-kilobytes/loading#freeze-the-partition-attach-it-built-analyze-the-parent)).
+
+## Drop code first, then the column
+
+Dropping a column is catalog only but takes `AccessExclusive`, so it gets `lock_timeout`. The danger is the app: code that names the column fails, and so can code that doesn't, like an ORM that cached the column list at startup. Ship code that ignores the column, wait until every old process is gone, then drop it.
+
+Dropping a table takes `AccessExclusive` on every table linked to it by a foreign key. Drop those keys first, one short `lock_timeout` statement each, so no single statement needs every lock at once; for a cheap undo, rename the table and drop it a release later.
+
+## Transactional DDL holds every lock until commit
+
+Postgres DDL is transactional, so most tools wrap each migration in a transaction and a half-applied migration can't happen. The cost: every lock is held until commit.
+
+```sql
+begin;
+alter table accounts add column region text;
+alter table users    add column region text;
+update accounts set region = 'us';
+-- still holding AccessExclusive on accounts and users
+commit;
+```
+
+After the `update`, `pg_locks` still shows `AccessExclusiveLock` on both tables, and every query on either one queues until `commit`.
+
+<ProveIt lab="25-migrations">
+
+```sql
+begin;
+alter table accounts add column region text;
+alter table users    add column region text;
+update accounts set region = 'us';
+select lab.prove('after the update, the transaction still holds AccessExclusive on accounts and users',
+  my_strongest('accounts') = 'AccessExclusiveLock' and my_strongest('users') = 'AccessExclusiveLock');
+rollback;
+```
+
+</ProveIt>
+
+Every lock you hold makes the next wait worse. So: **one risky table per migration**, and **no data changes in schema migrations**. (MySQL commits each DDL statement on its own; see [DDL is transactional](/books/eight-kilobytes/not-mysql#ddl-is-transactional).)
+
+## The short version
+
+- Every migration sets `lock_timeout` (1 to 5 seconds) and retries. DDL waiting for a lock blocks everything behind it, even reads.
+- Know whether a change is catalog only, a scan, or a rewrite, and test on production-sized data.
+- Constant defaults are instant; volatile ones like `gen_random_uuid()` rewrite.
+- Add CHECK, FOREIGN KEY, and NOT NULL constraints `NOT VALID`, then `VALIDATE` under a lock traffic passes.
+- Plain `create index` stops writes for the whole build; `concurrently` keeps them flowing for twice the reading. Use plain only on tables nobody writes.
+- Run concurrent builds with `lock_timeout` off, and check for `INVALID` leftovers. Never plain `reindex` a live table.
+- `int` to `bigint`, `text` to `varchar(n)`, and scale changes rewrite.
+- Renames ship as expand and contract; backfills run as batched jobs in primary-key ranges, outside the migration.
+
+## Further reading
+
+- [ALTER TABLE](https://www.postgresql.org/docs/18/sql-altertable.html), PostgreSQL documentation. The lock level, rewrite behavior, and `NOT VALID` rules for every form.
+- [CREATE INDEX: building indexes concurrently](https://www.postgresql.org/docs/18/sql-createindex.html#SQL-CREATEINDEX-CONCURRENTLY), PostgreSQL documentation. What the two-phase build waits for and why it can leave an invalid index.
+- [Zero-downtime Postgres migrations: the hard parts](https://gocardless.com/blog/zero-downtime-postgres-migrations-the-hard-parts), GoCardless. The lock-queue outage above, told by the team it happened to.
+- [Zero-downtime Postgres schema migrations need this: lock_timeout and retries](https://postgres.ai/blog/20210923-zero-downtime-postgres-schema-migrations-lock-timeout-and-retries), Nikolay Samokhvalov, PostgresAI. The case for rule one, with retry strategies.
+- [strong_migrations](https://github.com/ankane/strong_migrations), [Squawk](https://squawkhq.com/), and [pgroll](https://github.com/xataio/pgroll). Tooling that encodes these rules so reviewers don't have to remember them.

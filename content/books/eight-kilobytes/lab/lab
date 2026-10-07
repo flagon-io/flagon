@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# Run a chapter's lab: every claim in it is a check that holds or stops the
+# run with "NOT PROVED: ...".
+#
+# From this folder on your machine (Linux, macOS, or Git Bash on Windows):
+#
+#   ./lab                 list the chapters, and which start their own servers
+#   ./lab 16-btree        one chapter; 16 or btree work too
+#   ./lab all             every chapter, in reading order, then a summary
+#   KEEP=1 ./lab 37       leave a multi-server chapter's containers running
+#
+# A chapter's .sql lab runs in the lab container (started for you with
+# `docker compose up -d --wait`); its .sh lab, if it has one, starts the extra
+# servers it needs from its own compose file and removes them afterwards.
+#
+# Inside the lab container the same script runs one .sql lab, which is what
+# `docker compose exec postgres lab 16-btree` does: each lab gets its own
+# database cloned from the `book` template, so labs can add indexes, update
+# every row, or drop tables without affecting each other.
+
+# compose.yml sets LAB_IN_CONTAINER; the rest covers containers started from
+# an older compose file (the kit is mounted at /lab, and there is no docker).
+if [ "${LAB_IN_CONTAINER:-}" = 1 ] || { [ -d /lab ] && ! command -v docker >/dev/null 2>&1; }; then
+set -uo pipefail
+cd /lab
+# Keep the output to the claims: hide "skipping" notices from the clone setup.
+export PGOPTIONS="-c client_min_messages=warning"
+
+run_one() {
+  local name="$1" db="lab_${1//-/_}"
+  if [ ! -f "$name.sql" ]; then echo "no such lab: $name" >&2; return 2; fi
+  psql -q -X -c "drop database if exists $db with (force)" >/dev/null
+  psql -q -X -c "create database $db template book" >/dev/null
+  # Helpers load on every run so changes reach kits whose template was built earlier.
+  psql -q -X -v ON_ERROR_STOP=1 -d "$db" -f helpers.sql
+  echo "== $name"
+  if psql -X -q -v ON_ERROR_STOP=1 -d "$db" -f "$name.sql"; then
+    echo "== $name: all claims proved"
+    psql -q -X -c "drop database if exists $db with (force)" >/dev/null
+    return 0
+  fi
+  echo "== $name: FAILED (database $db kept for inspection)"
+  return 1
+}
+
+if [ "${1:-}" = "all" ]; then
+  failed=()
+  for f in [0-9][0-9]-*.sql; do
+    run_one "${f%.sql}" || failed+=("${f%.sql}")
+  done
+  if [ ${#failed[@]} -gt 0 ]; then echo "failed: ${failed[*]}"; exit 1; fi
+  echo "every lab passed"
+elif [ -n "${1:-}" ]; then
+  run_one "$1"
+else
+  echo "usage: lab <chapter>|all   e.g. lab 16-btree"; ls [0-9][0-9]-*.sql 2>/dev/null | sed 's/\.sql$//'
+  exit 2
+fi
+exit
+fi
+
+# ---------------------------------------------------------------------------
+# On your machine. Written for bash 3.2 too (macOS), so no associative arrays.
+set -uo pipefail
+cd "$(dirname "$0")"
+# Git Bash on Windows would rewrite /paths in arguments meant for containers.
+export MSYS_NO_PATHCONV=1
+trap 'echo; echo "interrupted"; exit 130' INT
+
+# chapters: every chapter with a lab, in reading order, one per line.
+chapters() {
+  local f c last=""
+  for f in [0-9][0-9]-*; do
+    case "$f" in *.sql | *.sh) ;; *) continue ;; esac
+    c="${f%.*}"
+    [ "$c" = "$last" ] || echo "$c"
+    last="$c"
+  done
+}
+
+# resolve <arg>: the chapter an argument names (16-btree, btree, or 16), or a
+# single lab file (16-btree.sql, 08-acid.sh).
+resolve() {
+  local want="$1" c num=""
+  case "$want" in
+    *.sql | *.sh) [ -f "$want" ] && echo "$want" && return 0; return 1 ;;
+  esac
+  if [[ "$want" =~ ^[0-9]+$ ]]; then num=$(printf %02d "$((10#$want))"); fi
+  for c in $(chapters); do
+    if [ "$c" = "$want" ] || [ "${c%%-*}" = "$num" ] || [ "${c#*-}" = "$want" ]; then
+      echo "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# files <chapter or file>: the lab files to run, .sql before .sh.
+files() {
+  case "$1" in
+    *.sql | *.sh) echo "$1" ;;
+    *) for ext in sql sh; do [ -f "$1.$ext" ] && echo "$1.$ext"; done ;;
+  esac
+  return 0
+}
+
+kit_ready=""
+# kit_up: start the main lab container once, and wait until it's healthy.
+kit_up() {
+  local out
+  [ -n "$kit_ready" ] && return 0
+  echo "== starting the lab container (the first start seeds the sample data: about a minute)"
+  if ! out=$(docker compose up -d --wait 2>&1); then
+    echo "$out" | tail -20
+    echo "the lab container didn't come up healthy" >&2
+    return 1
+  fi
+  kit_ready=1
+}
+
+# run_file <file>: one lab; its exit status says whether every claim held.
+run_file() {
+  case "$1" in
+    *.sql) kit_up && docker compose exec -T postgres lab "${1%.sql}" ;;
+    *.sh) echo "== $1 (starts its own servers)"; bash "$1" ;;
+  esac
+}
+
+usage() {
+  local c extra
+  echo "usage: ./lab <chapter> [<chapter> ...] | all"
+  echo "       a chapter is its number, its name, or both: ./lab 16, ./lab btree, ./lab 16-btree"
+  echo
+  echo "chapters (+ starts extra servers of its own: slower, and needs more memory):"
+  for c in $(chapters); do
+    extra=""
+    [ -f "$c.sh" ] && extra="  +"
+    echo "  $c$extra"
+  done
+}
+
+if [ $# -eq 0 ]; then usage; exit 2; fi
+
+targets=()
+for arg in "$@"; do
+  if [ "$arg" = all ]; then
+    for c in $(chapters); do targets+=("$c"); done
+  elif t=$(resolve "$arg"); then
+    targets+=("$t")
+  else
+    echo "no such chapter: $arg (run ./lab to list them)" >&2
+    exit 2
+  fi
+done
+
+failed=""
+ran=0
+for t in "${targets[@]}"; do
+  for f in $(files "$t"); do
+    ran=$((ran + 1))
+    run_file "$f" || failed="$failed $f"
+  done
+done
+
+if [ $ran -gt 1 ]; then
+  echo
+  if [ -n "$failed" ]; then echo "NOT PROVED:$failed"; else echo "every lab passed ($ran labs)"; fi
+fi
+[ -z "$failed" ]

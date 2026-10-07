@@ -1,0 +1,510 @@
+---
+title: The planner is guessing
+description: Read the statistics the planner uses, find the estimate that went wrong, and fix it with ANALYZE, extended statistics, or a better query instead of a hint.
+part: Finding rows fast
+builds_on: [explain]
+---
+
+Here is a query for the 85 events of one project inside one account:
+
+```sql
+select * from events
+where account_id = 696 and project_id = 4242;
+```
+
+The planner expected one row:
+
+```text
+ Bitmap Heap Scan on events  (cost=28.78..32.80 rows=1 width=112)
+                             (actual time=0.250..0.696 rows=85.00 loops=1)
+```
+
+Off by a factor of 85, and nothing is broken. The table was analyzed a minute ago and every number the planner used was correct. It made an assumption that's false for this data, and it will keep making it until you tell it otherwise.
+
+Most bad plans start with a gap like that one. The planner doesn't know your data. It guesses from a small summary of it, and the guess is usually good. Learn what it knows and what it assumes, and "the planner is being stupid" becomes a specific misestimate you can point at and fix.
+
+## The planner is a cost calculator
+
+Postgres doesn't try plans to see which is fastest. It lists the candidates (every way to scan each table, every join method and order), prices each with a formula, and runs the cheapest. A plan's price depends on two things: **how many rows** each step will produce, which comes from statistics, and **what each unit of work costs**, which comes from a handful of settings.
+
+Right row counts usually mean a good plan, even with rough prices. Wrong row counts can't be priced away. So this chapter is about the estimates. How the planner turns them into a choice of scans, joins, and join orders is [The cheapest plan wins](/books/eight-kilobytes/plans).
+
+### Every price is relative to one sequential page
+
+Costs are arbitrary units anchored to one number: reading one 8 KB page sequentially costs `seq_page_cost = 1.0`. Everything else is priced relative to it:
+
+| Parameter | Default | What it prices |
+|---|---|---|
+| `seq_page_cost` | 1.0 | Reading a page as part of a sequential scan |
+| `random_page_cost` | 4.0 | Fetching a page out of order (index scans) |
+| `cpu_tuple_cost` | 0.01 | Processing one row |
+| `cpu_index_tuple_cost` | 0.005 | Processing one index entry |
+| `cpu_operator_cost` | 0.0025 | Evaluating one operator or function call |
+
+A sequential scan costs its pages times `seq_page_cost` plus its rows times `cpu_tuple_cost`, plus a `cpu_operator_cost` per row per filter ([to the cent](/books/eight-kilobytes/explain#cost-is-a-guess-in-made-up-units)). The formula isn't the hard part. Notice what most of it multiplies: a row count. That's where the real work lives.
+
+`random_page_cost` is a ratio, not a measurement. Its default of 4.0 dates from spinning disks; SSD-backed systems often run 1.1 to 2 ([random_page_cost assumes spinning disks](/books/eight-kilobytes/configuration#random_page_cost-assumes-spinning-disks)). And `effective_cache_size` isn't a price at all: it tells the planner how much data is probably cached ([effective_cache_size is a hint, not memory](/books/eight-kilobytes/buffers#effective_cache_size-is-a-hint-not-memory)).
+
+<Callout type="warn" title="Tune estimates before costs">
+When a plan looks wrong, the reflex is to nudge `random_page_cost` until it flips. Set server-wide, that fixes one query by making the planner wrong about every other query in a different way, and some of those flip to plans that can sink the server. Fix the estimate first. Change cost parameters only to describe your hardware, once, for the whole server.
+</Callout>
+
+## pg_stats is the planner's entire picture
+
+Row estimates come from statistics that `ANALYZE` stores and the `pg_stats` view shows, one row per column. For `events` (`ANALYZE` samples at random, so your last digits will differ):
+
+```text
+  attname   | null_frac | avg_width | n_distinct |  correlation
+------------+-----------+-----------+------------+----------------
+ account_id |         0 |         8 |       1000 |   0.0029704524
+ created_at |         0 |         8 |         -1 |              1
+ id         |         0 |         8 |         -1 |              1
+ kind       |         0 |         6 |          5 |     0.25737208
+ payload    |         0 |        66 |      40687 |  -0.0014929087
+ project_id |         0 |         8 |      19979 | -0.00024722528
+ user_id    |         0 |         8 |      19979 | -0.00069223094
+```
+
+That's the planner's entire picture of a two-million-row table:
+
+- **`null_frac`**: the fraction of nulls. (On `projects`, `archived_at` has 0.80445, so `archived_at is null` is estimated at 80.4%.)
+- **`avg_width`**: average bytes per value, which sizes hashes and sorts.
+- **`n_distinct`**: distinct values. Positive is a count (`kind` has 5); negative is a fraction of the rows, and `-1` means every value is unique.
+- **`most_common_vals`** and **`most_common_freqs`**: the MCV list, the most frequent values and how often each appears.
+- **`histogram_bounds`**: the other values, cut into 100 buckets of roughly equal row counts.
+- **`correlation`**: how closely physical row order matches the column's order, from -1 to 1. It prices index scans ([Correlation prices the index scan](/books/eight-kilobytes/plans#correlation-prices-the-index-scan)).
+
+Here's the MCV list for `kind`:
+
+```text
+          most_common_vals          |              most_common_freqs
+------------------------------------+---------------------------------------------
+ {build,deploy,login,comment,alert} | {0.3713,0.25146666,0.12726666,0.12716667,0.1228}
+```
+
+So `where kind = 'deploy'` is estimated at `rows=502927`: 0.25146666 times the table's 1,999,974 rows. A value in the MCV list gets its frequency; anything else shares the leftover evenly. Ranges count histogram buckets: the week of September 1, 2026 on `created_at` was estimated at 36,613 rows, against an actual 38,356.
+
+<DeepDive title="Do the planner's arithmetic by hand">
+
+Every row estimate is a formula over `pg_stats`, and you can check it. On `events.account_id` (1,000 distinct values; the sample happened to put six slightly busier accounts in the MCV list, with frequencies summing to 0.0091666665):
+
+```text
+  equality, value in the MCV list (account 393):
+    0.0015666666 x 2,000,034 = 3,133.4  ->  rows=3133
+
+  equality, any other value (account 42):
+    selectivity = (1 - sum(MCV freqs) - null_frac)
+                  / (n_distinct - number of MCVs)
+                = (1 - 0.0091666665) / (1000 - 6) = 0.00099681
+    0.00099681 x 2,000,034 = 1,993.7  ->  rows=1994
+```
+
+That second formula is why a skewed column hurts. If a few hundred mid-sized tenants each had 0.5% of the rows, the 100 MCV slots couldn't hold them all, and the rest would each be estimated at about 2,000 rows instead of 10,000. A higher statistics target (next section) gives big tenants their own entries.
+
+A range finds the histogram bucket holding each end and assumes values spread evenly inside it. For `created_at >= '2026-04-01' and created_at < '2026-04-08'`:
+
+```text
+  frac(2026-04-01) = (48 + 0.4176) / 100 = 0.484176
+  frac(2026-04-08) = (50 + 0.3391) / 100 = 0.503391
+  rows = (0.503391 - 0.484176) x 2,000,021 = 38,430
+```
+
+The planner said 38,431 (the difference is our rounding) and the real count is 38,356. A join on `=` multiplies the two inputs and divides by the larger `n_distinct` when it has nothing better: events joined to the 173 enterprise accounts is estimated at 2,000,000 x 173 / 1,000 = 346,000. It assumes enterprise accounts produce an average number of events, the same independence assumption as below.
+
+<ProveIt lab="19-planner">
+
+```sql
+select lab.prove('equality on a non-MCV value: (1 - sum(freqs) - null_frac) / (n_distinct - #MCVs)',
+  abs(lab.est_rows(format('select * from events where account_id = %s',
+        (select min(g) from generate_series(1, 1000) g where g <> all (mcv))))
+      - round((1 - (select sum(f) from unnest(freqs) f) - null_frac)
+              / (n_distinct - cardinality(mcv)) * reltuples)) <= 1)
+from s;
+
+select lab.prove('a one-week range: rows = (frac(b) - frac(a)) x reltuples, from the histogram',
+  abs(lab.est_rows(format('select * from events where created_at >= %L and created_at < %L',
+                      current_setting('plans.week_a'), current_setting('plans.week_b')))
+      - (hist_frac(current_setting('plans.week_b')::timestamptz)
+         - hist_frac(current_setting('plans.week_a')::timestamptz))
+        * (select reltuples from pg_class where relname = 'events'))
+  < 2);
+```
+
+</ProveIt>
+
+`pg_stats` also has `most_common_elems` and `elem_count_histogram` for arrays and `tsvector` columns, and range histograms for range types: the same idea for other shapes of data.
+
+</DeepDive>
+
+## ANALYZE reads a sample, not the table
+
+`ANALYZE` samples `300 x default_statistics_target` rows. The default target is 100, so 30,000 rows:
+
+```text
+INFO:  "events": scanned 30000 of 35173 pages,
+       containing 1705877 live rows and 17 dead rows;
+       30000 rows in sample, 2000027 estimated total rows
+```
+
+The target also caps the MCV list and the histogram at 100 entries each: plenty for most columns, too few for a skewed one with many values. If `account_id` had a long tail of large tenants, 100 MCV slots couldn't hold them, and the rest would get the average estimate. Raise the target per column, not globally:
+
+```sql
+alter table events alter column account_id set statistics 1000;
+analyze events;
+```
+
+Now `ANALYZE` reads all 35,173 pages for a 300,000-row sample, and all 1,000 accounts get their own MCV entry. The price is a slower `ANALYZE` (about 2 seconds instead of 0.2 on our machine) and slightly slower planning. Use 500 to 1000 only where estimates are measurably wrong, typically tenant ids and status columns. If `ANALYZE` keeps getting `n_distinct` wrong, pin it with `alter table ... alter column ... set (n_distinct = 20000)`.
+
+### Three kinds of change slip past autovacuum's analyze
+
+[Autovacuum](/books/eight-kilobytes/glossary#autovacuum) analyzes a table after roughly `autovacuum_analyze_threshold + autovacuum_analyze_scale_factor x reltuples` rows change: 50 plus 10% by default, so 200,050 changed rows on a 2-million-row table. Three cases slip through:
+
+- **Bulk loads.** The planner works from statistics that predate the load, or none. Run `ANALYZE` at the end of every bulk load or large backfill ([Vacuum and analyze before you open the doors](/books/eight-kilobytes/loading#vacuum-and-analyze-before-you-open-the-doors)).
+- **Growing time ranges.** Query "the last hour" when `ANALYZE` last ran yesterday, and the histogram ends before your rows. Postgres partly compensates for indexed columns, but big append-only tables want a lower per-table `autovacuum_analyze_scale_factor` ([The defaults are wrong for big tables](/books/eight-kilobytes/vacuum#the-defaults-are-wrong-for-big-tables)).
+- **Temporary tables.** Autovacuum never touches them. Analyze one before you join against it.
+
+PostgreSQL 18's `pg_upgrade` keeps planner statistics, closing the old "slow until analyze finishes" window after an upgrade. It doesn't keep the extended statistics covered later in this chapter, so follow it with `vacuumdb --all --analyze-only --missing-stats-only` (also new in 18) to rebuild just those.
+
+## The planner assumes your columns are independent
+
+Back to the opening query. The planner knows two facts from `pg_stats`: `account_id = 696` matches about 1 row in 1,000, and `project_id = 4242` about 1 in 20,000. To combine them, it multiplies:
+
+```text
+  2,000,000 x (1 / 1,000) x (1 / 20,000) = 0.1  ->  rounded up to 1 row
+```
+
+Multiplying is right only if the project tells you nothing about the account. But a project belongs to exactly one account, so the second filter removes nothing. The right answer is "about 100 rows". With single-column indexes on both, the plan shows it:
+
+```text
+ Bitmap Heap Scan on events  (... rows=1 ...) (actual ... rows=85.00 loops=1)
+   ->  BitmapAnd  (... rows=1 ...) (actual ... rows=0.00 loops=1)
+         ->  Bitmap Index Scan on events_project_id_idx  (... rows=100 ...)
+                 (actual ... rows=85.00 loops=1)
+         ->  Bitmap Index Scan on events_account_id_idx  (... rows=1990 ...)
+                 (actual ... rows=1961.00 loops=1)
+```
+
+(`BitmapAnd` always reports 0 rows: it combines bitmaps and never counts rows.) Each leaf estimate is excellent: 100 against 85 for the project, 1,990 against 1,961 for the account. Only the combination is wrong. **Correct leaves, wrong combination: that's the signature of correlated columns.**
+
+This query is fast either way. But the 1-row estimate feeds every node above it: joined to something else, it picks a [nested loop](/books/eight-kilobytes/glossary#nested-loop), fine for 1 row and painful for 10,000. Correlated columns are everywhere: tenant and project, city and postal code, `status` and `completed_at`. Joins inherit the assumption too. A redundant `and p.account_id = e.account_id` divides a join estimate by another 1,000 ([The cheapest plan wins](/books/eight-kilobytes/plans) opens with one).
+
+### Extended statistics measure columns together
+
+Tell `ANALYZE` to measure the columns together:
+
+```sql
+create statistics events_account_project (dependencies, ndistinct)
+  on account_id, project_id from events;
+analyze events;
+```
+
+```text
+-[ RECORD 1 ]---+------------------------
+statistics_name | events_account_project
+attnames        | {account_id,project_id}
+n_distinct      | {"2, 3": 19959}
+dependencies    | {"3 => 2": 1.000000}
+```
+
+That's `pg_stats_ext`, shown one column per line (`\x` in psql). Read `dependencies` as "column 3 (`project_id`) determines column 2 (`account_id`) with degree 1.0": the project tells you the account every time. `n_distinct` says the pair has 19,959 combinations, not 1,000 x 20,000. Run the opening query again and the estimate is `rows=100` against the actual 85.
+
+Extended statistics come in three kinds, one per kind of correlation:
+
+| Kind | Fixes | Use for |
+|---|---|---|
+| `dependencies` | Equality filters where one column determines another | tenant + project, zip + city |
+| `ndistinct` | Group counts for `GROUP BY` and `DISTINCT` on several columns | Rollups over correlated keys |
+| `mcv` | Filters on partially correlated combinations | status + kind, plan + region |
+
+Leave out the kind list to get all three. They're cheap, but add them where you've seen a misestimate, not on every column pair.
+
+<DeepDive title="What ndistinct and mcv statistics fixed, measured">
+
+<ProveIt lab="19-planner">
+
+```sql
+select lab.prove(
+  'before extended statistics: estimated 1 row, actual 85',
+  (select (p -> 'Plan' ->> 'Plan Rows')::numeric = 1
+      and (p -> 'Plan' ->> 'Actual Rows')::numeric = 85
+   from lab.plan($$ select * from events where account_id = 696 and project_id = 4242 $$) p));
+
+select lab.prove(
+  'after extended statistics: estimated about 100 rows, actual 85',
+  (select (p -> 'Plan' ->> 'Plan Rows')::numeric between 60 and 140
+      and (p -> 'Plan' ->> 'Actual Rows')::numeric = 85
+   from lab.plan($$ select * from events where account_id = 696 and project_id = 4242 $$) p));
+```
+
+</ProveIt>
+
+**`ndistinct`** fixes group counts. Before it, `select account_id, project_id, count(*) from events group by 1, 2` was planned like this:
+
+```text
+ HashAggregate  (cost=188301.60..209833.36 rows=200005 width=24)
+                (actual time=289.762..290.971 rows=20000.00 loops=1)
+   Planned Partitions: 4  Batches: 1  Memory Usage: 3097kB
+```
+
+With no idea how many pairs exist, the planner guessed 10% of the input, 200,005 groups, and planned 4 on-disk partitions for a hash table it expected to overflow `work_mem`. After: `rows=19959`, no planned spill, a third of the cost. Runtime barely moved because the table fit anyway; in a bigger query, a 10x overestimate of groups is what flips an aggregate to sorting, or hashes the wrong side of a join three levels up.
+
+**`mcv`** handles partial correlation, where one column only *usually* predicts the other. In a copy of `events` with a `status` that's `failed` for 95% of alerts and 5% of everything else, multiplying got it wrong in both directions: failed alerts estimated at 42,822 (actual 237,213, 5.5x under), failed builds at 123,067 (actual 37,336, 3.3x over). After `create statistics event_outcomes_kind_status (mcv) on kind, status from event_outcomes`, both landed within 10%. The stored list shows why:
+
+```text
+      values      |       frequency       |    base_frequency
+------------------+-----------------------+----------------------
+ {alert,failed}   |   0.11763333333333334 | 0.020256466666666667
+ ...
+```
+
+`frequency` is what the sample saw; `base_frequency` is what multiplying the per-column frequencies predicts. Where they differ by almost 6x, independence was badly wrong.
+
+<ProveIt lab="19-planner">
+
+```sql
+select lab.prove(
+  'before extended statistics: GROUP BY over both columns is estimated at about 200,000 groups, actual 20,000',
+  (select (p -> 'Plan' ->> 'Plan Rows')::numeric between 150000 and 250000
+      and (p -> 'Plan' ->> 'Actual Rows')::numeric = 20000
+   from lab.plan($$ select account_id, project_id, count(*) from events group by 1, 2 $$) p));
+
+select lab.prove(
+  'after extended statistics: the GROUP BY estimate is within 10% of the 20,000 actual groups',
+  (select (p -> 'Plan' ->> 'Plan Rows')::numeric between 18000 and 22000
+   from lab.plan($$ select account_id, project_id, count(*) from events group by 1, 2 $$) p));
+
+select lab.prove(
+  'before MCV statistics: failed alerts are underestimated more than 4x',
+  (select (n ->> 'Actual Rows')::numeric / (n ->> 'Plan Rows')::numeric > 4
+   from lab.plan($$ select count(*) from event_outcomes
+                    where kind = 'alert' and status = 'failed' $$) p,
+        lab.find_node(p -> 'Plan', 'Seq Scan') n));
+
+create statistics event_outcomes_kind_status (mcv) on kind, status from event_outcomes;
+analyze event_outcomes;
+
+select lab.prove(
+  'after MCV statistics: both estimates land close to the actual counts',
+  (select bool_and((n ->> 'Plan Rows')::numeric / (n ->> 'Actual Rows')::numeric between 0.8 and 1.25)
+   from (values ('alert'), ('build')) k(kind),
+        lab.plan(format($$ select count(*) from event_outcomes
+                           where kind = %L and status = 'failed' $$, k.kind)) p,
+        lab.find_node(p -> 'Plan', 'Seq Scan') n));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<Callout type="tip" title="How to find candidates">
+At the node where the estimate goes wrong, if it filters on two or more columns of the same table and each column's estimate alone is fine, you have correlated columns: create statistics on exactly those columns, analyze, and check again.
+</Callout>
+
+## Functions hide your statistics
+
+Statistics are per column. Wrap a column in a function and the planner has nothing to look up, so it falls back to constants in its source code: 0.5% of the table for equality, 33% for a range.
+
+```text
+ Seq Scan on events  (cost=0.00..65173.71 rows=10000 width=111)
+   Filter: ((payload ->> 'status'::text) = 'failed'::text)
+```
+
+10,000 rows is 0.5% of 2 million; the real count is 500,420, 50x more. `lower(kind) = 'deploy'` gets the same 10,000 (actual 499,992), and `(payload->>'duration_ms')::int > 4000` gets a flat third, 666,682 (actual 400,064). These numbers aren't about your data at all.
+
+<DeepDive title="The fallback constants, proven">
+
+The constants are `DEFAULT_EQ_SEL` (0.005) and `DEFAULT_INEQ_SEL` (one third) in the planner's [selfuncs.h](https://github.com/postgres/postgres/blob/master/src/include/utils/selfuncs.h), next to a handful of others for `like`, ranges, and booleans. The plan's cost gives the expression away too: 65,173.71 is the plain scan's 60,173 plus one more `cpu_operator_cost` per row, for the `->>` call itself.
+
+<ProveIt lab="19-planner">
+
+```sql
+select lab.prove(
+  'an expression compared with = is estimated at 0.5% of the table',
+  (select bool_and(abs((lab.estimate(q) ->> 'Plan Rows')::numeric
+                       - 0.005 * (select reltuples from pg_class where relname = 'events')) < 10)
+   from (values ($$ select * from events where payload ->> 'status' = 'failed' $$),
+                ($$ select * from events where lower(kind) = 'deploy' $$)) v(q)));
+
+select lab.prove(
+  'an expression compared with > is estimated at one third of the table',
+  abs((lab.estimate($$ select * from events where (payload ->> 'duration_ms')::int > 4000 $$)
+       ->> 'Plan Rows')::numeric
+      - (select reltuples / 3 from pg_class where relname = 'events')) < 10);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+You can give the planner real numbers two ways. An **expression index**: `ANALYZE` collects statistics on every indexed expression as if it were a column. Or **expression statistics** (PostgreSQL 14+), which collect the same statistics without an index to maintain on every write:
+
+```sql
+create statistics events_status_stats on (payload ->> 'status') from events;
+analyze events;
+```
+
+Now the first query is estimated at 500,670 rows against 500,420. [Compare estimated and actual rows](/books/eight-kilobytes/explain#compare-estimated-and-actual-rows) shows this fix turning a bad nested loop into a hash join. (If a jsonb field needs statistics, ask whether it should be a real column.)
+
+### A function in FROM is guessed at 1,000 rows
+
+A function in `FROM` is a black box, estimated at 1,000 rows unless the planner can see inside:
+
+```text
+ Function Scan on recent_projects_plpgsql  (cost=0.25..10.25 rows=1000 width=72)
+```
+
+That's a PL/pgSQL function returning one account's recent projects. As a single-statement `language sql` function, the planner inlines the body, statistics and all: a `Seq Scan on projects` estimated at 1 row. When you can't inline, declare a realistic estimate: `alter function recent_projects_plpgsql(bigint) rows 5`. What blocks inlining, and what volatility promises the planner, are in [Volatility is a promise to the planner](/books/eight-kilobytes/functions#volatility-is-a-promise-to-the-planner).
+
+<DeepDive title="The two versions of the function">
+
+```sql
+create function recent_projects_plpgsql(acct bigint) returns setof projects
+language plpgsql stable as $$
+begin
+  return query
+    select * from projects
+    where account_id = acct and created_at > now() - interval '30 days';
+end
+$$;
+
+create function recent_projects(acct bigint) returns setof projects
+language sql stable as $$
+  select * from projects
+  where account_id = acct and created_at > now() - interval '30 days'
+$$;
+```
+
+```text
+ Seq Scan on projects  (cost=0.00..591.00 rows=1 width=53)
+   Filter: ((account_id = '42'::bigint) AND (created_at > (now() - ...)))
+```
+
+That's `explain select * from recent_projects(42)`: the body, inlined. Built-ins like `generate_series` have support functions that compute the real count when the arguments are constants (`rows=50` for `generate_series(1, 50)`). `COST`, in units of `cpu_operator_cost`, prices a call; in `WHERE` clauses the planner evaluates cheaper conditions first.
+
+</DeepDive>
+
+## Prepared statements switch plans after five runs
+
+Most drivers and ORMs use prepared statements: parsed once, executed many times. The first five executions each get a **custom plan**, built for the actual values. From the sixth on, Postgres also builds a **generic plan** with the parameters unknown, and if it looks no costlier than the average custom plan, it switches to it for good and stops planning. For short queries run thousands of times a second, that saving is real.
+
+The danger is skew: a generic plan can't see the value, so it plans for an average one. Take `latest($1)`, the 10 newest events of a kind, with indexes on `events (kind)` and `events (created_at)` and 20 rows of a rare new kind, `incident`, from ten months ago. Custom plans adapt: for `incident`, fetch the 20 rows by the `kind` index and sort (23 pages); for `build`, walk the `created_at` index backward and stop after 10 (5 pages).
+
+Run it a few more times, as an app would, and the sixth execution switches to the generic plan. Now someone opens the incidents page:
+
+```text
+ Limit  (cost=0.43..2.73 rows=10 width=16)
+        (actual time=284.639..291.002 rows=10.00 loops=1)
+   Buffers: shared hit=4691 read=29845 written=7425
+   ->  Index Scan Backward using events_created_at_idx on events
+           (cost=0.43..92124.34 rows=399999 width=16)
+           (actual time=284.638..290.994 rows=10.00 loops=1)
+         Filter: (kind = $1)
+         Rows Removed by Filter: 1698631
+```
+
+The generic plan assumes `kind = $1` matches a fifth of the table (1 over `n_distinct`), so walking `created_at` backward should find 10 almost at once. Instead it walked 1.7 million rows and 34,536 pages to reach incidents ten months old, where the custom plan touched 23: a 1,500x difference, caused entirely by plan caching.
+
+`Filter: (kind = $1)`, with `$1` instead of a literal, is how you spot a generic plan.
+
+`plan_cache_mode` controls this: `auto` (the default), `force_custom_plan`, or `force_generic_plan`. Set `force_custom_plan` per role, function, or session for queries over skewed columns, where a fraction of a millisecond of planning is cheap insurance; it brings the incidents query back to 23 pages. Keep `auto` for high-frequency, uniform lookups. PL/pgSQL caches plans inside functions the same way ([PL/pgSQL caches plans per session](/books/eight-kilobytes/functions#plpgsql-caches-plans-per-session)).
+
+<Callout type="warn" title="The query that is slow only in production">
+Fast when you paste it into psql, slow from the application? Suspect a generic plan. psql sends literal values, so it always gets a custom plan; your driver sends parameters. Reproduce it with `PREPARE` and six `EXECUTE`s, or `set plan_cache_mode = force_generic_plan` in your session. On PostgreSQL 16+, `explain (generic_plan)` takes the query with its `$1` placeholders as written and shows the generic plan directly.
+</Callout>
+
+<DeepDive title="The setup, and why the generic plan guessed a fifth">
+
+```sql
+prepare latest(text) as
+  select id, created_at from events
+  where kind = $1
+  order by created_at desc
+  limit 10;
+
+insert into events (account_id, project_id, user_id, kind, payload, created_at)
+select p.account_id, p.id, p.owner_id, 'incident', '{"status": "failed"}',
+       timestamptz '2026-10-06' - interval '300 days' - g * interval '1 day'
+from generate_series(1, 20) g
+join projects p on p.id = g * 100;
+
+create index events_kind_idx on events (kind);
+create index events_created_at_idx on events (created_at);
+vacuum analyze events;
+```
+
+The 30,000-row sample usually misses all 20 incidents, so the statistics count 5 kinds (6 when the sample catches one), and the generic plan prices `kind = $1` at a fifth of the table: `rows=399999`. The two custom plans, for reference:
+
+```text
+-- execute latest('incident')
+ Limit  (cost=8.46..8.46 rows=1 width=16) (actual ... rows=10.00 loops=1)
+   Buffers: shared hit=20 read=3
+   ->  Sort  (cost=8.46..8.46 rows=1 width=16) (actual ... rows=10.00 loops=1)
+         ->  Index Scan using events_kind_idx on events  (cost=0.43..8.45 rows=1 ...)
+                 (actual ... rows=20.00 loops=1)
+
+-- execute latest('build')
+ Limit  (cost=0.43..1.66 rows=10 width=16) (actual ... rows=10.00 loops=1)
+   Buffers: shared hit=3 read=2
+   ->  Index Scan Backward using events_created_at_idx on events
+           (cost=0.43..92124.34 rows=745065 width=16) (actual ... rows=10.00 loops=1)
+         Rows Removed by Filter: 19
+```
+
+(`generic_plans` and `custom_plans` in `pg_prepared_statements` are PostgreSQL 14+.)
+
+<ProveIt lab="19-planner">
+
+```sql
+select lab.prove(
+  'after five executions: five custom plans, no generic plan yet',
+  (select (generic_plans, custom_plans) = (0::bigint, 5::bigint)
+   from pg_prepared_statements where name = 'latest'));
+
+select lab.prove(
+  'the sixth execution switches to the generic plan',
+  (select (generic_plans, custom_plans) = (1::bigint, 5::bigint)
+   from pg_prepared_statements where name = 'latest'));
+
+select lab.prove(
+  'the generic plan for incident filters on $1 and reads over 30,000 pages',
+  (select lab.find_node(p -> 'Plan', 'Index Scan') ->> 'Filter' = '(kind = $1)'
+      and (p -> 'Plan' ->> 'Shared Hit Blocks')::int + (p -> 'Plan' ->> 'Shared Read Blocks')::int > 30000
+   from lab.plan($$ execute latest('incident') $$) p));
+
+set plan_cache_mode = force_custom_plan;
+
+select lab.prove(
+  'force_custom_plan brings incident back to the kind index and a few dozen pages',
+  (select lab.find_node(p -> 'Plan', 'Index Scan') ->> 'Index Name' = 'events_kind_idx'
+      and (p -> 'Plan' ->> 'Shared Hit Blocks')::int + (p -> 'Plan' ->> 'Shared Read Blocks')::int < 50
+   from lab.plan($$ execute latest('incident') $$) p));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A hint freezes a plan; fix the estimate instead
+
+Postgres has no built-in optimizer hints: no `/*+ INDEX(...) */`, no `FORCE INDEX` ([Postgres fixes estimates instead of taking hints](/books/eight-kilobytes/not-mysql#postgres-fixes-estimates-instead-of-taking-hints)). That's deliberate, and we think it's right. A hint freezes a plan that was right on the day it was written, rots silently as the data changes, and hides the real problem: a bad estimate.
+
+Everything in this chapter is what to do instead: find the node where the estimate goes wrong ([A method for slow queries](/books/eight-kilobytes/explain#a-method-for-slow-queries)), then fix what the planner knows, with fresh statistics after a bulk load, better statistics, a [sargable](/books/eight-kilobytes/queries#keep-the-indexed-column-bare) query, or a better index. Often the bad plan was the best one available, given what the planner knew. The next chapter ends with the tools for looking at the plan the planner rejected, and the extension for the night you need a hint anyway.
+
+## The short version
+
+- Wrong row estimates cause most bad plans. Fix estimates before you touch cost settings.
+- `pg_stats` is the planner's whole picture of a column. Read it when an estimate looks off.
+- Raise the statistics target per column (500 to 1000) for skewed tenant ids, and run `ANALYZE` yourself after bulk loads.
+- The planner multiplies as if columns were independent. For correlated columns, `create statistics` took 1 row to 100 against 85 actual.
+- Expressions on columns get fixed guesses (0.5% for equality, 33% for ranges). Give them an expression index or expression statistics.
+- Prepared statements switch to a generic plan after five runs. On skewed data that cost 1,500x; `plan_cache_mode = force_custom_plan`, scoped to a role or function, fixes it.
+- Postgres has no hints. Fix the estimate, the statistics, the index, or the query.
+
+## Further reading
+
+- [Statistics Used by the Planner](https://www.postgresql.org/docs/18/planner-stats.html), PostgreSQL documentation. What `ANALYZE` collects, including extended statistics; pair it with [How the Planner Uses Statistics](https://www.postgresql.org/docs/18/planner-stats-details.html) for worked row-estimation arithmetic.
+- [CREATE STATISTICS](https://www.postgresql.org/docs/18/sql-createstatistics.html), PostgreSQL documentation. Every kind of extended statistic and the expression form.
+- [Query Planning settings](https://www.postgresql.org/docs/18/runtime-config-query.html), PostgreSQL documentation. Cost constants and `plan_cache_mode`.
+- [PREPARE: notes on custom and generic plans](https://www.postgresql.org/docs/18/sql-prepare.html#SQL-PREPARE-NOTES), PostgreSQL documentation. The exact rule for when a prepared statement switches plans.
+- [How Good Are Query Optimizers, Really?](https://www.vldb.org/pvldb/vol9/p204-leis.pdf), Leis et al., PVLDB 2015. Evidence, using PostgreSQL, that bad cardinality estimates rather than cost models cause most bad plans.
+- [OptimizerHintsDiscussion](https://wiki.postgresql.org/wiki/OptimizerHintsDiscussion), PostgreSQL wiki. The project's reasoning for leaving hints out of core.

@@ -2,7 +2,7 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
-import readingTime from "reading-time";
+import { readingMinutes } from "@/lib/reading";
 
 /** Root directory holding all long-form content collections. */
 const CONTENT_ROOT = path.join(process.cwd(), "content");
@@ -38,7 +38,7 @@ export function readDoc(collection: string, slug: string): RawDoc | null {
     slug,
     content,
     data,
-    readingMinutes: Math.max(1, Math.round(readingTime(content).minutes)),
+    readingMinutes: readingMinutes(content),
   };
 }
 

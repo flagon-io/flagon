@@ -1,0 +1,673 @@
+---
+title: The settings that matter
+description: Which of Postgres's 400 settings deserve your attention, how to change each one safely, and a commented starter config for a 4 vCPU, 16 GB server.
+part: Running it
+builds_on: [buffers, wal, vacuum]
+---
+
+A stock PostgreSQL 18 server on a 64 GB machine uses 128 MB of it for its own cache. It assumes random reads cost four times as much as sequential ones, as if it sat on a spinning disk. It starts a [checkpoint](/books/eight-kilobytes/glossary#checkpoint) every half gigabyte or so of WAL, and it logs nothing about slow queries, lock waits, or temporary files.
+
+Every one of those defaults is safe, chosen so Postgres can start on the smallest machine anyone might run. That's right for a default and wrong for your production server.
+
+Of roughly 400 settings, a couple of dozen matter. Here they are, how to pick each, and what to check underneath Postgres. Set them before anyone asks for a bigger server: a stock config wastes whatever box you give it ([Earn the bigger box](/books/eight-kilobytes/scale#earn-the-bigger-box)).
+
+<DeepDive title="The defaults, checked against the server">
+
+Every setting's compiled-in default is in `pg_settings.boot_val`, next to its current value and where that value came from. To see everything a server changed from stock, which is also the first thing to read on a server you inherit:
+
+```sql
+select name, setting, unit, boot_val, source
+  from pg_settings
+ where setting is distinct from boot_val
+ order by source, name;
+```
+
+A few rows are written into `postgresql.conf` by `initdb` (`TimeZone`, `log_timezone`, the `lc_*` settings, and sometimes `max_connections` or `shared_buffers` on a small machine), so `source` says configuration file even though nobody chose them.
+
+<ProveIt lab="29-configuration">
+
+```sql
+-- boot_val is the compiled-in default, whatever this server's config says
+select lab.prove('shared_buffers defaults to 128 MB (16384 pages of 8 kB)',
+  boot('shared_buffers') = '16384'
+  and (select unit from pg_settings where name = 'shared_buffers') = '8kB');
+select lab.prove('random_page_cost defaults to 4, seq_page_cost to 1',
+  boot('random_page_cost') = '4' and boot('seq_page_cost') = '1');
+select lab.prove('a checkpoint starts after about max_wal_size / (1 + checkpoint_completion_target) of WAL: ~539 MB',
+  round(1024 / (1 + boot('checkpoint_completion_target')::numeric)) = 539);
+select lab.prove('no slow-query, lock-wait, or temp-file logging by default',
+  boot('log_min_duration_statement') = '-1'
+  and boot('log_lock_waits') = 'off'
+  and boot('log_temp_files') = '-1');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Know where a setting is set and what applies it
+
+Before you change a value, know where it can be set and what it takes to apply. Most "the setting didn't take" mysteries are one of those two.
+
+### The most specific setting wins
+
+```text
+ postgresql.conf          server-wide, edited by hand
+ postgresql.auto.conf     server-wide, written by ALTER SYSTEM
+ ALTER DATABASE ... SET   per database, at connection start
+ ALTER ROLE ... SET       per role (and per role in a database)
+ SET                      per session
+ SET LOCAL                until the end of the transaction
+```
+
+Each line overrides those above. Per-role settings are underrated: each workload gets its own limits. The app role's timeouts are in [Every timeout defaults to off](/books/eight-kilobytes/connections#every-timeout-defaults-to-off); a reporting role gets the opposite treatment, more memory and more patience:
+
+```sql
+alter role reporting set work_mem = '256MB';
+alter role reporting set statement_timeout = '5min';
+```
+
+They apply when a session starts, so pooled connections keep old values until they reconnect. When a setting doesn't seem to take effect, `pg_settings.source` says where the value came from.
+
+<DeepDive title="A database setting, then a role setting on top">
+
+Set `work_mem` for the database: a new session reports it with `source = database`, while a session already connected keeps its old value. Add a role setting and it wins, with `source = user`. Database and role settings live in `pg_db_role_setting`.
+
+<ProveIt lab="29-configuration">
+
+```sql
+alter database :"DBNAME" set work_mem = '16MB';
+select lab.prove('a new session picks up the database setting, with source = database',
+  (select s from dblink('fresh',
+     $$select setting || ' ' || unit || ' ' || source from pg_settings where name = 'work_mem'$$) t(s text))
+  = '16384 kB database');
+select lab.prove('this session, connected before the change, keeps its old value',
+  current_setting('work_mem') = '4MB');
+alter role lab_cfg_reporting set work_mem = '256MB';
+select lab.prove('a role setting overrides the database setting (source = user)',
+  (select s from dblink('reporting',
+     $$select current_setting('work_mem') || ' ' || source from pg_settings where name = 'work_mem'$$) t(s text))
+  = '256MB user');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Context decides reload or restart
+
+The `context` column of `pg_settings` says what a change takes:
+
+| context      | how to change it                                   | examples                                  |
+|--------------|----------------------------------------------------|-------------------------------------------|
+| `postmaster` | config file or `ALTER SYSTEM`, then **restart**    | `shared_buffers`, `max_connections`, `io_method` |
+| `sighup`     | config file or `ALTER SYSTEM`, then **reload**     | `max_wal_size`, most `autovacuum_*` |
+| `superuser`  | reload, or `SET` by a superuser                    | `log_min_duration_statement`, `wal_compression` |
+| `user`       | reload, or `SET` by anyone, per role, per database | `work_mem`, `random_page_cost`, `statement_timeout` |
+
+For server-wide settings, `alter system set ...` then `select pg_reload_conf()`; a reload is harmless, and running queries continue. A `postmaster` setting is recorded but not applied until a restart, so run this after every config change:
+
+```sql
+select name, setting, pending_restart from pg_settings where pending_restart;
+```
+
+<Callout type="tip" title="Pick one place for server settings">
+
+`postgresql.auto.conf` overrides `postgresql.conf`. Mix the two and someday a change to `postgresql.conf` does nothing because an old `ALTER SYSTEM` still wins. Choose one (config management usually means the file) and clear the other with `alter system reset all`.
+
+</Callout>
+
+<DeepDive title="Settings you can't change, and contexts checked">
+
+`internal` settings can't be changed at all (`block_size`, `data_checksums`). `pg_file_settings` shows each config file line and whether it applied; its `error` column catches bad values a reload reports only in the server log.
+
+<ProveIt lab="29-configuration">
+
+```sql
+select lab.prove('postmaster (restart): shared_buffers, max_connections, io_method',
+  ctx('shared_buffers') = 'postmaster' and ctx('max_connections') = 'postmaster'
+  and ctx('io_method') = 'postmaster');
+select lab.prove('user: work_mem, random_page_cost, statement_timeout',
+  ctx('work_mem') = 'user' and ctx('random_page_cost') = 'user' and ctx('statement_timeout') = 'user');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Memory: budget it before you tune it
+
+Postgres has one shared pool allocated at startup, plus private memory each connection allocates as it runs ([Backend memory is private](/books/eight-kilobytes/buffers#backend-memory-is-private)). The second kind is how servers run out of memory, so add up the ceilings before raising anything. The budget for this chapter's starter config:
+
+```text
+ 16 GB server, starter config
+ ------------------------------------------------------------
+ allocated at startup
+   shared_buffers                               4 GB
+ ceilings, used only when busy
+   work_mem 32MB x 3 nodes x 100 connections    9.4 GB
+     (x2 for hash nodes, x3 with 2 parallel workers)
+   autovacuum_work_mem 512MB x 4 workers        2 GB
+   maintenance_work_mem 1GB x 1 index build     1 GB
+ everything left over
+   OS page cache, the second cache tier         the rest
+ ------------------------------------------------------------
+ ceilings alone: 16.4 GB. Nothing left for the OS cache.
+```
+
+The ceilings overcommit the machine, and that's normal: most queries use a sliver of `work_mem`. But know which line grows with traffic: `work_mem`, times connections.
+
+### shared_buffers starts at 25% of RAM, not 80%
+
+`shared_buffers` is Postgres's own page cache ([shared_buffers is an array of pages](/books/eight-kilobytes/buffers#shared_buffers-is-an-array-of-pages)), 128 MB by default. Start at **25% of RAM** on a dedicated server. Not 80%: Postgres also reads through the [OS page cache](/books/eight-kilobytes/glossary#os-page-cache), a second, larger tier, and a huge `shared_buffers` squeezes it and caches pages twice. Beyond 40%, measure. It needs a restart.
+
+### A big shared_buffers wants huge pages
+
+With a large `shared_buffers`, use 2 MB **huge pages** on Linux: with ordinary 4 KB pages, the page tables of hundreds of processes mapping 16 GB of shared memory can take gigabytes. Reserve them in the kernel (`vm.nr_hugepages`, sized by `postgres -C shared_memory_size_in_huge_pages`), then set `huge_pages = on`; the default, `try`, silently falls back when none are reserved.
+
+### effective_cache_size is a hint: set it to 50% to 75% of RAM
+
+It allocates nothing. The planner reads it as a hint about how much can be cached ([effective_cache_size is a hint, not memory](/books/eight-kilobytes/buffers#effective_cache_size-is-a-hint-not-memory)). Set it to 50% to 75% of RAM; the default is 4 GB.
+
+### work_mem: multiply before you raise it
+
+[`work_mem`](/books/eight-kilobytes/glossary#work_mem) (default 4 MB) is the memory a query may use for **each** sort or hash node before spilling to temporary files. Sorting all of `events` at the default, then at 256 MB:
+
+```text
+   Sort Method: external merge  Disk: 50896kB
+...
+   Sort Method: quicksort  Memory: 111653kB
+```
+
+At 4 MB the sort wrote 50 MB to temp files; at 256 MB it sorted in 109 MB of memory. The threshold is sharp: 64 MB still spilled the same 50 MB, and 128 MB fit. On our machine the in-memory sort wasn't even faster. Spills matter when they're big, frequent, or on slow storage.
+
+So why not `work_mem = 256MB` globally? The word *each*. A plan can have several sort and hash nodes ([work_mem is per node, and you can see it](/books/eight-kilobytes/buffers#work_mem-is-per-node-and-you-can-see-it)), hash nodes get twice `work_mem` (`hash_mem_multiplier`, 2.0 by default since PostgreSQL 15), each parallel worker gets its own allowance, and every connection can do it at once:
+
+```text
+ max memory  ~  connections x nodes per query x work_mem (x2 for hashes)
+                x (1 + parallel workers)
+
+ 200 connections x 3 nodes x 64MB = 38 GB   on a 16 GB server
+```
+
+The tail is what wakes the Linux OOM killer, and when it kills a backend, the whole server restarts ([below](#dont-let-the-oom-killer-choose-the-postmaster)). So:
+
+1. Keep global `work_mem` modest: 16 to 64 MB behind a pooler, lower with many connections.
+2. Raise it per role (like the `reporting` role above) or per transaction (`set local work_mem = '512MB'`) where you know it's needed.
+3. Turn on `log_temp_files` (below) to find what actually spills.
+
+<DeepDive title="The spill threshold, and nine allowances in one aggregate">
+
+<ProveIt lab="29-configuration">
+
+```sql
+-- each row: one EXPLAIN ANALYZE of the sort at that work_mem
+select lab.prove('at the default 4 MB the sort spills: external merge, about 50 MB on disk',
+  (select method = 'external merge' and space_type = 'Disk'
+          and space_kb between 45000 and 56000 and temp_written > 10000
+     from sorts where work_mem = '4MB'));
+select lab.prove('at 256 MB it sorts in memory, using about 109 MB',
+  (select method = 'quicksort' and space_type = 'Memory' and space_kb between 100000 and 120000
+     from sorts where work_mem = '256MB'));
+select lab.prove('the threshold: 64 MB (less than the sort needs) still spills, 128 MB (more) does not',
+  (select method from sorts where work_mem = '64MB') = 'external merge'
+  and (select method from sorts where work_mem = '128MB') = 'quicksort');
+```
+
+</ProveIt>
+
+The sort ran with parallelism off; its spill was `temp written=12751` blocks. An ordinary `select kind, count(*) from events group by kind` runs a Sort over a Partial HashAggregate in three processes (leader and two workers). It used kilobytes (25 KB per sort, 32 KB per hash), but its *ceiling* is `work_mem` for the sort plus twice that for the hash, per process: nine times `work_mem`.
+
+</DeepDive>
+
+### Each autovacuum worker takes maintenance_work_mem too
+
+`maintenance_work_mem` (default 64 MB) serves `CREATE INDEX`, `VACUUM`, and restores; few run at once, so 1 GB is reasonable on 16 GB. Each autovacuum worker takes that much too unless you set `autovacuum_work_mem` explicitly. (Vacuum short on memory [rescans every index](/books/eight-kilobytes/vacuum#1-remove-dead-row-versions).)
+
+## Tell Postgres what your storage can do
+
+Two groups of settings describe your disks to Postgres: one prices reads for the planner, the other decides how many reads to keep in flight.
+
+### random_page_cost assumes spinning disks
+
+The planner prices a sequential page read at 1 and a random one at `random_page_cost = 4`, a ratio that models disk heads seeking. On SSDs, random reads cost nearly the same, so the default undervalues index scans. The events of the first twenty projects, in project order, with an index on `project_id`:
+
+```text
+-- random_page_cost = 4
+   Buffers: shared hit=135 read=1784
+   ->  Sort ...
+         ->  Bitmap Heap Scan on events ...
+-- random_page_cost = 1.1
+   Buffers: shared hit=1970
+   ->  Index Scan using events_project_id_idx on events ...
+```
+
+Both touch about the same pages (1,919 against 1,970). At `4` the planner priced reading the index in order above a bitmap scan plus a sort, so it gathered pages with a bitmap and sorted; at `1.1` the in-order index scan won and the sort disappeared. Set `random_page_cost = 1.1` on SSD-backed servers, cloud block storage included. It's a `user` setting, so try it per session first and see which plans change ([The planner is guessing](/books/eight-kilobytes/planner)).
+
+<DeepDive title="The two plans, and the query behind them">
+
+```sql
+create index events_project_id_idx on events (project_id);
+set max_parallel_workers_per_gather = 0;
+explain (analyze, timing off)
+select * from events where project_id between 1 and 20
+order by project_id limit 5000;
+```
+
+The `limit` is a cap the query never reaches (1,967 rows). Estimated costs: 6,748 at `4`, 2,244 at `1.1`.
+
+<ProveIt lab="29-configuration">
+
+```sql
+\set q 'select * from events where project_id between 1 and 20 order by project_id limit 5000'
+select lab.prove('at random_page_cost = 4: a bitmap heap scan, then a sort',
+  (:'nodes_at_4')::text[] @> array['Sort', 'Bitmap Heap Scan']);
+select lab.prove('at 1.1: an index scan in order, no sort',
+  (:'nodes_at_11')::text[] @> array['Index Scan'] and not (:'nodes_at_11')::text[] @> array['Sort']);
+select lab.prove('both touch about the same number of pages',
+  :buffers_at_11::numeric / :buffers_at_4 between 0.8 and 1.25);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Fast storage wants more reads in flight
+
+`effective_io_concurrency` sets how many reads Postgres may have in flight when it can predict the pages it needs. PostgreSQL 18 raised its default from 1 to 16 (and `maintenance_io_concurrency` from 10 to 16); on fast NVMe or high-IOPS cloud volumes, 64 to 200 can help scans that read from disk.
+
+PostgreSQL 18 also added **asynchronous I/O** for reads, chosen by `io_method`, which needs a restart. `worker`, the default, hands reads to `io_workers` processes; `io_uring` uses the Linux kernel's interface; `sync` is the old behavior. Keep `worker`. If scans are I/O-bound, raise `io_workers` first, which takes only a reload.
+
+## Space out checkpoints and size max_wal_size to your WAL rate
+
+[Write it down first](/books/eight-kilobytes/wal) explains what these do; here's how to set them:
+
+- **`checkpoint_timeout`** (5 min): raise to 15 to 30 minutes on write-heavy systems. Fewer [full-page images](/books/eight-kilobytes/glossary#full-page-write), longer crash recovery.
+- **`max_wal_size`** (1 GB): a soft cap on WAL between checkpoints; Postgres requests one at about `max_wal_size / (1 + checkpoint_completion_target)`, roughly 540 MB at the defaults. Measure your WAL rate (an [LSN](/books/eight-kilobytes/glossary#lsn) diff over a busy hour) and set this comfortably above one interval's worth: 4 to 16 GB is common on a 16 GB server, with that much free disk in `pg_wal`.
+- **`wal_compression`** (off): set `lz4` or `zstd`. In the WAL chapter's test, it cut image-heavy WAL to 59% and 35%.
+- **`min_wal_size`** (80 MB): 1 GB is fine. The rest are already right.
+
+Then confirm that most checkpoints are timed rather than requested ([Checkpoints put a limit on recovery](/books/eight-kilobytes/wal#checkpoints-put-a-limit-on-recovery) shows how to read `pg_stat_checkpointer`).
+
+<DeepDive title="The WAL defaults, checked">
+
+`wal_buffers` defaults to -1: 1/32 of `shared_buffers`, capped at one 16 MB WAL segment, which is right for nearly every server. Two WAL settings to leave alone: `wal_level` defaults to `replica`, enough for standbys and point-in-time recovery (only logical decoding needs `logical`), and `full_page_writes` stays on, because without it a crash in the middle of an 8 KB page write can leave a torn page that recovery can't repair. "The rest are already right" means these.
+
+<ProveIt lab="29-configuration">
+
+```sql
+select lab.prove('checkpoint_timeout 5 min, checkpoint_completion_target 0.9, min_wal_size 80 MB',
+  boot('checkpoint_timeout') = '300' and boot('checkpoint_completion_target') = '0.9'
+  and boot('min_wal_size') = '80');
+select lab.prove('wal_compression off (superuser), wal_buffers -1 (automatic, restart)',
+  boot('wal_compression') = 'off' and ctx('wal_compression') = 'superuser'
+  and boot('wal_buffers') = '-1' and ctx('wal_buffers') = 'postmaster');
+select lab.prove('18 defaults: effective_io_concurrency and maintenance_io_concurrency 16',
+  boot('effective_io_concurrency') = '16' and boot('maintenance_io_concurrency') = '16');
+select lab.prove('io_workers defaults to 3 and changes with a reload',
+  boot('io_workers') = '3' and ctx('io_workers') = 'sighup');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Autovacuum's defaults suit small tables and slow disks
+
+[Vacuum is not optional](/books/eight-kilobytes/vacuum) explains why those defaults fall behind on big tables and fast storage. The server-wide changes worth making:
+
+| setting                              | default | starting point | why |
+|--------------------------------------|---------|----------------|-----|
+| `autovacuum_vacuum_cost_limit`       | -1 (200) | 1000 to 2000  | too slow on SSDs, and shared by all workers |
+| `autovacuum_vacuum_scale_factor`     | 0.2     | 0.05           | vacuum at 5% dead, not 20% |
+| `autovacuum_vacuum_insert_scale_factor` | 0.2  | 0.05           | freeze and set visibility bits sooner |
+| `autovacuum_analyze_scale_factor`    | 0.1     | 0.02 to 0.05   | fresher statistics on growing tables |
+| `autovacuum_max_workers`             | 3       | 3 to 6         | more tables in parallel; raise the cost limit with it |
+| `log_autovacuum_min_duration`        | 10min   | 1s             | see what autovacuum is doing |
+
+Then add per-table settings for your biggest tables. PostgreSQL 18 also caps the dead-row trigger at `autovacuum_vacuum_max_threshold` (100 million rows by default), so a billion-row table no longer waits for 200 million dead rows ([Vacuum is not optional](/books/eight-kilobytes/vacuum) has the formula).
+
+<DeepDive title="The autovacuum defaults, checked">
+
+In PostgreSQL 18, `autovacuum_max_workers` changes with a reload, up to `autovacuum_worker_slots` (default 16, restart).
+
+Per-table settings are storage parameters, and they override the server-wide values for that table only. For a big, busy table like `events`:
+
+```sql
+alter table events set (autovacuum_vacuum_scale_factor = 0.01,
+                        autovacuum_analyze_scale_factor = 0.01);
+```
+
+A worker's cost budget is split across the workers running at once, unless the table has its own `autovacuum_vacuum_cost_limit`, in which case that worker runs on its own budget.
+
+<ProveIt lab="29-configuration">
+
+```sql
+select lab.prove('autovacuum_vacuum_cost_limit -1, meaning vacuum_cost_limit (200)',
+  boot('autovacuum_vacuum_cost_limit') = '-1' and boot('vacuum_cost_limit') = '200');
+select lab.prove('scale factors 0.2, 0.2 (insert), 0.1 (analyze)',
+  boot('autovacuum_vacuum_scale_factor') = '0.2'
+  and boot('autovacuum_vacuum_insert_scale_factor') = '0.2'
+  and boot('autovacuum_analyze_scale_factor') = '0.1');
+select lab.prove('autovacuum_max_workers 3, a reload in 18, up to autovacuum_worker_slots (16, restart)',
+  boot('autovacuum_max_workers') = '3' and ctx('autovacuum_max_workers') = 'sighup'
+  and boot('autovacuum_worker_slots') = '16' and ctx('autovacuum_worker_slots') = 'postmaster');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Parallel query speeds up one query, not the server
+
+Postgres can split a large scan, join, or aggregate across worker processes. That makes one big query faster. It doesn't raise queries per second, and on a busy OLTP server every core a query's workers take is a core other connections don't get.
+
+For 4 vCPUs: `max_parallel_workers = 4`, `max_parallel_workers_per_gather = 2`. Analytics servers can go higher; latency-sensitive OLTP can set it to 0 for the application role and let only reporting go parallel.
+
+<DeepDive title="How the planner decides how many workers">
+
+`max_worker_processes` (8, restart) caps all background workers, and `max_parallel_workers` (8) is parallel query's share. The planner scales workers by table size: past `min_parallel_table_scan_size` (8 MB) for one, three times more for each additional one, so `events` (275 MB) gets four.
+
+<ProveIt lab="29-configuration">
+
+```sql
+select lab.prove('events (275 MB) is past 8 x 3^3 = 216 MB but short of 648 MB: four workers',
+  pg_relation_size('events') between 216 * 1024 * 1024 and 648 * 1024 * 1024);
+set max_parallel_workers_per_gather = 8;
+select lab.prove('with the cap raised, the planner plans 4 workers for events',
+  (select (p -> 'Plan' -> 'Plans' -> 0 ->> 'Workers Planned')::int
+     from lab.plan('select kind, count(*) from events group by kind') p) = 4);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Cheap logging answers most 3 a.m. questions
+
+Out of the box, Postgres logs errors and checkpoints (`log_checkpoints` is on since PostgreSQL 15) and little else. These cost little and answer most "what happened at 3 a.m." questions:
+
+| setting                        | default | recommended | what it gives you                         |
+|--------------------------------|---------|-------------|-------------------------------------------|
+| `log_min_duration_statement`   | -1      | 250ms to 1s | every statement slower than this |
+| `log_lock_waits`               | off     | on          | a line whenever a lock wait exceeds `deadlock_timeout` (1s) |
+| `log_temp_files`               | -1      | 0 or a size | the queries that spill out of `work_mem` |
+| `log_autovacuum_min_duration`  | 10min   | 1s          | autovacuum runs with full statistics      |
+
+Set `log_line_prefix` to `'%m [%p] %q%u@%d %a '` so every line names the user, database, and `application_name`.
+
+Two cautions: `log_min_duration_statement` logs query parameters, so personal data can land in your logs; and `log_statement = 'all'` can produce more I/O than the database itself. Logs show which queries were slow; `pg_stat_statements` shows which cost the most in total, usually the better question ([Watch it run](/books/eight-kilobytes/observability)).
+
+### auto_explain logs the plan you can't reproduce later
+
+`auto_explain` logs the *plan* of a slow query as it actually ran, which you often can't reproduce later. Preload it (`shared_preload_libraries`) with `auto_explain.log_min_duration` at a couple of seconds, `log_analyze` and `log_buffers` on, and `log_timing` off: per-node timing is the expensive part. The starter config below has the lines.
+
+<DeepDive title="What auto_explain caught in one session">
+
+Loaded into one session with a 50 ms threshold, a count of failed alerts logged:
+
+```text
+NOTICE:  duration: 64.819 ms  plan:
+Query Text: select count(*) from events
+            where kind = 'alert' and payload->>'status' = 'failed';
+Finalize Aggregate  (... rows=1 width=8) (actual rows=1.00 loops=1)
+  Buffers: shared hit=4207 read=30966
+  ...
+        ->  Parallel Seq Scan on events  (... rows=511 width=0)
+                                         (actual rows=20820.33 loops=3)
+              Rows Removed by Filter: 645846
+```
+
+That plan tells a story on its own: 35,000 pages scanned for one count, and an estimate of 511 rows per process (about 1,200 in all: two workers plus the leader, which the planner expects to do less than a worker's share) against 62,461 actual ([The planner is guessing](/books/eight-kilobytes/planner) explains the misestimate).
+
+<ProveIt lab="29-configuration">
+
+```sql
+load 'auto_explain';
+select lab.prove('the slow count reads about 35,000 pages',
+  lab.buffers($$select count(*) from events where kind = 'alert' and payload->>'status' = 'failed'$$)
+  between 33000 and 37000);
+-- est: the scan's estimate across all processes; actual: rows x loops
+select lab.prove('the planner estimates under 5,000 matching rows; there are over 60,000',
+  (select est < 5000 and actual > 60000 from est));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## The kernel can take down a well-tuned server
+
+Every setting above can be right and the server can still fall over: Linux kills the postmaster, a checkpoint stalls behind gigabytes of dirty pages, a container gives parallel queries 64 MB of shared memory. The kernel answers by its own rules. (On a managed service the provider owns it, but an out-of-memory kill still reaches you, as every connection dropping at once.)
+
+### Don't let the OOM killer choose the postmaster
+
+By default Linux grants memory it may not be able to back, and when RAM and swap run out, the **OOM killer** kills a process. If it picks a backend, Postgres can't know whether shared memory was left half-changed, so it terminates every other process and runs crash recovery ([Checkpoints put a limit on recovery](/books/eight-kilobytes/wal#checkpoints-put-a-limit-on-recovery)). Every connection drops.
+
+The docs give two fixes, usable together. **Strict overcommit** (`vm.overcommit_memory = 2`) makes the kernel refuse allocations past a limit, so a query that wants too much fails alone with `out of memory`. **Protect the postmaster** with `oom_score_adj = -1000`, and set `PG_OOM_ADJUST_FILE` so its children stay killable. Neither fixes the cause. The [memory budget](#memory-budget-it-before-you-tune-it) does.
+
+<DeepDive title="Strict overcommit and oom_score_adj, step by step">
+
+Under strict overcommit the commit limit is `(RAM - huge pages) x vm.overcommit_ratio / 100 + swap`; the ratio defaults to 50, which refuses allocations with half the RAM free, so raise it (we start at 80 to 90), on a dedicated server only. Under systemd, protection is `OOMScoreAdjust=-1000` plus `Environment=PG_OOM_ADJUST_FILE=/proc/self/oom_score_adj`; without that variable every backend inherits the exemption. If the postmaster itself is killed, no new connections are accepted until a restart ([PostgreSQL docs](https://www.postgresql.org/docs/18/kernel-resources.html#LINUX-MEMORY-OVERCOMMIT)).
+
+```bash
+grep -E '^(CommitLimit|Committed_AS)' /proc/meminfo  # Committed_AS must stay below
+cat /proc/$(head -1 "$PGDATA/postmaster.pid")/oom_score_adj  # -1000: protected
+journalctl -k | grep -iE 'out of memory|killed process'     # past kills
+```
+
+<ProveIt lab="29-configuration">
+
+```sql
+select lab.prove('without PG_OOM_ADJUST_FILE, a backend inherits the postmaster''s oom_score_adj',
+  position('PG_OOM_ADJUST_FILE'::bytea in pg_read_binary_file('/proc/' || :pm_pid || '/environ')) = 0
+  and host_file('/proc/' || :pm_pid || '/oom_score_adj')
+      = host_file('/proc/' || pg_backend_pid() || '/oom_score_adj'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Decide the OS settings once per machine type
+
+Each of these is a kernel or filesystem choice Postgres can't make for you:
+
+- **Reserve huge pages (`vm.nr_hugepages`), and turn transparent huge pages off.** The docs discourage the transparent kind.
+- **Keep swap, and keep it rarely used** (`vm.swappiness` 1 to 10). A swapped-out backend is slow; a killed one restarts the server.
+- **Cap dirty pages in bytes** (`vm.dirty_background_bytes` and `vm.dirty_bytes`, about one second of what the storage can write). By default the kernel lets 10% of memory sit unflushed, and the checkpoint's `fsync` stalls every commit behind it: the latency spike every few minutes, on the dot.
+- **ext4 or XFS, `noatime`, and never disable write barriers**, or a power cut can lose commits Postgres reported as durable.
+- **Leave readahead and the I/O scheduler at their defaults, and keep `vm.zone_reclaim_mode = 0`.** For OLTP prefer fewer, faster cores; on x86 clouds a vCPU is usually half a physical core.
+- **In containers, budget against the cgroup limit**, which counts page cache, and give `/dev/shm` more than Docker's 64 MB, or big parallel queries can fail.
+
+<DeepDive title="Huge pages and dirty pages, by the numbers">
+
+`postgres -D "$PGDATA" -C shared_memory_size_in_huge_pages` answers even before the server starts (76 on the lab server, for 152 MB). Set `vm.nr_hugepages` to it, then `huge_pages = on`. Reserved huge pages are gone from everything else, so reserve only what Postgres needs ([docs recipe](https://www.postgresql.org/docs/18/kernel-resources.html#LINUX-HUGE-PAGES)). Transparent huge pages "has been known to cause performance degradation with PostgreSQL for some users on some Linux versions" ([docs](https://www.postgresql.org/docs/18/runtime-config-resource.html#GUC-HUGE-PAGES)); kernels have changed since those reports, but nobody has shown THP helping.
+
+Past `vm.dirty_background_ratio` (10) the kernel starts flushing; past `vm.dirty_ratio` (20) writers must flush their own pages: on a 256 GB box, around 25 GB before flushing starts. Postgres nudges the kernel as it writes (`checkpoint_flush_after` 256 KB, `bgwriter_flush_after` 512 KB), but bulk-writing backends don't (`backend_flush_after = 0`). Set byte limits to about one second of what the storage writes, and compare the `sync` time in `log_checkpoints` lines before and after.
+
+<ProveIt lab="29-configuration">
+
+```sql
+select lab.prove('huge_pages defaults to try, and changing it needs a restart',
+  boot('huge_pages') = 'try' and ctx('huge_pages') = 'postmaster');
+select lab.prove('on Linux, checkpoint_flush_after is 256 kB and bgwriter_flush_after 512 kB; backends: 0',
+  boot('checkpoint_flush_after') = '32' and boot('bgwriter_flush_after') = '64'
+  and boot('backend_flush_after') = '0'
+  and (select unit from pg_settings where name = 'checkpoint_flush_after') = '8kB');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="Containers: the page cache counts, and /dev/shm is 64 MB">
+
+A cgroup's memory includes page cache and shared memory ([kernel cgroup docs](https://docs.kernel.org/admin-guide/cgroup-v2.html)), and at `memory.max` the OOM killer runs inside it. Size `shared_buffers` from the limit in `/sys/fs/cgroup/memory.max`; `free` inside a container usually reports the host.
+
+Parallel queries share state, such as a parallel hash join's table, in `/dev/shm`, where Docker gives a container 64 MB. A few big parallel hash joins at once fail with `could not resize shared memory segment ... No space left on device`. The lab kit sets `shm_size: 512m`; on Kubernetes, mount a memory-backed `emptyDir` there ([Kubernetes docs](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir)).
+
+<ProveIt lab="29-configuration">
+
+```sql
+select lab.prove('shared_buffers lives in anonymous mmap memory; dynamic shared memory is POSIX shm',
+  current_setting('shared_memory_type') = 'mmap'
+  and current_setting('dynamic_shared_memory_type') = 'posix');
+select lab.prove('the lab kit''s compose file gives /dev/shm 512 MB, not Docker''s 64 MB',
+  host_file('/proc/self/mounts') ~ '/dev/shm \S+ \S*size=524288k');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="The whole sysctl file, and the commands to check a box">
+
+For the 16 GB starter box below, on a dedicated server, with storage that sustains about 500 MB/s:
+
+```ini
+# /etc/sysctl.d/30-postgresql.conf, then: sysctl --system
+vm.overcommit_memory = 2                # refuse, don't kill
+vm.overcommit_ratio = 85                # then watch Committed_AS vs CommitLimit
+vm.swappiness = 5                       # keep swap for emergencies
+vm.dirty_background_bytes = 268435456   # 256 MB; size to about 1 s of writes
+vm.dirty_bytes = 1073741824             # 1 GB
+vm.zone_reclaim_mode = 0                # the default; multi-socket boxes
+vm.nr_hugepages = N                     # from shared_memory_size_in_huge_pages
+# and on the kernel command line: transparent_hugepage=never
+```
+
+```bash
+cat /sys/kernel/mm/transparent_hugepage/enabled   # want [never] (or [madvise])
+grep -E '^(HugePages_(Total|Free|Rsvd)|Dirty|Writeback):' /proc/meminfo
+vmstat 5                                          # nonzero si/so: swapping now
+findmnt -no SOURCE,FSTYPE,OPTIONS -T "$PGDATA"    # noatime; never nobarrier
+```
+
+</DeepDive>
+
+## Start from this config for 4 vCPU and 16 GB, then measure
+
+Most values come from a section above; the few that don't carry a comment saying why. It assumes a dedicated server with SSDs, 4 vCPUs, 16 GB, and an app behind a pooler, checked against PostgreSQL 18.6. Before you copy it: `work_mem = 32MB` assumes about 100 server connections; `max_wal_size = 8GB` needs that much headroom on the WAL volume; and everything scales, memory with RAM, parallelism with cores, WAL with write rate.
+
+Put it in a file included from `postgresql.conf` or set it with `ALTER SYSTEM`, not both.
+
+```ini
+# Connections (restart). Keep this low and use a pooler.
+max_connections = 100
+
+# Memory
+shared_buffers = 4GB                 # 25% of RAM (restart)
+huge_pages = try                     # 'on' once vm.nr_hugepages is set
+effective_cache_size = 12GB
+work_mem = 32MB                      # per sort/hash node, per process; raise per role
+hash_mem_multiplier = 2.0
+maintenance_work_mem = 1GB
+autovacuum_work_mem = 512MB
+
+# Storage and I/O (SSD / NVMe / cloud block storage)
+random_page_cost = 1.1               # random reads are nearly sequential cost
+effective_io_concurrency = 64        # fast SSDs; 16 is the default
+maintenance_io_concurrency = 64
+io_method = worker                   # the default, made explicit
+io_workers = 4                       # one per vCPU to start; a reload
+
+# WAL and checkpoints
+wal_compression = lz4
+max_wal_size = 8GB                   # make checkpoints time-driven
+min_wal_size = 1GB
+checkpoint_timeout = 15min           # fewer full-page images, longer recovery
+checkpoint_completion_target = 0.9
+
+# Autovacuum
+autovacuum_max_workers = 4
+autovacuum_vacuum_cost_limit = 2000  # shared by all workers
+autovacuum_vacuum_scale_factor = 0.05
+autovacuum_vacuum_insert_scale_factor = 0.05
+autovacuum_analyze_scale_factor = 0.02
+# then per-table settings for the biggest tables
+
+# Parallel query (4 cores, mixed workload)
+max_worker_processes = 8             # the default; all background workers
+max_parallel_workers = 4
+max_parallel_workers_per_gather = 2
+max_parallel_maintenance_workers = 2 # the default; parallel index builds
+
+# Server-wide backstop only. The app role's timeouts (statement 5s,
+# lock 3s, idle in transaction 30s, transaction 5min) are set per role.
+idle_in_transaction_session_timeout = 5min
+
+# Logging
+log_line_prefix = '%m [%p] %q%u@%d %a '
+log_min_duration_statement = 500ms
+log_lock_waits = on
+log_temp_files = 0                   # every spill; raise to e.g. 64MB if noisy
+log_autovacuum_min_duration = 1s
+log_checkpoints = on
+
+# Extensions (restart)
+shared_preload_libraries = 'pg_stat_statements,auto_explain'
+pg_stat_statements.max = 10000       # default 5000; room for ORM-heavy apps
+pg_stat_statements.track = top       # the default: top-level statements
+auto_explain.log_min_duration = 2s
+auto_explain.log_analyze = on
+auto_explain.log_buffers = on
+auto_explain.log_timing = off
+
+# Monitoring. track_io_timing reads the clock on every I/O: cheap on
+# modern hardware; check new machine types with pg_test_timing.
+track_io_timing = on
+```
+
+<Callout type="tip" title="Change one thing at a time, and measure">
+
+Before a change, capture the numbers it should move: `pg_stat_statements` totals, checkpoint counts, temp file volume, autovacuum frequency. Change one setting, wait a representative period, compare ([Change one thing, and measure it end to end](/books/eight-kilobytes/benchmarking#change-one-thing-and-measure-it-end-to-end)). Keep the config in version control so "what changed?" always has an answer.
+
+</Callout>
+
+<DeepDive title="The lab checks every line of the starter config">
+
+The lab checks the config the way you'd check your own: every name exists in `pg_settings`, and every value a session can set is accepted. On your own server, add one query to the `pending_restart` check from earlier in the chapter. It lists config file lines the server couldn't apply:
+
+```sql
+select sourcefile, sourceline, name, setting, error
+  from pg_file_settings where error is not null;
+```
+
+A misspelled name in `postgresql.conf` shows up here, and a bad value for a `postmaster` setting stops the server from starting at all, which is why you check before the restart, not after.
+
+<ProveIt lab="29-configuration">
+
+```sql
+-- the lab also checks that every name in the config exists in pg_settings,
+-- and SETs every value a session can set, inside a transaction
+select lab.prove('the session-settable starter values are all accepted (wal_compression = lz4 included)',
+  current_setting('wal_compression') = 'lz4' and current_setting('random_page_cost') = '1.1');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## On managed services, the settings that matter still move
+
+On a managed service, settings live in the provider's parameter group, restart-required settings mean a reboot (often a failover), and some are locked ([Settings live in a parameter group](/books/eight-kilobytes/managed#settings-live-in-a-parameter-group)). Providers that replace the storage layer change how WAL settings behave ([Disaggregated storage changes some rules](/books/eight-kilobytes/managed#disaggregated-storage-changes-some-rules)). The settings that matter most are adjustable everywhere, and `ALTER ROLE ... SET` works even where `ALTER SYSTEM` doesn't.
+
+## The short version
+
+- Check `pg_settings` (`source`, `context`) before changing anything, and use per-role settings for anything that differs by workload.
+- Budget memory first: `shared_buffers` at 25% of RAM, plus `work_mem` times nodes times connections. Keep `work_mem` modest globally and raise it where you know it's needed.
+- On SSDs set `random_page_cost = 1.1`; leave asynchronous I/O (`io_method = worker`) on its default.
+- Make checkpoints time-driven with a larger `max_wal_size` and a longer `checkpoint_timeout`, and turn on `wal_compression`.
+- Give autovacuum a much bigger cost limit and smaller scale factors.
+- Below Postgres: keep the OOM killer off the postmaster, turn transparent huge pages off, cap dirty pages in bytes, never disable barriers, and in containers budget against the cgroup limit.
+- Turn on slow-query, lock-wait, temp-file, and autovacuum logging, and `auto_explain`.
+
+## Further reading
+
+- [Setting parameters](https://www.postgresql.org/docs/18/config-setting.html), PostgreSQL documentation. Every way to set a value, including includes, `ALTER SYSTEM`, and per-role settings.
+- [Resource consumption](https://www.postgresql.org/docs/18/runtime-config-resource.html), PostgreSQL documentation. The memory, I/O, and asynchronous I/O settings, with their exact defaults and limits.
+- [Write Ahead Log settings](https://www.postgresql.org/docs/18/runtime-config-wal.html), PostgreSQL documentation. Checkpoints, `max_wal_size`, and `wal_compression`.
+- [Error reporting and logging](https://www.postgresql.org/docs/18/runtime-config-logging.html), PostgreSQL documentation. Every `log_*` setting and the `log_line_prefix` escapes.
+- [Managing kernel resources](https://www.postgresql.org/docs/18/kernel-resources.html), PostgreSQL documentation. Huge pages, Linux memory overcommit, and the `oom_score_adj` recipe that keeps the OOM killer off the postmaster.
+- [Documentation for /proc/sys/vm](https://docs.kernel.org/admin-guide/sysctl/vm.html), Linux kernel documentation. The exact meaning and defaults of overcommit, swappiness, the dirty-page thresholds, and zone reclaim.

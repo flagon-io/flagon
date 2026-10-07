@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { site } from "@/lib/site";
 import { listHandbookSlugs } from "@/lib/handbook";
 import { getAllPosts } from "@/lib/blog";
+import { chapterHref, getBooks } from "@/lib/books";
 import { PRODUCTS, productHref } from "@/lib/products";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -13,6 +14,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     "/about",
     "/handbook",
     "/blog",
+    "/books",
     "/careers",
     "/products",
     "/not-for-everyone",
@@ -41,5 +43,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     lastModified: now,
   }));
 
-  return [...staticRoutes, ...products, ...handbook, ...blog];
+  const books = getBooks().flatMap((b) => {
+    const lastModified = b.published ? new Date(b.published) : now;
+    return [
+      { url: `${base}/books/${b.slug}`, lastModified },
+      ...b.chapters.map((c) => ({ url: `${base}${chapterHref(b, c)}`, lastModified })),
+    ];
+  });
+
+  return [...staticRoutes, ...products, ...handbook, ...books, ...blog];
 }

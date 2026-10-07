@@ -1,0 +1,719 @@
+---
+title: Glossary
+description: The terms the book leans on, defined in a sentence or three, each with a link to the section that teaches it.
+part: Back matter
+---
+
+Most Postgres vocabulary names something physical: a slot on a page, a counter in a header, a file next to the table. Each entry here links to the section that shows the thing in real output, so you can go and watch it happen.
+
+Headwords follow one convention: SQL commands and keywords in capitals (`VACUUM`, `NOT VALID`), settings, functions, and other identifiers exactly as you'd type them (`work_mem`, `ctid`), and everything else in sentence case. Entries are in letter-by-letter order, ignoring case and punctuation.
+
+## A
+
+### ACID
+
+The four promises a transaction makes: atomicity, consistency, isolation, and durability. In Postgres each one is a specific mechanism you can watch, from the commit record to the fsync. See [Four promises, four mechanisms](/books/eight-kilobytes/acid#four-promises-four-mechanisms).
+
+### Advisory lock
+
+A lock on an integer key that means whatever your application says, for mutual exclusion over something that isn't a row ("one nightly rollup at a time"). Prefer the transaction-scoped kind, released at commit. See [Take advisory locks per transaction, not per session](/books/eight-kilobytes/concurrency#take-advisory-locks-per-transaction-not-per-session).
+
+### ANALYZE
+
+The command that samples a table and stores the statistics the planner estimates from. Autovacuum runs it after enough rows change. See [ANALYZE reads a sample, not the table](/books/eight-kilobytes/planner#analyze-reads-a-sample-not-the-table).
+
+### Anomaly
+
+A result no one-at-a-time order of the transactions could have produced, such as a lost update or write skew. Isolation levels are defined by which anomalies they allow. See [Only serializable rules out every anomaly](/books/eight-kilobytes/acid#only-serializable-rules-out-every-anomaly).
+
+### Autovacuum
+
+Background workers that vacuum and analyze a table when its dead tuples, inserts, or transaction ID age cross a threshold. The thresholds scale with table size, so the defaults are too lazy for big tables. The anti-wraparound vacuum it forces at 200 million transactions runs even with autovacuum off. See [Autovacuum fires on dead rows, inserts, or age](/books/eight-kilobytes/vacuum#autovacuum-fires-on-dead-rows-inserts-or-age).
+
+## B
+
+### Backend
+
+The operating system process Postgres starts for each connection. It parses, plans, and runs that session's queries, holds its state, and serves no one else. See [Every connection is a process](/books/eight-kilobytes/connections#every-connection-is-a-process).
+
+### Base backup
+
+A physical copy of the whole data directory, taken while the server runs, with `pg_basebackup` or a backup tool. Restoring one and replaying archived WAL from where it started is how physical restores and point-in-time recovery work. See [At size, only a physical backup restores fast](/books/eight-kilobytes/backups#at-size-only-a-physical-backup-restores-fast).
+
+### Bitmap scan
+
+A scan that collects every matching row address from the index first, then visits each heap page once, in physical order. Past `work_mem` the bitmap goes lossy and remembers pages instead of rows. See [An index helps only as much as its rows sit together](/books/eight-kilobytes/btree#an-index-helps-only-as-much-as-its-rows-sit-together).
+
+### Bloat
+
+Space in a table or index that isn't live data and won't be reused soon, left by dead tuples that piled up between vacuums. A table at five times its live size makes every scan read five times the pages. See [Vacuum frees space inside the table, not on disk](/books/eight-kilobytes/mvcc#vacuum-frees-space-inside-the-table-not-on-disk).
+
+### BM25
+
+A relevance score that weighs how often a word appears in a document against how rare it is across the corpus. Built-in ranking doesn't do it; newer search extensions keep the statistics in the index. See [Search extensions put BM25 in the index](/books/eight-kilobytes/search#search-extensions-put-bm25-in-the-index).
+
+### BRIN
+
+A Block Range INdex: the smallest and largest value for each range of pages, like labels on moving boxes. Tiny and nearly as good as a B-tree when physical order matches the column, useless when it doesn't. See [BRIN keeps one summary per range of pages](/books/eight-kilobytes/more-indexes#brin-keeps-one-summary-per-range-of-pages).
+
+### B-tree
+
+The default index: a shallow, sorted tree of 8 KB pages whose leaves hold every key in order with the address of its row. Three or four page reads find one row among millions. See [A B-tree is a shallow tree of pages](/books/eight-kilobytes/btree#a-b-tree-is-a-shallow-tree-of-pages).
+
+### Buffer
+
+One 8 KB slot in shared memory that holds one page. Every process reads and writes pages through buffers, never straight from the file. See [shared_buffers is an array of pages](/books/eight-kilobytes/buffers#shared_buffers-is-an-array-of-pages).
+
+### Buffer ring
+
+A small private set of buffers that big scans, vacuum, and bulk writes recycle, so they evict their own pages, not yours. A big sequential scan's ring is 2,304 KB in PostgreSQL 18. See [Big operations get a ring](/books/eight-kilobytes/buffers#big-operations-get-a-ring).
+
+### Buffers (in a plan)
+
+The `explain (analyze)` line counting the pages a node touched: `hit` in shared buffers, `read` from below, `dirtied`, `written`. Unlike timings, these counts don't move with load, which makes them the book's main evidence. See [Buffers are the evidence](/books/eight-kilobytes/explain#buffers-are-the-evidence).
+
+## C
+
+### Checkpoint
+
+The periodic write of every dirty buffer to the data files, fsynced, so crash recovery can start there instead of at the beginning of time. See [Checkpoints put a limit on recovery](/books/eight-kilobytes/wal#checkpoints-put-a-limit-on-recovery).
+
+### Checkpointer
+
+The background process that runs checkpoints, spreading its writes of dirty buffers over most of the interval (`checkpoint_completion_target`, 0.9 by default). Its partner, the **background writer**, cleans buffers ahead of the clock sweep so backends rarely write their own. See [Your query shouldn't be the one writing dirty pages](/books/eight-kilobytes/buffers#your-query-shouldnt-be-the-one-writing-dirty-pages).
+
+### Citus
+
+An open-source extension (AGPL-3.0) that makes a group of Postgres servers one distributed database: a coordinator you connect to, workers holding the shards, and routing, merging, and two-phase commit handled inside Postgres. See [Citus routes and merges inside Postgres](/books/eight-kilobytes/sharding#citus-routes-and-merges-inside-postgres).
+
+### Clock sweep
+
+The algorithm Postgres uses to pick a buffer to evict: a hand circles the buffers, skips pinned ones, takes a point off each usage count, and evicts the first it finds at zero. One pass of cold data can't push out the hot pages. See [The clock sweep picks the victim](/books/eight-kilobytes/buffers#the-clock-sweep-picks-the-victim).
+
+### Collation
+
+The rules for comparing and sorting text: whether `'a'` sorts before `'B'`, and whether two spellings are equal. Every text index is built in one, and an operating system upgrade that changes the rules can corrupt it. See [Collations decide what equal means](/books/eight-kilobytes/types#collations-decide-what-equal-means).
+
+### Colocation
+
+A sharding layout that splits related tables by the same key, so one tenant's rows in all of them share a shard and join there. Small tables every tenant reads are copied everywhere as reference tables. See [The shard key is the whole design](/books/eight-kilobytes/sharding#the-shard-key-is-the-whole-design).
+
+### Column store
+
+A database that keeps each column in its own compressed files and reads only the columns a query names. It wins scans over billions of rows and loses point lookups and updates. See [A row store reads every column to use two](/books/eight-kilobytes/limits#a-row-store-reads-every-column-to-use-two).
+
+### Coordinated omission
+
+The benchmarking error where a load generator waits out slow answers before sending more, so it never measures the requests a stall delayed. Closed-loop runs have it built in. See [Closed loops hide the stalls](/books/eight-kilobytes/benchmarking#closed-loops-hide-the-stalls).
+
+### COPY
+
+The bulk loading path: one statement streams many rows with far less per-row overhead than inserts, and its `freeze` option writes rows already frozen into a table created or truncated in the same transaction. See [COPY is the bulk path](/books/eight-kilobytes/loading#copy-is-the-bulk-path).
+
+### Correlation
+
+A statistic, from -1 to 1, of how closely a column's order matches the physical order of rows. The planner uses it, squared, to price index scans. See [Correlation prices the index scan](/books/eight-kilobytes/plans#correlation-prices-the-index-scan).
+
+### Cost
+
+The planner's price for a plan, in arbitrary units anchored to reading one page sequentially (`seq_page_cost = 1.0`). It's a guess built from row estimates, not a time. See [Cost is a guess in made-up units](/books/eight-kilobytes/explain#cost-is-a-guess-in-made-up-units).
+
+### Covering index
+
+An index holding every column a query needs, often via `include`, so it can be answered by an index-only scan. Cover the hot query, not every query. See [Covering indexes: cover the hot query, not every query](/books/eight-kilobytes/btree#covering-indexes-cover-the-hot-query-not-every-query).
+
+### CREATE INDEX CONCURRENTLY
+
+The index build that doesn't block writes, at the price of two table scans and a wait for older transactions to finish. A failed build leaves an `INVALID` index that queries ignore; drop it and retry. See [Pick the index build that matches the table's traffic](/books/eight-kilobytes/migrations#pick-the-index-build-that-matches-the-tables-traffic).
+
+### CTE
+
+A common table expression, the `with` clause. Since PostgreSQL 12 a CTE referenced once is inlined; `materialized` forces it to run alone, which can hide your indexes from the outer query. See [A CTE used once is inlined, not fenced](/books/eight-kilobytes/queries#a-cte-used-once-is-inlined-not-fenced).
+
+### ctid
+
+A row version's physical address: a page number and a line pointer number, like `(0,3)`. Every table has it as a hidden column, and every index points at it. See [A line pointer lets a tuple move without changing its address](/books/eight-kilobytes/storage#a-line-pointer-lets-a-tuple-move-without-changing-its-address).
+
+## D
+
+### Data checksums
+
+A checksum on every data page, so a flipped bit from a disk becomes an error instead of silently wrong rows. On by default in `initdb` since PostgreSQL 18. See [With checksums, even a read writes WAL](/books/eight-kilobytes/wal#with-checksums-even-a-read-writes-wal).
+
+### Deadlock
+
+A standoff in which two transactions each wait for a lock the other holds. Postgres detects it after `deadlock_timeout` and aborts one; the fix is to take locks in a consistent order. See [Deadlocks are an ordering bug](/books/eight-kilobytes/concurrency#deadlocks-are-an-ordering-bug).
+
+### Dead tuple
+
+A row version no transaction can ever see again: deleted or replaced, and older than every running snapshot. Pruning and vacuum reclaim its space; until then it costs pages. See [A version is dead only when no snapshot can see it](/books/eight-kilobytes/mvcc#a-version-is-dead-only-when-no-snapshot-can-see-it).
+
+### Deduplication
+
+The B-tree's way (PostgreSQL 13+) of storing a repeated key once, followed by a posting list of the rows that have it. It makes indexes on foreign keys and statuses about three times smaller. See [Deduplication: repeated keys are stored once (PostgreSQL 13+)](/books/eight-kilobytes/btree#deduplication-repeated-keys-are-stored-once-postgresql-13).
+
+### Dirty buffer
+
+A page changed in memory and not yet written to its file. The change is already safe in the WAL; the checkpointer, background writer, or a backend needing the buffer writes it later. See [Your query shouldn't be the one writing dirty pages](/books/eight-kilobytes/buffers#your-query-shouldnt-be-the-one-writing-dirty-pages).
+
+### Disaggregated storage
+
+A managed design (Aurora, AlloyDB, Neon) that keeps Postgres above the buffer cache and replaces the disk with a storage service that builds pages from shipped WAL. Checkpoint tuning and replica behavior change on them. See [Disaggregated storage changes some rules](/books/eight-kilobytes/managed#disaggregated-storage-changes-some-rules).
+
+## E
+
+### Exclusion constraint
+
+A generalization of unique: no two rows may satisfy a combination of operators, such as "no two bookings for one room overlap". It's enforced with a GiST index. See [An exclusion constraint makes overlaps impossible](/books/eight-kilobytes/relationships#an-exclusion-constraint-makes-overlaps-impossible).
+
+### Expand and contract
+
+A way to ship a breaking schema change in steps that old and new code both survive: add the new shape, deploy code that uses it, backfill, then drop the old shape in a later deploy. See [Renames ship as expand and contract](/books/eight-kilobytes/migrations#renames-ship-as-expand-and-contract).
+
+### EXPLAIN
+
+The command that shows the plan Postgres chose. Plain `explain` only estimates; `explain analyze` runs the query and prints reality beside the prediction, so wrap writes in a transaction you roll back. See [EXPLAIN guesses; EXPLAIN ANALYZE runs it](/books/eight-kilobytes/explain#explain-guesses-explain-analyze-runs-it).
+
+### Expression index
+
+An index on the result of an expression, like `lower(email)`, which serves queries written with exactly that expression. `ANALYZE` also gathers statistics on it, which fixes estimates. See [An index stores exactly what you gave it](/books/eight-kilobytes/btree#an-index-stores-exactly-what-you-gave-it).
+
+### Extended statistics
+
+Statistics across columns, created with `create statistics`, for when the planner's assumption that columns are independent is wrong. `ndistinct` fixes group counts and `mcv` fixes correlated filters. See [Extended statistics measure columns together](/books/eight-kilobytes/planner#extended-statistics-measure-columns-together).
+
+### Extension
+
+A package of types, functions, and index methods installed with `create extension` and tracked by version. Managed services allow only the ones on their allowlist. See [An extension is a package the database tracks](/books/eight-kilobytes/extensions#an-extension-is-a-package-the-database-tracks).
+
+## F
+
+### Failover
+
+The promotion of a replica when the primary dies. The hard parts are deciding it's really dead and fencing it; miss either and two servers accept writes (split brain), with nothing to merge them. Use a tool, not a script. See [Promotion takes one call and starts a new timeline](/books/eight-kilobytes/replication#promotion-takes-one-call-and-starts-a-new-timeline).
+
+### Fillfactor
+
+A storage parameter telling inserts to stop filling a page early and leave room, 100 percent by default for tables. The room is for updates: a new version that fits on the same page can be HOT. See [Fillfactor leaves room for updates](/books/eight-kilobytes/storage#fillfactor-leaves-room-for-updates).
+
+### Foreign key
+
+A constraint that a value exists in another table's key. Inserting a child checks the parent cheaply; deleting a parent scans the child table unless you index the referencing column yourself. See [A foreign key is checked both ways, at different prices](/books/eight-kilobytes/relationships#a-foreign-key-is-checked-both-ways-at-different-prices).
+
+### Fork
+
+One of the files that make up a table: `main` holds the rows, `_fsm` the free space map, `_vm` the visibility map, and unlogged tables add an empty `_init`. See [A table is more than its main file](/books/eight-kilobytes/storage#a-table-is-more-than-its-main-file).
+
+### Free space map
+
+A small fork that records roughly how much room each page has, so inserts and updates fill existing pages instead of growing the file. Vacuum keeps it current. See [Inserts find room without scanning the table](/books/eight-kilobytes/storage#inserts-find-room-without-scanning-the-table).
+
+### Freezing
+
+The vacuum step that marks a tuple visible to everyone forever once its inserting transaction is old enough, so it survives transaction ID wraparound. An all-frozen page is never visited for it again. See [Old rows must be frozen before the XID counter wraps](/books/eight-kilobytes/mvcc#old-rows-must-be-frozen-before-the-xid-counter-wraps).
+
+### fsync
+
+The system call that forces written data to durable storage. Every commit waits for one on the WAL, so your disk's fsync latency sets the commit rate. See [Every commit waits for the disk](/books/eight-kilobytes/latency#every-commit-waits-for-the-disk).
+
+### Full-page write
+
+An 8 KB image of a page, logged with its first change after each checkpoint, so recovery can repair a torn page (half written when the power failed). It's why WAL spikes after a checkpoint. See [The first change after a checkpoint logs the whole page](/books/eight-kilobytes/wal#the-first-change-after-a-checkpoint-logs-the-whole-page).
+
+## G
+
+### Generic plan
+
+A prepared statement's plan built with its parameters unknown. From the sixth execution Postgres switches to it for good if it doesn't look costlier than the custom plans, which can make a fast query slow. See [Prepared statements switch plans after five runs](/books/eight-kilobytes/planner#prepared-statements-switch-plans-after-five-runs).
+
+### GEQO
+
+The genetic query optimizer: from 12 joined tables (`geqo_threshold`), a randomized search for a join order replaces the exhaustive one. Planning stays fast; the plan is good rather than guaranteed best. See [Join order is a search, and searches get expensive](/books/eight-kilobytes/plans#join-order-is-a-search-and-searches-get-expensive).
+
+### GIN
+
+A Generalized Inverted iNdex: one entry per distinct element (a `jsonb` key, an array tag, a word) with the rows that contain it, like the index at the back of a book. See [GIN is fast to search and expensive to update](/books/eight-kilobytes/more-indexes#gin-is-fast-to-search-and-expensive-to-update).
+
+### GiST
+
+A Generalized Search Tree whose entries store a bounding value covering everything beneath them. It indexes overlap and distance: ranges, geometry, trigram similarity, exclusion constraints. See [GiST indexes values that have no order](/books/eight-kilobytes/more-indexes#gist-indexes-values-that-have-no-order).
+
+### Group commit
+
+One WAL flush covering several transactions that committed at nearly the same moment. Postgres does it for you, and it's why throughput can exceed one commit per fsync. See [Many commits share one flush](/books/eight-kilobytes/wal#many-commits-share-one-flush).
+
+## H
+
+### Hash index
+
+An index of 32-bit hash codes that serves exactly one operator, `=`, and whose size doesn't depend on the key's width. Worth it for equality on long random values like tokens; use a B-tree everywhere else. See [A hash index wins only on equality over long keys](/books/eight-kilobytes/more-indexes#a-hash-index-wins-only-on-equality-over-long-keys).
+
+### Hash join
+
+A join that loads the inner input into a hash table, then streams the outer input past it. The workhorse for large, unsorted inputs; past `work_mem` times `hash_mem_multiplier` it splits into batches on disk. See [Each join method is right only for some row counts](/books/eight-kilobytes/explain#each-join-method-is-right-only-for-some-row-counts).
+
+### Heap
+
+A Postgres table: an unordered pile of pages where rows go wherever there's room. Every index, the primary key included, points into it by ctid. See [A line pointer lets a tuple move without changing its address](/books/eight-kilobytes/storage#a-line-pointer-lets-a-tuple-move-without-changing-its-address).
+
+### Hint bits
+
+Flags on a tuple caching whether its transactions committed, set by the first reader to check the commit log (`pg_xact`). Setting them dirties the page, which is how a `select` can write. See [A read can write](/books/eight-kilobytes/mvcc#a-read-can-write).
+
+### Histogram
+
+The `histogram_bounds` statistic: a column's values outside the most-common list, cut into about 100 buckets of equal row counts. The planner estimates range filters from it. See [pg_stats is the planner's entire picture](/books/eight-kilobytes/planner#pg_stats-is-the-planners-entire-picture).
+
+### HNSW
+
+Hierarchical Navigable Small World, an approximate vector index: a layered graph where each vector links to near neighbors, a few sit on sparser upper layers like express stops, and a search walks it greedily. See [HNSW walks a graph greedily, and can miss](/books/eight-kilobytes/search#hnsw-walks-a-graph-greedily-and-can-miss).
+
+### HOT chain
+
+The versions of one row linked through their headers on a single page by HOT updates. Indexes point at the chain's first slot; pruning later turns the head into a redirect. See [A HOT lookup follows the chain without leaving the page](/books/eight-kilobytes/hot#a-hot-lookup-follows-the-chain-without-leaving-the-page).
+
+### HOT update
+
+A heap-only tuple update: it changes no indexed column and fits on the same page, so no index hears about it. An update that isn't HOT (a cold update) writes an entry into every index. See [HOT needs an unindexed change and room on the page](/books/eight-kilobytes/hot#hot-needs-an-unindexed-change-and-room-on-the-page).
+
+## I
+
+### Identity column
+
+An integer key filled from a sequence, `generated always as identity`: the replacement for `serial`. Sequences never roll back, so gaps are normal. See [Let the database number rows, and never trust the order](/books/eight-kilobytes/keys#let-the-database-number-rows-and-never-trust-the-order).
+
+### Idle in transaction
+
+A session that opened a transaction and went quiet, often while the app waits on a network call. It holds its locks and snapshot, so vacuum can't clean up behind it. See [idle_in_transaction_session_timeout matters most](/books/eight-kilobytes/connections#idle_in_transaction_session_timeout-matters-most).
+
+### IDOR
+
+An insecure direct object reference: an endpoint that loads whatever id it's handed without checking the caller may see it. Sequential ids make it trivial to exploit. See [A counter is an invitation](/books/eight-kilobytes/keys#a-counter-is-an-invitation).
+
+### Index-only scan
+
+A scan that answers a query from the index alone, skipping the heap for every page the visibility map marks all-visible. `Heap Fetches` in the plan counts the rows it had to check in the heap anyway. See [The best heap page is the one you never read](/books/eight-kilobytes/btree#the-best-heap-page-is-the-one-you-never-read).
+
+### Index scan
+
+A scan that reads an index and fetches each matching row from the heap as it goes, so rows come out in index order. Cheap for a few rows, expensive when matches are scattered over many pages. See [An index helps only as much as its rows sit together](/books/eight-kilobytes/btree#an-index-helps-only-as-much-as-its-rows-sit-together).
+
+### IOPS
+
+I/O operations per second, sold alongside latency and throughput. Provisioned IOPS are only a ceiling: what you get is the lower of that ceiling and the I/Os you keep in flight divided by latency. See [IOPS are capped by reads in flight, not by what you paid](/books/eight-kilobytes/latency#iops-are-capped-by-reads-in-flight-not-by-what-you-paid).
+
+### Isolation level
+
+The setting for how much a transaction sees of other transactions' work. Read committed (the default) takes a snapshot per statement, repeatable read one per transaction, and serializable also guarantees some one-at-a-time order. See [Pick an isolation level on purpose](/books/eight-kilobytes/concurrency#pick-an-isolation-level-on-purpose).
+
+### IVFFlat
+
+An approximate vector index that clusters vectors into `lists` and searches only the `probes` nearest the query. Its default of one probe is a trap: recall@10 was 0.636 in our test, five probes 1.000. See [IVFFlat's default of one probe is a trap](/books/eight-kilobytes/search#ivfflats-default-of-one-probe-is-a-trap).
+
+## J
+
+### JIT
+
+Just-in-time compilation of a query's expressions to machine code, triggered when its estimated cost passes `jit_above_cost`. A bet on the estimate: it pays on long analytic scans and loses on short queries. See [JIT is a bet the planner places on its own estimate](/books/eight-kilobytes/plans#jit-is-a-bet-the-planner-places-on-its-own-estimate).
+
+## K
+
+### Keyset pagination
+
+Pagination that remembers where the last page ended (`where (created_at, id) < ($1, $2)`). Every page costs the same; `offset` reads every row it skips. See [OFFSET reads every row it skips](/books/eight-kilobytes/queries#offset-reads-every-row-it-skips).
+
+## L
+
+### Lexeme
+
+A normalized word as full-text search stores it: lowercased, stemmed, stop words dropped, with its positions. "The deploys failed" becomes `'deploy'` and `'fail'`. See [Text becomes lexemes](/books/eight-kilobytes/search#text-becomes-lexemes).
+
+### Line pointer
+
+A 4-byte slot at the top of a page that points at a tuple further down. Indexes point at line pointers, so a tuple can move within its page without its address changing. See [A line pointer lets a tuple move without changing its address](/books/eight-kilobytes/storage#a-line-pointer-lets-a-tuple-move-without-changing-its-address).
+
+### Lock modes
+
+The eight table lock levels, from `ACCESS SHARE` (every `select`) to `ACCESS EXCLUSIVE` (most `alter table` forms, which blocks even reads). Every statement takes one, so ask which lock and for how long. See [The eight modes, the conflict matrix, and what each DDL took](/books/eight-kilobytes/concurrency#the-eight-modes-the-conflict-matrix-and-what-each-ddl-took).
+
+### Lock queue
+
+The line of sessions waiting for a lock. A request that conflicts with a waiting request queues behind it, so one `alter table` waiting on a long query blocks every query behind it. See [A waiting lock blocks everyone behind it](/books/eight-kilobytes/concurrency#a-waiting-lock-blocks-everyone-behind-it).
+
+### lock_timeout
+
+The setting for how long a statement waits for a lock before failing. A few seconds, with a retry, turns a migration's lock-queue outage into a harmless error. See [Rule one: lock_timeout and retry](/books/eight-kilobytes/migrations#rule-one-lock_timeout-and-retry).
+
+### Logical decoding
+
+The machinery that turns WAL into a stream of row changes, read through a logical replication slot and an output plugin. Logical replication is built on it, and so are change-data-capture tools. See [Logical replication copies rows, not pages](/books/eight-kilobytes/replication#logical-replication-copies-rows-not-pages).
+
+### Logical replication
+
+Replication that copies row changes rather than pages: the publisher decodes its WAL into row inserts and updates, and a writable subscriber applies them. Used for upgrades, selective sync, and leaving a provider. See [Logical replication copies rows, not pages](/books/eight-kilobytes/replication#logical-replication-copies-rows-not-pages).
+
+### Lost update
+
+The anomaly where two transactions read a value, each computes a new one, and the second write silently overwrites the first. Do the arithmetic in the `update` or lock the row first. See [Read committed loses updates computed in the app](/books/eight-kilobytes/concurrency#read-committed-loses-updates-computed-in-the-app).
+
+### LSN
+
+A log sequence number: a byte offset into the endless WAL stream, written like `2/8BE4C8B0`. Subtract two and you have the bytes of WAL between them. See [LSNs are byte offsets](/books/eight-kilobytes/wal#lsns-are-byte-offsets).
+
+### LWLock
+
+A lightweight lock guarding shared memory for microseconds. A pile of `LWLock` waits means too many sessions doing the same internal thing, not that someone holds your row. See [LWLock waits are fixed in the workload, not the query](/books/eight-kilobytes/concurrency#lwlock-waits-are-fixed-in-the-workload-not-the-query).
+
+## M
+
+### Materialized view
+
+A query's result stored as a table. A plain `refresh` locks out readers while it runs; `refresh ... concurrently` doesn't, but needs a unique index. Either way it recomputes everything, so for data that grows forever use a rollup. See [A materialized view recomputes everything](/books/eight-kilobytes/scale#a-materialized-view-recomputes-everything).
+
+### MCV list
+
+The most common values of a column and how often each appears (`most_common_vals` and `most_common_freqs`). The planner estimates equality filters on those values straight from the list. See [pg_stats is the planner's entire picture](/books/eight-kilobytes/planner#pg_stats-is-the-planners-entire-picture).
+
+### Memoize
+
+A plan node (PostgreSQL 14+) that caches the inner side of a nested loop by join value: a nested loop with a memory. `Hits` are lookups it saved. See [The crossover, the merge join, and the Memoize](/books/eight-kilobytes/plans#the-crossover-the-merge-join-and-the-memoize).
+
+### Merge join
+
+A join that walks both inputs in join-key order, like merging two sorted lists. Cheap when both sides come out of indexes already sorted. See [Each join method is right only for some row counts](/books/eight-kilobytes/explain#each-join-method-is-right-only-for-some-row-counts).
+
+### Multixact
+
+An ID in a row's `xmax` when several transactions lock it at once, pointing to a list of lockers. Concurrent foreign key checks on one parent create them fast, and they have their own wraparound limits. See [Shared row locks make multixacts, and multixacts wrap too](/books/eight-kilobytes/concurrency#shared-row-locks-make-multixacts-and-multixacts-wrap-too).
+
+### MVCC
+
+Multiversion concurrency control, the design in which Postgres never overwrites a row in place, so readers never wait for writers. Updates are inserts, which is where bloat and vacuum come from. See [Updates are inserts](/books/eight-kilobytes/mvcc).
+
+## N
+
+### N+1 queries
+
+The pattern of one query for a list, then one more per item, usually hidden in an ORM loop. Each is fast; the round trips add up. Fix it with a join or one array parameter. See [N+1 is a loop, not a slow query](/books/eight-kilobytes/queries#n1-is-a-loop-not-a-slow-query).
+
+### Nested loop
+
+A join that runs the inner side once per outer row. Great when the outer side is small and the inner side is an index lookup; terrible when the outer estimate was wrong. See [Each join method is right only for some row counts](/books/eight-kilobytes/explain#each-join-method-is-right-only-for-some-row-counts).
+
+### Network block storage
+
+A cloud disk reached over the network and priced by IOPS and throughput: durable and detachable, but every page that misses memory becomes a request to storage servers elsewhere. Local NVMe is far faster and is lost with the host. See [Storage decides the benchmark](/books/eight-kilobytes/providers#storage-decides-the-benchmark).
+
+### Node
+
+One step of a query plan: a scan, join, sort, or aggregate that pulls rows from the nodes below it and hands rows up. Read a plan from the most indented node outward. See [The plan is a tree; read it inside out](/books/eight-kilobytes/explain#the-plan-is-a-tree-read-it-inside-out).
+
+### NOT VALID
+
+The option that adds a constraint without checking existing rows, under a brief lock; `validate constraint` checks them later under a weaker one. It's the safe way to add foreign keys and checks to big tables. See [Add foreign keys NOT VALID, then validate](/books/eight-kilobytes/migrations#add-foreign-keys-not-valid-then-validate).
+
+## O
+
+### OLTP
+
+Online transaction processing: many short transactions, each reading and writing a few rows, the workload Postgres's row storage and B-trees are built for. Analytics, which scans many rows but few columns, is where column stores win. See [A row store reads every column to use two](/books/eight-kilobytes/limits#a-row-store-reads-every-column-to-use-two).
+
+### Operator class
+
+The part of an index definition that says how to compare a type and which operators the index can serve. `text_pattern_ops` lets a B-tree serve `like 'abc%'` under a linguistic collation; `jsonb_path_ops` is a smaller GIN class for containment. See [Prefix search needs the right operator class](/books/eight-kilobytes/more-indexes#prefix-search-needs-the-right-operator-class).
+
+### ORM
+
+An object-relational mapper, the library that turns objects into SQL. It writes most of the queries a typical app sends, so read the SQL it generates: N+1 loops and updates that rewrite every column start there. See [N+1 is a loop, not a slow query](/books/eight-kilobytes/queries#n1-is-a-loop-not-a-slow-query).
+
+### OS page cache
+
+The kernel's cache of file contents in free RAM, a second tier under `shared_buffers`. A plan's `read` may come from here in microseconds, and a hot page can sit in both caches (double buffering). See [A page lives in one of three places](/books/eight-kilobytes/latency#a-page-lives-in-one-of-three-places).
+
+### Outbox
+
+A table written in the same transaction as a business change, holding the messages other systems should hear about. A relay publishes them and deletes what it sent, so a commit can't happen without its message, or a message without its commit. See [Put the message in the same transaction as the order](/books/eight-kilobytes/acid#put-the-message-in-the-same-transaction-as-the-order).
+
+## P
+
+### Page
+
+The 8 KB unit Postgres reads, writes, caches, and logs: a header, line pointers from the front, tuples from the back, free space between. A query's cost is mostly how many it touches. See [Every page has the same layout](/books/eight-kilobytes/storage#every-page-has-the-same-layout).
+
+### Parallel query
+
+A plan that splits a big scan or aggregate among worker processes under a `Gather` node. It finishes one query sooner and reads the same pages, so it costs more server, not less. See [Parallel query is faster, not cheaper](/books/eight-kilobytes/explain#parallel-query-is-faster-not-cheaper).
+
+### Partial index
+
+An index on only the rows matching its `where` clause, such as unprocessed jobs or live rows. Small and cheap to maintain, but a query must imply the same predicate to use it. See [Index the rows you ask about, not the whole table](/books/eight-kilobytes/btree#index-the-rows-you-ask-about-not-the-whole-table).
+
+### Partition
+
+One child table of a partitioned table, holding the rows whose partition key falls in its range or list. Each has its own heap, indexes, and vacuum schedule, which is why retention becomes a quick drop. See [Every benefit comes from separate tables](/books/eight-kilobytes/partitioning#every-benefit-comes-from-separate-tables).
+
+### Partition pruning
+
+The step that skips partitions that can't hold matching rows, at plan time or at run time. It only happens when the query filters on the partition key. Not to be confused with pruning, the cleanup of dead tuples inside one page. See [The bounds are a free, coarse index](/books/eight-kilobytes/partitioning#the-bounds-are-a-free-coarse-index).
+
+### pgbench
+
+The benchmarking tool that ships with Postgres. It runs your SQL scripts from as many clients as you ask for and reports throughput and latency. Its built-in TPC-B-like test mostly measures your disk's fsync, so write scripts shaped like your workload. See [pgbench is already installed](/books/eight-kilobytes/benchmarking#pgbench-is-already-installed).
+
+### PgBouncer
+
+An external connection pooler: one event-driven process that lends many clients a small, fixed set of server connections. Run it alongside your app's own pool. See [Pool in the app and in front of the database](/books/eight-kilobytes/connections#pool-in-the-app-and-in-front-of-the-database).
+
+### pg_stat_statements
+
+The extension that aggregates every normalized statement's calls, time, rows, and pages. It's where finding the expensive work starts. See [Start with pg_stat_statements](/books/eight-kilobytes/observability#start-with-pg_stat_statements).
+
+### PITR
+
+Point-in-time recovery: restoring a base backup, then replaying archived WAL (each 16 MB segment copied off as it fills) to just before the mistake. See [Point-in-time recovery is replay that keeps going](/books/eight-kilobytes/backups#point-in-time-recovery-is-replay-that-keeps-going).
+
+### Pooling modes
+
+The three ways a pooler lends server connections. Session pooling holds one for the whole session. Transaction pooling holds one only inside a transaction: the big win, and the mode that breaks session state like `set`. Statement pooling forbids multi-statement transactions. See [Transaction pooling breaks session state](/books/eight-kilobytes/connections#transaction-pooling-breaks-session-state).
+
+### Postmaster
+
+The first Postgres process and the parent of all the others. It listens for connections, starts a backend for each, and starts the background processes. Keep the OOM killer away from it. See [Every connection is a process](/books/eight-kilobytes/connections#every-connection-is-a-process).
+
+### Pruning
+
+The on-the-fly cleanup of dead tuples from one page, when a query reads it and it's nearly full: cheap, one page at a time, no index work. Vacuum does the full job. Not to be confused with partition pruning, which skips whole partitions. See [Pruning waits for a nearly full page](/books/eight-kilobytes/hot#pruning-waits-for-a-nearly-full-page).
+
+## R
+
+### Recall@k
+
+The fraction of the true k nearest neighbors an approximate search returned. Recall@10 of 0.9 means nine of the real ten came back; approximate indexes trade it for speed. See [ef_search trades latency for recall](/books/eight-kilobytes/search#ef_search-trades-latency-for-recall).
+
+### Reciprocal rank fusion
+
+A way to merge rankings that share no score scale, used for hybrid text and vector search: each document gets `1 / (60 + rank)` from every list that returned it, and the sum sets the order. See [Keywords and vectors fail differently, so fuse them](/books/eight-kilobytes/search#keywords-and-vectors-fail-differently-so-fuse-them).
+
+### Redirect
+
+A line pointer that points at another line pointer on the same page, left when pruning or vacuum removes the head of a HOT chain. Indexes still point at the old slot, and the redirect forwards them. See [A version is dead only when no snapshot can see it](/books/eight-kilobytes/mvcc#a-version-is-dead-only-when-no-snapshot-can-see-it).
+
+### Replication slot
+
+The primary's record of how far one consumer has read, with a promise to keep the WAL it still needs. An abandoned slot keeps WAL forever and fills the disk. See [Replication slots are a promise to keep WAL](/books/eight-kilobytes/replication#replication-slots-are-a-promise-to-keep-wal).
+
+### Rollup
+
+A table that stores an aggregate, such as events per account per day, kept fresh as rows arrive, usually by an idempotent upsert. A dashboard reads the rollup instead of the raw rows: 4 pages instead of 35,249 in our test. See [Precompute what you show](/books/eight-kilobytes/scale#precompute-what-you-show).
+
+### Row-level security
+
+Policies Postgres adds to every query on a table, so rows where the policy isn't true can't be read or written. With the tenant in a session setting, it holds even when the app forgets a `where`. See [A policy makes other tenants' rows invisible](/books/eight-kilobytes/security#a-policy-makes-other-tenants-rows-invisible).
+
+### RPO and RTO
+
+Recovery point objective, how much data you can afford to lose, in time; recovery time objective, how long you can be down restoring. Write both down before choosing a backup method. See [Write down RPO and RTO first](/books/eight-kilobytes/backups#write-down-rpo-and-rto-first).
+
+## S
+
+### Sargable
+
+A predicate comparing a bare column to a value known before the scan, so an index can serve it. Wrap the column in a function or cast, and the index can't help. See [Keep the indexed column bare](/books/eight-kilobytes/queries#keep-the-indexed-column-bare).
+
+### Savepoint
+
+A named point inside a transaction that you can roll back to without losing the whole transaction, which is how you contain one failed statement. A savepoint that writes gets its own subtransaction, so keep them out of loops. See [Savepoints contain the damage](/books/eight-kilobytes/concurrency#savepoints-contain-the-damage).
+
+### search_path
+
+The schemas Postgres searches for unqualified names. A `security definer` function, which runs with its owner's privileges, must pin it or a caller can plant an object that runs as the owner. See [Older databases still let anyone create in public](/books/eight-kilobytes/security#older-databases-still-let-anyone-create-in-public).
+
+### Selectivity
+
+The fraction of rows the planner expects a filter to keep, from the MCV list, the histogram, or fallback guesses. Every later choice builds on it. See [Do the planner's arithmetic by hand](/books/eight-kilobytes/planner#do-the-planners-arithmetic-by-hand).
+
+### Sequential scan
+
+A scan that reads every page of a table in physical order and checks each row against the filter. It's the right plan for a large share of a table and the wrong one for a few rows, where it shows up as `Seq Scan` with a large `Rows Removed by Filter`. See [Filter means rows were read and thrown away](/books/eight-kilobytes/explain#filter-means-rows-were-read-and-thrown-away).
+
+### Serializable
+
+The strictest isolation level: the result must match some one-at-a-time order, or a transaction fails with SQLSTATE `40001` and your code retries it. See [Serializable catches the write skew repeatable read misses](/books/eight-kilobytes/concurrency#serializable-catches-the-write-skew-repeatable-read-misses).
+
+### Shard
+
+One subset of the rows, on its own primary. The shard key decides where each row lives, and a query that doesn't name it goes to every shard. See [Sharding multiplies everything](/books/eight-kilobytes/sharding#sharding-multiplies-everything).
+
+### shared_buffers
+
+Postgres's own page cache in shared memory. The default is 128 MB; a dedicated server starts at about 25 percent of RAM. See [shared_buffers is an array of pages](/books/eight-kilobytes/buffers#shared_buffers-is-an-array-of-pages).
+
+### SKIP LOCKED
+
+A row-lock option that skips rows another transaction holds instead of waiting for them. It's what lets many workers claim jobs from one queue table without blocking each other. See [A Postgres queue commits with the business write](/books/eight-kilobytes/concurrency#a-postgres-queue-commits-with-the-business-write).
+
+### Skip scan
+
+PostgreSQL 18's way of using a multicolumn B-tree without its first column, one descent per value of that column. It works when the leading column has few values; don't design for it. See [Equality first, then range or sort](/books/eight-kilobytes/btree#equality-first-then-range-or-sort).
+
+### Snapshot
+
+A record, taken when a statement or transaction starts, of which transactions had committed. A row version is visible if it was born before the snapshot and hadn't died by then. See [A snapshot picks one version](/books/eight-kilobytes/mvcc#a-snapshot-picks-one-version).
+
+### SP-GiST
+
+Space-partitioned GiST, for data that splits into non-overlapping regions (prefixes, points, IP networks), so a search follows one path down the tree. See [You'll rarely need SP-GiST](/books/eight-kilobytes/more-indexes#youll-rarely-need-sp-gist).
+
+### Split brain
+
+Two servers accepting writes as primary at once, usually because a failover promoted a replica without fencing the old primary. Their histories diverge and nothing merges them. Use a failover manager that fences, never a script. See [Don't hand-roll failover](/books/eight-kilobytes/replication#dont-hand-roll-failover).
+
+### SSI
+
+Serializable snapshot isolation, Postgres's implementation of serializable: repeatable read's snapshots, plus tracking of read and write dependencies, aborting a transaction when they form a dangerous cycle. Nobody blocks; somebody retries. See [How serializable catches it without blocking anyone](/books/eight-kilobytes/acid#how-serializable-catches-it-without-blocking-anyone).
+
+### statement_timeout
+
+The setting for how long one statement may run before it's canceled. Set it below your request deadline so abandoned work stops holding locks. See [Every timeout defaults to off](/books/eight-kilobytes/connections#every-timeout-defaults-to-off).
+
+### Streaming replication
+
+A standby that replays the primary's WAL as it arrives, a byte-for-byte copy that can answer reads (a hot standby). Asynchronous by default, so a failover can lose the last commits. See [A replica is a server stuck in recovery](/books/eight-kilobytes/replication#a-replica-is-a-server-stuck-in-recovery).
+
+### Subtransaction
+
+The transaction ID a savepoint or PL/pgSQL `exception` block gets when it writes. Each backend caches 64; past that, visibility checks fall back to disk. See [Subtransactions are not free](/books/eight-kilobytes/concurrency#subtransactions-are-not-free).
+
+### synchronous_commit
+
+The setting for what a commit waits for. Set to off, a commit returns before its WAL is flushed, and a crash can lose a short window of transactions others already saw; it never corrupts. See [synchronous_commit = off loses a window](/books/eight-kilobytes/acid#synchronous_commit--off-loses-a-window).
+
+### Synchronous replication
+
+Replication in which each commit waits for a standby to confirm the WAL, so failover loses nothing. Every commit pays a round trip, and writes stop if the standby goes away. See [Synchronous commit costs a round trip](/books/eight-kilobytes/replication#synchronous-commit-costs-a-round-trip).
+
+## T
+
+### Tenant
+
+One customer account in a multi-tenant app, where many customers share the same tables. This book puts `account_id` on every tenant table and leads keys with it, so queries, row-level security, and any future shard key agree. See [Carry the tenant everywhere](/books/eight-kilobytes/keys#carry-the-tenant-everywhere).
+
+### Text search configuration
+
+A parser plus the dictionaries each kind of token goes through, such as `'english'`. It's part of what an index stores, so always pass it explicitly. See [The configuration is part of the index](/books/eight-kilobytes/search#the-configuration-is-part-of-the-index).
+
+### Timeline
+
+A numbered branch of WAL history. Every promotion starts a new one, and WAL file names carry its number, so recovery and `pg_rewind` can tell which history a segment belongs to. See [Promotion takes one call and starts a new timeline](/books/eight-kilobytes/replication#promotion-takes-one-call-and-starts-a-new-timeline).
+
+### TOAST
+
+The Oversized-Attribute Storage Technique: past about 2 KB a row's large values are compressed and, if needed, moved to a side table in chunks. Changing a toasted value rewrites all of it. See [Large values are compressed, then moved out of the row](/books/eight-kilobytes/storage#large-values-are-compressed-then-moved-out-of-the-row).
+
+### Transaction ID
+
+The 32-bit number (XID) a transaction takes at its first write; read-only transactions never take one. Row versions record them, which is why the counter's wraparound matters. See [Every write gets a transaction ID](/books/eight-kilobytes/mvcc#every-write-gets-a-transaction-id).
+
+### Trigger
+
+A function the database runs when a table changes: before or after each row, or once per statement. It fires for every writer, which is its point, and a row trigger costs about a microsecond a row even when it does almost nothing. Foreign keys are enforced by triggers too. See [Triggers run once per row unless you say otherwise](/books/eight-kilobytes/functions#triggers-run-once-per-row-unless-you-say-otherwise).
+
+### Trigram
+
+A three-character sequence of a string. The `pg_trgm` extension indexes every trigram with GIN or GiST, which makes `like '%x%'` and similarity search indexable. See [pg_trgm makes a leading wildcard indexable](/books/eight-kilobytes/more-indexes#pg_trgm-makes-a-leading-wildcard-indexable).
+
+### tsvector
+
+The full-text type: sorted lexemes with positions, matched against a `tsquery` with `@@`. Store it in a column and index that. See [Store the tsvector; don't index the expression](/books/eight-kilobytes/search#store-the-tsvector-dont-index-the-expression).
+
+### Tuple
+
+One version of a row, as stored on a page. An update writes a new tuple; the old one stays until it's dead and cleaned up. See [Every page has the same layout](/books/eight-kilobytes/storage#every-page-has-the-same-layout).
+
+### Tuple header
+
+The 23 bytes that start every tuple: `xmin`, `xmax`, a ctid (its own, or its newer version's), and flags, followed by the null bitmap when there is one. See [A row costs more than its columns](/books/eight-kilobytes/storage#a-row-costs-more-than-its-columns).
+
+### Two-phase commit
+
+One transaction across several databases: each prepares, then all commit. It holds locks until the second phase, and a coordinator that dies in between leaves prepared transactions behind. See [Two-phase commit is rarely the answer](/books/eight-kilobytes/acid#two-phase-commit-is-rarely-the-answer).
+
+### TypeID
+
+A specification for prefixed ids: a lowercase type prefix, an underscore, and a UUIDv7 in base32, like `prj_01j6b7yh69fq2vyabwvmba4nr5`. Store the `uuid`; print the prefix. See [A prefix makes an id say what it is](/books/eight-kilobytes/keys#a-prefix-makes-an-id-say-what-it-is).
+
+## U
+
+### ULID
+
+A 128-bit id with UUIDv7's shape (48 bits of milliseconds, 80 random bits) and no version bits, written as 26 characters of Crockford base32. It fits a `uuid` column byte for byte. See [A ULID fits a uuid column byte for byte](/books/eight-kilobytes/keys#a-ulid-fits-a-uuid-column-byte-for-byte).
+
+### Unlogged table
+
+A table that skips the WAL: much cheaper to write, emptied after a crash, and not replicated. Right for staging and disposable data. See [An unlogged table is emptied after a crash](/books/eight-kilobytes/models#an-unlogged-table-is-emptied-after-a-crash).
+
+### Upsert
+
+An insert that updates the existing row instead when its key exists, in one atomic statement: `insert ... on conflict`. It names the unique index it arbitrates on and is safe under concurrency. See [ON CONFLICT is the safe upsert](/books/eight-kilobytes/queries#on-conflict-is-the-safe-upsert).
+
+### UUIDv4
+
+A UUID of 122 random bits. Random keys land anywhere in a B-tree; in our test a million of them wrote 551 MB of WAL against 143 MB for UUIDv7. See [UUIDv4 hides creation time, at 3.8 times the WAL](/books/eight-kilobytes/keys#uuidv4-hides-creation-time-at-38-times-the-wal).
+
+### UUIDv7
+
+A UUID starting with a 48-bit millisecond timestamp, so new keys land at the index's right edge. Built in as `uuidv7()` since PostgreSQL 18; it reveals when the row was created. See [UUIDv7 is the default, and it reveals creation time](/books/eight-kilobytes/keys#uuidv7-is-the-default-and-it-reveals-creation-time).
+
+## V
+
+### VACUUM
+
+The maintenance command that removes dead tuples and their index entries, records free space, truncates empty trailing pages, freezes old tuples, and maintains the visibility map. It makes space reusable; it rarely shrinks the file. See [Vacuum does five jobs](/books/eight-kilobytes/vacuum#vacuum-does-five-jobs).
+
+### VACUUM FULL
+
+The command that rewrites the table into a new, compacted file, holding `ACCESS EXCLUSIVE` for the whole run. Use a maintenance window or an online rebuild tool. See [VACUUM FULL is an outage on a big table](/books/eight-kilobytes/vacuum#vacuum-full-is-an-outage-on-a-big-table).
+
+### Visibility map
+
+Two bits per heap page: all-visible and all-frozen. Index-only scans and vacuum skip pages on their strength; any change to the page clears them. See [Two bits per page let scans and vacuum skip work](/books/eight-kilobytes/storage#two-bits-per-page-let-scans-and-vacuum-skip-work).
+
+### Volatility
+
+A function's promise to the planner: `immutable`, `stable`, or `volatile` (the default). A false `immutable` serves stale answers. See [Volatility is a promise to the planner](/books/eight-kilobytes/functions#volatility-is-a-promise-to-the-planner).
+
+## W
+
+### Wait event
+
+What a session is waiting on, in `pg_stat_activity`: a `Lock`, an `LWLock`, `IO`, or the `Client`. Sample them and you get a profile of where the time goes. See [An active session with no wait event is on a CPU](/books/eight-kilobytes/observability#an-active-session-with-no-wait-event-is-on-a-cpu).
+
+### WAL
+
+The write-ahead log: every change appended as a compact record before data pages are written. A commit waits only for the log; recovery, replication, and PITR all replay it. See [Write the log, not the pages](/books/eight-kilobytes/wal#write-the-log-not-the-pages).
+
+### Working set
+
+The pages your workload touches over, say, an hour: not the whole database, the part that's used. Size RAM to it, and more RAM past it buys nothing. See [Size RAM to the working set](/books/eight-kilobytes/latency#size-ram-to-the-working-set).
+
+### work_mem
+
+The memory one sort or hash node may use before spilling to temporary files, 4 MB by default. It's per node, per connection, so multiply before you raise it. See [work_mem is per node, and you can see it](/books/eight-kilobytes/buffers#work_mem-is-per-node-and-you-can-see-it).
+
+### Wraparound
+
+The point where the 32-bit transaction ID counter laps an unfrozen row, and old rows would suddenly look like the future. Postgres stops accepting writes before that, so freezing has to keep up. See [Wraparound stops writes before anything is corrupted](/books/eight-kilobytes/vacuum#wraparound-stops-writes-before-anything-is-corrupted).
+
+### Write skew
+
+The anomaly where two transactions read the same data, each changes a different row, and together they break a rule neither broke alone. Only serializable catches it. See [Serializable catches the write skew repeatable read misses](/books/eight-kilobytes/concurrency#serializable-catches-the-write-skew-repeatable-read-misses).
+
+## X
+
+### xmin and xmax
+
+The two transaction IDs in every tuple header: `xmin` inserted this version; `xmax` deleted, replaced, or locked it (0 if none). Compared against a snapshot, they decide who sees the row. See [Every write gets a transaction ID](/books/eight-kilobytes/mvcc#every-write-gets-a-transaction-id).
+
+### xmin horizon
+
+The oldest snapshot still running. Versions that died before it can go; the rest must stay, so one long transaction holds back cleanup in its whole database (a replication slot, in the whole cluster). See [Long transactions hold everything back](/books/eight-kilobytes/mvcc#long-transactions-hold-everything-back).

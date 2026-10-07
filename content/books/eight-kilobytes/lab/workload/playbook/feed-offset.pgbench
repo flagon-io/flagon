@@ -1,0 +1,8 @@
+-- The performance playbook: an account's activity feed, page 1 to 25 by OFFSET.
+\set a random(1, 1000)
+\set skip 20 * random(0, 24)
+select id, project_id, kind, created_at
+from events
+where account_id = :a
+order by created_at desc, id desc
+limit 20 offset :skip;

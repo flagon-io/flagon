@@ -5,6 +5,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { site } from "@/lib/site";
 import { ThemeScript } from "@/components/theme-script";
+import { DepthScript } from "@/components/deep-dive";
 
 // Three roles, kept clean: Geist is the neutral body/UI workhorse, Hanken
 // Grotesk gives headlines a tighter, more distinct voice, and JetBrains Mono
@@ -67,6 +68,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <head>
         <ThemeScript />
+        <DepthScript />
       </head>
       <body className="flex min-h-dvh flex-col overflow-x-clip">
         {children}

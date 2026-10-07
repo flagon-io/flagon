@@ -1,0 +1,11 @@
+-- The performance playbook: the account dashboard, with a bare column.
+-- Same rows, same answer: the range is on created_at itself.
+\set a random(1, 1000)
+select created_at::date as day,
+       count(*) as events,
+       count(*) filter (where kind = 'deploy' and payload->>'status' = 'failed') as failed_deploys
+from events
+where account_id = :a
+  and created_at >= '2026-09-06'
+group by 1
+order by 1;

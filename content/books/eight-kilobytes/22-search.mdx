@@ -1,0 +1,547 @@
+---
+title: Search without a search engine
+description: Build full-text and vector search in Postgres, measure what parsing, ranking, snippets, TOAST, and recall cost, and know when you need a search engine.
+part: Finding rows fast
+builds_on: [more-indexes, explain]
+---
+
+Two ways to give a help center a search box. Same 50,000 articles, same [GIN](/books/eight-kilobytes/glossary#gin) index, same 4,206 matches for "failed payment", same top 20. One answers in under 5 ms. The other takes 170 ms, because it indexed an expression instead of storing a column, and every match gets parsed again to be ranked.
+
+Search in Postgres is like that: good pieces, each with a cost you only see when you measure it. Most products never need a search engine, and the ones that do can name the reason.
+
+[Beyond the B-tree](/books/eight-kilobytes/more-indexes#a-full-text-gin-search-read-51-pages-not-6671) showed the basics: a [`tsvector`](/books/eight-kilobytes/glossary#tsvector) column, a GIN index, a `@@` match. Here we build text and vector search on one synthetic help center of 50,000 articles (the lab is `22-search.sh`). Its embeddings come from no model, so our recall numbers demonstrate trade-offs rather than forecast your data.
+
+## Text becomes lexemes
+
+Full-text search never compares your query to your text. It compares normalized words to normalized words. `to_tsvector` parses a document and keeps **lexemes**, normalized words, with their positions:
+
+```sql
+select to_tsvector('english',
+  'The deploys were failing, so we rolled back the deployment');
+```
+
+```text
+ 'back':8 'deploy':2,10 'fail':4 'roll':7
+```
+
+"Deploys" and "deployment" became `deploy`; "the", "were", "so", and "we" are gone. The `'english'` argument is a **text search configuration**: a parser plus the dictionaries each kind of token goes through.
+
+### Stop words and stemming cut both ways
+
+Stemming is suffix rules, not meaning: in `english`, "organization" matches "organ". Search for the band The Who and `english` throws the whole query away as stop words. Stemming helps prose and hurts names and codes, so give each its own configuration: `english` for text, `simple` (which only lowercases) for titles, tags, and error codes.
+
+### The configuration is part of the index
+
+Always pass the configuration: the one-argument `to_tsvector(body)` depends on a session setting, so an index refuses it (`functions in index expression must be marked IMMUTABLE`).
+
+Accents need a configuration of their own. `english` keeps "Zürich" as `zürich`, so "zurich" finds nothing. Add the `unaccent` dictionary from contrib to a copy of the configuration, not as a function call. Ours is `app_english`, and `to_tsvector('app_english', 'Requests from Zürich and Montréal')` gives `'montreal':5 'request':1 'zurich':3`.
+
+<DeepDive title="Inside the parser, and why unaccent() can't be indexed">
+
+```sql
+create extension unaccent;
+create text search configuration app_english (copy = english);
+alter text search configuration app_english
+  alter mapping for hword, hword_part, word with unaccent, english_stem;
+```
+
+`english_stem` is a Snowball stemmer with a 127-word stop-word list, so `plainto_tsquery('english', 'to be or not to be')` comes back empty. The `unaccent()` function is only `stable` (its rules file could change), so an index refuses `to_tsvector('english', unaccent(body))` but accepts `to_tsvector('app_english', body)`, trusting the configuration. Keep that promise by hand: change `app_english` and old rows keep their old vectors until you rewrite them. For Japanese or Chinese, which the built-in parser can't split into words, see [PGroonga](/books/eight-kilobytes/extensions#pgroonga-searches-text-the-built-in-parser-cant-split).
+
+<ProveIt lab="22-search.sh">
+
+```sql
+select lab.prove('english stems deploys, failing, rolled, and deployment and drops the stop words',
+  to_tsvector('english', 'The deploys were failing, so we rolled back the deployment')
+    = $$'back':8 'deploy':2,10 'fail':4 'roll':7$$::tsvector);
+select lab.prove('the english stop-word list has 127 words, and a query of only stop words has no lexemes left',
+  numnode(plainto_tsquery('english', 'to be or not to be')) = 0);
+select lab.prove('stemming collides: organization matches organ, university matches universe',
+  to_tsvector('english', 'organization') @@ to_tsquery('english', 'organ')
+  and to_tsvector('english', 'university') @@ to_tsquery('english', 'universe'));
+select lab.prove('plain english keeps the accent, so a search for zurich misses Zürich',
+  not (to_tsvector('english', 'Requests from Zürich') @@ websearch_to_tsquery('english', 'zurich'))
+  and to_tsvector('app_english', 'Requests from Zürich') @@ websearch_to_tsquery('app_english', 'zurich'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Store the tsvector; don't index the expression
+
+Store the vector in a generated column and index the column. Indexing the expression instead looks thriftier and costs you on every search.
+
+```sql
+alter table docs add column search tsvector generated always as (
+  setweight(to_tsvector('english', title), 'A') ||
+  setweight(to_tsvector('english', body),  'B')) stored;
+create index docs_search_idx on docs using gin (search);
+```
+
+Title words are weighted above body words. For comparison, a second table, `docs_expr`, skips the column and puts a GIN index on the same expression. Say `stored`: generated columns are virtual by default in PostgreSQL 18, and a virtual column can't be indexed ([Types are a contract](/books/eight-kilobytes/types#generated-columns-are-virtual-by-default-postgresql-18)).
+
+| | Heap pages | GIN index | WAL to load |
+|---|---|---|---|
+| expression index | 3,347 | 9,064 KB | 70 MB |
+| stored column | 6,766 | 9,360 KB | 95 MB |
+
+The stored column doubles the heap: a `tsvector` with positions averages 511 bytes, against 380 for the body it came from.
+
+That's the cost. The payoff shows when you rank the matches. The stored version took 4.6 ms on our machine; the expression version, 170 ms. Either GIN index finds the 4,206 matches in under a millisecond, but ranking needs each match's `tsvector`, and the expression version has to parse all 4,206 documents again to get one.
+
+Pay the heap and the WAL once, on write, instead of paying the parser on every search.
+
+<DeepDive title="Proving the heap, the WAL, and the re-parse">
+
+Why the expression version loses: a GIN index on `tsvector` stores lexemes and row pointers, nothing more, so it can say which rows match but can't hand `ts_rank` the vector to score. With no column to read the vector from, the ranking calls `to_tsvector` on each match's title and body again, 4,206 times per search. The two GIN indexes come out about the same size; what the stored column adds is the vector itself, in the heap and in the WAL that logged every row of it.
+
+<ProveIt lab="22-search.sh">
+
+```sql
+select lab.prove('the stored tsvector roughly doubles the heap (3,347 pages without it, 6,766 with)',
+  pg_relation_size('docs') / pg_relation_size('docs_expr')::numeric between 1.8 and 2.6);
+select lab.prove('the average tsvector is bigger than the text it came from',
+  (select avg(pg_column_size(search)) > avg(pg_column_size(body)) from docs));
+select lab.prove('loading the table with the stored column writes more WAL',
+  (select s.wal > e.wal * 1.15 from cost s, cost e where s.what = 'stored' and e.what = 'expression'));
+select lab.ms(:'rank_stored') as stored_ms, lab.ms(:'rank_expr') as expr_ms \gset
+select lab.prove('ranking through the expression index is more than 5 times slower: it re-parses every match',
+  :expr_ms > 5 * :stored_ms);
+```
+
+</ProveIt>
+
+The expression index only wins when you never rank or highlight.
+
+</DeepDive>
+
+## websearch_to_tsquery never raises a syntax error
+
+Never hand what a user typed to `to_tsquery`: it expects `tsquery` syntax, so `'failed payment'` is a syntax error. `websearch_to_tsquery` (PostgreSQL 11+) takes search-box syntax and never raises one: `'"roll back" -flags or rollback'` becomes `'roll' <-> 'back' & !'flag' | 'rollback'`, and junk like `'payment & ) ( !'` becomes `'payment'`.
+
+### Phrases need positions
+
+Quotes become `<->`, "followed by", checked against stored positions: "roll" and "back" both appear in 7,849 articles, but side by side, as a phrase, in only 4,194.
+
+<DeepDive title="Stop words still count as positions">
+
+`phraseto_tsquery('english', 'roll back the deploy')` produces `'roll' <-> 'back' <2> 'deploy'`, so "roll back a deploy" matches too. Close enough for search; surprising if you expected an exact string.
+
+<ProveIt lab="22-search.sh">
+
+```sql
+do $$ begin
+  perform to_tsquery('english', 'failed payment');
+  raise exception 'no error';
+exception when syntax_error then
+  if sqlerrm not like 'syntax error in tsquery%' then raise; end if;
+end $$;
+select lab.prove('to_tsquery rejects two plain words with a syntax error', true);
+select lab.prove('garbage input never raises an error',
+  websearch_to_tsquery('english', 'payment & ) ( !')::text = $$'payment'$$);
+select lab.prove('phraseto_tsquery counts the dropped stop word as a gap of two',
+  phraseto_tsquery('english', 'roll back the deploy')::text = $$'roll' <-> 'back' <2> 'deploy'$$
+  and to_tsvector('english', 'roll back a deploy') @@ phraseto_tsquery('english', 'roll back the deploy'));
+select lab.prove('the phrase matches far fewer articles than the two words anywhere (about 4,200 against 7,800)',
+  :phrase between 3800 and 4600 and :anded between 7400 and 8300);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Rank by proximity, not frequency
+
+A match is yes or no; ranking orders the yeses. Use `ts_rank_cd`: it scores **cover density**, how close together the query's words are, so "failed payment" as a phrase beats the two words sentences apart. (`ts_rank` only counts how often they appear.)
+
+<DeepDive title="Three documents, three rankings">
+
+For the query "failed payment":
+
+```text
+ id | doc                                  | ts_rank | norm 2 | ts_rank_cd
+----+--------------------------------------+---------+--------+-----------
+  1 | title "When a payment fails", short  |  0.9990 | 0.1427 |     1.4000
+  2 | "failed payment" 4 times, long body  |  0.9854 | 0.0340 |     1.8111
+  3 | "failed" and "payment" far apart     |  0.0869 | 0.0072 |     0.0333
+```
+
+The `norm 2` column is `ts_rank` with normalization `2`.
+
+`ts_rank` slightly prefers the short title match; `ts_rank_cd` prefers four adjacent hits; both bury the third. By default a title hit (weight A) counts two and a half times a body hit (B). The normalization bits divide the rank by something about the document: `2` by its length cut the long article to a quarter of the short one. There's no right setting, only the one your users agree with.
+
+<ProveIt lab="22-search.sh">
+
+```sql
+select lab.prove('ts_rank_cd puts the article with four adjacent "failed payment"s first',
+  (select r2.cd > r1.cd from rank_scores r1, rank_scores r2 where r1.id = 1 and r2.id = 2));
+select lab.prove('dividing by length (normalization 2) cuts the long article to less than a quarter of the short one',
+  (select r2.rank_len < r1.rank_len / 4 from rank_scores r1, rank_scores r2 where r1.id = 1 and r2.id = 2));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Ranking reads every match
+
+`order by rank limit 20` looks like it should read 20 rows. It can't. The top 20 are only known once every match is ranked:
+
+```text
+ Limit (actual time=8.167..8.171 rows=20.00 loops=1)
+   Buffers: shared hit=3283
+         ->  Bitmap Heap Scan on docs ... rows=4206.00 ...
+               ->  Bitmap Index Scan on docs_search_idx ...
+                     Buffers: shared hit=13
+```
+
+The index lookup is 13 pages; fetching all 4,206 matches is the rest, the same 3,283 pages as with no `limit`. (The 8 ms here includes `EXPLAIN ANALYZE`'s own overhead; run plain, the same search took the 4.6 ms quoted earlier.) Ranking "deploy", which appears in 19,507 articles, reads 97 percent of the table. GIN knows which rows contain a lexeme, not how often or where, so it can't hand back the best first. That's the scaling limit of built-in full-text search.
+
+So narrow before you rank. In this corpus a tenant owns about 50 articles in all, so a tenant filter leaves a handful of candidates where the whole corpus offered 4,206. Give the filter an index the planner can combine with the GIN scan: a B-tree on `account_id` for a `BitmapAnd`, or one combined GIN index through the `btree_gin` extension. In a multi-tenant app that's usually the whole fix.
+
+<ProveIt lab="22-search.sh">
+
+```sql
+select lab.buffers(:'top20') as top20_pages, lab.buffers(:'all') as all_pages \gset
+select lab.prove('limit 20 reads the same pages as returning all 4,206 matches: ranking needs every one',
+  :top20_pages >= 0.95 * :all_pages and :top20_pages > 3000);
+select lab.prove('deploy is in four articles of ten, and ranking them reads over 90% of the heap',
+  (select count(*) from docs where search @@ websearch_to_tsquery('english', 'deploy')) between 18000 and 21000
+  and lab.buffers($$ select id, ts_rank(search, q) as rank
+     from docs, websearch_to_tsquery('english', 'deploy') q
+     where search @@ q order by rank desc limit 20 $$) > 0.9 * pg_relation_size('docs') / 8192);
+```
+
+</ProveIt>
+
+## ts_headline parses the document again
+
+Compute snippets last, only for the rows you show. `ts_headline` parses the whole original document again, every call. A page of 20 took about 5 ms with snippets or without, because the planner computes them after the limit. Snippets for all 4,206 matches took about 150 ms, and that's the bill an API or view pays when it snippets every match.
+
+<Callout type="note" title="ts_headline output is not safe HTML">
+The documentation says it's no defense against cross-site scripting. Escape the result before rendering, or set `StartSel` and `StopSel` to markers your template turns into tags after escaping.
+</Callout>
+
+<DeepDive title="Where the plan puts ts_headline">
+
+```text
+ Limit
+   ->  Result
+         Output: ..., ts_headline('english'::regconfig, docs.body, ...)
+         ->  Sort
+               Sort Key: (ts_rank(docs.search, ...)) DESC
+```
+
+A materialized CTE that computes snippets before ranking defeats this. `MaxWords`, `MinWords`, and `MaxFragments` shape the snippet.
+
+<ProveIt lab="22-search.sh">
+
+```sql
+select lab.ms(:'search') as search_ms, lab.ms(:'page') as page_ms, lab.ms(:'every') as every_ms \gset
+select lab.prove('snippets for every match cost more than 10 times a page of 20 with snippets',
+  :every_ms > 10 * :page_ms);
+select lab.prove('the planner computes ts_headline after the sort and limit, only for the 20 rows shown',
+  (select (p -> 'Plan' ->> 'Node Type') = 'Limit'
+      and (p -> 'Plan' -> 'Plans' -> 0 ->> 'Node Type') = 'Result'
+      and (p -> 'Plan' -> 'Plans' -> 0 -> 'Plans' -> 0 ->> 'Node Type') = 'Sort'
+     from lab.plan(:'page') p));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## For most applications, Postgres search is enough
+
+Postgres search searches your own content, in the same transaction as the writes, under the same permissions and tenant filters, with nothing to sync. Reach for more when you can name what's missing: relevance as a product ([BM25](/books/eight-kilobytes/glossary#bm25) scoring that knows how rare a word is across the corpus, boosts, synonyms), typo tolerance on long prose (`pg_trgm` covers [short strings](/books/eight-kilobytes/more-indexes#pg_trgm-makes-a-leading-wildcard-indexable)), facets and counts over huge result sets, or many languages in one field.
+
+A separate engine brings a sync pipeline that lags and drifts, a second copy of every permission rule, and no transactions across the two. Start in Postgres. Move when you can show the query a search engine would answer and Postgres can't.
+
+## Search extensions put BM25 in the index
+
+An extension that ranks like a search engine should be judged like one: on your queries and your corpus, not on a feature table. That said, BM25 no longer requires leaving Postgres. Newer extensions keep term frequencies and corpus statistics inside the index, so they return the best k without fetching every match. Four are worth knowing as of October 2026 (none ran in our lab; this comes from each project's own documentation):
+
+| Extension | Phrase, fuzzy | License | Where it runs |
+|---|---|---|---|
+| pg_search (ParadeDB) | yes, yes | AGPL-3.0; Enterprise is commercial | self-hosted, ParadeDB Cloud |
+| pg_textsearch (Timescale) | yes, no | PostgreSQL | self-hosted, PostgreSQL 17 and 18 |
+| VectorChord-bm25 (TensorChord) | no, no | AGPL-3.0 or ELv2 | self-hosted |
+| TIN (PlanetScale) | yes, yes | not published | PlanetScale only |
+
+Before you test one, check that your host offers it, that its index survives failover, and how portable the query syntax is (only pg_textsearch keeps `tsquery`). PlanetScale's benchmark puts TIN well ahead; it's a vendor measuring its own product.
+
+<DeepDive title="The four extensions, one paragraph each">
+
+**[pg_search](https://github.com/paradedb/paradedb)** (0.26.0, PostgreSQL 15+) builds a log-structured merge index on Tantivy, a Lucene-style Rust library. Its docs say the open source edition doesn't replicate the search index, so search runs only on the primary; replicas for it come with the commercial editions.
+
+**[pg_textsearch](https://github.com/timescale/pg_textsearch)** (1.5.1) is BM25 over this chapter's configurations, ranked by `order by content <@> 'failed payment'`. Its README flags a limit of any shared BM25 index: corpus statistics count rows hidden by row-level security, so a tenant can infer something about other tenants' data ([Trust no tenant](/books/eight-kilobytes/security)).
+
+**[VectorChord-bm25](https://github.com/supervc-stack/VectorChord-bm25)** (0.3.0, December 2025) ranks sparse vectors of token counts: no positions, so no phrases, and tested only on English, per its README.
+
+**[TIN](https://planetscale.com/blog/introducing-tin)** (generally available September 16, 2026) uses the row's [`ctid`](/books/eight-kilobytes/storage#a-line-pointer-lets-a-tuple-move-without-changing-its-address) as the document id, so posting lists compress as bitmaps of pages, then tuples. We found no published source or license; [Lead](https://github.com/planetscale/lead) (AGPL-3.0) is a development stand-in that calls itself "intentionally unsuitable for production". We haven't reproduced the vendor's benchmark.
+
+</DeepDive>
+
+## A vector search finds near points, whatever the words
+
+An embedding model turns text into an array of floats, placed so that similar inputs land near each other. "Find articles like this question" becomes "find the nearest points", whatever words they use. **pgvector** (the lab runs 0.8.7) adds a `vector` type and distance operators: `<=>` for cosine distance, what most text models want, plus `<->` for Euclidean (L2) distance, `<#>` for negative inner product, and `<+>` for L1.
+
+### A 1,536-dimension vector lives in TOAST
+
+A common 1,536-dimension embedding is 6,152 bytes (4 per dimension plus 8), three quarters of a page and far past the roughly 2 KB at which Postgres moves a value out of line into TOAST ([Large values are compressed, then moved out of the row](/books/eight-kilobytes/storage#large-values-are-compressed-then-moved-out-of-the-row)). Store 2,000 and the table is 15 heap pages of ids and pointers, plus 2,000 TOAST pages. Anything that skips the vector is cheap: `count(*)` reads 15 pages. Exact search reads every vector chunk by chunk: 12,024 buffers, about six per vector.
+
+<DeepDive title="Plain storage, halfvec, and bits: where the vector lives">
+
+Set the column to `storage plain` and the 2,000 vectors sit inline, one per heap page; the same search reads 2,003 buffers. That works only while the row fits in a page (2,100 dimensions is refused: "row is too big"). `halfvec(1536)` (pgvector 0.7+) is 3,080 bytes and 1,000 TOAST pages; a `binary_quantize()`d `bit(1536)` is 200 bytes in the heap, and the table gets no TOAST table at all. Both are approximations ([halfvec shrinks the index with no measurable recall loss](#halfvec-shrinks-the-index-with-no-measurable-recall-loss) measures their recall).
+
+<ProveIt lab="22-search.sh">
+
+```sql
+select lab.prove('a vector(1536) is 4 x 1,536 + 8 = 6,152 bytes',
+  (select pg_column_size(l2_normalize(embedding)) = 6152 from wide limit 1));
+select lab.prove('2,000 vectors: 15 heap pages and one TOAST page per vector',
+  pg_relation_size('wide') / 8192 < 20
+  and (select pg_relation_size(reltoastrelid) / 8192 between 1990 and 2010 from pg_class where relname = 'wide'));
+select lab.prove('counting rows never touches the vectors: under 20 pages',
+  lab.buffers('select count(*) from wide') < 20);
+select lab.prove('exact search reads about six buffers per toasted vector, five times the plain layout',
+  :toasted between 11000 and 13000 and :plain between 1990 and 2100);
+select lab.prove('a binary-quantized bit(1536) is 200 bytes and stays in the heap: the table has no TOAST table at all',
+  (select pg_column_size(embedding) = 200 from wide_bit limit 1)
+  and (select reltoastrelid = 0 from pg_class where relname = 'wide_bit'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Exact search is a sequential scan
+
+Don't reach for an approximate index first. From here on the embeddings are 384 dimensions, in their own `doc_embeddings` table so the article list doesn't drag them through the cache. With no index, `order by embedding <=> $1 limit 10` scans all 10,000 pages, about 20 ms here. It's exact, needs no tuning, and for tens of thousands of vectors, or one tenant's slice, it's fast enough.
+
+## HNSW walks a graph greedily, and can miss
+
+**HNSW** (Hierarchical Navigable Small World) is a graph. Every vector links to some of its near neighbors; a few also appear on sparser upper layers with longer links, like express stops on a subway line:
+
+```text
+  layer 2   A ─────────────────────────── K
+            │                             │
+  layer 1   A ─────── E ───────── H ───── K
+            │         │           │       │
+  layer 0   A ─ B ─ C ─ E ─ F ─ G ─ H ─ J ─ K ─ ...   (every vector)
+```
+
+A search enters at the top, walks toward the query, and drops a layer, touching a few hundred nodes instead of all of them; it can miss what the greedy walk can't reach. Give the build memory and workers: 57 s with the default 64 MB of `maintenance_work_mem` and no parallel workers, 8 s with 256 MB and two. The index, 98 MB, is bigger than the 78 MB table.
+
+### ef_search trades latency for recall
+
+At query time one setting matters: `hnsw.ef_search`, the candidate list (40 by default). **Recall@10** is the fraction of the true ten nearest neighbors that came back:
+
+| `hnsw.ef_search` | Recall@10 | ms per query (ours) | Buffers, one query |
+|---|---|---|---|
+| 40 (default) | 0.969 | 0.7 | 722 |
+| 400 | 0.995 | 4.0 | 3,925 |
+| exact (no index) | 1.000 | 21 | 10,035 |
+
+At the default, 97 percent of the true neighbors for a fourteenth of the pages. An HNSW build is randomized, so recall moves a few points from one build to the next: across our runs the default gave 0.92 to 0.99, and ef_search 400 anywhere from 0.98 to a full 1.0. That's what "approximate" means, and why you measure recall on your own data. Raise it per query where the stakes are high (`set local hnsw.ef_search = 100`), and measure recall on your own data by comparing against exact search for a sample of real queries.
+
+<DeepDive title="Build settings, and how much recall moves between builds">
+
+With 64 MB the build warns `hnsw graph no longer fits into maintenance_work_mem after 28369 tuples`. Our timing runs started from a serial build (`max_parallel_maintenance_workers = 0`; the server default allows two). Memory alone (256 MB) took it from 57 s to 23 s; two parallel workers alone, to 17 s; both, to 8 s. Parallel builds keep the graph in shared memory, so in Docker give the container a bigger `/dev/shm`.
+
+The sweep also measured 10 (0.956, 340 buffers), 20 (0.968), 100 (0.986, 1,684 buffers), and 200 (0.986). Builds aren't deterministic: pgvector picks each vector's graph level at random (and `setseed` doesn't reach it), and parallel builds insert in a different order every time. Across our runs the default's recall ranged from 0.923 to 0.992, so the lab checks for 0.9 or better rather than one run's number.
+
+<ProveIt lab="22-search.sh">
+
+```bash
+build=$(sql -c "set client_min_messages = notice" -c "show maintenance_work_mem" \
+  -c "create index doc_embeddings_hnsw on doc_embeddings using hnsw (embedding vector_cosine_ops)" 2>&1)
+prove "with 64 MB the build warns: hnsw graph no longer fits into maintenance_work_mem" \
+  has "hnsw graph no longer fits into maintenance_work_mem" "$build"
+```
+
+```sql
+select lab.prove('the HNSW index (98 MB here) is bigger than the table it indexes',
+  pg_relation_size('doc_embeddings_hnsw') > pg_relation_size('doc_embeddings'));
+select lab.prove('at the default ef_search of 40, recall@10 is 0.9 or better',
+  (select recall >= 0.9 from sweep where ef = 40));
+select lab.prove('raising ef_search raises recall, to 0.98 or better at 400',
+  (select max(recall) filter (where ef >= 200) > min(recall) filter (where ef = 10)
+      and max(recall) filter (where ef = 400) >= 0.98 from sweep));
+select lab.prove('ef_search 400 reads more than 4 times the pages of ef_search 40',
+  (select b.buffers > 4 * a.buffers from sweep a, sweep b where a.ef = 40 and b.ef = 400));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## IVFFlat's default of one probe is a trap
+
+**IVFFlat** clusters the vectors at build time into `lists` groups and searches only the `probes` lists nearest the query. It builds in under 2 seconds against HNSW's 8, and its default is a trap: with 50 lists and `ivfflat.probes = 1`, recall@10 was 0.636. Five probes gave 1.000. Start at `sqrt(lists)`, and build after loading, since the lists come from the rows present. Our default is HNSW.
+
+## halfvec shrinks the index with no measurable recall loss
+
+The table can keep 4-byte floats while the index holds something smaller: `using hnsw ((embedding::halfvec(384)) halfvec_cosine_ops)` shrank the index from 98 MB to 56 MB with no measurable recall loss. Binary quantization, one bit per dimension, made a 17 MB index that found 0.303 of the true neighbors, and 0.915 after re-ranking 400 candidates by the full vector (fetch the 400 nearest by bits, then reorder them exactly). Measure it on your embeddings first.
+
+<DeepDive title="Re-ranking binary candidates">
+
+```sql
+select doc_id
+from (select doc_id, embedding
+      from doc_embeddings
+      order by binary_quantize(embedding)::bit(384) <~> binary_quantize($1)
+      limit 400) candidates
+order by embedding <=> $1
+limit 10;
+```
+
+The bit index is `using hnsw ((binary_quantize(embedding)::bit(384)) bit_hamming_ops)`, and `hnsw.ef_search` must be at least the inner limit. Re-ranking 100 gave 0.747. Gaussian noise is a hard case for one bit; real models, some trained for it, do much better. Half precision's 0.980 beat full precision's 0.969 in this build: graph-building luck.
+
+<ProveIt lab="22-search.sh">
+
+```sql
+select lab.prove('with 50 lists and the default single probe, recall@10 is under 0.8',
+  (select recall < 0.8 from probes where probes = 1));
+select lab.prove('the halfvec index is under two thirds the size, the bit index under a fifth',
+  pg_relation_size('doc_embeddings_half') < 0.67 * pg_relation_size('doc_embeddings_hnsw')
+  and pg_relation_size('doc_embeddings_bit') < 0.2 * pg_relation_size('doc_embeddings_hnsw'));
+select lab.prove('halfvec keeps recall above 0.95', :half >= 0.95);
+select lab.prove('re-ranking 400 bit candidates by the full vectors lifts recall above 0.85',
+  :rerank400 > 0.85 and :rerank400 > :rerank100 and :rerank100 > :bits);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Filters and approximate indexes don't mix
+
+With an approximate index, your `where` runs *after* the index scan: HNSW finds its `ef_search` best candidates, Postgres discards the ones that fail the filter, and whatever is left is your answer. `kind = 'faq'` matches one article in ten. Ask for ten:
+
+```text
+ Limit (actual time=0.823..0.861 rows=4.00 loops=1)
+   ->  Index Scan using doc_embeddings_hnsw on doc_embeddings (actual rows=4.00 ...)
+         Filter: (kind = 'faq'::text)
+         Rows Removed by Filter: 36
+```
+
+Four rows, and over 100 queries an average of 3.7, some none. Your app asked for ten and got four, with no error, which is the worst kind of wrong.
+
+For broad filters, turn on pgvector 0.8's **iterative index scans** (`set hnsw.iterative_scan = relaxed_order`), which keep fetching candidates until the filter is satisfied: ten rows every time, at more than three times the pages. For selective filters, put a B-tree on the filter column: for one tenant's 46 articles the planner used it and computed 46 exact distances, 83 pages, no HNSW. A partial HNSW index per value, or [partitions](/books/eight-kilobytes/partitioning), cover the rest.
+
+<DeepDive title="Iterative scans, order, and the tenant plan">
+
+With `relaxed_order`, one query read 2,529 pages against 708, scanning up to `hnsw.max_scan_tuples` (20,000) candidates. Results may come slightly out of distance order; `strict_order` keeps it and gets less recall. A filter on a joined table can't apply during the scan, which is why `account_id` and `kind` are copied onto `doc_embeddings`.
+
+<ProveIt lab="22-search.sh">
+
+```sql
+select lab.prove('with a 10% filter and ef_search 40, limit 10 returns about 4 rows on average',
+  (select avg_rows between 2.5 and 5.5 and min_rows = 0 from filtered where mode = 'off'));
+select lab.prove('hnsw.iterative_scan = relaxed_order returns all 10 rows for every query',
+  (select avg_rows = 10 and min_rows = 10 from filtered where mode = 'relaxed_order'));
+select lab.prove('a tenant filter (46 rows) uses the B-tree and sorts exactly, ignoring HNSW',
+  (select count(*) = 46 from doc_embeddings where account_id = 42)
+  and lab.plan($$ select doc_id from doc_embeddings where account_id = 42
+     order by embedding <=> (select embedding from queries where id = 1) limit 10 $$)::text
+     like '%doc_embeddings_account_idx%'
+  and lab.plan($$ select doc_id from doc_embeddings where account_id = 42
+     order by embedding <=> (select embedding from queries where id = 1) limit 10 $$)::text
+     not like '%doc_embeddings_hnsw%');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Keywords and vectors fail differently, so fuse them
+
+Full-text nails exact terms (an error code, "SAML") and misses paraphrase: "card declined" matches nothing in our corpus. Vectors find the paraphrase and blur exact terms.
+
+Their scores share no scale, so combine positions instead: **reciprocal rank fusion** (RRF) gives each document `1 / (60 + rank)` from each list that returned it and sorts by the sum. An article both lists found always wins: with 50 results per list, two shares of at least 1/110 beat the best single share, 1/61. For "card declined", the vector side fills all ten places.
+
+Pass the query vector as a parameter: distance to a column of a *joined* row can't use the HNSW index.
+
+<DeepDive title="Hybrid search as one SQL function">
+
+```sql
+create function hybrid_search(query text, query_embedding vector(384),
+                              k int default 10)
+returns table (id bigint, score numeric, fts_rank bigint, vec_rank bigint)
+language sql stable as $$
+  with fts as (
+    select d.id,
+           row_number() over (order by ts_rank_cd(d.search, q) desc, d.id) as r
+    from docs d, websearch_to_tsquery('english', query) q
+    where d.search @@ q
+    order by r
+    limit 50
+  ), vec as (
+    select e.doc_id as id,
+           row_number() over (order by e.embedding <=> query_embedding,
+                                       e.doc_id) as r
+    from (select doc_id, embedding from doc_embeddings
+          order by embedding <=> query_embedding limit 50) e
+  )
+  select id,
+         round(coalesce(1.0 / (60 + fts.r), 0)
+             + coalesce(1.0 / (60 + vec.r), 0), 4) as score,
+         fts.r, vec.r
+  from fts full join vec using (id)
+  order by score desc, id
+  limit k
+$$;
+```
+
+With the billing topic's center as the query embedding, the top ten interleave the two lists. On one build of the index the top result ranked 35th in text and 19th in vectors; on another, no article made both top 50s. An HNSW graph differs from build to build, so the vector list does too. The constant 60 comes from the RRF paper, which calls it k; our function's `k` is only the number of results.
+
+<ProveIt lab="22-search.sh">
+
+```sql
+select lab.prove('fusion returns 10 rows from both lists, and any article both lists found ranks above every article only one found',
+  (select count(*) = 10 and count(fts_rank) > 0 and count(vec_rank) > 0
+     from hybrid_search('failed payment', (select embedding from query_embeddings where name = 'billing')))
+  and (select coalesce(min(score) filter (where fts_rank is not null and vec_rank is not null), 1)
+              > coalesce(max(score) filter (where fts_rank is null or vec_rank is null), 0)
+         from hybrid_search('failed payment', (select embedding from query_embeddings where name = 'billing'), 100)));
+select lab.prove('card declined matches no text at all; the vector side still answers',
+  (select count(*) = 0 from docs where search @@ websearch_to_tsquery('english', 'card declined'))
+  and (select count(*) = 10 and bool_and(vec_rank is not null)
+         from hybrid_search('card declined', (select embedding from query_embeddings where name = 'billing'))));
+select lab.prove('ordering by distance to a vector from a join can''t use the HNSW index',
+  'Seq Scan' = any (lab.nodes($$ select e.doc_id from doc_embeddings e, query_embeddings q
+                                 where q.name = 'billing'
+                                 order by e.embedding <=> q.embedding limit 10 $$)));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A vector database needs a reason you can name
+
+Name the property: hundreds of millions of vectors, latency a busy primary can't meet, filtered search where iterative scans read too much. Below that, vectors next to their rows win: one backup, one permission model, and an embedding that updates in the same transaction as its text.
+
+## The short version
+
+- Most products never need a search engine. Move only for a property you can name: BM25 relevance, typo tolerance, facets at scale.
+- Pass the text search configuration everywhere.
+- Store the `tsvector`: ranking through an expression index took 170 ms against 4.6.
+- Use `websearch_to_tsquery` for anything a person types.
+- Ranking reads every match. Narrow by tenant or date first.
+- Compute `ts_headline` only for the rows you show, and escape it.
+- A 1,536-dimension `vector` lives in TOAST: free to skip, six buffers each to scan.
+- Exact search first. HNSW gave 0.92 to 0.99 recall at the default, for a fourteenth of the pages.
+- Filters run after an approximate scan: turn on `hnsw.iterative_scan`, or let a B-tree make a selective filter exact.
+
+## Further reading
+
+- [Full Text Search](https://www.postgresql.org/docs/18/textsearch.html), PostgreSQL documentation. The whole subsystem.
+- [Controlling Text Search](https://www.postgresql.org/docs/18/textsearch-controls.html), PostgreSQL documentation. Ranking, normalization, and `ts_headline`'s cost and XSS warning.
+- [ParadeDB architecture](https://www.paradedb.com/docs/concepts/architecture), ParadeDB documentation. A Tantivy index inside Postgres, and what replicates.
+- [pg_textsearch](https://github.com/timescale/pg_textsearch), source repository. BM25 on Postgres configurations, with its limitations.
+- [Introducing TIN](https://planetscale.com/blog/introducing-tin), PlanetScale blog, September 2026. The `ctid`-as-document-id design.
+- [pgvector](https://github.com/pgvector/pgvector), pgvector project. The README is the manual.
+- [Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs](https://arxiv.org/abs/1603.09320), Yu. A. Malkov and D. A. Yashunin. The HNSW paper.
+- [Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods](http://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf), Gordon V. Cormack, Charles L. A. Clarke, and Stefan Büttcher, SIGIR 2009. Two pages that introduce RRF.

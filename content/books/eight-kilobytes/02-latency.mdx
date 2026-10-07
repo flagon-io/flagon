@@ -1,0 +1,426 @@
+---
+title: Where the time goes
+description: Learn the latency numbers behind every query, so you can predict how fast a page read, a commit, or a round trip will be before you measure it.
+part: The machine
+---
+
+An endpoint that lists a team's projects takes 180 ms in production. You copy the query from the logs, run it in `psql`, and it finishes in 0.4 ms. Again: 0.3 ms. The database is clearly fine.
+
+Then you count. The endpoint doesn't run one query. It runs one to fetch 100 projects, one per project for the owner, and one per project for the latest deploy. That's 201 queries, each fast on the server, each crossing the network and back. At half a millisecond per round trip, the network alone costs 100 ms before the database does any work.
+
+Nothing in that story is slow. It's counted wrong. Know roughly what each kind of operation costs and you can estimate a query, an access pattern, or a loop in your code before you measure it.
+
+## Memory is cheap; everything else is expensive
+
+You can't estimate a query until you know what its parts cost. Here is the latency ladder for a database. Rows marked "measured" come from the lab kit on our laptop; the rest are orders of magnitude, not guarantees.
+
+| Operation | Typical latency |
+| --- | --- |
+| CPU L1 cache reference | about 1 ns |
+| Main memory (RAM) reference | about 100 ns |
+| Read an 8 KB page from the OS page cache | 4 to 5 µs (measured) |
+| Random read from local NVMe | tens of µs |
+| Round trip within one availability zone | 100 to 500 µs |
+| Random read from network block storage | under 0.5 ms to several ms |
+| Round trip across availability zones | about 0.5 to 2 ms |
+| Durable write (fsync) on our laptop SSD | 0.65 ms quiet, 18 ms busy (measured) |
+| Round trip across regions | 30 to 150 ms |
+
+Three lessons drive almost every database decision. **Memory is cheap; everything else is expensive**, so the first question about any query is how many pages it touches, and where they are. **The network isn't free, even nearby**: a same-zone round trip costs about as much as a network disk read. And **durability is the slowest thing on every write**, which is why the [write-ahead log](/books/eight-kilobytes/wal) exists.
+
+<DeepDive title="Where the unmeasured rows come from">
+
+The CPU, memory, SSD and network rows follow the classic ladder in [Numbers Every Programmer Should Know By Year](https://colin-scott.github.io/personal_website/research/interactive_latency.html) (1 ns L1, 100 ns RAM, 16 µs SSD random read, 500 µs datacenter round trip, 150 ms California to the Netherlands and back). The network storage row comes from AWS's own [volume type documentation](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-volume-types.html): io2 Block Express volumes average under 500 µs per I/O, and general-purpose gp3 volumes promise "single-digit millisecond" latency. Cross-zone round trips depend on the provider and the zones; AWS says only that its zones are within 100 km of each other, so measure yours. One disk can also swing widely with load: our laptop's fsync measured 0.65 ms quiet and 18 ms while other containers hammered the same disk.
+
+</DeepDive>
+
+## A query is pages and round trips
+
+A rough model, good enough for most decisions:
+
+```text
+query time  ~  round trips x network latency
+            +  pages touched x cost per page (depends on where the page is)
+            +  CPU work on the rows in those pages
+```
+
+For a typical application query the CPU term is small and the first two dominate. To see the page term, take the two queries from the preface and ask Postgres to report what it did:
+
+```sql
+explain (analyze, costs off, timing off, summary off)
+select * from events where id = 777777;
+```
+
+```text
+ Index Scan using events_pkey on events (actual rows=1.00 loops=1)
+   Index Cond: (id = 777777)
+   Index Searches: 1
+   Buffers: shared hit=4
+```
+
+That's a query **plan**, and you'll read hundreds in this book. Four rules get you through them until [Read the plan, not the clock](/books/eight-kilobytes/explain) covers the rest. Each line is a step, a **node**; the most indented runs first and feeds the one above. `actual rows` is what a node produced, per loop. `Buffers:` counts the 8 KB pages it touched: `hit` means the page was already in Postgres's memory, `read` means Postgres had to ask the operating system. And read that line first: timings bounce with cache and load, page counts don't. (PostgreSQL 18 shows it by default; before 18, write `explain (analyze, buffers)`.)
+
+Four pages, all in memory: three in the primary key index ([the B-tree chapter](/books/eight-kilobytes/btree) shows its shape) and one in the table, holding the row.
+
+<ProveIt lab="02-latency">
+
+```sql
+select lab.prove(
+  'a primary key lookup touches 4 pages: root, internal, leaf, and the table page',
+  lab.buffers($$ select * from events where id = 777777 $$) = 4
+  and (select level from bt_metap('events_pkey')) = 2);
+```
+
+</ProveIt>
+
+Now a filter on a column with no index:
+
+```sql
+explain (analyze, costs off)
+select count(*) from events where project_id = 4242;
+```
+
+```text
+ Finalize Aggregate (actual time=26.707..28.186 rows=1.00 loops=1)
+   Buffers: shared hit=2049 read=33124
+   I/O Timings: shared read=8.623
+...
+         ->  Parallel Seq Scan on events (actual time=1.522..24.278 rows=28.33 loops=3)
+               Filter: (project_id = 4242)
+               Rows Removed by Filter: 666638
+...
+ Execution Time: 28.211 ms
+```
+
+35,173 pages to find 85 rows: every page of the table. It still took only about 30 ms, because three processes shared the work and the "read" pages came from the operating system's memory, not the disk.
+
+Four pages against 35,173, both "simple". Once an hour in a report, 30 ms is fine. On every page view, it's the most expensive thing your database does. The skill here is noticing the ratio.
+
+<DeepDive title="The checks behind 4 pages and 35,173">
+
+The scan's count is the same on every run: 35,173 is every page of `events`, and 85 is how many events project 4242 has.
+
+<ProveIt lab="02-latency">
+
+```sql
+select lab.buffers($$ select count(*) from events where project_id = 4242 $$) as scan_pages \gset
+
+select lab.prove(
+  'a filter on project_id (no index) touches all 35,173 pages to find 85 rows',
+  :scan_pages = 35173
+  and (select count(*) from events where project_id = 4242) = 85
+  and lab.nodes($$ select count(*) from events where project_id = 4242 $$)
+      && array['Seq Scan', 'Parallel Seq Scan']);
+```
+
+</ProveIt>
+
+Neither plan asked for buffers; PostgreSQL 18 reports them anyway. The lab checks that against the JSON form of a plain `explain (analyze)`.
+
+<ProveIt lab="02-latency">
+
+```sql
+-- pg_temp.explain_default runs plain explain (analyze, format json)
+select lab.prove(
+  'since PostgreSQL 18, EXPLAIN ANALYZE reports buffers without being asked',
+  pg_temp.explain_default($$ select * from events where id = 777777 $$) ? 'Shared Hit Blocks');
+```
+
+</ProveIt>
+
+Run the primary key lookup on a fresh copy and the first execution shows a few more pages, `read` rather than `hit`, while Postgres loads the index's metadata page and the path down the tree. Run it again and it settles at four.
+
+</DeepDive>
+
+## A page lives in one of three places
+
+When Postgres needs a page, it looks in three places, each far slower than the last: a desk, a filing cabinet across the room, a warehouse across town.
+
+<Fig name="three-tiers">
+
+**A page lives in one of three places.** A hit in shared_buffers is a memory lookup; a miss, which EXPLAIN calls "read", costs a system call and a copy if the kernel has the page cached, and a trip to the device if it doesn't. Postgres can't tell those last two apart.
+
+</Fig>
+
+**shared_buffers** is Postgres's own cache of pages, shared by every server process. The default is 128 MB, tiny on purpose; the usual production starting point is about 25% of RAM ([The settings that matter](/books/eight-kilobytes/configuration)). [The buffer cache decides what stays](/books/eight-kilobytes/buffers) shows how it chooses what to keep.
+
+**The OS page cache** is the kernel's cache of file contents, in whatever RAM is otherwise free. Every page Postgres reads also lands there, so a hot page can sit in both caches at once. That **double buffering** is why shared_buffers isn't set to 90% of RAM.
+
+### "Read" does not mean "from disk"
+
+In a plan, `read` means "not in shared_buffers, so Postgres asked the kernel". Whether the kernel went to the device, Postgres can't see. The clock can: the lab kit turns on `track_io_timing`, which adds an `I/O Timings` line. Here are 2,000 primary key lookups scattered across the table:
+
+```text
+ Aggregate (actual time=21.062..21.064 rows=1.00 loops=1)
+   Buffers: shared hit=4861 read=3139
+   I/O Timings: shared read=15.037
+...
+```
+
+3,139 pages read in 15.0 ms: about **5 µs per page** (4 to 5 µs across our runs). No storage device does random reads that fast; those pages came from the OS page cache. Tens of microseconds or more per page means a device.
+
+<DeepDive title="Why we timed random lookups instead of the big scan">
+
+The query behind those numbers:
+
+```sql
+explain (analyze, costs off, summary off)
+select sum(length(kind)) from events
+where id = any(array(select (g * 997)::bigint from generate_series(1, 2000) g));
+```
+
+Don't divide the sequential scan's numbers instead. In PostgreSQL 18 a sequential scan reads ahead through asynchronous I/O and combines neighboring pages into larger reads (up to `io_combine_limit`, 128 KB by default), so most of its I/O time overlaps with other work and the per-page figure means little. Random reads, one page at a time, are the honest test.
+
+<ProveIt lab="02-latency">
+
+```sql
+select lab.plan($$
+  select sum(length(kind)) from events
+  where id = any(array(select (g * 997)::bigint from generate_series(1, 2000) g)) $$) as p \gset
+
+select lab.prove(
+  'thousands of "read" pages at under 20 us each came from the OS page cache',
+  (:'p'::jsonb -> 'Plan' ->> 'Shared Read Blocks')::int > 1000
+  and (:'p'::jsonb -> 'Plan' ->> 'Shared I/O Read Time')::numeric
+      / (:'p'::jsonb -> 'Plan' ->> 'Shared Read Blocks')::numeric < 0.02);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Big scans don't flush the cache
+
+You might expect that full scan of the 275 MB `events` table to push everything else out of a 128 MB cache. It doesn't. A big sequential scan recycles a small private ring of buffers (2,304 KB in PostgreSQL 18 with default settings), so one report can't evict the pages your application lives on ([Big operations get a ring](/books/eight-kilobytes/buffers#big-operations-get-a-ring)).
+
+## Every commit waits for the disk
+
+Reads can be cached. Commits can't, not if they must survive a crash. On `commit`, Postgres writes a record to its write-ahead log and waits for the disk to confirm it's durable. That wait is an **fsync**, and your hardware sets its price: about 0.65 ms on our quiet laptop SSD, 18 ms with other containers writing to the same disk, and well under a millisecond on good server storage.
+
+A client that commits one row at a time pays one flush per row. At 0.65 ms that's about 1,500 commits per second at the very best; at 18 ms, about 55. So 10,000 rows in 10,000 transactions cost 10,000 flushes, and in one transaction, one.
+
+Batch your writes ([Load it fast](/books/eight-kilobytes/loading)), and for write-heavy systems buy storage with fast fsync before fast reads. [Commit means flush](/books/eight-kilobytes/wal#commit-means-flush) measures the commit rate, and the two ways around the wait: many sessions sharing one flush, and not waiting at all.
+
+<Callout type="danger" title="Never turn off fsync">
+Postgres has a server setting called `fsync`. Setting it to `off` makes benchmarks look wonderful and turns any crash or power loss into possible silent corruption of the whole cluster, not just the last few transactions. `synchronous_commit = off` is the safe version of the idea, and you can set it per session or per transaction: a crash may lose commits from the last fraction of a second (at most three times `wal_writer_delay`, 600 ms by default), but the database stays consistent.
+</Callout>
+
+<DeepDive title="Durability costs three orders of magnitude">
+
+`pg_test_fsync` ships with Postgres. Run it on the volume where your data lives; in the lab kit, open a shell with `docker compose exec postgres bash` first:
+
+```bash
+/usr/lib/postgresql/18/bin/pg_test_fsync -s 1 -f /var/lib/postgresql/fsynctest.out
+rm /var/lib/postgresql/fsynctest.out
+```
+
+```text
+Compare file sync methods using one 8kB write:
+...
+        fdatasync                          1524.249 ops/sec     656 usecs/op
+...
+Non-sync'ed 8kB writes:
+        write                           2870550.553 ops/sec       0 usecs/op
+```
+
+`fdatasync` is the server's `wal_sync_method` on Linux: 0.65 ms here. Unsynced writes ran at 2.6 to 2.9 million per second across our runs. That gap, three orders of magnitude, is the price of durability.
+
+</DeepDive>
+
+## IOPS are capped by reads in flight, not by what you paid
+
+Every read that misses both caches, and every commit, lands on storage. If you're on a managed service, your data most likely lives on network block storage: a volume that looks like a local disk but sits on servers down the hall, so every cache miss is a network request. That storage is sold by three numbers that are easy to confuse: **latency** (how long one I/O takes), **IOPS** (I/Os per second), and **throughput** (bytes per second).
+
+Queue depth, the number of I/Os in flight, connects them: **IOPS achieved = I/Os in flight / latency**. A process that waits for one 1 ms read at a time gets 1,000 IOPS, however many you paid for. (That's Little's law; it holds for the line at the post office too.) Big scans can keep many reads in flight; an index lookup that misses the cache is one round trip to the storage servers.
+
+Do the arithmetic. AWS gp3 starts at [3,000 IOPS and 125 MiB/s](https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html): about 3,000 random cold page reads per second, for every connection combined. Buy faster volumes when you've measured that you're I/O bound, never instead of an index. On a managed service this is usually the first ceiling you hit ([The volume is your bottleneck now](/books/eight-kilobytes/managed#the-volume-is-your-bottleneck-now)).
+
+<DeepDive title="What a baseline volume can and can't do">
+
+On gp3's baseline of 3,000 IOPS and 125 MiB/s:
+
+- **Random page reads**: 3,000 IOPS times 8 KB is about 24 MB/s. Index lookups on a big table that doesn't fit in memory are capped at about 3,000 cold pages per second, across all connections.
+- **Sequential scans**: the 275 MB `events` table read cold at 125 MiB/s takes about 2.2 seconds. A 100 GB table takes over 13 minutes, and a nightly report doing that saturates the volume for everyone else.
+
+Provisioned-IOPS volumes (io1/io2-style) sell more IOPS and lower, steadier latency at a higher price.
+
+Burst credits have exact numbers too. A gp2 volume under 1 TiB bursts to 3,000 IOPS on a balance that lasts at least 30 minutes at full burst, and many smaller instance types can drive their maximum EBS performance for [30 minutes at least once every 24 hours](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-optimized.html) before falling back to a baseline that can be several times lower. gp3 volumes don't burst; they hold their provisioned numbers.
+
+</DeepDive>
+
+### Burst credits run out in the middle of the job
+
+gp2 volumes and many smaller instance types run on **burst credits**: fast for a while, then back to a much lower baseline when the credits run out. Testing goes fine, and so does the first half hour of a heavy job; then latency climbs with no change in traffic. If an I/O cliff lines up with time under load rather than with load, check your burst balance before your queries.
+
+### Local NVMe is fast and dies with the host
+
+Local NVMe reads in tens of microseconds and dies with the host. Use it only with [replication](/books/eight-kilobytes/replication) and [backups](/books/eight-kilobytes/backups) built for losing a node at any moment ([Local NVMe: fast, and gone with the host](/books/eight-kilobytes/providers#local-nvme-fast-and-gone-with-the-host)). Network volumes survive the host and charge you latency on every miss.
+
+## Size RAM to the working set
+
+The most effective hardware decision for Postgres is enough RAM for your **working set**: the pages your workload touches over, say, an hour. Not the whole database; the part that's used.
+
+All of `events` is 318 MB with its index. But suppose the application mostly shows the last week. Events arrive in time order, so the latest 7 days sit together at the end of the table: 675 pages, about 5 MB, smaller than `users`. That's the common shape: a big tail that's rarely read and a hot head that's read constantly. Your working set is the hot head of each table, plus the index pages that find it, plus whatever periodic jobs touch.
+
+If the working set fits in RAM (shared_buffers plus the OS page cache), almost every read takes microseconds. If it doesn't, every query becomes a storage-latency query, and no amount of IOPS will make it feel like memory. RAM is usually cheaper than IOPS, and much cheaper than engineering time.
+
+<DeepDive title="Measuring table sizes and the pages behind the last 7 days">
+
+How big everything is, heap and indexes:
+
+```sql
+select relname,
+       pg_size_pretty(pg_relation_size(relid))       as heap,
+       pg_size_pretty(pg_indexes_size(relid))        as indexes,
+       pg_size_pretty(pg_total_relation_size(relid)) as total
+from pg_stat_user_tables
+order by pg_total_relation_size(relid) desc;
+```
+
+```text
+ relname  |  heap   | indexes |  total
+----------+---------+---------+---------
+ events   | 275 MB  | 43 MB   | 318 MB
+ users    | 9008 kB | 8336 kB | 17 MB
+ projects | 1528 kB | 456 kB  | 2024 kB
+ accounts | 72 kB   | 40 kB   | 152 kB
+```
+
+A row's `ctid` is its physical address, a page number and a slot ([A line pointer lets a tuple move without changing its address](/books/eight-kilobytes/storage#a-line-pointer-lets-a-tuple-move-without-changing-its-address) takes it apart); casting it to a `point` pulls out the page number. The sample data ends on October 6, 2026, so we measure back from the newest event rather than from `now()`:
+
+```sql
+select count(distinct (ctid::text::point)[0]) as pages,
+       pg_size_pretty(count(distinct (ctid::text::point)[0]) * 8192) as size
+from events
+where created_at > (select max(created_at) from events) - interval '7 days';
+```
+
+```text
+ pages |  size
+-------+---------
+   675 | 5400 kB
+```
+
+<ProveIt lab="02-latency">
+
+```sql
+select lab.prove(
+  'the latest 7 days of events sit in about 675 pages (5 MB), smaller than users',
+  count(distinct (ctid::text::point)[0]) between 640 and 710
+  and count(distinct (ctid::text::point)[0]) * 8192 < pg_relation_size('users'))
+from events
+where created_at > (select max(created_at) from events) - interval '7 days';
+```
+
+</ProveIt>
+
+[Watch it run](/books/eight-kilobytes/observability) shows how to measure what your cache is serving.
+
+</DeepDive>
+
+## Round trips cost more than queries
+
+Back to the endpoint from the start. Timed end to end with `pgbench`, the load generator that ships with Postgres ([pgbench is already installed](/books/eight-kilobytes/benchmarking#pgbench-is-already-installed)), a primary key lookup took **78 µs**, trip included, with client and server on one laptop. Another host in the same zone adds roughly 100 to 500 µs per query; another zone, up to a couple of milliseconds; another region, 30 ms or more.
+
+Now the [N+1](/books/eight-kilobytes/glossary#n1-queries) math. A page showing 100 projects that loads each owner separately runs 101 queries:
+
+| Where the app runs | Round trip | 101 queries | 2 queries |
+| --- | --- | --- | --- |
+| Same host | 0.08 ms | 8 ms | 0.2 ms |
+| Same zone | 0.5 ms | 51 ms | 1 ms |
+| Other zone | 1.5 ms | 152 ms | 3 ms |
+| Other region | 60 ms | 6 s | 120 ms |
+
+The queries didn't get slower. Only the distance changed. That's why N+1 bugs are invisible on a laptop and painful in production, and why moving the database to "a better region" without moving the app makes everything slower.
+
+The ORM version looks innocent:
+
+```ts
+const projects = await db.project.findMany({ where: { accountId }, take: 100 });
+for (const p of projects) {
+  // one round trip per project: 100 in all
+  p.owner = await db.user.findUnique({ where: { id: p.ownerId } });
+}
+```
+
+Fetch them in one query instead, with a join or an array parameter:
+
+```sql
+select * from users where id = any($1::bigint[]);
+```
+
+Fetching 100 rows by primary key this way took about a millisecond, in one round trip. Most ORMs can ask for it ("eager loading", "includes", "preload"); [Queries that age well](/books/eight-kilobytes/queries) covers the SQL side.
+
+<DeepDive title="What one query for 100 rows costs on the server, and other round trips">
+
+```sql
+explain (analyze, costs off, summary off)
+select * from projects
+where id = any(array(select generate_series(1, 20000, 200)));
+```
+
+```text
+ Index Scan using projects_pkey on projects (actual ... rows=100.00 loops=1)
+   Index Cond: (id = ANY ((InitPlan 1).col1))
+   Index Searches: 55
+   Buffers: shared hit=57 read=156 written=156
+```
+
+100 rows, 213 pages, one round trip. (`written` counts dirty pages this backend had to write out before it could reuse their buffers, on a server busy with other labs; [Your query shouldn't be the one writing dirty pages](/books/eight-kilobytes/buffers#your-query-shouldnt-be-the-one-writing-dirty-pages) explains it.)
+
+<ProveIt lab="02-latency">
+
+```sql
+select lab.prove(
+  'one query fetches 100 projects by id in one index scan, a few hundred pages at most',
+  lab.buffers($$ select * from projects
+                 where id = any(array(select generate_series(1, 20000, 200))) $$) < 300
+  and 'Index Scan' = any(lab.nodes($$ select * from projects
+                 where id = any(array(select generate_series(1, 20000, 200))) $$))
+  and (select count(*) from projects where id = any(array(select generate_series(1, 20000, 200)))) = 100);
+```
+
+</ProveIt>
+
+The per-query number came from a two-line script, `lookup.sql` (100 µs per query on a busy run):
+
+```text
+\set id random(1, 2000000)
+select * from events where id = :id;
+```
+
+```bash
+pgbench -n -c 1 -T 5 -f lookup.sql scratch
+```
+
+```text
+number of transactions actually processed: 64088
+latency average = 0.078 ms
+tps = 12820.761600 (without initial connection time)
+```
+
+A new connection costs several round trips before it runs anything, so use a pool ([Connections aren't free](/books/eight-kilobytes/connections)). Transactions add trips too: `begin`, each statement, and `commit` are separate unless your driver pipelines them, so a five-statement transaction is at least seven. **Pipelining** sends several queries without waiting for each result (libpq has supported it since PostgreSQL 14, and several drivers expose it), which cuts latency for chatty workloads without restructuring queries.
+
+</DeepDive>
+
+## Estimate before you measure
+
+You can now estimate most queries without running them. Three same-zone round trips touching 50 cached pages: about 1.5 ms, nearly all network. 2,000 uncached pages on a network volume: 2 seconds, and more CPUs won't help. A batch job committing every row on a disk with 2 ms fsync: 500 rows per second, at most.
+
+When something is slow, ask which term is large: round trips, pages, or where the pages came from. The rest of the book shrinks each one, starting with the pages themselves.
+
+## The short version
+
+- Query time is roughly round trips times network latency, plus pages touched times the cost of wherever those pages live: microseconds in memory, up to milliseconds on a network volume.
+- Read the `Buffers:` line of a plan first; page counts repeat, timings don't. `read` means "missed shared_buffers", not "came from disk".
+- A commit waits for one WAL flush, whatever it contains. Batch rows into transactions, and measure your fsync with `pg_test_fsync`.
+- Size RAM to the working set, not the whole database. On cloud volumes, IOPS achieved is I/Os in flight divided by latency; watch burst credits.
+- N+1 queries cost round trips, not server time. Fetch related rows in one query, and keep the app in the same region and zone as the database.
+
+## Further reading
+
+- [Resource consumption settings](https://www.postgresql.org/docs/18/runtime-config-resource.html), PGDG. The primary source for `shared_buffers`, `work_mem` and the I/O settings, including `io_method`.
+- [WAL reliability](https://www.postgresql.org/docs/18/wal-reliability.html), PGDG. What a durable commit requires from the disk, and how write caches can lie.
+- [pg_test_fsync](https://www.postgresql.org/docs/18/pgtestfsync.html), PGDG. Measure your own fsync latency before choosing storage.
+- [Amazon EBS volume types](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-volume-types.html), AWS. Real IOPS, throughput and latency figures for network block storage; the [General Purpose SSD page](https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html) documents gp3 baselines and gp2 burst credits.
+- [Numbers Every Programmer Should Know By Year](https://colin-scott.github.io/personal_website/research/interactive_latency.html), Colin Scott. The latency ladder, adjustable by year.

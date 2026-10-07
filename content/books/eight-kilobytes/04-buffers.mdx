@@ -1,0 +1,617 @@
+---
+title: The buffer cache decides what stays
+description: How shared_buffers finds, keeps, evicts, and writes pages, how to see what's cached and warm it after a restart, and where each backend's private memory goes.
+part: The machine
+builds_on: [latency, storage]
+---
+
+Read a nine-page table once and Postgres gives each of its pages one point. Read it again: two points. By the fifth read every page has five, and there the counting stops. Those points, and a hand that goes round the cache taking them away, decide which pages stay in memory and which go. That's the whole eviction policy, and it fits in a sentence.
+
+A page costs microseconds or milliseconds depending on where it is ([A page lives in one of three places](/books/eight-kilobytes/latency#a-page-lives-in-one-of-three-places)). This chapter is the machinery that decides where it is. After that comes the memory each connection keeps for itself, which is what actually runs servers out of RAM. Everything below runs on the lab kit's default 128 MB of shared_buffers, inspected with the `pg_buffercache` extension.
+
+## shared_buffers is an array of pages
+
+`shared_buffers` is one big array of 8 KB slots, called **buffers**, allocated in shared memory at startup. Every process reads and writes pages through it. The default 128 MB is 16,384 buffers.
+
+Think of a coat check: numbered hooks, each with a ticket. Each buffer's ticket is a 64-byte **descriptor**: a **tag** naming the page it holds (which file, which fork, which block), how many processes are using it right now, a **usage count**, and whether it was changed in memory and not yet written (**dirty**). `pg_buffercache` shows one row per buffer with those fields decoded; the examples below read it through `cached`, a small view over `pg_buffercache` that keeps only this database's tables and names them.
+
+<DeepDive title="What the buffer pool looks like in shared memory">
+
+`pg_shmem_allocations` (PostgreSQL 13+) lists the pieces:
+
+```sql
+select name, pg_size_pretty(size) as size
+from pg_shmem_allocations
+where name in ('Buffer Blocks', 'Buffer Descriptors');
+```
+
+```text
+        name        |  size
+--------------------+---------
+ Buffer Blocks      | 128 MB
+ Buffer Descriptors | 1024 kB
+```
+
+`Buffer Blocks` is the 128 MB of pages (plus 4 KB for alignment). `Buffer Descriptors` is exactly 1 MB: 16,384 descriptors padded to 64 bytes each, one CPU cache line, so two processes updating neighboring descriptors don't fight over the same line.
+
+The `cached` view joins `pg_buffercache` to `pg_class`. It filters on the database as well as the file number, because databases cloned from the same template start with the same file numbers:
+
+```sql
+create view cached as
+select c.relname, b.bufferid, b.relblocknumber,
+       b.usagecount, b.isdirty, b.pinning_backends
+from pg_buffercache b
+join pg_class c
+  on b.relfilenode = pg_relation_filenode(c.oid)
+ and b.reldatabase = (select oid from pg_database
+                      where datname = current_database())
+ and b.relforknumber = 0;   -- the main fork: the table's own pages
+```
+
+The whole server is shared memory: shared_buffers plus the WAL buffers, lock tables, and the rest. `show shared_memory_size` reports 152 MB on the kit, the number to plan RAM and Linux huge pages around ([Memory: budget it before you tune it](/books/eight-kilobytes/configuration#memory-budget-it-before-you-tune-it); `shared_memory_size_in_huge_pages`, PostgreSQL 15+, says 76 here).
+
+<ProveIt lab="04-buffers">
+
+```sql
+select lab.prove(
+  'the buffer pool is one 128 MB block of shared memory (plus 4 KB of alignment)',
+  (select size from pg_shmem_allocations where name = 'Buffer Blocks') = 16384 * 8192 + 4096);
+
+select lab.prove(
+  'each buffer has a 64-byte descriptor: 16,384 of them take exactly 1 MB',
+  (select size from pg_shmem_allocations where name = 'Buffer Descriptors') = 16384 * 64);
+
+select lab.prove(
+  'pg_buffercache shows one row per buffer',
+  (select count(*) from pg_buffercache) = 16384);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Finding a page takes a hash lookup
+
+A backend that wants block 7 of `users` doesn't search 16,384 descriptors. It hashes the tag and looks it up in the **buffer mapping table**, a shared hash table from tag to buffer:
+
+<Fig name="buffer-lookup">
+
+**Finding a page is one hash lookup.** The tag lands in one of 128 separately locked partitions. A hit pins the buffer and is done; a miss has to evict a victim, maybe write it out, and read the page in.
+
+</Fig>
+
+A hit is a quick lookup in one of 128 separately locked partitions, so backends rarely wait for each other. A miss does real work. When many sessions wait on `BufferMapping` ([An active session with no wait event is on a CPU](/books/eight-kilobytes/observability#an-active-session-with-no-wait-event-is-on-a-cpu)), they're all missing at once: a working set that doesn't fit, not a lock to tune.
+
+## A pin means "in use"
+
+Before a backend touches a page, it **pins** the buffer. A pinned buffer can't be evicted, so the page stays put while it's read. Pins are short, but they last as long as a query sits on a page: an open cursor, or a slow client that stopped reading halfway, keeps its page pinned. That matters to vacuum. Vacuum can only clean a page nobody has pinned, so a parked cursor makes it skip the page or wait on a `BufferPin` event ([Vacuum is not optional](/books/eight-kilobytes/vacuum)).
+
+<DeepDive title="What an open cursor pins">
+
+Open a cursor on `accounts`, fetch one row, and `cached` shows blocks 0, 1 and 2 each pinned by one backend. The cursor holds block 0, where its row came from. Blocks 1 and 2 are pinned too: since PostgreSQL 17, sequential scans read through a "read stream" that pins a few pages ahead so their I/O can already be in flight. While the pins exist, `pg_buffercache_evict()` (PostgreSQL 17+, superuser, for testing) refuses to evict those buffers. Commit, and the same call succeeds.
+
+<ProveIt lab="04-buffers">
+
+```sql
+begin;
+declare c cursor for select * from accounts;
+fetch 1 from c \g /dev/null
+
+select lab.prove(
+  'an open cursor holds a pin on the page it is reading (and PostgreSQL 18 pins a few pages ahead)',
+  :pinned between 1 and 9);
+
+select lab.prove(
+  'a pinned buffer cannot be evicted',
+  not (select buffer_evicted from pg_buffercache_evict(:pinned_buf)));
+commit;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Usage counts climb with every read
+
+Each pin also bumps the buffer's **usage count**, up to 5: the cache's memory of how popular a page is. Evict `accounts` (nine pages), scan it, and count:
+
+```text
+ after 1 scan            after 2 scans           after 5 scans
+ usagecount | buffers    usagecount | buffers    usagecount | buffers
+------------+--------   ------------+--------   ------------+--------
+          1 |       9             2 |       9             5 |       9
+```
+
+One scan, one point per page. Five scans, five points, and there it stays.
+
+<ProveIt lab="04-buffers">
+
+```sql
+select count(*) from accounts \g /dev/null
+select lab.prove(
+  'one scan: all 9 pages cached, each with usage count 1',
+  (select count(*) from cached where relname = 'accounts' and usagecount = 1) = 9);
+
+select count(*) from accounts \g /dev/null
+select count(*) from accounts \g /dev/null
+select count(*) from accounts \g /dev/null
+select count(*) from accounts \g /dev/null
+select lab.prove(
+  'five scans: usage count 5, the maximum',
+  (select count(*) from cached where relname = 'accounts' and usagecount = 5) = 9);
+```
+
+</ProveIt>
+
+## The clock sweep picks the victim
+
+When a backend misses and every buffer is taken, something has to go. Postgres doesn't keep a least-recently-used list (maintaining one on every hit would need a global lock). It runs a **clock sweep**:
+
+<Fig name="clock-sweep">
+
+**The hand takes a point from every buffer it passes.** It skips pinned buffers and evicts the first one it finds at zero. A page read constantly is back at 5 before the hand returns, so it never gets there.
+
+</Fig>
+
+A page read once survives one pass of the hand. A page read constantly is back at 5 long before the hand returns, so it never reaches zero. Two consequences:
+
+- **One pass over cold data can't push out the hot set.** Cold pages arrive at count 1 and leave first, where a strict least-recently-used cache would evict everything older.
+- **Popularity is relative to churn.** The hand moves as fast as backends miss. Miss a lot and it spins, and even popular pages fall out between visits. More misses cause more misses; that's how a working set that outgrows the cache falls off a cliff.
+
+<DeepDive title="Watching the clock sweep evict a flood">
+
+Start from an empty cache: `pg_buffercache_evict_all()` (PostgreSQL 18, for testing only; never on a server you care about) throws out every unpinned page. Read `accounts` five times so its pages sit at 5. Then flood the cache: `pg_prewarm` reads the first 20,000 pages of `events` through the normal path, more than the 16,384 buffers there are.
+
+```sql
+select * from pg_buffercache_evict_all();
+select count(*) from accounts;   -- five times
+select pg_prewarm('events', 'buffer', 'main', 0, 19999);
+
+select relname, count(*) as buffers,
+       min(relblocknumber) as first_block, max(relblocknumber) as last_block,
+       min(usagecount) as min_usage, max(usagecount) as max_usage
+from cached
+where relname in ('accounts', 'events')
+group by relname;
+```
+
+```text
+ relname  | buffers | first_block | last_block | min_usage | max_usage
+----------+---------+-------------+------------+-----------+-----------
+ accounts |       9 |           0 |          8 |         3 |         3
+ events   |   16335 |        1352 |      19999 |         0 |         1
+```
+
+Over 3,600 of the flood's own pages are already gone, evicted by its newer ones, while the nine `accounts` pages survived, a point lighter per pass of the hand. Which older flood pages go depends on where the hand stood (on our runs, sometimes all of the first thousand, sometimes none). The shape doesn't change.
+
+`pg_buffercache_usage_counts()` (PostgreSQL 16+) gives the distribution server-wide. On the shared lab server, while a dozen labs ran at once, 13,578 of 16,384 buffers sat at 0 or 1 and 295 at 5: a cache too small for, or swept by, work that reads everything once. A cache doing its job on a steady workload has a fat tail at 4 and 5.
+
+<ProveIt lab="04-buffers">
+
+```sql
+select * from pg_buffercache_evict_all() \g /dev/null
+-- ... five scans of accounts ...
+select pg_prewarm('events', 'buffer', 'main', 0, 19999) as prewarmed \gset
+
+select lab.prove(
+  'the flood evicted thousands of its own pages; its newest 2,000 are all still cached',
+  (select count(*) from cached where relname = 'events') < 20000 - 3000
+  and (select count(*) from cached where relname = 'events' and relblocknumber >= 18000) = 2000);
+
+select lab.prove(
+  'the 9 accounts pages at usage count 5 survived the flood, losing a point per pass',
+  (select count(*) from cached where relname = 'accounts') = 9
+  and (select max(usagecount) from cached where relname = 'accounts') < 5);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Your query shouldn't be the one writing dirty pages
+
+An `update` changes the page in its buffer and marks it **dirty**; the data file isn't touched. The change is already recorded in the write-ahead log, which must reach disk before the page does ([Checkpoints put a limit on recovery](/books/eight-kilobytes/wal#checkpoints-put-a-limit-on-recovery)). The page reaches the file later, written by one of three kinds of process:
+
+| Who | When | Ideal share |
+| --- | --- | --- |
+| Checkpointer | Every [checkpoint](/books/eight-kilobytes/glossary#checkpoint) writes all dirty buffers | Most writes |
+| Background writer | Continuously, ahead of the clock hand | Some |
+| Any backend | When the victim it picked is dirty | Few |
+
+Watch the last row. A backend that picks a dirty victim must write it before reusing the buffer, and its query waits. When backends write a steady share of pages, shared_buffers is too small for the write load. `pg_stat_io` (PostgreSQL 16+) counts writes by process type ([pg_stat_io catches backends writing dirty pages (PostgreSQL 16+)](/books/eight-kilobytes/observability#pg_stat_io-catches-backends-writing-dirty-pages-postgresql-16)).
+
+<DeepDive title="Dirty pages, the background writer, and a backend paying for someone else">
+
+Update 50 accounts and `cached` shows two dirty pages on our runs: the one holding the old row versions and the one that received the new ones ([Updates are inserts](/books/eight-kilobytes/mvcc) explains why there are two).
+
+The checkpointer writes every buffer that was dirty when a checkpoint began, so recovery can start there. The background writer wakes every 200 ms (`bgwriter_delay`), finds dirty buffers the clock is about to reach, and writes up to 100 of them: at most 4 MB per second with the defaults. A backend writes when it has no choice; `pg_buffercache_evict()` shows the rule, flushing a dirty buffer before evicting it:
+
+```text
+ buffer_evicted | buffer_flushed
+----------------+----------------
+ t              | t
+```
+
+On our shared test server, one backend that ran a single scan while other labs bulk-loaded data had to write 2,909 other sessions' dirty pages to make room.
+
+<ProveIt lab="04-buffers">
+
+```sql
+update accounts set name = name where id <= 50;
+
+select lab.prove(
+  'an update dirties the pages it changes in memory; nothing is written to the table file yet',
+  (select count(*) from cached where relname = 'accounts' and isdirty) >= 1);
+
+select bufferid as dirty_buf from cached where relname = 'accounts' and isdirty limit 1 \gset
+select lab.prove(
+  'to reuse a dirty buffer, the evicting process must write the page out first',
+  (select buffer_evicted and buffer_flushed from pg_buffercache_evict(:dirty_buf)));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Big operations get a ring
+
+A nightly report reading 275 MB through a 128 MB cache would flood it, if nothing stopped it. Something does. Operations that touch many pages once get a **buffer ring**: a small private set of buffers they recycle instead of taking new ones from the clock, so they evict their own pages, not yours.
+
+| Operation | Ring | Size with defaults |
+| --- | --- | --- |
+| Sequential scan of a table bigger than shared_buffers / 4 | bulkread | 256 KB, plus room for in-flight I/O: 2,304 KB in PostgreSQL 18 |
+| VACUUM and ANALYZE | vacuum | `vacuum_buffer_usage_limit`, 2 MB (the setting is PostgreSQL 16+; 17 raised its default from 256 KB) |
+| COPY FROM and CREATE TABLE AS | bulkwrite | 16 MB |
+
+The scan threshold is a quarter of shared_buffers, 4,096 pages here. Scan `events` (35,173 pages) and `users` (1,126) once each from an empty cache, with parallel workers off:
+
+```text
+ relname | pages | cached after one scan
+---------+-------+-----------------------
+ events  | 35173 |                     94
+ users   |  1126 |                   1126
+```
+
+The small table is cached whole. The big one went through its ring and left under 288 buffers behind, the size of one 2,304 KB ring (the exact count varies run to run).
+
+Writes hold a surprise: `insert ... select` gets no ring. Load the same 2,000,000 integers both ways and `COPY` leaves one 16 MB ring in the cache, 2,048 pages, having written its own pages as it went. `insert ... select` leaves all 8,850 pages in shared_buffers, 69 MB of a 128 MB cache, with its dirty buffers for someone else to write. For a backfill into a new table, `COPY` or `create table as` is the polite way to load.
+
+<Callout type="note" title="Rings protect the cache, not the disk">
+A ring stops one operation from evicting everyone else's pages. It does nothing for the I/O: the report still reads all 35,173 pages, and because its pages don't stay, the next run reads them all again. If a big scan runs often enough to matter, it needs an index or a summary table, not a bigger cache.
+</Callout>
+
+<DeepDive title="Where the 2,304 KB ring comes from, and the COPY experiment">
+
+No ring is larger than an eighth of shared_buffers. The PostgreSQL 18 bulk-read ring is bigger than the classic 256 KB because asynchronous reads need buffers to land in: 8 KB times `io_combine_limit` (16) times `effective_io_concurrency` (16) on top, 288 buffers in all. The backend's own I/O counters (`pg_stat_get_backend_io()`, PostgreSQL 18) show the full scan above reused buffers over 35,000 times in the `bulkread` context. With parallel workers, each worker gets its own ring.
+
+The write experiment:
+
+```sql
+create table copied (n bigint);
+copy copied from program 'seq 1 2000000';
+
+create table inserted (n bigint);
+insert into inserted select generate_series(1, 2000000);
+```
+
+```text
+ relname  | pages | cached
+----------+-------+--------
+ copied   |  8912 |   2048
+ inserted |  8850 |   8850
+```
+
+`copied` is 62 pages longer: COPY extends the file many pages at a time, and its last batch is still empty. Because a ring buffer full of new rows is dirty, COPY writes its own pages as it recycles them. That's deliberate: a bulk load pays for its own writes instead of handing them to the background writer and to every other backend's evictions.
+
+<ProveIt lab="04-buffers">
+
+```sql
+select * from pg_buffercache_evict_relation('events') \g /dev/null
+select count(kind) from events \g /dev/null
+select count(*) as events_cached from cached where relname = 'events' \gset
+
+select lab.prove(
+  'a full scan of events leaves at most one ring (288 buffers) of it in shared_buffers',
+  :events_cached <= 288);
+
+select lab.prove(
+  'COPY leaves at most its 16 MB ring (2,048 buffers) of its pages in the cache',
+  :copy_pages between 8850 and 8850 + 64 and :copy_cached <= 2048 + 64);
+
+select lab.prove(
+  'INSERT ... SELECT gets no ring: it extends the table through the normal buffer pool',
+  (:'bw3'::jsonb ->> 'extends')::bigint = (:'bw2'::jsonb ->> 'extends')::bigint
+  and (:'nw3'::jsonb ->> 'extends')::bigint - (:'nw2'::jsonb ->> 'extends')::bigint > 0);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Temporary tables live in local buffers
+
+Temporary tables never enter shared_buffers. Each session caches them in private **local buffers**, `temp_buffers` (8 MB by default), and a bigger temp table is read from its file on every scan. The setting can only be raised **before** the session first touches a temp table, so if your application builds big ones (reports, imports, staging), set it per role: `alter role reporting set temp_buffers = '64MB'`.
+
+<DeepDive title="A temp table bigger than its buffers">
+
+```sql
+create temp table recent as select * from events where id <= 100000;
+explain (analyze, costs off, timing off, summary off)
+select count(kind) from recent;
+```
+
+```text
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: local read=1792 dirtied=1759 written=1759
+...
+```
+
+14 MB through 8 MB of buffers: every later scan reads all 1,792 pages again, because a sequential pass always evicts the page it will need next. (The first scan also set [hint bits](/books/eight-kilobytes/mvcc#a-read-can-write) and wrote the pages back.) Raising the setting now fails:
+
+```text
+ERROR:  invalid value for parameter "temp_buffers": 8192
+DETAIL:  "temp_buffers" cannot be changed after any temporary tables have been
+accessed in the session.
+```
+
+In a fresh session with `set temp_buffers = '32MB'` first, the same scan shows `Buffers: local hit=1792`.
+
+<ProveIt lab="04-buffers">
+
+```sql
+select lab.plan($$ select count(kind) from recent $$) as tp \gset
+select lab.prove(
+  'every scan of it reads all 1,792 pages again: local buffers are per session and too small',
+  (:'tp'::jsonb -> 'Plan' ->> 'Local Read Blocks')::int = 1792
+  and coalesce((:'tp'::jsonb -> 'Plan' ->> 'Shared Hit Blocks')::int, 0)
+    + coalesce((:'tp'::jsonb -> 'Plan' ->> 'Shared Read Blocks')::int, 0) = 0);
+
+select lab.prove(
+  'temp_buffers cannot be changed once the session has used a temp table',
+  pg_temp.try_set_temp_buffers() like 'invalid value for parameter "temp_buffers"%');
+
+select lab.prove(
+  'with temp_buffers = 32MB set first, the same table is read entirely from local buffers',
+  (:'t_p'::jsonb ->> 'Local Hit Blocks')::int = 1792
+  and coalesce((:'t_p'::jsonb ->> 'Local Read Blocks')::int, 0) = 0);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## The OS page cache is the second tier
+
+A miss in shared_buffers may still hit the kernel's page cache. Rings send big scans there on every run, so that second tier is what makes a repeated report survivable, and it's one reason to keep shared_buffers near a quarter of RAM rather than most of it ([shared_buffers starts at 25% of RAM, not 80%](/books/eight-kilobytes/configuration#shared_buffers-starts-at-25-of-ram-not-80)).
+
+## A big table at usage 1 needs an index, not memory
+
+Everything above is visible from SQL. This query ranks the current database's tables and indexes by how much of the cache they hold:
+
+```sql
+select c.relname,
+       count(*)                                            as buffers,
+       pg_size_pretty(count(*) * 8192)                     as cached,
+       round(100.0 * count(*) / greatest(c.relpages, 1), 1) as pct_of_rel,
+       round(avg(b.usagecount), 1)                         as avg_usage,
+       count(*) filter (where b.isdirty)                   as dirty
+from pg_buffercache b
+join pg_class c
+  on b.relfilenode = pg_relation_filenode(c.oid)
+ and b.reldatabase = (select oid from pg_database
+                      where datname = current_database())
+group by c.relname, c.relpages
+order by buffers desc
+limit 10;
+```
+
+Read it with the clock in mind. A table at a high percentage with average usage near 5 is your hot set, earning its place. A big table holding a large share of the cache at usage 1 is being read once and replaced: a candidate for an index, not more memory. The query walks every buffer, so run it on demand; `pg_buffercache_usage_counts()` (PostgreSQL 16+) is the cheap server-wide check, and most buffers at 0 or 1 means churn.
+
+## Warm the cache after a restart
+
+A restart empties shared_buffers, and so does a failover to a replica that cached different pages. For the next hour every query that used to hit memory goes to the OS cache or the disk; on network storage, it can be the slowest hour of the week. `pg_prewarm` (a contrib extension) loads a relation on demand: `select pg_prewarm('users')` loaded all 1,126 pages, and the next full scan was all hits.
+
+### autoprewarm restores the last cache
+
+Choosing tables by hand is guesswork. **autoprewarm**, part of the same extension, records what was in the cache and puts it back after a restart:
+
+```ini
+shared_preload_libraries = 'pg_stat_statements,pg_prewarm'   # restart required
+pg_prewarm.autoprewarm = on              # the default once the library is loaded
+pg_prewarm.autoprewarm_interval = 300s   # how often to save the list (default)
+```
+
+A background worker saves the list of cached blocks every 5 minutes and at shutdown, and loads them back at startup while the server accepts connections. It runs on standbys too, so after a failover the new primary starts from its own warm list. It costs one small file every few minutes; turn it on (managed services may not let you: [Extensions come from an allowlist](/books/eight-kilobytes/managed#extensions-come-from-an-allowlist)).
+
+<DeepDive title="pg_prewarm's modes, and what autoprewarm writes down">
+
+```sql
+create extension pg_prewarm;
+
+select * from pg_buffercache_evict_relation('users');
+select pg_prewarm('users');
+```
+
+```text
+ pg_prewarm
+------------
+       1126
+```
+
+It works on indexes too (`users_pkey` is 276 pages) and takes a fork and a block range. Prewarmed pages get no special treatment: they start at usage count 1, and prewarming a table bigger than shared_buffers is the flood from earlier. Two other modes skip shared_buffers, `'read'` and `'prefetch'`, for relations too big for it that still fit in RAM. autoprewarm's list is a small text file, `autoprewarm.blocks`, one line per block; `select autoprewarm_dump_now()` saves it on demand.
+
+<ProveIt lab="04-buffers">
+
+```sql
+select * from pg_buffercache_evict_relation('users') \g /dev/null
+select pg_prewarm('users') as users_prewarmed \gset
+
+select lab.prove(
+  'pg_prewarm(''users'') loads all 1,126 pages and says so',
+  :users_prewarmed = 1126
+  and (select count(*) from cached where relname = 'users') >= 1100);
+
+select lab.prove(
+  'after prewarming, a full scan of users is all hits',
+  (lab.plan($$ select count(email) from users $$) -> 'Plan' ->> 'Shared Read Blocks')::int = 0);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## effective_cache_size is a hint, not memory
+
+`effective_cache_size` allocates nothing. It tells the planner how much data is probably cached, in both tiers, and a bigger value makes index scans look cheaper. Set it to 50 to 75% of the machine's RAM ([effective_cache_size is a hint: set it to 50% to 75% of RAM](/books/eight-kilobytes/configuration#effective_cache_size-is-a-hint-set-it-to-50-to-75-of-ram)).
+
+<DeepDive title="One setting flips a plan without allocating a byte">
+
+```sql
+set effective_cache_size = '1MB';
+explain select * from users order by account_id, email limit 30000;
+
+reset effective_cache_size;   -- the default, 4GB
+explain select * from users order by account_id, email limit 30000;
+```
+
+```text
+ Limit  (cost=10062.34..10137.34 rows=30000 width=55)
+   ->  Sort  (cost=10062.34..10312.34 rows=100000 width=55)
+         Sort Key: account_id, email
+         ->  Seq Scan on users  (cost=0.00..2126.00 rows=100000 width=55)
+
+ Limit  (cost=0.42..2720.65 rows=30000 width=55)
+   ->  Index Scan using users_account_id_email_key on users  (cost=0.42..9067.86 ...)
+```
+
+At 1 MB the planner assumes nearly every page fetched through the index is a fresh random read, and sorts a sequential scan instead. At 4 GB it walks the index. Nothing about memory changed; any session can set it. The cost model itself is in [The planner is guessing](/books/eight-kilobytes/planner).
+
+</DeepDive>
+
+## Backend memory is private
+
+Everything so far was shared. Each backend also has **private memory**, allocated as it works and invisible to other processes: a megabyte or two idle, a hundred or more mid-query ([Memory: 1.5 MB idle, 109 MB mid-sort](/books/eight-kilobytes/connections#memory-15-mb-idle-109-mb-mid-sort) measured both). Two things decide most of it: working memory for queries, and caches of the system catalogs.
+
+### The biggest memory context names the culprit
+
+Postgres allocates in **memory contexts**, arenas arranged in a tree, and frees a whole context when its job ends, a query's when the query finishes. `pg_backend_memory_contexts` (PostgreSQL 14+) shows your own backend's tree; for another, say a pooled connection that has grown to 2 GB, `pg_log_backend_memory_contexts(pid)` writes its tree to the server log. The biggest context names the culprit.
+
+### work_mem is per node, and you can see it
+
+`work_mem` (4 MB by default) limits each sort or hash step of a plan, not each query. A [merge join](/books/eight-kilobytes/glossary#merge-join) with two sorts holds two allowances at once: we caught a query with two Sort nodes holding just over 4 MB each. Add a [hash join](/books/eight-kilobytes/glossary#hash-join) and that's a third, at twice `work_mem` with the default `hash_mem_multiplier`. Multiply by connections, and that's why we keep `work_mem` modest globally and raise it per role or per transaction ([work_mem: multiply before you raise it](/books/eight-kilobytes/configuration#work_mem-multiply-before-you-raise-it)).
+
+<DeepDive title="Catching two sorts in memory at once">
+
+Open the join as a cursor and fetch one row, so both sorts have finished and are held in memory:
+
+```sql
+set enable_hashjoin = off;
+set enable_nestloop = off;
+begin;
+declare two_sorts cursor for
+  select *
+  from (select user_id, created_at from events where id <= 300000) a
+  join (select user_id, created_at from events where id > 1700000) b using (user_id);
+fetch 1 from two_sorts;
+
+select name, level, total_bytes
+from pg_backend_memory_contexts
+where name like 'TupleSort%';
+```
+
+```text
+      name      | level | total_bytes
+----------------+-------+-------------
+ TupleSort main |     5 |        8192
+ TupleSort sort |     6 |     4202856
+ TupleSort main |     5 |        8192
+ TupleSort sort |     6 |     4202856
+```
+
+Each sort sits at its own `work_mem` limit; the rest of each 300,000-row input spilled to temp files.
+
+<ProveIt lab="04-buffers">
+
+```sql
+select lab.prove(
+  'one query, two Sort nodes, two work_mem allowances: each sort holds about 4 MB',
+  :sorts = 2
+  and :smallest between 3.5 * 1024 * 1024 and 4.5 * 1024 * 1024
+  and :largest between 3.5 * 1024 * 1024 and 4.5 * 1024 * 1024);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### The catalog caches only grow
+
+To plan a query, a backend needs the table's definition, and it caches what it reads from the system catalogs for as long as the connection lives. Here's one connection that ran a trivial query against each of 1,000 small tables:
+
+```text
+ CacheMemoryContext and its children
+ -----------------------------------
+ fresh connection            731 kB
+ after touching 1,000 tables  10 MB
+ after DISCARD ALL            10 MB
+ new connection              731 kB
+```
+
+About 9 KB per table and its index, in every backend that touched them, and `discard all`, which poolers run between clients, gives none of it back. With 10,000 partitions and 200 pooled connections, that's gigabytes of RAM that show up in no plan.
+
+Recycle connections: give pooled server connections a maximum lifetime ([PgBouncer](/books/eight-kilobytes/glossary#pgbouncer)'s `server_lifetime` defaults to 3,600 seconds). An hour of growth is bounded; a month isn't. And if tenants map to schemas, don't route every tenant through every connection ([Trust no tenant](/books/eight-kilobytes/security) covers shared-table tenancy).
+
+<DeepDive title="How we grew a connection to 10 MB">
+
+```sql
+create schema tenants;
+-- create tenants.t1 .. tenants.t1000, each:
+--   (id bigint primary key, account_id bigint not null,
+--    body text, created_at timestamptz)
+
+do $$ begin
+  for i in 1..1000 loop
+    execute format('select count(*) from tenants.t%s where id = 1', i);
+  end loop;
+end $$;
+```
+
+The source's README for memory contexts says `CacheMemoryContext` is never reset or deleted: it holds the **relcache** (one entry per table or index opened) and the **catcache** (rows of the catalogs themselves).
+
+<ProveIt lab="04-buffers">
+
+```sql
+select lab.prove(
+  'touching 1,000 small tables grows them by more than 5 MB',
+  :touched - :fresh > 5 * 1024 * 1024);
+
+select lab.prove(
+  'DISCARD ALL gives none of it back',
+  :discarded >= :touched * 0.95);
+
+select lab.prove(
+  'a new connection starts small again',
+  :reconnected < 2 * 1024 * 1024);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## The short version
+
+- shared_buffers is an array of 8 KB buffers. The clock sweep evicts the first unpinned buffer at usage count 0, taking a point from each it passes: hot pages keep earning points, pages read once go after one pass.
+- Changes dirty buffers in memory. The checkpointer should write most of them; backends that write their own victims are waiting on I/O. Check `pg_stat_io`.
+- Big scans, VACUUM, and COPY or `create table as` use small rings and can't flush your cache. `insert ... select` doesn't, so prefer COPY or `create table as` for bulk loads.
+- Temp tables use per-session `temp_buffers`; set it per role if you build big ones.
+- See what's cached with `pg_buffercache`; turn on autoprewarm to come back warm after a restart or failover.
+- `effective_cache_size` is a planner hint that can change plans; it allocates nothing.
+- `work_mem` is per sort or hash node, and catalog caches grow with every table a connection touches and never shrink. Cap connection lifetime in the pooler.
+
+## Further reading
+
+- [src/backend/storage/buffer/README](https://github.com/postgres/postgres/blob/master/src/backend/storage/buffer/README), PostgreSQL source. The buffer manager's own design notes: pins, content locks, the mapping partitions, clock sweep, and the rings.
+- [pg_buffercache](https://www.postgresql.org/docs/18/pgbuffercache.html), PGDG. Every column and function, including the summary, usage-count, and eviction functions and their version notes.
+- [pg_prewarm](https://www.postgresql.org/docs/18/pgprewarm.html), PGDG. The prewarm modes and the autoprewarm settings.
+- [Resource consumption settings](https://www.postgresql.org/docs/18/runtime-config-resource.html), PGDG. `shared_buffers`, `temp_buffers`, `work_mem`, `vacuum_buffer_usage_limit`, and the background writer settings.
+- [src/backend/utils/mmgr/README](https://github.com/postgres/postgres/blob/master/src/backend/utils/mmgr/README), PostgreSQL source. How memory contexts work and which ones live how long.

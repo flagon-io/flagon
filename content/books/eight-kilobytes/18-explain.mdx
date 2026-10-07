@@ -1,0 +1,602 @@
+---
+title: Read the plan, not the clock
+description: Read a PostgreSQL query plan node by node, find where the pages and the time actually go, and fix slow queries with measured before-and-after proof.
+part: Finding rows fast
+builds_on: [buffers, btree]
+---
+
+This query returns 20 rows and takes about a second and a half on our machine:
+
+```sql
+select u.email, last.kind, last.created_at
+from users u
+cross join lateral (
+  select e.kind, e.created_at
+  from events e
+  where e.user_id = u.id
+  order by e.created_at desc
+  limit 1
+) last
+where u.account_id = 42
+  and u.id in (select owner_id from projects where account_id = 42);
+```
+
+Run it under `explain (analyze, buffers)` and one line explains everything:
+
+```text
+   ->  Limit  (...) (actual time=70.407..70.408 rows=1.00 loops=20)
+         Buffers: shared hit=81803 read=621660
+```
+
+`loops=20`. The inner part ran once per user, and each run read the whole `events` table: 703,463 page accesses, more than 5 GB, for 20 rows. Once you can read that line, the fix follows, and it takes the query from 703,714 pages to 331.
+
+Most people read a plan by staring at the milliseconds. Don't: timings move with the cache and the load. The plan also says how many rows each step expected, how many it got, how many times it ran, and how many pages it touched, and those point at the fix. Reading plans isn't an art. It's a short list of things to look at, in order.
+
+All plans here are real, from PostgreSQL 18 on the book's `events` table (2,000,000 rows, 35,173 pages, only a primary key unless stated). Your page and row counts should match or come close; your timings won't. Plan lines are long, so we trim the parts a section doesn't discuss to `...`, and wrap the estimate and the actuals onto two lines where both matter.
+
+## EXPLAIN guesses; EXPLAIN ANALYZE runs it
+
+`explain` asks the planner what it *would* do: nothing runs, and you see only estimates. That's the right tool when the query takes an hour. Otherwise use `explain analyze`, which **runs the query** and prints reality next to the prediction. Here is `explain analyze select * from events where kind = 'alert'`; plain `explain` would print only the first parenthesis and the `Filter`:
+
+```text
+ Seq Scan on events  (cost=0.00..60173.43 rows=245404 width=111)
+                     (actual time=0.130..100.660 rows=249714.00 loops=1)
+   Filter: (kind = 'alert'::text)
+   Rows Removed by Filter: 1750286
+   Buffers: shared hit=94 read=35079 written=3
+   I/O Timings: shared read=1.167 write=0.041
+ Planning Time: 0.050 ms
+ Execution Time: 106.418 ms
+```
+
+PostgreSQL 18 prints `Buffers:` by default; older versions need `explain (analyze, buffers)`, which this book spells out so it works everywhere.
+
+<Callout type="danger" title="EXPLAIN ANALYZE executes the statement">
+`explain analyze` on an `insert`, `update`, `delete`, or `merge` performs the write. Always wrap it in `begin` ... `rollback`, and beware of `select` statements that call functions with side effects.
+</Callout>
+
+<DeepDive title="What rollback undoes, and the options worth knowing">
+
+`explain analyze delete from events where created_at < '2025-10-11'` really deleted 27,397 rows (and dirtied 482 pages) before the `rollback`. Nothing was copied back: the rows were stamped by a transaction that then aborted, so they stay visible ([Updates are inserts](/books/eight-kilobytes/mvcc)). The rollback undoes the delete, not everything: rows were really locked, triggers fired, sequences advanced, and WAL was written.
+
+<ProveIt lab="18-explain">
+
+```sql
+begin;
+create temp table p_del as
+  select lab.plan($$ delete from events where created_at < '2025-10-11' $$) as p;
+select lab.prove('explain analyze of a delete really deletes (about 27,000 rows here)',
+  (select count(*) from events) < 2000000
+  and (select lab.field(p, 'Seq Scan', 'Actual Rows')::numeric between 20000 and 60000 from p_del));
+rollback;
+select lab.prove('and rollback puts them back',
+  (select count(*) from events) = 2000000);
+
+select lab.prove('PostgreSQL 18 includes Buffers without asking',
+  lab.plan_text($$ select * from events where id = 1 $$, 'analyze, costs off') like '%Buffers: shared%');
+```
+
+</ProveIt>
+
+Other options: `costs off` hides estimates; `timing off` skips per-node timing on nodes run millions of times; `settings`, `wal`, and PostgreSQL 17's `serialize` and `memory` add what their names say; PostgreSQL 16's `generic_plan` explains a query with `$1` placeholders as a prepared statement would ([Prepared statements switch plans after five runs](/books/eight-kilobytes/planner#prepared-statements-switch-plans-after-five-runs)); `format json` is for tools.
+
+</DeepDive>
+
+## The plan is a tree; read it inside out
+
+A plan is a tree of **nodes**. Each node does one job (scan, join, sort, aggregate), pulls rows from the nodes below it, and hands rows up. Indentation shows the tree, and `->` marks a child. Rows start at the leaves, so read from the innermost node outward, like a recipe printed with its first step last. A two-table join, with each node's estimate and actuals wrapped onto two lines and the middle nodes' `Buffers:` lines trimmed:
+
+```sql
+explain (analyze, buffers)
+select p.name, count(*)
+from events e
+join projects p on p.id = e.project_id
+where e.created_at >= '2026-09-29'
+  and p.archived_at is not null
+group by p.name;
+```
+
+```text
+ GroupAggregate  (cost=61217.60..61314.79 rows=3911 width=21)
+     (actual time=94.552..95.476 rows=3307.00 loops=1)
+   Group Key: p.name
+   Buffers: shared hit=2835 read=32532
+   ->  Sort  (cost=61217.60..61236.96 rows=7744 width=13)
+           (actual time=94.540..94.726 rows=7358.00 loops=1)
+         Sort Key: p.name
+         Sort Method: quicksort  Memory: 193kB
+         ...
+         ->  Hash Join  (cost=439.89..60717.38 rows=7744 width=13)
+                 (actual time=81.660..86.492 rows=7358.00 loops=1)
+               Hash Cond: (e.project_id = p.id)
+               ...
+               ->  Seq Scan on events e  (cost=0.00..60173.53 rows=39599 width=8)
+                       (actual time=80.537..82.898 rows=38357.00 loops=1)
+                     Filter: (created_at >= '2026-09-29 00:00:00+00'::timestamp ...)
+                     Rows Removed by Filter: 1961643
+                     Buffers: shared hit=2641 read=32532
+               ->  Hash  (cost=391.00..391.00 rows=3911 width=21)
+                       (actual time=1.048..1.049 rows=3911.00 loops=1)
+                     Buckets: 4096  Batches: 1  Memory Usage: 246kB
+                     Buffers: shared hit=191
+                     ->  Seq Scan on projects p  (cost=0.00..391.00 ...)
+                             (actual time=0.023..0.683 rows=3911.00 loops=1)
+                           Filter: (archived_at IS NOT NULL)
+                           Rows Removed by Filter: 16089
+```
+
+(Captured with `max_parallel_workers_per_gather = 0` to keep it short.) The same tree, drawn:
+
+```text
+   GroupAggregate          3,307 groups
+         │
+       Sort                7,358 rows, by name
+         │
+     Hash Join             7,358 rows
+      ┌──┴─────────────┐
+  Seq Scan events     Hash (3,911 rows, 246 KB)
+  38,357 of 2M rows     │
+  35,173 pages        Seq Scan projects
+                      3,911 of 20,000 rows, 191 pages
+```
+
+Bottom up: scan `projects`, keep the archived ones, build a hash table. Scan `events`, keep the last week, look each row up in the hash table. Sort, then count per name.
+
+### A node's numbers include its children's
+
+Every node has the same parts. The `events` scan from that plan, taken apart:
+
+```text
+  Seq Scan on events e  (cost=0.00..60173.53 rows=39599 width=8)
+  ────────────────────        ────  ──────── ────────── ───────
+           1                   2       3         4         5
+  (actual time=80.537..82.898 rows=38357.00 loops=1)
+               ──────  ────── ───────────── ───────
+                 6       7          8          9
+    Filter: (created_at >= '2026-09-29 00:00:00+00'::timestamp with time zone)
+    Rows Removed by Filter: 1961643
+                            ───────
+                              10
+    Buffers: shared hit=2641 read=32532
+             ──────────────────────────
+                         11
+
+   1  the node: what this step does
+   2  estimated startup cost (before the first row)
+   3  estimated total cost (all rows)
+   4  estimated rows, per loop
+   5  estimated average row width, in bytes
+   6  ms until the first row, per loop
+   7  ms until the last row, per loop
+   8  actual rows, per loop (an average, hence two decimals in 18)
+   9  times this node ran: multiply 7 and 8 by it for totals
+  10  rows read and thrown away
+  11  8 KB pages: this node plus its children, all loops
+```
+
+The first line is the guess; the rest is what happened. Most diagnosis is comparing 4 with 8, multiplying by 9, and reading 11. Two more rules:
+
+- **Times and buffers are cumulative.** A node's numbers include its children's. Subtract the children to see what a node did itself.
+- **`actual time=A..B`** is milliseconds to the first row (`A`) and the last (`B`). A large `A` means work before any output, like a sort or a hash build. The `Hash Join` produced its first row at 82 ms because the `events` scan read most of the table before finding a recent row.
+
+<DeepDive title="Subtract the children: where this plan's pages went">
+
+The `GroupAggregate` at the top reports `shared hit=2835 read=32532`, 35,367 pages for the whole tree. The `events` scan accounts for 35,173 of them, and the `Hash` over `projects` for 191. That leaves 3 pages for the join, the sort, and the aggregate combined: they worked in memory. In a slow plan, this subtraction finds the node where the big number starts.
+
+<ProveIt lab="18-explain">
+
+```sql
+select lab.prove('buffers are cumulative: the top node reports about 35,367, the events scan 35,173 of them',
+  (select pg_temp.bufs(p) between 35364 and 35400 from p_tree)
+  and (select (n ->> 'Shared Hit Blocks')::bigint + (n ->> 'Shared Read Blocks')::bigint = 35173
+       from (select pg_temp.node(p, '{"Node Type": "Seq Scan", "Relation Name": "events"}') n from p_tree) x));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Cost is a guess in made-up units
+
+`cost=0.00..60173.43` is the estimated startup and total cost, in units where reading one page sequentially costs 1.0. The planner prices every plan it considers and runs the cheapest. That's all cost is for. It isn't milliseconds, it doesn't compare across queries, and a high cost isn't necessarily slow. Use costs to explain *why* the planner chose a plan; diagnose with rows, loops, and buffers. The unit prices belong to [The planner is a cost calculator](/books/eight-kilobytes/planner#the-planner-is-a-cost-calculator).
+
+<DeepDive title="The cost of a sequential scan, to the cent">
+
+The `kind = 'alert'` scan is pages plus per-row CPU work, each at its configured price:
+
+```text
+  35,173 pages   × 1.0     =  35,173.00   seq_page_cost
+  2,000,034 rows × 0.01    =  20,000.34   cpu_tuple_cost
+  2,000,034 rows × 0.0025  =   5,000.09   cpu_operator_cost
+                              ---------
+                              60,173.43
+```
+
+That matches the plan to the cent. The counts come from `pg_class.relpages` and `reltuples`, which `vacuum` and `analyze` keep current. `reltuples` is an estimate (2,000,034 for a table of exactly 2,000,000 rows), and every lab run re-analyzes its own copy, so it moves by a few rows between runs. That's why the `created_at` scan in the join plan above costs 60173.53, not 60173.43: same formula, a slightly different `reltuples`. Your copy may differ by a few cents; the formula still matches your plan exactly.
+
+<ProveIt lab="18-explain">
+
+```sql
+select lab.prove('the plan''s total cost equals relpages x 1.0 + reltuples x 0.01 + reltuples x 0.0025, to the cent',
+  (select round((relpages * 1.0 + reltuples * 0.01 + reltuples * 0.0025)::numeric, 2)
+   from pg_class where relname = 'events')
+  = (select (p -> 'Plan' ->> 'Total Cost')::numeric
+     from (select lab.plan($$ select * from events where kind = 'alert' $$) as p) x));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Multiply by loops; buffers are already totals
+
+Some nodes run more than once. The inner side of a nested loop runs once per outer row, and `loops` counts the runs. **`actual time` and `rows` are per loop; buffers are totals.**
+
+That's the opening query. Its inner `Limit` said `actual time=70.407..70.408 ... loops=20`: 70 ms looks harmless until you multiply by 20 and get the whole 1.4 seconds. Its buffers, 703,463 pages, are already the total, 20 times the table's 35,173. At the bottom of that subtree:
+
+```text
+               ->  Seq Scan on events e  ... (actual ... rows=104.20 loops=20)
+                     Filter: (user_id = u.id)
+                     Rows Removed by Filter: 1999896
+```
+
+Nothing can look up events by user, so every loop reads the whole table and throws away nearly two million rows. The inner query asks for "the latest event for one user", which is a question for an index:
+
+```sql
+create index events_user_created_idx on events (user_id, created_at);
+```
+
+```text
+   ->  Limit  ... (actual time=0.003..0.003 rows=1.00 loops=20)
+         Buffers: shared hit=80
+         ->  Index Scan Backward using events_user_created_idx on events e  ...
+```
+
+Still 20 loops, now four pages each (three index levels, one heap page). The whole query went from 703,714 pages to 331, and on our machine from 1,409 ms to 0.6 ms. Whenever `loops` is above 1, multiply before you decide whether a node matters.
+
+<DeepDive title="How we know every loop read the whole table">
+
+The rest of the plan, finding the 20 users, costs 251 pages; the inner subtree has everything else. The fix's index also covers the unindexed foreign key `events.user_id` ([One catalog query lists the unindexed foreign keys](/books/eight-kilobytes/relationships#one-catalog-query-lists-the-unindexed-foreign-keys)).
+
+<ProveIt lab="18-explain">
+
+```sql
+select lab.prove('the inner Limit ran 20 times, each a full Seq Scan with Filter (user_id = u.id)',
+  (select lab.field(p, 'Limit', 'Actual Loops')::int = 20
+      and pg_temp.node(p, '{"Node Type": "Seq Scan", "Relation Name": "events"}') ->> 'Filter' = '(user_id = u.id)'
+      and (lab.field(p, 'Limit', 'Shared Hit Blocks')::bigint
+         + lab.field(p, 'Limit', 'Shared Read Blocks')::bigint) = 20 * (pg_relation_size('events') / 8192)
+   from p_ex2));
+
+select lab.prove('before: about 703,714 pages for 20 rows',
+  (select pg_temp.bufs(p) between 703500 and 704500
+      and (p -> 'Plan' ->> 'Actual Rows')::numeric = 20 from p_ex2));
+
+create index events_user_created_idx on events (user_id, created_at);
+
+-- (lab.plan of the same query, after the index)
+select lab.prove('each loop now costs 4 pages: 80 for 20 loops',
+  (select (lab.field(p, 'Limit', 'Shared Hit Blocks')::int
+         + coalesce(lab.field(p, 'Limit', 'Shared Read Blocks')::int, 0)) = 80
+      and lab.field(p, 'Limit', 'Actual Loops')::int = 20
+   from p_ex2_after));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Compare estimated and actual rows
+
+Every choice in a plan rests on estimates, so this habit pays most: **for each node, compare estimated to actual rows, starting from the leaves.** A factor of 2 or 3 rarely matters. A factor of 10 or more usually means a bad choice above it.
+
+In the `kind = 'alert'` plan, `rows=245404` is the estimate and `rows=249714.00` what happened: within 2%, because the planner's statistics know all five values of `kind`. The statistics come from a random sample of the table, so your estimate will land a little differently, but close. That's the good case.
+
+Now a bad case. An on-call dashboard lists the ten projects with the most failed deploys in the last week (`kind = 'deploy'`, `payload->>'status' = 'failed'`, a `created_at` range, joined to `projects`). It read 42,397 pages, the whole table plus a lookup into `projects` per matching event. An index on `created_at` brought that to 7,990, which looks like a win until you read where the pages went:
+
+```text
+ Nested Loop  (... rows=49 ...) (actual ... rows=2402.00 loops=1)
+   ->  Index Scan using events_created_at_idx on events e  (... rows=49 ...)
+           (actual ... rows=2402.00 loops=1)
+         Buffers: shared hit=784
+   ->  Index Scan using projects_pkey on projects p  ...
+           (actual ... rows=1.00 loops=2402)
+         Buffers: shared hit=7206
+```
+
+The events scan estimated `rows=49` and got 2,402: a 49x error at the lowest node. A nested loop is the right join for 49 project lookups; for 2,402 it spent 7,206 pages, when hashing all 191 pages of `projects` once is cheaper. The 49 is a fixed guess: Postgres keeps no statistics on an expression like `payload->>'status'` until you ask for them ([Functions hide your statistics](/books/eight-kilobytes/planner#functions-hide-your-statistics)). With expression statistics (PostgreSQL 14+):
+
+```sql
+create statistics events_status_stats on (payload->>'status') from events;
+analyze events;
+```
+
+The estimate becomes 2,558, and the planner switches to a hash join on its own: 975 pages instead of 7,990. No rewrite, just better information. That's the pattern behind most "the planner is being stupid" complaints.
+
+<ProveIt lab="18-explain">
+
+```sql
+select lab.prove('the events scan estimated about 49 rows: at least 20x too few',
+  (select (n ->> 'Actual Rows')::numeric / (n ->> 'Plan Rows')::numeric > 20
+      and (n ->> 'Plan Rows')::int between 30 and 70
+   from (select pg_temp.node(p, '{"Index Name": "events_created_at_idx"}') n from p_ex3) x));
+
+select lab.prove('and the planner switches to a Hash Join and a hashed aggregate on its own',
+  (select lab.field(p, 'Hash Join', 'Node Type') is not null
+      and lab.field(p, 'Nested Loop', 'Node Type') is null
+      and lab.field(p, 'Aggregate', 'Strategy') = 'Hashed'
+   from p_ex3b));
+```
+
+</ProveIt>
+
+<DeepDive title="The fixed plan, and what the fix left behind">
+
+After `create statistics` and `analyze`:
+
+```text
+ Limit  ... (actual time=7.958..7.961 rows=10.00 loops=1)
+   Buffers: shared hit=975
+   ...
+               ->  Hash Join  (... rows=2558 ...) (actual ... rows=2402.00 loops=1)
+                     ->  Index Scan using events_created_at_idx on events e  (...)
+                           Rows Removed by Filter: 35955
+```
+
+The statistics come from a sample, so your estimate lands near 2,558, not on it. `Rows Removed by Filter: 35955` is the scan still reading the whole week to find the failed deploys; if the dashboard is hot, [a partial index](/books/eight-kilobytes/btree#index-the-rows-you-ask-about-not-the-whole-table) removes that too. (An expression index would also have given the planner statistics, at the cost of maintaining an index.)
+
+<ProveIt lab="18-explain">
+
+```sql
+select lab.prove('the default selectivity for an expression without statistics is 0.5%; the real share of failed is 25%',
+  (select avg((payload->>'status' = 'failed')::int) between 0.24 and 0.26 from events));
+
+select lab.prove('about 975 pages instead of 7,990',
+  lab.warm_buffers($$ select p.id, p.name, count(*) as failures
+                  from events e
+                  join projects p on p.id = e.project_id
+                  where e.kind = 'deploy'
+                    and e.payload->>'status' = 'failed'
+                    and e.created_at >= '2026-09-29'
+                  group by p.id, p.name
+                  order by failures desc
+                  limit 10 $$) between 900 and 1050);
+
+select lab.prove('the estimate (about 245,000) is within a few percent of the actual rows (5% allows for sampling)',
+  (select abs((p -> 'Plan' ->> 'Plan Rows')::numeric - 249714) / 249714 < 0.05 from p_alert));
+```
+
+</ProveIt>
+
+Older versions printed actual rows as whole numbers, so "0.4 rows per loop" read as a misleading 0; PostgreSQL 18's two decimals (`rows=104.20`) fix that.
+
+</DeepDive>
+
+## Buffers are the evidence
+
+`Buffers:` counts 8 KB pages, the thing this whole book is about, and it's the most honest line in the plan.
+
+`shared hit` pages were already in [shared_buffers](/books/eight-kilobytes/glossary#shared_buffers); `shared read` pages were requested from the OS; `dirtied` and `written` show up on writes; `temp` means a sort or hash spilled to disk.
+
+`hit + read` is the number of page accesses, and it's deterministic: same query, same data, nearly the same total every run. How many were hits depends on what else ran. Compare plans by the total; explain one run by the split.
+
+A `read` isn't necessarily a disk read: it means "not in shared_buffers, so Postgres asked the kernel", and the kernel may answer from its own page cache (["Read" does not mean "from disk"](/books/eight-kilobytes/latency#read-does-not-mean-from-disk)). Don't use `I/O Timings` on a big scan to tell which. In the `kind = 'alert'` plan, 35,079 reads show about 1 ms of I/O time, about 33 nanoseconds a page, which is faster than copying a page out of any cache. That's because PostgreSQL 18 reads ahead asynchronously: background I/O workers (`io_method = worker`, the default) fetch pages before the scan asks for them, and `I/O Timings` counts only the time the query itself waited. On a cold server with network storage, the same count could take seconds, and the waits would show.
+
+Nor will a second run of a big scan turn into hits: big scans use a small ring of buffers ([Big operations get a ring](/books/eight-kilobytes/buffers#big-operations-get-a-ring)). And `written` on a plain read, like the `written=3` above, means the query had to flush someone else's dirty pages to make room ([Your query shouldn't be the one writing dirty pages](/books/eight-kilobytes/buffers#your-query-shouldnt-be-the-one-writing-dirty-pages)).
+
+## Filter means rows were read and thrown away
+
+The leaves of every plan read tables: `Seq Scan`, `Index Scan`, `Index Only Scan`, and the bitmap pair, all explained in [An index helps only as much as its rows sit together](/books/eight-kilobytes/btree#an-index-helps-only-as-much-as-its-rows-sit-together). On any of them, tell `Index Cond` from `Filter`. `Index Cond` narrowed what was read; `Filter` means rows were read and then thrown away, counted by `Rows Removed by Filter`. A big count there on an index scan means some condition couldn't use the index: column order, a function on the column, a type mismatch.
+
+## Each join method is right only for some row counts
+
+Postgres joins two inputs three ways, and a wrong row estimate picks the wrong one:
+
+- **Nested loop:** for each row of the outer (first) child, run the inner (second) child. Wonderful when the outer side is small and the inner side is an index lookup; terrible when the outer side is big.
+- **Hash join:** load the inner child into a hash table (the `Hash` node), then stream the outer child past it. The workhorse for large, unsorted inputs. When the table outgrows [`work_mem`](/books/eight-kilobytes/glossary#work_mem) times `hash_mem_multiplier`, it splits into `Batches` on disk.
+- **Merge join:** walk both inputs in join-key order, like merging two sorted lists. Cheap when both come out of indexes already sorted.
+
+The planner picks by cost, so its pick is only as good as its row estimates, as the 49-row nested loop showed. Why each one wins where it does, and the `Memoize` cache that can sit inside a nested loop, are in [Each join method wins on a cost curve](/books/eight-kilobytes/plans#each-join-method-wins-on-a-cost-curve).
+
+<DeepDive title="What a hash join looks like when it spills">
+
+Joining 30 days of events to their users (`where e.created_at >= '2026-09-06'`), parallelism off:
+
+```text
+ Hash Join (actual time=94.638..137.030 rows=164384.00 loops=1)
+   Hash Cond: (e.user_id = u.id)
+   ->  Seq Scan on events e (...)
+   ->  Hash (actual time=17.055..17.057 rows=100000.00 loops=1)
+         Buckets: 131072  Batches: 1  Memory Usage: 7274kB
+```
+
+`Batches: 1` means the hash fit: 7,274 KB is over the 4 MB default `work_mem`, but `hash_mem_multiplier` (2 by default) lets a hash use twice that, 8 MB. The batch count is chosen up front from the planner's size estimate, so `Batches: 1` here also means the planner expected it to fit. With `work_mem` lowered to 1 MB, it's `Batches: 4` and `temp written=474`: still correct, slower, and visible in the `temp` buffers.
+
+<ProveIt lab="18-explain">
+
+```sql
+select lab.prove('hash join: 100,000 users hashed in 1 batch at the default work_mem (about 7,274 kB)',
+  (select lab.field(p, 'Hash', 'Actual Rows')::numeric = 100000
+      and lab.field(p, 'Hash', 'Hash Batches')::int = 1
+      and lab.field(p, 'Hash', 'Peak Memory Usage')::int between 7000 and 7500
+   from p_hash));
+
+begin;
+set local work_mem = '1MB';
+create temp table p_hash1 on commit drop as
+  select lab.plan($$ select e.id, u.email
+                     from events e join users u on u.id = e.user_id
+                     where e.created_at >= '2026-09-06' $$) as p;
+select lab.prove('at work_mem = 1MB it splits into 4 batches and writes temp files',
+  (select lab.field(p, 'Hash', 'Hash Batches')::int = 4
+      and lab.field(p, 'Hash', 'Temp Written Blocks')::int > 0
+   from p_hash1));
+commit;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Fix the pages before you raise work_mem
+
+Sorts and hashes get up to `work_mem` (4 MB by default) per node, then spill to temporary files. A monthly report sorts 30 days of events by user (`where created_at >= '2026-09-06' order by user_id, created_at`):
+
+```text
+ Sort (actual time=135.067..143.625 rows=164384.00 loops=1)
+   Sort Key: user_id, created_at
+   Sort Method: external merge  Disk: 5480kB
+   Buffers: shared hit=2929 read=32250, temp read=685 written=687
+   ->  Seq Scan on events (actual time=90.854..100.979 rows=164384.00 loops=1)
+         Rows Removed by Filter: 1835616
+```
+
+`external merge` with `Disk:`, plus `temp` buffers, means it spilled. The tempting fix is more memory, and it works: with `set local work_mem = '32MB'` the sort becomes `quicksort  Memory: 12566kB`. Total time didn't move (153 ms against 148 ms, inside the noise).
+
+Read the plan again and you see why. The scan finished at 101 ms; the sort added about 43. The real cost is reading all 35,173 pages for 8% of the table, which an index on `created_at` fixes (even a tiny BRIN index: [BRIN keeps one summary per range of pages](/books/eight-kilobytes/more-indexes#brin-keeps-one-summary-per-range-of-pages)). **Fix page counts first; tune memory second.** When a spill does matter, raise `work_mem` for that transaction with `set local`, never globally: every sort and hash node in every connection may take that much ([work_mem is per node, and you can see it](/books/eight-kilobytes/buffers#work_mem-is-per-node-and-you-can-see-it)).
+
+<DeepDive title="The spill, measured, and the sort methods you'll meet">
+
+In memory, the sort needed 12.5 MB for data that took 5.5 MB on disk: in-memory tuples carry overhead. Besides `quicksort` and `external merge`, you'll meet `top-N heapsort` (under a `limit`, keeping only N rows) and `incremental sort` (input already sorted on a prefix of the key). Hash aggregates spill too (PostgreSQL 13+), showing `Batches` and `Disk Usage` like a hash join.
+
+<ProveIt lab="18-explain">
+
+```sql
+select lab.prove('sorting 30 days of events (about 164,000 rows) spills: external merge, about 5,480 kB on disk',
+  (select lab.field(p, 'Sort', 'Sort Method') = 'external merge'
+      and lab.field(p, 'Sort', 'Sort Space Type') = 'Disk'
+      and lab.field(p, 'Sort', 'Sort Space Used')::int between 4800 and 6000
+      and lab.field(p, 'Sort', 'Actual Rows')::numeric between 150000 and 170000
+      and lab.field(p, 'Sort', 'Temp Written Blocks')::int > 0
+   from p_sort));
+
+select lab.prove('at work_mem = 32MB it is a quicksort in memory, about 12,566 kB',
+  (select lab.field(p, 'Sort', 'Sort Method') = 'quicksort'
+      and lab.field(p, 'Sort', 'Sort Space Type') = 'Memory'
+      and lab.field(p, 'Sort', 'Sort Space Used')::int between 11000 and 13500
+   from p_sort32));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Limit bets on finding rows early
+
+A `Limit` stops pulling rows once it has enough, so the planner favors plans that produce the *first* rows cheaply, betting it won't have to finish them. When it's wrong about where the rows are, it hurts. Ask for the ten events with the lowest `user_id`, joined to `users`, with no index on `events.user_id`, and the plan reads 35,176 pages, spills a copy of `events` to disk, and takes over half a second.
+
+The full nested loop would cost over four billion units, but the `Limit` is costed at 20,860, because the planner assumed the first users would have plenty of events. It walks users in id order, rescanning a copy of all two million events for each. Users 1 and 2 have no events, so two loops read everything for nothing before the third found ten.
+
+With an index on `events (user_id)`, it reads 16 pages. (Following along? Drop the `(user_id, created_at)` index from the loops section first, or it serves this query too.) `order by ... limit` without a supporting index is the classic plan that's fast in development and terrible in production: when a `Limit` sits above an expensive subtree, ask whether an index could hand it the rows in order.
+
+<DeepDive title="The plan, and why the fixed one varies between copies">
+
+```text
+ Limit  (cost=0.29..20860.11 rows=10 width=43)
+     (actual time=565.905..582.183 rows=10.00 loops=1)
+   Buffers: shared hit=4375 read=30801, temp read=9358 written=8301
+   ->  Nested Loop  (cost=0.29..4171963906.29 rows=2000000 width=43)
+           (actual time=565.904..582.179 rows=10.00 loops=1)
+         ...
+         ->  Materialize  ... (actual ... rows=1418191.33 loops=3)
+```
+
+`loops=3` times 1,418,191 rows is the 4.25 million in the plan's `Rows Removed by Join Filter: 4254564`, and the materialized copy of `events` went to disk. With the index, our copy chose a merge join over two index scans; another copy of the kit, with slightly different sampled statistics, chose a nested loop with a `Memoize` (9 hits, 1 miss). They cost within a few percent of each other, and both read the same 16 pages.
+
+<ProveIt lab="18-explain">
+
+```sql
+select lab.prove('the Limit is costed near 20,860; the full nested loop over four billion',
+  (select (p -> 'Plan' ->> 'Total Cost')::numeric between 19000 and 23000
+      and lab.field(p, 'Nested Loop', 'Total Cost')::numeric > 4e9
+   from p_limit));
+
+select lab.prove('users 1 and 2 have no events: the third user found the ten rows (loops=3)',
+  (select min(user_id) = 3 from events)
+  and (select lab.field(p, 'Materialize', 'Actual Loops')::int = 3 from p_limit));
+
+create index events_user_id_idx on events (user_id);
+
+-- The two plans cost within a few percent of each other, so which one wins
+-- depends on the kit's sampled statistics. Both read 16 pages.
+select lab.prove('with the index, it reads 16 pages: the events index feeds a merge join, or a nested loop with a Memoize (9 hits, 1 miss)',
+  lab.warm_buffers($$ select e.id, e.kind, u.email
+                  from events e join users u on u.id = e.user_id
+                  order by e.user_id limit 10 $$) = 16
+  and (select pg_temp.node(p, '{"Index Name": "events_user_id_idx"}') is not null
+          and lab.field(p, 'Materialize', 'Node Type') is null
+          and lab.field(p, 'Sort', 'Node Type') is null
+          and (lab.field(p, 'Merge Join', 'Node Type') is not null
+               or (lab.field(p, 'Memoize', 'Cache Hits')::int = 9
+                   and lab.field(p, 'Memoize', 'Cache Misses')::int = 1))
+       from p_limit2));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Parallel query is faster, not cheaper
+
+When a scan is big enough, Postgres splits it among **workers**: a `Gather` node over a `Parallel Seq Scan`, with `loops=3` for the leader plus two workers. Counting deploys that way still read all 35,173 pages. Parallelism finishes a big scan sooner by spending more cores on it, so on a busy server, a frequent query that needs a parallel sequential scan needs an index instead.
+
+<DeepDive title="Reading a parallel plan">
+
+```text
+ Finalize Aggregate (actual time=38.578..40.111 rows=1.00 loops=1)
+   Buffers: shared hit=4964 read=30209
+   ->  Gather (actual time=38.442..40.105 rows=3.00 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         ->  Partial Aggregate (actual time=36.867..36.868 rows=1.00 loops=3)
+               ->  Parallel Seq Scan on events (actual ... rows=166664.00 loops=3)
+```
+
+Each process scans a share of the pages and counts its part; `Gather` collects the partial counts for `Finalize Aggregate`. `rows=166664.00` times 3 is the 499,992 deploys. `Workers Launched` below `Workers Planned` means the server ran out of worker slots, and `Gather Merge` is the order-preserving variant. How many workers a plan gets is in [Parallel plans are priced like everything else](/books/eight-kilobytes/plans#parallel-plans-are-priced-like-everything-else).
+
+<ProveIt lab="18-explain">
+
+```sql
+select lab.prove('count of deploys: Finalize Aggregate over Gather, 2 workers, loops=3',
+  (select (p -> 'Plan' ->> 'Node Type') = 'Aggregate'
+      and (p -> 'Plan' ->> 'Partial Mode') = 'Finalize'
+      and lab.field(p, 'Gather', 'Workers Planned')::int = 2
+      and lab.field(p, 'Seq Scan', 'Actual Loops')::int = 3
+   from p_par));
+
+select lab.prove('there are 499,992 deploys',
+  (select count(*) from events where kind = 'deploy') = 499992);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A method for slow queries
+
+Everything above folds into one checklist. Work it in order; most problems surface by step 4.
+
+1. **Get the real plan.** `explain (analyze, buffers)` with real parameter values on production-sized data. Wrap writes in `begin` / `rollback`. Too slow to run? Use plain `explain`, and let auto_explain log the real plan from production ([auto_explain logs the plan you can't reproduce later](/books/eight-kilobytes/configuration#auto_explain-logs-the-plan-you-cant-reproduce-later)).
+2. **Read the top line.** Ask what the answer *should* cost: 20 rows should need tens of pages, not tens of thousands.
+3. **Find where the buffers went.** Walk down to where the big numbers start. Subtract children; multiply by `loops`.
+4. **Compare estimated and actual rows, bottom up.** The lowest node off by 10x or more is usually the root cause; everything above it was planned for a different query.
+5. **Check the usual suspects:** `Rows Removed by Filter` far above rows returned (a missing or unusable index); `loops` in the thousands; `external merge`, `Batches` above 1, or `temp` buffers (spills); `Heap Fetches` near the row count (vacuum is behind); a `Limit` above an expensive subtree.
+6. **Fix one thing:** an index, a rewrite, or better statistics.
+7. **Measure again and compare buffers.** Keep the before-and-after plans in the pull request, so the next person knows why the index exists.
+
+## The short version
+
+- `explain (analyze, buffers)` runs the query and shows reality next to the estimates. Wrap writes in `begin` / `rollback`.
+- Read plans from the innermost node out. Times and buffers are cumulative: subtract children.
+- `actual time` and `rows` are per loop: multiply by `loops`. 70 ms times 20 loops was the whole 1.4 seconds.
+- Compare estimated and actual rows bottom up. A 49x underestimate picked a nested loop that a hash join beat by 8x in pages.
+- Use buffers as the evidence: `hit + read` is stable across runs, milliseconds aren't.
+- A spill costs less than it looks. Fix the scan first, then raise `work_mem` with `set local`.
+- Keep before-and-after plans with every index you add.
+
+## Further reading
+
+- [Using EXPLAIN](https://www.postgresql.org/docs/18/using-explain.html), PostgreSQL documentation. The official walkthrough, and still the best primary source on plan output.
+- [EXPLAIN](https://www.postgresql.org/docs/18/sql-explain.html), PostgreSQL documentation. Every option, including `BUFFERS` (default in 18), `WAL`, `SETTINGS`, `SERIALIZE`, and `MEMORY`.
+- [auto_explain](https://www.postgresql.org/docs/18/auto-explain.html), PostgreSQL documentation. Log the plans of slow queries in production, for queries you can't rerun by hand.
+- [explain.depesz.com](https://explain.depesz.com/) and [explain.dalibo.com](https://explain.dalibo.com/), Hubert Lubaczewski and Dalibo. Paste a plan and see where the time and rows go, highlighted.

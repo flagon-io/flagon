@@ -1,0 +1,3 @@
+-- Watch it run: an account's project list, with a member count per project.
+\set a random(1, 1000)
+select p.id, p.name, (select count(*) from users u where u.account_id = p.account_id) as members from projects p where p.account_id = :a order by p.created_at desc limit 20;

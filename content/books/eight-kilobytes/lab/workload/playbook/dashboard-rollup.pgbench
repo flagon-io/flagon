@@ -1,0 +1,7 @@
+-- The performance playbook: the account dashboard, from the daily rollup.
+\set a random(1, 1000)
+select day, events, failed_deploys
+from account_daily
+where account_id = :a
+  and day >= '2026-09-06'
+order by day;

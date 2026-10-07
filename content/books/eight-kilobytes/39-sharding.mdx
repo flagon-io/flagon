@@ -1,0 +1,497 @@
+---
+title: Shard last
+description: Know when sharding is worth its cost, pick a shard key, keep the door open from day one, and choose among the real ways to shard Postgres.
+part: Scaling out
+builds_on: [keys, replication, partitioning]
+---
+
+On a small sharded cluster built for this chapter, the same join between `projects` and `users` ran in about 10 milliseconds one way and about 950 milliseconds the other. Same rows, same machines, same answer. The difference was one extra equality in the `on` clause, `u.account_id = p.account_id`. With it, every shard joined its own rows locally. Without it, the cluster had to reshuffle both tables across the network first, and by default it refused to try.
+
+That's sharding. Every query is either kept local by the shard key or pays for the network, and you choose which on the day you pick the key.
+
+We think most teams shard too early, and too few design for it before they do. Design for it from day one, then wait as long as you can. When the day comes, the tool matters less than the key.
+
+## Sharding multiplies everything
+
+Sharding splits one logical database across several independent primaries. A **shard** is one subset of the rows; the **shard key** (or distribution column) decides which shard a row lives on: here, `account_id`, with a router in front that knows where each account lives.
+
+Short of splitting the database by function, it's the only rung of the [scaling ladder](/books/eight-kilobytes/scale) that raises the ceiling on writes and total data. The price is a boundary through everything Postgres did for you inside one server:
+
+- **Queries** that don't name one shard key go to every shard and get merged; joins across shards ship rows over the network.
+- **Transactions** across shards need [two-phase commit](/books/eight-kilobytes/glossary#two-phase-commit) to stay atomic.
+- **Constraints** live on one shard: `(account_id, email)` can be unique, `email` alone can't.
+- **Migrations and operations** happen N times: N sets of replicas, backups, vacuum backlogs, and places a 3 a.m. page can come from.
+
+None of that is a reason never to shard. It's a reason to make sure the alternative is worse first.
+
+## Shard when one primary can no longer absorb writes or hold data
+
+Three signals say one primary, on the biggest machine you're willing to run, can no longer absorb your writes or hold your data:
+
+- **Write throughput is pinned**: writes, not reads, saturate the primary even after tuning [WAL and checkpoints](/books/eight-kilobytes/wal) and batching.
+- **The data no longer fits the box, operationally**: a restore longer than your [recovery time objective](/books/eight-kilobytes/glossary#rpo-and-rto), a vacuum that never catches up.
+- **A hard requirement splits tenants**: data residency, or dedicated hardware by contract. The one case where sharding early is right.
+
+Not signals: "we might be big one day", a slow query, a connection count, read load. Try the cheaper rungs first, including the underrated one: **split by function**, moving `events` and its writers to their own database, so each side still behaves like one Postgres.
+
+<Callout type="tip" title="Do the math before the migration">
+Measure your WAL rate (`pg_current_wal_lsn()` sampled a minute apart), your largest table's growth per month, and your restore time. Project them a year out against the biggest instance you can buy. If the line crosses in three years, you don't have a sharding problem yet. You have a calendar reminder.
+</Callout>
+
+## The shard key is the whole design
+
+Pick the shard key so your hottest queries, and the transactions you can't afford to split, stay on one shard. A good one is in almost every hot query's filter, is shared by rows joined or written together, and has many evenly spread values.
+
+For multi-tenant SaaS, that's the tenant id: the app serves one account at a time, and an account's rows are joined together, never with another account's. Shard `events` by `id` and every "my account's events" query hits every shard; by `created_at`, all of today's writes land on one. Cross-tenant reports become fan-out: fine if rare.
+
+<Fig name="route-by-tenant">
+
+**The shard key decides who does the work.** A query that names account_id goes to the one shard holding that account, where its rows sit together. A query without it goes to every shard, and the results are merged.
+
+</Fig>
+
+**A hash spreads tenants, not load.** One customer's CI system adding 400,000 events turned its 13 MB shard into 61 MB, shared with every account that hashes there. Big tenants need their own shard, so [moving one tenant](#resharding-means-moving-tenants) must be routine.
+
+**Colocation keeps joins local.** Shard `users`, `projects`, and `events` by `account_id` the same way and account 42's rows sit together, joined locally, *if* the join condition includes the shard key: the 10 ms against 950. Small tables every tenant reads are copied to every shard as **reference tables**.
+
+<DeepDive title="What one hot tenant did to the shard sizes">
+
+```text
+ shardid | nodename | size
+---------+----------+-------
+  102147 | citus-w1 | 61 MB
+  102166 | citus-w2 | 14 MB
+  102169 | citus-w1 | 13 MB
+```
+
+That's `citus_shards` for `events`, largest first. A tenant that outgrows the biggest machine alone would need a second key inside it; very few products get there.
+
+<ProveIt lab="39-sharding.sh">
+
+```bash
+prove "account 7's shard is now the largest, over 3 times the median events shard" \
+  holds citus-coord "with s as (select shardid, shard_size from citus_shards where table_name = 'events'::regclass),
+    seven as (select shardid from pg_dist_shard where logicalrelid = 'events'::regclass and hashint8(7) between shardminvalue::int and shardmaxvalue::int)
+    select (select shardid from s order by shard_size desc limit 1) = (select shardid from seven)
+       and (select max(shard_size) from s) > 3 * (select percentile_cont(0.5) within group (order by shard_size) from s)"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Keep the door open from day one
+
+You can make sharding cheap without doing it. The same habits make [row-level security](/books/eight-kilobytes/security#a-policy-makes-other-tenants-rows-invisible) simpler and cross-tenant bugs harder to write. Put `account_id` on every tenant-owned table, in every primary key, unique constraint, and foreign key, and in every query's `where` clause ([Carry the tenant everywhere](/books/eight-kilobytes/keys#carry-the-tenant-everywhere), [Make cross-tenant references impossible](/books/eight-kilobytes/keys#make-cross-tenant-references-impossible)). On one server those composite keys prevent cross-tenant references; sharded, they're the only kind that can be enforced.
+
+Already on single-column keys? Migrate on one server, step by step: composite unique constraints, composite foreign keys (`not valid`, then `validate`), then queries. Each step pays for itself.
+
+<Callout type="tip" title="Globally unique emails need a different home">
+No sharded table can enforce one account per email across the system. Keep a small table of `(email, account_id)`, unique on `email`, in one unsharded database, and claim the email there first. Then create the user on its shard, and release the claim if that fails. A separate database can't share the user's transaction without two-phase commit, so the claim comes first and a cleanup job removes claims older than a few minutes that never got a user. (On Citus, a reference table can hold the claim and is written in the same distributed transaction.) Decide this before you shard.
+</Callout>
+
+## Route by tenant, never by id
+
+Each shard has its own sequences, so two shards both hand out `id = 1`. If ids leave the database, use **shard bits** (the top bits of a `bigint` name the shard, [Snowflake-style](/books/eight-kilobytes/keys#a-snowflake-id-needs-a-unique-machine-id-per-writer)) or **UUIDv7** (no coordination, `uuidv7()` in PostgreSQL 18); [the id landscape](/books/eight-kilobytes/keys#every-id-format-trades-order-against-what-it-leaks) compares the rest.
+
+With 16 shard bits, each shard can issue 281 trillion ids. But an id says where a row was *created*, not where it lives after its tenant moves: route by tenant, never by id.
+
+<DeepDive title="Shard bits, as Citus hands them out">
+
+Citus uses shard bits for identity columns. The same insert (`returning id, id >> 48 as node_bits`) on the coordinator and each worker:
+
+```text
+-- on citus-coord
+   id    | node_bits
+---------+-----------
+ 2000001 |         0
+
+-- on citus-w1
+       id        | node_bits
+-----------------+-----------
+ 281474976710657 |         1
+
+-- on citus-w2
+       id        | node_bits
+-----------------+-----------
+ 562949953421313 |         2
+```
+
+Each node's sequence starts at its group number shifted left 48 bits. (The coordinator is group 0, so its ids look ordinary.)
+
+<ProveIt lab="39-sharding.sh">
+
+```bash
+id_sql="insert into events (account_id, project_id, kind)
+  select 42, id, 'login' from projects where account_id = 42 order by id limit 1
+  returning id >> 48"
+c_bits=$(coord -c "$id_sql"); w1_bits=$(on citus-w1 -c "$id_sql"); w2_bits=$(on citus-w2 -c "$id_sql")
+prove "the same insert accepted on every node, ids carry the node's group in the top 16 bits" \
+  [ "$c_bits $w1_bits $w2_bits" = "0 1 2" ]
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Cross-shard queries fan out
+
+A query without the shard key goes to every shard, and something merges the results: sums add, averages need sums and counts, `limit 10` needs each shard's top 10, distinct counts need the values. Latency is the slowest shard's, and 100 such queries a second on 32 shards is 3,200 tasks a second. Tenant queries get cheaper per node as you add shards. Fan-out doesn't. Keep it to jobs and internal tools.
+
+## Cross-shard transactions need two-phase commit
+
+Writes have the same boundary. A write to two shards is two transactions; if one fails, you have half a transfer. **Two-phase commit** has every shard `prepare transaction` before any commits. It holds locks everywhere until the second phase, and a coordinator that dies in between leaves prepared transactions holding locks and blocking vacuum. Plain PostgreSQL ships with it off (`max_prepared_transactions = 0`), and `postgres_fdw` doesn't use it. The best cross-shard transaction is the one your shard key made unnecessary.
+
+<DeepDive title="Two-phase commit in the remote command log">
+
+On Citus, an update with no tenant filter sent `PREPARE TRANSACTION`, then `COMMIT PREPARED`, to both workers. Between the two, each worker holds a prepared transaction: it survives a restart, keeps its row locks, and holds back vacuum's horizon until someone commits or rolls it back. Citus records each one in its own metadata and its maintenance daemon finishes or aborts leftovers on its own; with hand-rolled 2PC that job is yours, and `pg_prepared_xacts` is where you look for the stragglers.
+
+<ProveIt lab="39-sharding.sh">
+
+```bash
+out=$(coord -c "set citus.log_remote_commands = on" -c "set client_min_messages = notice" \
+  -c "update events set kind = kind where kind = 'alert'" 2>&1)
+prove "an update with no tenant filter commits with two-phase commit on both workers" \
+  bash -c 'grep -q "PREPARE TRANSACTION" <<<"$1" && grep -q "COMMIT PREPARED" <<<"$1" && grep -q "citus-w1" <<<"$1" && grep -q "citus-w2" <<<"$1"' _ "$out"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Resharding means moving tenants
+
+Sooner or later a tenant needs a machine of its own. **Logical replication with a row filter** (PostgreSQL 15+, [what it's for](/books/eight-kilobytes/replication#logical-replication-is-for-upgrades-moves-and-feeds)) copies one tenant's rows, then streams changes.
+
+With a tenant directory, a table mapping each tenant to its shard, the move takes four steps: publish `where (account_id = 42)` and subscribe; when lag is near zero, mark the tenant read-only; at zero, point the directory at the destination; clean up the source in batches. The read-only window lasts seconds. Logical replication doesn't carry sequences, so ids minted on the destination must not collide with the moved ones: one more reason for shard bits or UUIDv7.
+
+The shard moves in Citus (an extension that shards inside Postgres, [below](#citus-routes-and-merges-inside-postgres)) and the resharding in PgDog (a sharding proxy, [below](#a-proxy-keeps-the-shards-plain-postgres)) use the same protocol, a good sign it's the right primitive.
+
+<DeepDive title="Moving account 42 between two plain Postgres databases">
+
+```sql
+-- on the source
+create publication move_acct_42 for table events where (account_id = 42);
+
+-- on the destination, which already has the table
+create subscription move_acct_42
+  connection 'host=citus-w1 dbname=fdwshard user=postgres'
+  publication move_acct_42;
+```
+
+It copied the 500 existing rows; one more insert on the source arrived within seconds, and the source's slot showed zero bytes of lag.
+
+<ProveIt lab="39-sharding.sh">
+
+```bash
+prove "the subscription copies account 42's 500 existing rows, and only those" \
+  wait_for pg dest "select count(*) = 500 and min(account_id) = 42 and max(account_id) = 42 from events"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## There are seven ways to shard a Postgres workload
+
+The seven differ in where routing lives, who merges cross-shard results, and how much of Postgres you keep. Every fact about other projects in this section is from their own documentation as of October 2026; check before you commit. We ran `postgres_fdw` and Citus because both are open source and run anywhere: easy to demonstrate, not the default answer.
+
+### An application router makes every hard problem yours
+
+You run ordinary primaries, and a router in your code looks up each tenant's shard. Any Postgres works, managed or not, and every hard problem (merges, moves, atomicity) is yours.
+
+<DeepDive title="A tenant directory and a router you can't misuse">
+
+Hash ranges need no lookup, but can't move one tenant alone. A directory can place each tenant anywhere; for SaaS, pick it:
+
+```sql
+create table tenant_shards (
+  account_id  bigint primary key,
+  shard       text   not null,
+  state       text   not null default 'active'
+              check (state in ('active', 'read_only', 'moving'))
+);
+```
+
+```go
+// Router sends every query for an account to the database that owns it.
+type Router struct {
+	mu        sync.RWMutex
+	directory map[int64]string   // account_id -> shard, loaded from tenant_shards
+	shards    map[string]*sql.DB // shard name -> connection pool
+}
+
+func (r *Router) For(accountID int64) (*sql.DB, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	name, ok := r.directory[accountID]
+	if !ok {
+		return nil, fmt.Errorf("account %d has no shard", accountID)
+	}
+	return r.shards[name], nil
+}
+```
+
+No database handle without an account id, so no query can skip the routing step. The directory can still be stale in the seconds a tenant moves, which is what the `state` column is for: reload the directory when it changes, and refuse writes to a tenant marked `read_only` or `moving`. **Fits:** a modest number of large tenants, managed Postgres you can't extend. **Costs:** you build fan-out merges, moves, migration tooling, and any two-phase commit.
+
+</DeepDive>
+
+### postgres_fdw is a building block
+
+Make each partition of a hash-partitioned table a foreign table on another server and the parent routes rows across machines. Tenant queries push their filter to one server; cross-tenant aggregates pull every row back. No two-phase commit, constraints, or rebalancing: a kit, not a car.
+
+<DeepDive title="Sharding by hand with partitions and foreign tables">
+
+On a plain PostgreSQL 18 database, pointing at two plain databases on our Citus worker hosts (Citus plays no part):
+
+```sql
+create server shard1 foreign data wrapper postgres_fdw
+  options (host 'citus-w1', dbname 'fdwshard', async_capable 'true');
+-- shard2 likewise, plus user mappings
+
+create table events (
+  account_id bigint not null,
+  id         bigint not null,
+  kind       text   not null
+) partition by hash (account_id);
+create foreign table events_s1 partition of events
+  for values with (modulus 2, remainder 0)
+  server shard1 options (table_name 'events');
+-- events_s2: remainder 1, server shard2
+```
+
+50,000 rows for 100 accounts routed 26,000 and 24,000. Account 42's query sent `WHERE ((account_id = 42))` to one server. Grouping by the key, with `enable_partitionwise_aggregate`, pushed whole aggregates to both concurrently (`async_capable`, PostgreSQL 14+); grouping by `kind` pulled every row back and counted locally, because on PostgreSQL 18 `postgres_fdw` doesn't push partial aggregates.
+
+<ProveIt lab="39-sharding.sh">
+
+```bash
+prove "50,000 rows for 100 accounts route 26,000 to one server and 24,000 to the other" \
+  [ "$(on citus-w1 -d fdwshard -c 'select count(*) from events') $(on citus-w2 -d fdwshard -c 'select count(*) from events')" = "26000 24000" ]
+plan=$(on pg -d router -c "set enable_partitionwise_aggregate = on" -c "explain (verbose, costs off) select kind, count(*) from events group by kind")
+prove "grouping by anything else pulls the rows back and counts locally" \
+  bash -c 'grep -qF "Remote SQL: SELECT kind FROM public.events" <<<"$1" && ! grep -q "Relations: Aggregate on" <<<"$1"' _ "$plan"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Citus routes and merges inside Postgres
+
+Citus is an open-source extension (AGPL-3.0) that makes a group of Postgres servers one distributed database: a **coordinator** you connect to, **workers** holding the shards, and routing, merges, two-phase commit, DDL, and rebalancing handled for you.
+
+The latest release is 14.2.0 (14.0 added PostgreSQL 18). On our cluster (14.2.0 on PostgreSQL 18.4, the version its image ships; two workers, 32 colocated shards by `account_id`), a tenant query was one task on one worker, a cross-tenant one was 32 tasks merged on the coordinator, and the opening's join without `account_id` was refused.
+
+#### Constraints must include the distribution column
+
+A shard can only check its own rows, so Citus rejects any primary key, unique, or exclusion constraint without the distribution column: the original `primary key (id)` can't be distributed by `account_id`, nor `unique (email)`. Foreign keys must join colocated tables on the distribution column, or point at a reference table. The [day-one composite keys](#keep-the-door-open-from-day-one) were all accepted.
+
+<DeepDive title="Citus, demonstrated: distribution, router queries, fan-out, and joins">
+
+```sql
+select create_reference_table('accounts');
+select create_distributed_table('users',    'account_id');
+select create_distributed_table('projects', 'account_id', colocate_with => 'users');
+select create_distributed_table('events',   'account_id', colocate_with => 'users');
+```
+
+Each table hashes into 32 shards (the default `citus.shard_count`); distributing a 2.4-million-row copy of `events` took about ten seconds on our laptop cluster. (Distribute first and add foreign keys after; the other order failed.) The constraint error:
+
+```text
+ERROR:  cannot create constraint on "t1"
+DETAIL:  Distributed relations cannot have UNIQUE, EXCLUDE, or PRIMARY KEY
+constraints that do not include the partition column (with an equality
+operator if EXCLUDE).
+```
+
+Account 42's last week, counted by kind:
+
+```text
+ Custom Scan (Citus Adaptive) (actual rows=5.00 loops=1)
+   Task Count: 1
+   Tuple data received from nodes: 68 bytes
+   ->  Task
+         Node: host=citus-w2 port=5432 dbname=postgres
+         ->  GroupAggregate (actual rows=5.00 loops=1)
+               Buffers: shared hit=1092 read=10
+               ...
+                     ->  Bitmap Heap Scan on events_102166 events
+ Execution Time: 1.747 ms
+```
+
+Inside the task it's an ordinary plan ([read it](/books/eight-kilobytes/explain) as usual: 1,100 heap pages, because the primary key finds account 42 but not the last week). The cross-tenant version was `Task Count: 32`, the coordinator summing 160 partial rows. `count(distinct ...)` and windows not partitioned by `account_id` pull raw rows up instead.
+
+The join without `account_id`: `ERROR: the query contains a join that requires repartitioning`. With `citus.enable_repartition_joins = on`, two `MapMergeJob`s reshuffled both tables before 12 tasks joined: about 950 ms for a `count(*)`, against about 10 ms with `u.account_id = p.account_id` added (laptop timings; the gap is the point).
+
+<ProveIt lab="39-sharding.sh">
+
+```bash
+prove "account 42's users, projects, and events sit on the same worker" \
+  holds citus-coord "select count(distinct nodename) = 1 from citus_shards s join pg_dist_shard d using (shardid) where s.table_name in ('users'::regclass, 'projects'::regclass, 'events'::regclass) and hashint8(42) between d.shardminvalue::int and d.shardmaxvalue::int"
+join_sql="select u.email, count(*) from projects p join users u on u.id = p.owner_id group by u.email order by 2 desc limit 3"
+prove "a join without account_id is refused by default" \
+  fails_with "the query contains a join that requires repartitioning" citus-coord "$join_sql"
+slow=$(best_ms "select count(*) from projects p join users u on u.id = p.owner_id")
+fast=$(best_ms "select count(*) from projects p join users u on u.account_id = p.account_id and u.id = p.owner_id")
+prove "adding account_id to the join makes it at least 5 times faster" \
+  awk -v s="$slow" -v f="$fast" 'BEGIN { exit !(s > 5 * f) }'
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<Callout type="danger" title="A missing tenant filter is a fan-out, silently">
+`select id from users where email = 'user4242@example.com'` is valid on a sharded cluster. It has `Task Count: 32`: every shard searches for what one index probe handled on a single server. Nothing errors. Check your hottest queries' plans before and after you shard, and treat a fan-out on a request path as a bug.
+</Callout>
+
+<DeepDive title="Citus: moving a hot tenant, and schema-based sharding">
+
+Since Citus 11, metadata syncs to the workers, so any node can route (our worker-side inserts in [Route by tenant, never by id](#route-by-tenant-never-by-id) did), and DDL on the coordinator reaches every shard in a distributed transaction: the [migration rules](/books/eight-kilobytes/migrations), times 32.
+
+```sql
+select isolate_tenant_to_new_shard(
+  'events', 7,
+  cascade_option      => 'CASCADE',
+  shard_transfer_mode => 'block_writes');
+```
+
+That gave account 7 shards of its own (a hash range of a single value), splitting the colocated `users` and `projects` shards too. `citus_move_shard_placement(..., shard_transfer_mode => 'force_logical')` moved them with writes allowed, over logical replication: about 2 seconds for 51 MB. In one earlier session an online split stalled on a duplicate key conflict we couldn't reproduce, so rehearse on a copy of production; `call citus_cleanup_orphaned_resources()` cleans up after an interrupted move. The rebalancer (`citus_rebalance_start()`) has been open source since Citus 10, and Citus 11 opened up the non-blocking moves.
+
+Citus 12 and later can also shard by schema (`citus.enable_schema_based_sharding`): each schema becomes a colocation group on one node. Ours put `tenant_acme` and `tenant_globex` on different workers, and a join inside one was a single task. It inherits schema-per-tenant's costs, below.
+
+<ProveIt lab="39-sharding.sh">
+
+```bash
+new_shard=$(coord -c "select isolate_tenant_to_new_shard('events', 7, cascade_option => 'CASCADE', shard_transfer_mode => 'block_writes')")
+prove "isolate_tenant_to_new_shard gives account 7 a shard whose hash range is a single value" \
+  holds citus-coord "select shardminvalue = shardmaxvalue and shardminvalue::int = hashint8(7) from pg_dist_shard where shardid = $new_shard"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A proxy keeps the shards plain Postgres
+
+A sharding proxy sits where a pooler would, parses each query, and sends it to the right plain-Postgres primary, so the shards need no extension. Three have public code: PgDog, SPQR, and Multigres. What one can merge across shards is whatever its parser supports today; test your own queries through it.
+
+<DeepDive title="PgDog, SPQR, and Multigres, in their own words">
+
+- **PgDog** is "an open source proxy for scaling PostgreSQL" (AGPL-3.0, Rust) that also pools and load-balances reads. It finds the sharding key with the PostgreSQL parser, fans out and merges the rest (partial `count`, `sum`, `min`, `max`, `avg`, ordering), supports two-phase commit, and reshards over the logical replication protocol. Its README says it "is used in production and at scale", with some features experimental.
+- **SPQR** (Stateless Postgres Query Router), from Yandex Cloud's data platform team, calls itself "production-ready" for "single-shard OLTP queries" on a database "well splitted by a sharding key".
+- **Multigres** is "a Vitess adaptation for Postgres" that Supabase is building with a co-creator of Vitess (Apache-2.0), "currently in the early stages of development".
+
+</DeepDive>
+
+### Managed sharding costs you features and an easy exit
+
+Three providers run the cluster for you: Amazon Aurora PostgreSQL Limitless Database (generally available since October 31, 2024), Azure Database for PostgreSQL elastic clusters (managed Citus), and PlanetScale Neki (platform preview since September 10, 2026). You take the provider's versions and feature subset, and the exit is harder ([the hosts themselves](/books/eight-kilobytes/providers)).
+
+<DeepDive title="Limitless, elastic clusters, and Neki: architectures and documented limits">
+
+- **Aurora PostgreSQL Limitless Database**: **routers** hold metadata, split queries, and "manage distributed transactions"; **shards** are Aurora PostgreSQL instances; tables are sharded (hash only), reference, or standard. [Generally available since October 31, 2024](https://aws.amazon.com/about-aws/whats-new/2024/10/amazon-aurora-postgresql-limitless-database-generally-available/), launched with PostgreSQL 16.4 compatibility. Its [requirements page](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/limitless-reqs-limits.html) lists: special `16.X-limitless` engine versions only ([the newest listed](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/limitless-updates.html) is 16.13-limitless; no 17 or 18 build), no serializable isolation, shard keys you can't update, splits but no merges, and a subset of extensions and Aurora features.
+- **Azure Database for PostgreSQL elastic clusters** are "a managed offering of the open-source Citus extension", row- and schema-based. The older Cosmos DB for PostgreSQL, also Citus, "is on a retirement path and no longer recommended for new projects".
+- **PlanetScale Neki** is "sharded Postgres" from the team behind Vitess, built from scratch: stateless routers with a full Postgres parser and distributed planner (at least three, across zones) in front of ordinary Postgres shards, each with at least two replicas. A JSON data topology maps the shard key through a hash (`xxhash`) or integer `range` function; reference tables and global secondary indexes serve other lookups; resharding is an online copy-and-stream workflow with verification. It entered platform preview on September 10, 2026 (beta terms, no SLA), and its docs are plain about the gaps: a multi-shard read doesn't share one snapshot, a multi-shard write commits shard by shard with no two-phase commit, and DDL fans out without being atomic. A `single` transaction mode rejects any transaction that would reach a second shard.
+
+Neki's shards are plain Postgres, but its router isn't something you can run yourself; elastic clusters run an extension you could self-host.
+
+</DeepDive>
+
+### Distributed SQL speaks Postgres but isn't Postgres
+
+CockroachDB and YugabyteDB speak the Postgres protocol and much of its SQL, but underneath they're different databases: small Raft-replicated units that split and rebalance themselves, with distributed transactions built in. What this book says about pages, vacuum, and the heap describes Postgres, not them. Choosing one is a migration to a different engine.
+
+<DeepDive title="CockroachDB and YugabyteDB: the documented differences">
+
+- **CockroachDB** is its own implementation. Its compatibility page (for v26.3) lists unsupported features including triggers, range types, foreign data wrappers, and session-scoped advisory locks, and some behavior differs (integer division returns a decimal). Transactions default to `SERIALIZABLE`. Since version 24.3 it ships under the proprietary CockroachDB Software License, with a free tier for smaller businesses.
+- **YugabyteDB** runs a fork of the PostgreSQL query layer on its own storage engine, DocDB. Its v2025.1 release rebased that fork from PostgreSQL 11.2 to 15.0, so it trails current Postgres. The core database is Apache-2.0.
+
+</DeepDive>
+
+### Schema-per-tenant costs grow with every tenant
+
+The low-tech option is a schema, or a whole database, per tenant, placed on whichever server you like. Isolation is structural, and moving one tenant is one dump. The cost grows with tenant count: 1,000 tenants with three empty tables added 16,000 relations and over 40 MB of catalog before storing a row, and every migration runs 1,000 times, each with its own lock and its own chance to fail.
+
+<DeepDive title="What 1,000 empty tenant schemas cost">
+
+```text
+                          before    after 1,000 tenants
+ relations in pg_class       415             16,415
+ pg_attribute rows         3,161            100,161
+ system catalog size      7.7 MB            56.0 MB
+ database size, no rows   7.6 MB           134.0 MB
+```
+
+Sixteen relations per tenant (tables, indexes, sequences, TOAST); a real schema means millions at 10,000 tenants, each one autovacuum visits and `pg_dump` locks. Production migrations run per tenant, with [lock timeouts and retries](/books/eight-kilobytes/migrations). Database-per-tenant adds a pool per database, and suits a few large tenants.
+
+<ProveIt lab="39-sharding.sh">
+
+```bash
+prove "1,000 tenants with three empty tables add exactly 16,000 relations" [ $((rel1 - rel0)) -eq 16000 ]
+prove "the system catalogs grow by more than 40 MB before storing a row" [ $(( (cat1 - cat0) / 1048576 )) -gt 40 ]
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Choose by where the hard parts live
+
+### Each option moves the hard parts somewhere else
+
+How each handles the hard parts:
+
+| Approach | Routing in | Cross-shard joins | Cross-shard writes |
+|---|---|---|---|
+| App router | Your code | You write them | Yours (2PC if you build it) |
+| `postgres_fdw` | A router database | Pulled to the router | Not atomic |
+| Citus | Coordinator, or any node | Colocated: local; else opt-in | 2PC, automatic |
+| Proxy | The proxy | Merged, per its parser | PgDog: 2PC |
+| Managed | Provider's routers | Colocated: local | Varies (note 1) |
+| Distributed SQL | Any node | Yes | Built in |
+| Schema per tenant | Your code | Within one database | Within one database |
+
+And what it costs to live with:
+
+| Approach | Rebalancing | Operational load | Lock-in |
+|---|---|---|---|
+| App router | You build it | High | None |
+| `postgres_fdw` | Manual | High | None |
+| Citus | Online moves | Medium | Low |
+| Proxy | Tool-dependent | Medium | Low |
+| Managed | Service-run (note 2) | Low | High (note 3) |
+| Distributed SQL | Automatic | Medium | High |
+| Schema per tenant | Move one tenant | Grows with tenants | None |
+
+Notes on the managed row: (1) Limitless and elastic clusters make cross-shard writes atomic; Neki, in preview, commits them shard by shard. (2) Limitless splits shards but can't merge them; Neki reshards online. (3) High for Limitless and Neki, lower for elastic clusters, whose Citus you could run yourself. "Proxy" means PgDog and the others above; Citus "any node" is since Citus 11. Operational load is high for the do-it-yourself options because you run N primaries plus your own tooling; a proxy adds a service on the critical path; distributed SQL is a different database to learn.
+
+### Most teams don't need to shard yet
+
+- **You don't need to shard yet** if a bigger box, replicas, partitioning, or splitting off one workload buys two more years. That's most teams.
+- **Tens of large tenants, or residency rules:** database-per-tenant or an application router with a directory.
+- **Many tenants on shared tables, and you want Postgres to merge:** Citus, self-hosted or managed (Azure elastic clusters), or a sharding proxy to keep the shards extension-free. Prototype both.
+- **Deep in AWS and fine with its feature subset:** Aurora PostgreSQL Limitless Database. Read its unsupported-features list first.
+- **A managed router over plain Postgres, without atomic cross-shard writes yet:** PlanetScale Neki, while in preview. Read its limitations first.
+- **Multi-region writes or hands-off resharding over full compatibility:** a distributed SQL database, knowing it's a different engine.
+
+Whichever you look at, run your ten most important queries on it and read the plans.
+
+## The short version
+
+- Shard last. Short of splitting by function, it's the only rung that scales writes and storage past one machine, and it makes every cross-shard query, transaction, constraint, and migration harder.
+- Real signals: writes saturating the biggest primary, data too big to restore within your RTO, or residency. Not read load, not "someday".
+- Shard multi-tenant SaaS by tenant id, and start today: `account_id` on every tenant table, in every key, and in every query.
+- Colocated joins on the shard key stay local: about 10 ms with `account_id` in the `on` clause, about 950 ms without.
+- Anything globally unique, like email, needs its own unsharded table.
+- Plan to move hot tenants: a directory plus row-filtered logical replication.
+- Pick the approach by where routing, merging, and two-phase commit should live, and check your hottest queries' plans for fan-out.
+
+## Further reading
+
+- [postgres_fdw](https://www.postgresql.org/docs/18/postgres-fdw.html), PostgreSQL documentation. Foreign tables, pushdown, `async_capable`, and the note that it doesn't do two-phase commit.
+- [Citus](https://github.com/citusdata/citus), source repository. The extension used here, its license, and row- and schema-based sharding.
+- [Aurora PostgreSQL Limitless Database architecture](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/limitless-architecture.html), AWS documentation. Routers, shards, and table types; read the requirements page beside it.
+- [PgDog](https://github.com/pgdogdev/pgdog), source repository. A sharding proxy's view of routing, merges, two-phase commit, and resharding.
+- [Neki query planning](https://planetscale.com/docs/neki/query-planning), PlanetScale documentation. How a router picks one shard or all, and what cross-shard operations don't guarantee.
+- [CockroachDB PostgreSQL compatibility](https://docs.cockroachlabs.com/docs/stable/postgresql-compatibility), CockroachDB documentation. The concrete list of what differs.

@@ -1,0 +1,13 @@
+Eight Kilobytes: PostgreSQL from the page up
+Copyright (c) 2026 Flagon, Inc. All rights reserved.
+
+The text, figures, and cover of this book are free to read online at
+https://www.flagon.io/books/eight-kilobytes, but may not be republished,
+redistributed, or sold, in whole or in part, without written permission
+from Flagon, Inc. Short quotations with attribution are welcome.
+
+Corrections and suggestions sent as issues or pull requests are gratefully
+received; by sending one you agree that Flagon, Inc. may use it in the book.
+
+The lab kit in the lab/ folder is licensed separately, under the MIT
+License (see lab/LICENSE).

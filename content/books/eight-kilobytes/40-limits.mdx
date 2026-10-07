@@ -1,0 +1,384 @@
+---
+title: Where Postgres loses
+description: The honest map of where another system beats Postgres, measured where we could, and how to add one without losing your source of truth.
+part: Scaling out
+builds_on: [storage, scale, models]
+---
+
+Every chapter before this one showed how far one Postgres goes. Documents, queues, search, vectors, time series, tenants, rollups that turn a scan of the whole table into a dozen pages. Most products never need anything else, and we stand by that.
+
+But "most" isn't "all", and a book that only argues one side isn't telling you the truth. Some workloads run an order of magnitude better on a different kind of system, for reasons rooted in how Postgres stores and moves data. You should know which ones, why, and roughly where the line is, so that when you add a second database it's for a reason you can measure.
+
+We measure the biggest gap, analytics, with the same two million events in Postgres and two column stores. Then we map the rest, and give one rule for adding a system.
+
+## A row store reads every column to use two
+
+Postgres stores rows. Every heap page holds whole rows, header and all ([Every page has the same layout](/books/eight-kilobytes/storage#every-page-has-the-same-layout)). That's ideal for "fetch this order" and "update this user": one page, every column you need.
+
+An analytical query wants the opposite. "Events per kind per day for the year" touches every row but only two columns, and a row store reads every page anyway. A **column store** keeps each column in its own files, compressed, and reads only the columns a query names. Here's what that difference costs, measured.
+
+### Every system returned the same answers, to the row
+
+The lab runs, each capped at 3 GB of memory: **PostgreSQL 18.6** with the book's seed; **ClickHouse 26.8**, a column-oriented server (image tag 26.8.18.2); **DuckDB 1.5.6**, an embedded column-oriented engine; and a second **PostgreSQL 18.1** (the version the pg_duckdb image ships) with the **pg_duckdb** extension. They're open source, they start from one `docker compose` file, and each stands in for its class.
+
+To be fair to Postgres, the lab also builds `events_flat`, with the payload's fields as typed columns. Then it runs three dashboard queries: events per kind per day, p95 of `duration_ms` per region, and the ten busiest of 20,000 projects. All three systems agree to the row. A benchmark that compares different answers measures nothing.
+
+<DeepDive title="The three queries, and proof all three systems agree">
+
+```sql
+-- 1. events per kind per day, over the year
+select kind, date_trunc('day', created_at), count(*)
+from events group by 1, 2;
+
+-- 2. p95 of duration_ms per region
+select payload->>'region',
+       percentile_cont(0.95) within group (order by (payload->>'duration_ms')::int)
+from events group by 1;
+
+-- 3. the ten busiest projects (20,000 groups)
+select project_id, count(*), avg((payload->>'duration_ms')::int)
+from events group by 1 order by 2 desc, 1 limit 10;
+```
+
+Each system gets its own dialect (`toDate` and `quantileExactInclusive` in ClickHouse, `quantile_cont` in DuckDB): 1,826 kind-day groups with identical counts, identical p95s (4,745 to 4,749 ms in every region), the same ten projects with the same averages. In ClickHouse the table is a `MergeTree` sorted by `(project_id, created_at)` with `LowCardinality(String)` for the short text columns, as its docs suggest; DuckDB gets plain types and a primary key, like Postgres.
+
+<ProveIt lab="40-limits.sh">
+
+```bash
+prove "kind by day: 1,826 groups, identical in all three" \
+  test "$(wc -l <<<"$pg_q1" | tr -d ' ')" = 1826 -a "$pg_q1" = "$ch_q1" -a "$pg_q1" = "$duck_q1"
+prove "p95 of duration_ms by region is identical in all three" \
+  test "$pg_q2" = "$ch_q2" -a "$pg_q2" = "$duck_q2"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Column stores keep a tenth of the bytes
+
+Same two million rows, on disk:
+
+| System                                    | Size     |
+| ----------------------------------------- | -------- |
+| Postgres, `events` (jsonb), heap + index  | 317.8 MB |
+| Postgres, `events_flat`, heap + index     | 220.9 MB |
+| ClickHouse, compressed parts              | 32.1 MB  |
+| DuckDB, database file                     | 33.3 MB  |
+
+The column stores keep under a fifth of the bytes of the typed Postgres table (about a seventh), and a tenth of the table as the book stores it. Both Postgres sizes include the primary key index on `id`; DuckDB's file includes its own primary key, and ClickHouse has no such index to store.
+
+Two things account for the gap. Half the typed heap (22,784 pages, 178 MB) is bookkeeping: the values themselves come to about 92 MB as ClickHouse counts them, with the short text columns already dictionary-encoded, and every row adds a 24-byte header, a line pointer, and padding ([A row costs more than its columns](/books/eight-kilobytes/storage#a-row-costs-more-than-its-columns)), the price of [MVCC](/books/eight-kilobytes/glossary#mvcc). And similar values stored together compress to almost nothing.
+
+<DeepDive title="Where ClickHouse's bytes went, column by column">
+
+```text
+    created_at     13.4 MB compressed,   15.3 MB raw
+    id              9.1 MB compressed,   15.3 MB raw
+    duration_ms     5.7 MB compressed,    7.6 MB raw
+    region          1.2 MB compressed,    1.9 MB raw
+    kind            1.1 MB compressed,    1.9 MB raw
+    status          0.8 MB compressed,    1.9 MB raw
+    user_id         0.2 MB compressed,   17.2 MB raw
+    account_id      0.2 MB compressed,   15.3 MB raw
+    project_id      0.2 MB compressed,   15.3 MB raw
+```
+
+`project_id`: 15.3 MB of values (8 bytes a row) compressed to 0.2 MB. The table is sorted by project, so each column file holds long runs of the same value; `account_id` and `user_id` follow the project and compress as well. Random-looking `duration_ms` barely shrinks. Compression in a column store isn't magic: it's what happens when similar values sit next to each other, and the sort key decides which ones do. Typing the payload made Postgres a third smaller, because `jsonb` repeats every key name in every row, and it still wasn't close.
+
+<ProveIt lab="40-limits.sh">
+
+```bash
+prove "ClickHouse stores the events in under a fifth of the bytes of Postgres's typed-column table" \
+  holds "$ch_bytes * 5 < $pg_flat"
+prove "DuckDB does too" holds "$duck_bytes * 5 < $pg_flat"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Postgres read every page for every query
+
+Postgres read all 35,173 pages of `events` for each query: 275 MB, though each query names only two columns. ClickHouse also read all 2,000,000 rows, but only the named columns, compressed:
+
+| Query          | Postgres reads | ClickHouse reads (compressed) |
+| -------------- | -------------- | ----------------------------- |
+| kind by day    | 275 MB         | 14.6 MB                       |
+| p95 by region  | 275 MB         | 6.9 MB                        |
+| top projects   | 275 MB         | 6.0 MB                        |
+
+The p95 query names `region` and `duration_ms`, and ClickHouse read exactly 10,000,000 bytes of column data, 5 bytes a row (6.9 MB as it came off the disk, compressed). Postgres read 144 bytes a row to get the same 5.
+
+That's the whole mechanism in one number. A row store pays for the width of the row on every scan; a column store pays for the width of the question.
+
+<DeepDive title="Pages read, checked">
+
+Parallel workers count a few pages twice, so `explain` reported up to 35,257. The typed `events_flat` helped only by being smaller: 22,784 pages, all of them read, every time.
+
+ClickHouse's numbers come from its `system.query_log`: `read_rows` and `read_bytes` (uncompressed column data) per query, plus the `ReadCompressedBytes` profile event for what came off the disk. Uncompressed, the three queries read 17.2, 9.5 and 22.9 MB; the top-projects query reads the most column data (two 8-byte columns) but compresses best, because `project_id` is the sort key. Compressed, each is about 5 percent of Postgres's 275 MB, or less.
+
+<ProveIt lab="40-limits.sh">
+
+```bash
+prove "Postgres reads every page of events, 35,173 pages (275 MB), for each of the three queries" \
+  holds "$events_relpages == 35173 && $pg_p1 >= 35173 && $pg_p2 >= 35173 && $pg_p3 >= 35173 && $pg_p1 < 35173 * 1.01 && $pg_p2 < 35173 * 1.01 && $pg_p3 < 35173 * 1.01"
+prove "ClickHouse also reads all 2,000,000 rows for each query, but only the columns it needs: 5 bytes a row for region and duration_ms" \
+  test "$ch_rows1" = 2000000 -a "$ch_rows2" = 2000000 -a "$ch_rows3" = 2000000 -a "$ch_raw2" = 10000000
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Column stores were about ten times faster, and still faster on one core
+
+Bytes are the evidence; time is what users feel. Best-of-three, warm-cache milliseconds from one run of the lab: Docker on a desktop, 8 cores of a 13th-generation Intel i9 visible to the containers, 16 GB, shared with other databases. Each system timed itself on the server, with results discarded: Postgres with `clock_timestamp()` around each query in a PL/pgSQL function, ClickHouse from its query log, DuckDB with its command-line `.timer`.
+
+Stock Postgres is deliberately conservative, so it ran three ways. **Stock** is the defaults: 4 MB of `work_mem`, which made the p95 sort spill to disk, and at most two parallel workers. **Typed** is the same settings on `events_flat`. **Tuned** is `events_flat` with `work_mem = '256MB'` (no spill) and up to eight parallel workers, the fairest row-store baseline we could give it.
+
+| ms, default settings | kind by day | p95 by region | top projects |
+| -------------------- | ----------- | ------------- | ------------ |
+| Postgres, stock      | 324         | 816           | 158          |
+| Postgres, typed      | 312         | 675           | 108          |
+| Postgres, tuned      | 354         | 474           | 82           |
+| ClickHouse           | 43          | 16            | 15           |
+| DuckDB               | 57          | 6             | 13           |
+
+Against tuned Postgres, the three queries took 910 ms in all; ClickHouse took 74 and DuckDB 76, about twelve times faster. More workers didn't help Postgres on the first query: the planner used a few of them, and splitting rows across processes cost about what it saved.
+
+The column stores use every core by default, so the lab runs it again with one core each (Postgres with no parallel workers):
+
+| ms, one core each | kind by day | p95 by region | top projects |
+| ----------------- | ----------- | ------------- | ------------ |
+| Postgres, stock   | 313         | 1,087         | 363          |
+| Postgres, typed   | 315         | 675           | 199          |
+| Postgres, tuned   | 334         | 474           | 191          |
+| ClickHouse        | 81          | 26            | 24           |
+| DuckDB            | 278         | 22            | 15           |
+
+On one core the totals were 999 ms for tuned Postgres, 131 for ClickHouse (about 7.6 times faster), and 315 for DuckDB (about 3.2 times). The gap nearly closes on the first query: DuckDB on one core is barely faster than Postgres at bucketing timestamps by day. It stays wide on the other two. The exact p95 is the extreme: even with the sort in memory, Postgres sorts two million values one tuple at a time, while the column stores run through a tight, already-decoded integer column.
+
+<Callout type="info" title="One benchmark is not a verdict">
+One small dataset, three queries, one machine, one run, with only the obvious Postgres settings tuned and the column stores at their defaults. It shows a mechanism and an order of magnitude, not which column store is faster, nor your data at a hundred times the size. [Measure honestly](/books/eight-kilobytes/benchmarking) has the rules for running your own.
+</Callout>
+
+<DeepDive title="Why columns win: layout, compression, and vectorized execution">
+
+Three mechanisms, and they compound.
+
+**Layout.** A column store's cost scales with the columns a query touches, not the width of the table. Postgres's cost scales with pages, and every page holds whole rows.
+
+**Compression.** A column holds one type of value, often sorted or repetitive, so cheap codecs work well (ClickHouse uses LZ4 by default on a self-managed server, per its [CREATE TABLE docs](https://clickhouse.com/docs/sql-reference/statements/create/table); DuckDB picks among dictionary, run-length, and bit-packing encodings, per its [storage docs](https://duckdb.org/docs/current/internals/storage.html)). Postgres compresses only large values, one at a time, through TOAST ([Large values are compressed, then moved out of the row](/books/eight-kilobytes/storage#large-values-are-compressed-then-moved-out-of-the-row)). A 100-byte row is never compressed.
+
+**Vectorized execution.** Both column stores process a batch of one column's values at a time, in tight loops the CPU can pipeline. Postgres's executor pulls one row at a time through each plan node, deforming each tuple to find its columns: fine for the few rows an OLTP query touches, the whole cost across two million.
+
+<ProveIt lab="40-limits.sh">
+
+```bash
+tuned_sum=$((tuned_t1 + tuned_t2 + tuned_t3)); tuned_one=$((tuned_s1 + tuned_s2 + tuned_s3))
+prove "with stock work_mem, the p95 sort spills to disk; with 256 MB it doesn't" \
+  test "$spill" -gt 0 -a "$spill_tuned" = 0
+prove "against tuned, typed Postgres, both column stores answer the three queries at least 3 times faster" \
+  holds "$ch_sum * 3 < $tuned_sum && $duck_sum * 3 < $tuned_sum"
+prove "on one core each, against the same tuned, typed table, they are still at least twice as fast" \
+  holds "$ch_one * 2 < $tuned_one && $duck_one * 2 < $tuned_one"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Column stores give up what an application database is for
+
+Column stores pay for that speed with exactly the things an application database is for. The lab checked four:
+
+- **Point lookups.** Postgres found one event by `id` in 4 pages. ClickHouse indexes only its sort key, `(project_id, created_at)`, so a lookup by `id` read all 2,000,000 rows, and even a lookup on the sort key reads a whole 8,192-row granule.
+- **Constraints.** A ClickHouse primary key is a sort order, not a promise: it stored a second event with `id` 1. (DuckDB enforces keys and rejected it.)
+- **Updates and transactions.** Updating one event in ClickHouse rewrote a part of 2,000,000 rows; Postgres wrote 264 bytes of WAL. `begin transaction` answered "Transactions are not supported".
+- **Concurrent writers.** DuckDB runs inside your process, and only one process may write: a second got "Could not set lock on file".
+
+A column store is happiest with one wide, append-mostly table. Your application schema is the opposite.
+
+<DeepDive title="The four trade-offs, from each system's own docs">
+
+ClickHouse's sparse index is described in [its docs](https://clickhouse.com/docs/guides/best-practices/sparse-primary-indexes), and they say plainly that a primary key allows multiple rows with the same values. It checks `CHECK` constraints on insert; its table docs offer nothing like foreign keys. Its docs call a mutation "a heavy operation not designed for frequent use", asynchronous by default. Lighter options exist: a lightweight `DELETE` that masks rows until a merge removes them, and a lightweight `UPDATE` that writes small patch parts, marked beta and needing two table settings. They help; they don't make it an OLTP store. Transactions need ClickHouse Keeper ([its transactions guide](https://clickhouse.com/docs/guides/developer/transactional)). Joins work, with several algorithms, but its [joins guide](https://clickhouse.com/docs/guides/joining-tables) recommends denormalization, dictionaries, and materialized views, and warns that a hash join wants the right-hand table in memory.
+
+DuckDB's [concurrency docs](https://duckdb.org/docs/current/connect/concurrency.html) describe the one-writer model. Its answer for many writers is Quack, a client-server protocol released as a beta extension in 2026 and planned to mature with DuckDB 2.0 ([announcement](https://duckdb.org/2026/05/12/quack-remote-protocol.html)). Today an embedded analytics engine is superb for a report, a notebook, or a pipeline step, and not something a hundred app servers write to.
+
+<ProveIt lab="40-limits.sh">
+
+```bash
+prove "Postgres finds one event by id in 4 pages through its primary key index" test "$pg_point" = 4
+prove "ClickHouse has no index on id (its sort key is project_id, created_at), so it reads all 2,000,000 rows" \
+  test "$ch_point" = 2000000
+prove "even on its sort key, ClickHouse reads a whole granule: 8,192 rows to find a handful" \
+  test "$ch_key" = 8192
+```
+
+</ProveIt>
+
+<ProveIt lab="40-limits.sh">
+
+```bash
+ch -q "insert into events values (1, 1, 1, 1, 'deploy', 'ok', 1, 'iad', '2026-10-01 12:00:00')"
+prove "ClickHouse accepts it: a MergeTree primary key is a sort order, not a constraint" \
+  test "$(ch -q "select count() from events where id = 1")" = 2
+prove "Postgres updates one row with under 1 KB of WAL" holds "$pg_wal < 1024"
+prove "a ClickHouse ALTER TABLE ... UPDATE of one row rewrites a part of 2,000,000 rows" test "$ch_mut" = 2000000
+out=$(ch -q "begin transaction" 2>&1 || true)
+prove "ClickHouse has no multi-statement transactions at its default settings" has "Transactions are not supported" "$out"
+```
+
+</ProveIt>
+
+<ProveIt lab="40-limits.sh">
+
+```bash
+"${COMPOSE[@]}" run -d -i --name "$HOLDER" duckdb /duckdb /xfer/events.duckdb >/dev/null 2>&1
+sleep 3
+out=$("${COMPOSE[@]}" run --rm -T duckdb /duckdb /xfer/events.duckdb -c "select 1" 2>&1 || true)
+prove "DuckDB is one process: while one has the file open for writing, a second can't open it" \
+  has "Could not set lock on file" "$out"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Rollups and a column extension close much of the gap
+
+Before you add a server, try two things inside Postgres.
+
+**Rollups.** If the questions are known in advance, precompute them. A daily rollup of kind by day is 1,826 rows on 12 pages and gives the same answer as the 35,173-page scan ([Precompute what you show](/books/eight-kilobytes/scale#precompute-what-you-show)). No column store beats reading 12 pages. Rollups stop helping when the questions are ad hoc.
+
+**A column engine as an extension** ([the current ones](/books/eight-kilobytes/extensions#run-an-analytics-engine-on-a-replica-never-the-primary)). pg_duckdb runs DuckDB's vectorized executor over plain Postgres tables. The p95 ran about five times faster, with the same answers; the other two queries barely moved (the top-projects one got a little slower). And it still read all 22,752 heap pages of its copy of the typed table (on its own server, so not quite the 22,784 above), so DuckDB on its own columnar file was about six times faster again (474 ms for the three queries against 76). Vectorized execution fixes the CPU half; only columnar storage fixes the I/O half.
+
+<DeepDive title="Columnar storage inside Postgres, and its limits">
+
+The three queries on one pg_duckdb server, in milliseconds:
+
+| ms, same server | kind by day | p95 by region | top projects |
+| --------------- | ----------- | ------------- | ------------ |
+| Postgres executor | 292       | 623           | 92           |
+| DuckDB executor   | 252       | 113           | 109          |
+| DuckDB, own file  | 57        | 6             | 13           |
+
+That's why the executor pairs best with columnar files: Parquet or Iceberg in object storage, or a mirror like pg_mooncake's. Columnar table access methods (Citus's and Hydra's) store a table by column instead. The Citus one is append-only, as its [README](https://github.com/citusdata/citus/tree/main/src/backend/columnar) says: on Citus 14.2 with PostgreSQL 18.4, an `update` on a columnar table failed with "UPDATE and CTID scans not supported for ColumnarScan". TimescaleDB's columnstore, which converts older chunks of a hypertable to compressed columns, shrank the book's events from 324 MB to 30 MB when [that chapter measured it](/books/eight-kilobytes/extensions#the-columnstore-324-mb-to-30-mb), the same order as the column stores here.
+
+<ProveIt lab="40-limits.sh">
+
+```bash
+roll_pages=$(pg -c "select lab.buffers('select kind, day, n from events_daily')")
+prove "a daily rollup answers kind by day from under 20 pages instead of 35,173" holds "$roll_pages < 20"
+prove "with duckdb.force_execution on, pg_duckdb returns the same p95s" test "$pgd_q2" = "$pg_q2"
+prove "on the same server and table, pg_duckdb computes the p95s at least twice as fast as Postgres's executor" \
+  holds "$pgd_on2 * 2 < $pgd_off2"
+prove "but it still reads every 8 KB page of the row-store heap" holds "$pgd_read >= $pgd_relpages && $pgd_relpages > 22000"
+prove "so DuckDB on its own columnar file answers the three queries at least 3 times faster than pg_duckdb over a heap" \
+  holds "$duck_sum * 3 < $pgd_on1 + $pgd_on2 + $pgd_on3"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Move analytics out when four things are true together
+
+Over 200 million events, the same scans would read about 100 times the pages: arithmetic, not a measurement, but the arithmetic that turns a dashboard into a coffee break.
+
+Move analytics out when four things are true together: the queries are **ad hoc**, they **scan most of a large table**, the data is **append-mostly**, and running them on the primary or a replica **measurably hurts**. Until then, a replica with rollups runs reporting for a long time. When you move, the column store is a copy fed from Postgres, never where a row is born.
+
+## The other gaps show up only at scale
+
+Analytics is the gap we could measure on a laptop. The others show up at scale, so for each: the mechanism, the class of system that does better, and the line, sourced rather than benchmarked. Names are examples of a class, not recommendations.
+
+### Search: Postgres ranks without corpus statistics
+
+Postgres's ranking functions "do not use any global information" ([Ranking Search Results](https://www.postgresql.org/docs/18/textsearch-controls.html#TEXTSEARCH-RANKING)) and read every match. Engines in the class of [Elasticsearch](https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity) and OpenSearch score with corpus statistics ([BM25](/books/eight-kilobytes/glossary#bm25)), add synonyms and facets, and shard the index. The line: relevance is a product feature someone owns ([when Postgres is enough](/books/eight-kilobytes/search#for-most-applications-postgres-search-is-enough); try the [BM25 extensions](/books/eight-kilobytes/search#search-extensions-put-bm25-in-the-index) first).
+
+### Caching: a database is not a cache
+
+As a cache in front of itself, Postgres fails on its own mechanics: every connection is a process, every write a new row version ([Updates are inserts](/books/eight-kilobytes/mvcc)), nothing expires, and it shares the box it's meant to protect. Stores in the class of [Valkey](https://valkey.io/topics/introduction/) (a BSD-licensed fork of Redis) and Redis keep data in memory with time-to-live, and durability as a [dial](https://valkey.io/topics/persistence/). The line: request rates where connections and per-write overhead show up in your measurements; until then, an [unlogged table](/books/eight-kilobytes/models#an-unlogged-table-is-emptied-after-a-crash).
+
+### Streams: a table is not a log
+
+A [job queue](/books/eight-kilobytes/models#skip-locked-gives-each-job-to-exactly-one-worker) in Postgres is excellent. An event log for many consumers, kept for days, isn't: consuming makes dead tuples, and each consumer's position is a cursor you build. A log in the class of [Apache Kafka](https://kafka.apache.org/intro) keeps events after consumption (seven days by default, per its [topic configuration](https://kafka.apache.org/41/configuration/topic-configs/)), each consumer at its own pace. Feed it from logical decoding, through CDC tools in the class of [Debezium](https://debezium.io/documentation/reference/stable/connectors/postgresql.html), not a second write. The line: fan-out, and replay measured in days.
+
+### Time series: the write path is the limit
+
+BRIN and partitioning handle time-ordered data well ([Time series fits BRIN and monthly partitions](/books/eight-kilobytes/models#time-series-fits-brin-and-monthly-partitions)). At very high ingest the write path is the limit: a 24-byte header per row, about 600 bytes of WAL per single-row insert ([Every write funnels into one WAL stream](/books/eight-kilobytes/scale#every-write-funnels-into-one-wal-stream)), and one replay process per replica ([Replay is one process](/books/eight-kilobytes/replication#replay-is-one-process)). Time-series databases batch into compressed columnar blocks; TimescaleDB does it inside Postgres ([partitioning with opinions](/books/eight-kilobytes/extensions#timescaledb-is-partitioning-with-opinions)). The line: ingest that WAL or replay can't sustain even after [batching](/books/eight-kilobytes/loading).
+
+### Global writes: every commit pays the round trip
+
+A user in Sydney writing to Virginia pays the round trip on every commit, and a regional failover can lose what hadn't shipped. Distributed SQL databases ([Spanner](https://docs.cloud.google.com/spanner/docs/true-time-external-consistency), [CockroachDB](https://docs.cockroachlabs.com/docs/stable/architecture/replication-layer), [YugabyteDB](https://docs.yugabyte.com/stable/architecture/query-layer/); the last two [speak Postgres, with differences](/books/eight-kilobytes/sharding#distributed-sql-speaks-postgres-but-isnt-postgres)) commit by consensus and survive a region loss. They don't repeal physics; they choose where the round trip lands. The line: multi-continent write latency or zero-loss region failure as a real requirement.
+
+### Vectors: an indexed column tops out at 2,000 dimensions
+
+pgvector keeps similarity search next to your data ([A vector search finds near points, whatever the words](/books/eight-kilobytes/search#a-vector-search-finds-near-points-whatever-the-words)), within limits: an indexed column tops out at 2,000 dimensions (4,000 with `halfvec`, per the [pgvector README](https://github.com/pgvector/pgvector)), and [filters fight approximate indexes](/books/eight-kilobytes/search#filters-and-approximate-indexes-dont-mix). Dedicated vector databases distribute and quantize the index. The line ([when to use one](/books/eight-kilobytes/search#a-vector-database-needs-a-reason-you-can-name)): hundreds of millions of vectors, or an index bigger than your biggest box's memory.
+
+### Graphs: every hop is still a join
+
+Recursive CTEs and closure tables handle trees and a few hops ([Postgres stores a graph three ways](/books/eight-kilobytes/models#postgres-stores-a-graph-three-ways)), but each hop is a join, and an exponential frontier makes each join bigger. Graph databases follow stored relationships directly; [Apache AGE](/books/eight-kilobytes/extensions#apache-age-is-a-nicer-language-for-the-same-joins) brings openCypher to Postgres, but each hop is still a join. The line: graph algorithms over large, dense graphs, or many-hop matching on the request path. Org charts are nowhere near it.
+
+### Blobs: bytes belong in object storage
+
+Every byte you store goes through WAL, into every replica, backup, and restore, and a [TOASTed](/books/eight-kilobytes/glossary#toast) 20 MB image is read whole for a thumbnail. Object storage takes objects up to terabytes ([50 TB in Amazon S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/upload-objects.html)) behind a CDN. The line is low: anything over a few kilobytes that isn't queried as data goes in the bucket from day one, with its metadata in a Postgres row.
+
+## Know the signal before you need it
+
+| Workload           | Postgres goes far with                    | Signal to add a system                                  | Class of system        |
+| ------------------ | ----------------------------------------- | ------------------------------------------------------- | ---------------------- |
+| analytics          | rollups, partitions, a replica, pg_duckdb | ad hoc scans of most of a large table hurt OLTP         | column store           |
+| search             | `tsvector`, GIN, BM25 extensions          | relevance is a product; facets on huge result sets      | search engine          |
+| cache              | primary keys, unlogged tables             | request rates where connections and writes show up      | in-memory key-value    |
+| event streams      | `skip locked` queues, outbox              | fan-out, days of retention, replay                      | distributed log        |
+| time series        | BRIN, partitioning, TimescaleDB           | ingest beyond what WAL and replay sustain after batching | time-series or column |
+| global writes      | one primary, read replicas                | low write latency on several continents, region loss    | distributed SQL        |
+| vectors            | pgvector, `halfvec`, quantization         | hundreds of millions of vectors, index exceeds memory   | vector database        |
+| graphs             | recursive CTEs, `ltree`, closure tables   | many-hop traversals and graph algorithms on big graphs  | graph database         |
+| blobs              | metadata rows                             | almost always: files bigger than a few KB               | object storage         |
+
+## Add a second system for a measured reason
+
+Every row in that table has the same shape: a mechanism, a signal, and a number you can measure. That's the rule.
+
+**Add a system when you can name the property Postgres lacks and show the measurement that says you need it.** "The p95 dashboard query scans 300 GB, takes four minutes, and the questions change weekly" is a reason. "We'll need analytics eventually" is not. And price the second system honestly: another thing to back up, upgrade, secure, and page someone for.
+
+**Keep Postgres the source of truth.** A row is born in Postgres, inside a transaction, with its constraints checked. The index, the cache, the column store, and the stream are derived from it, and can be rebuilt from it.
+
+**Move data out with change data capture, not dual writes.** Writing to Postgres and then to a second system fails in the gap between them, and nothing notices. Read the committed stream with [logical decoding](/books/eight-kilobytes/replication#logical-replication-is-for-upgrades-moves-and-feeds) (and [watch its slot](/books/eight-kilobytes/replication#replication-slots-are-a-promise-to-keep-wal)), or write an [outbox](/books/eight-kilobytes/acid#put-the-message-in-the-same-transaction-as-the-order) row in the same transaction. Make consumers idempotent: they'll see some changes twice.
+
+<Callout type="tip" title="Moving out is a migration you can plan">
+Starting in Postgres doesn't lock you in. With logical decoding and an outbox, you can stand up the column store or the search engine beside Postgres, backfill it, stream changes into it, compare results, and move readers over one query at a time. Undoing a premature second database, with its data drifted and its writers scattered through the code, is far harder.
+</Callout>
+
+## Leave on evidence
+
+That rule is the book's two habits, one last time.
+
+**Count the pages.** The book opened with a query that touched 35,173 pages to return almost nothing. Here the same 35,173 pages, read for a question about two columns, send analytics elsewhere; the same question answered from 12 pages of a rollup keeps it home.
+
+**Earn the bigger box.** A second database is the biggest box of all, with its own pager, and it passes the same gate.
+
+Together they are the principle the book started with: start with one database, and leave on evidence. Most of the time the evidence says stay. One Postgres, read page by page, goes further than its reputation. When the evidence says go, you'll know why, in a number.
+
+## The short version
+
+- A row store reads every column of every row: 35,173 pages for each of our three queries, however few columns they named.
+- ClickHouse and DuckDB stored the same events in under a fifth of the bytes, read under a tenth per query, and answered about twelve times faster than a tuned Postgres; on one core, about seven and three times (our machine, one run).
+- Column stores give up what applications need: point lookups, enforced keys, cheap updates, transactions, concurrent writers.
+- Try the middle ground first: rollups (12 pages instead of 35,173), a replica for reports, pg_duckdb.
+- Search, caching, streams, extreme ingest, global writes, huge vector sets, deep graphs, and blobs each have a mechanism and a signal; know them before you need them.
+- Add a system only for a property you can name and a number you can measure, and keep Postgres the source of truth.
+- Count the pages, earn the bigger box, and start with one database: leave it only on evidence.
+
+## Further reading
+
+- [Parallel query](https://www.postgresql.org/docs/18/parallel-query.html), PostgreSQL documentation. When Postgres scans with more than one process, and the settings that cap it, which decide how a row store fares in benchmarks like this one.
+- [Logical Decoding](https://www.postgresql.org/docs/18/logicaldecoding.html), PostgreSQL documentation. The change stream every CDC tool builds on.
+- [A Practical Introduction to Primary Indexes](https://clickhouse.com/docs/guides/best-practices/sparse-primary-indexes), ClickHouse documentation. Granules, sparse indexes, and why the sort key is the whole design.
+- [Concurrency](https://duckdb.org/docs/current/connect/concurrency.html), DuckDB documentation. What an embedded engine can and can't share between processes.
+- [pg_duckdb](https://github.com/duckdb/pg_duckdb), DuckDB project. Running DuckDB's executor inside Postgres, and reading lake formats from SQL.
+- [Debezium connector for PostgreSQL](https://debezium.io/documentation/reference/stable/connectors/postgresql.html), Debezium documentation. A complete reference for CDC from Postgres: slots, snapshots, and failure modes.
+- [What Goes Around Comes Around... And Around...](https://db.cs.cmu.edu/papers/2024/whatgoesaround-sigmodrec2024.pdf), Michael Stonebraker and Andrew Pavlo, SIGMOD Record 2024. Why specialized systems keep appearing and the relational model keeps absorbing them.

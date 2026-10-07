@@ -1,0 +1,81 @@
+# Three PostgreSQL 18 servers for "Copies of the truth": a primary, a
+# streaming replica cloned from it with pg_basebackup -R, and a logical
+# subscriber. 37-replication.sh starts them in order, runs the chapter's
+# checks, and throws everything away. No ports are published; the script
+# talks to every server through `docker compose exec`.
+#
+#   ./lab 37
+#
+# Settings that differ from the defaults, and why:
+#   primary    wal_level=logical             the primary also feeds a logical
+#                                            subscriber (default replica)
+#   replica    wal_level=logical             lets the replica run logical
+#                                            decoding too (PostgreSQL 16+)
+#              max_standby_streaming_delay=5s  a replay conflict cancels the
+#                                            replica's query after 5 s, not
+#                                            the default 30 s, to keep the
+#                                            lab short
+#              wal_receiver_status_interval=1s  hot_standby_feedback reaches
+#                                            the primary within a second
+#                                            (default 10 s)
+name: ek-replication
+
+services:
+  primary:
+    image: postgres:18.6
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+      PGUSER: postgres
+      PGDATABASE: app
+    command: ["postgres", "-c", "wal_level=logical"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
+      interval: 1s
+      timeout: 5s
+      retries: 120
+
+  # The replica starts empty. On first start it waits for the primary, copies
+  # it with pg_basebackup (which also creates the replication slot "replica1"
+  # and writes standby.signal plus primary_conninfo), then runs as a standby.
+  # The script creates the "replicator" role before starting it.
+  replica:
+    image: postgres:18.6
+    user: postgres
+    environment:
+      PGPASSWORD: replpw
+      PGUSER: postgres
+      PGDATABASE: app
+    entrypoint:
+      - bash
+      - -c
+      - |
+        set -e
+        if [ ! -s "$$PGDATA/PG_VERSION" ]; then
+          until pg_isready -q -h primary; do sleep 1; done
+          pg_basebackup -h primary -U replicator -D "$$PGDATA" \
+            -X stream -R --checkpoint=fast \
+            --slot=replica1 --create-slot \
+            -d 'application_name=replica1'
+        fi
+        exec postgres -c wal_level=logical \
+          -c max_standby_streaming_delay=5s \
+          -c wal_receiver_status_interval=1s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
+      interval: 1s
+      timeout: 5s
+      retries: 180
+
+  subscriber:
+    image: postgres:18.6
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+      PGUSER: postgres
+      PGDATABASE: app
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
+      interval: 1s
+      timeout: 5s
+      retries: 120

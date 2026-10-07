@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Mdx } from "@/components/mdx";
 import { Toc } from "@/components/toc";
+import { Pager } from "@/components/pager";
 import {
   getHandbookPage,
   getHandbookOrder,
@@ -85,41 +84,10 @@ export default async function HandbookPage({
           </a>
         </div>
 
-        {/* prev / next */}
-        {(prev || next) && (
-          <nav className="mt-8 grid max-w-2xl gap-4 sm:grid-cols-2">
-            {prev ? (
-              <Link
-                href={`/handbook/${prev.slug}`}
-                className="group rounded-lg border border-hairline p-5 transition hover:bg-panel"
-              >
-                <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-subtle">
-                  <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} /> Previous
-                </span>
-                <p className="mt-2 font-medium tracking-tight group-hover:text-brand">
-                  {prev.title}
-                </p>
-              </Link>
-            ) : (
-              <span />
-            )}
-            {next ? (
-              <Link
-                href={`/handbook/${next.slug}`}
-                className="group rounded-lg border border-hairline p-5 text-right transition hover:bg-panel"
-              >
-                <span className="flex items-center justify-end gap-1.5 font-mono text-[10px] uppercase tracking-widest text-subtle">
-                  Next <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} />
-                </span>
-                <p className="mt-2 font-medium tracking-tight group-hover:text-brand">
-                  {next.title}
-                </p>
-              </Link>
-            ) : (
-              <span />
-            )}
-          </nav>
-        )}
+        <Pager
+          prev={prev ? { href: `/handbook/${prev.slug}`, title: prev.title } : null}
+          next={next ? { href: `/handbook/${next.slug}`, title: next.title } : null}
+        />
       </main>
 
       {/* On this page: sticky within the scrolling content column, with its own

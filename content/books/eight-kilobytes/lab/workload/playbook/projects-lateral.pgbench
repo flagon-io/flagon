@@ -1,0 +1,14 @@
+-- The performance playbook: the projects page in one query.
+-- Every project of the account with its latest event, one round trip.
+\set a random(1, 1000)
+select p.id, p.name, e.kind, e.created_at
+from projects p
+left join lateral (
+  select kind, created_at
+  from events
+  where project_id = p.id
+  order by created_at desc
+  limit 1
+) e on true
+where p.account_id = :a
+order by p.created_at desc;

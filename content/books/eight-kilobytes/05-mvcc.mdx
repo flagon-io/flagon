@@ -1,0 +1,586 @@
+---
+title: Updates are inserts
+description: See exactly what UPDATE and DELETE do to a page, why tables bloat, and why one long transaction can hurt a whole database.
+part: The machine
+builds_on: [storage]
+---
+
+The `users` table in the example database is 9 MB. Run one statement against it:
+
+```sql
+update users set name = upper(name);
+```
+
+Now it's 18 MB, and its indexes grew from 8 MB to 12 MB. You changed no row's size and added no rows, and the table doubled. Run `vacuum` and it's still 18 MB.
+
+None of this is a bug. It's how Postgres lets many transactions read and write the same data without making readers wait for writers. The technique is **multiversion concurrency control** (MVCC), and its central rule fits in three words: **updates are inserts**. Once you see it in the pages, bloat, slow updates, vacuum that can't keep up, and transaction ID wraparound stop being mysterious.
+
+## Readers never wait for writers
+
+Picture a report that sums every account's balance and takes ten seconds. Halfway through, another transaction moves money from an account the report hasn't reached to one it has already counted. If the report reads whatever is on the page when it gets there, the money vanishes from its total.
+
+One fix is locking: the report locks what it reads, and writers wait. Correct, and miserable. Postgres takes another route: it never overwrites a row in place. An update writes a **new version** of the row and leaves the old one where it is, marked with who replaced it. A reader that started before the update keeps seeing the old version; one that starts after sees the new one. Nobody waits.
+
+The bill comes later: old versions pile up until nobody can need them, and vacuum has to clean them up. That pile is the bloat.
+
+## Every write gets a transaction ID
+
+Two numbers in every row's header are where the trouble in the rest of this book starts: bloat, vacuum work, and wraparound all trace back to them.
+
+Every transaction that changes data gets a **transaction ID** (XID) from a server-wide counter at its first write; read-only transactions never take one. Every row version carries two of them in its header ([A row costs more than its columns](/books/eight-kilobytes/storage#a-row-costs-more-than-its-columns)): **xmin**, the transaction that inserted it, and **xmax**, the one that deleted, replaced, or locked it (0 if none). Every `events` row has xmin 766, the seed, and xmax 0; `select xmin, xmax, * from events` shows them on any table.
+
+(Our server was busy while we ran this chapter, so the XIDs below are large and jump between steps. Yours will differ.)
+
+## An update writes a whole new row
+
+To watch versions being made, we need a page small enough to read in full. A per-account usage counter fits, the kind of row an application updates constantly:
+
+```sql
+create table account_usage (
+  account_id    bigint primary key references accounts (id),
+  events_today  int not null default 0,
+  updated_at    timestamptz not null default now()
+);
+
+insert into account_usage (account_id) values (1), (2), (3);
+```
+
+Three rows, in slots 1 to 3 of page 0, inserted by transaction 869572. Now increment account 1's counter. `RETURNING` with `old` and `new` (PostgreSQL 18+) shows both versions' addresses:
+
+```sql
+update account_usage
+set events_today = events_today + 1
+where account_id = 1
+returning old.events_today, new.events_today,
+          old.ctid as old_ctid, new.ctid as new_ctid;
+```
+
+```text
+ events_today | events_today | old_ctid | new_ctid
+--------------+--------------+----------+----------
+            0 |            1 | (0,1)    | (0,4)
+```
+
+The row moved to a new slot. The page now holds four tuples for three rows: the old version, still in slot 1 byte for byte, stamped with the updater's XID and pointing at `(0,4)`, and a complete new copy in slot 4:
+
+<Fig name="update-new-version">
+
+**An update is an insert plus a stamp.** The old version stays in slot 1, stamped with the updater's XID and a ctid pointing at (0,4); the new version is a complete copy in slot 4. Four tuples now hold three rows.
+
+</Fig>
+
+That's the whole mechanism: an update inserts a new version and stamps the old one "replaced by 869576, see `(0,4)`".
+
+Every update writes a full new copy, however little changed. Increment a 4-byte counter in a 1 KB row and a new 1 KB tuple lands on the page. That's why wide, frequently updated rows are expensive in Postgres, and why a hot counter belongs in its own narrow table, like `account_usage`.
+
+<DeepDive title="The page after one update, and what a 4-byte change costs">
+
+```sql
+select lp, t_xmin, t_xmax, t_ctid, raw_flags
+from heap_page_items(get_raw_page('account_usage', 0)),
+     heap_tuple_infomask_flags(t_infomask, t_infomask2);
+```
+
+```text
+ lp | t_xmin | t_xmax | t_ctid |                    raw_flags
+----+--------+--------+--------+--------------------------------------------------
+  1 | 869572 | 869576 | (0,4)  | {HEAP_XMIN_COMMITTED,HEAP_HOT_UPDATED}
+  2 | 869572 |      0 | (0,2)  | {HEAP_XMIN_COMMITTED,HEAP_XMAX_INVALID}
+  3 | 869572 |      0 | (0,3)  | {HEAP_XMIN_COMMITTED,HEAP_XMAX_INVALID}
+  4 | 869576 |      0 | (0,4)  | {HEAP_XMAX_INVALID,HEAP_UPDATED,HEAP_ONLY_TUPLE}
+```
+
+`HEAP_HOT_UPDATED` on slot 1 and `HEAP_ONLY_TUPLE` on slot 4 mark this as a HOT update, the kind the HOT section below explains.
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'the old version is still there, stamped with the updater''s xid and pointing at (0,4)',
+  (select t_xmax from page0 where lp = 1) = (select t_xmin from page0 where lp = 4)
+  and (select t_ctid from page0 where lp = 1) = '(0,4)');
+
+select lab.prove(
+  'HEAP_HOT_UPDATED on the old version and HEAP_ONLY_TUPLE on the new: a HOT update',
+  'HEAP_HOT_UPDATED' = any((select raw_flags from page0 where lp = 1)::text[])
+  and 'HEAP_ONLY_TUPLE' = any((select raw_flags from page0 where lp = 4)::text[]));
+```
+
+</ProveIt>
+
+The lab also updates a counter in a row of about 1 KB and reads the new tuple's length off the page: over 1,000 bytes. The write-ahead log is kinder. When the new version lands on the same page, Postgres logs only the bytes that changed, under 100 in our test, unless the record carries a full-page image or the server runs with `wal_level = logical` ([Write it down first](/books/eight-kilobytes/wal)).
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'incrementing a 4-byte counter in a 1 KB row writes a whole new 1 KB tuple',
+  lp_len > 1000)
+from heap_page_items(get_raw_page('wide_counter', (:'wide_ctid'::text::point)[0]::int))
+where lp = (:'wide_ctid'::text::point)[1]::int;
+
+select lab.prove(
+  'but the WAL record for a same-page update logs only the changed bytes (under 100)',
+  bytes < 100) from wide_wal;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A version is dead only when no snapshot can see it
+
+Update account 1 twice more and its chain grows to `(0,1)` to `(0,4)` to `(0,5)` to `(0,6)`: six tuples for three rows, three of them dead weight.
+
+A version no transaction can ever see again is a **dead tuple**. "Ever" matters: a replaced version is dead only once every transaction that might still read it has finished. The oldest snapshot still running (a fixed view of what had committed, [below](#a-snapshot-picks-one-version)) sets the **xmin horizon**: versions that died before it can go; the rest must stay. That line decides how much vacuum can clean, as the section on long transactions shows.
+
+Dead tuples are removed two ways. **Pruning** happens on the fly, when a query reads a nearly full page: cheap, one page at a time, no index work. **Vacuum** does the full job, index entries included ([Vacuum is not optional](/books/eight-kilobytes/vacuum)).
+
+After `vacuum account_usage`, account 1's three dead versions are gone and slot 1 is a **redirect** to slot 6, because the primary key index still points at `(0,1)`. Tuples move; addresses don't. That's what the line pointer from [A line pointer lets a tuple move without changing its address](/books/eight-kilobytes/storage#a-line-pointer-lets-a-tuple-move-without-changing-its-address) is for.
+
+<DeepDive title="How vacuum turns a chain into a redirect">
+
+Before, the page held the whole chain:
+
+```text
+ lp | lp_flags | t_xmin | t_xmax | t_ctid
+----+----------+--------+--------+--------
+  1 |        1 | 869572 | 869576 | (0,4)
+  2 |        1 | 869572 |      0 | (0,2)
+  3 |        1 | 869572 |      0 | (0,3)
+  4 |        1 | 869576 | 869578 | (0,5)
+  5 |        1 | 869578 | 869580 | (0,6)
+  6 |        1 | 869580 |      0 | (0,6)
+```
+
+After `vacuum account_usage`, with `lp_off` and `lp_len` added:
+
+```text
+ lp | lp_off | lp_flags | lp_len | t_xmin | t_xmax | t_ctid
+----+--------+----------+--------+--------+--------+--------
+  1 |      6 |        2 |      0 |        |        |
+  2 |   8144 |        1 |     48 | 869572 |      0 | (0,2)
+  3 |   8096 |        1 |     48 | 869572 |      0 | (0,3)
+  4 |      0 |        0 |      0 |        |        |
+  5 |      0 |        0 |      0 |        |        |
+  6 |   8048 |        1 |     48 | 869580 |      0 | (0,6)
+```
+
+Slot 1 has `lp_flags` 2, redirect, with the target slot, 6, in its offset field. Slots 4 and 5 are 0, unused: they could be freed outright because they were heap-only, with no index entry pointing at them. Slot 6 moved to offset 8048. The fourth state, `lp_flags` 3, is **dead**: the tuple is gone but an index might still point at the slot. It stays until vacuum removes the index entries, then becomes unused.
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'after vacuum, lp 1 is a redirect (lp_flags 2) to slot 6',
+  lp_flags = 2 and lp_off = 6) from page0 where lp = 1;
+
+select lab.prove(
+  'lp 4 and 5 are unused (lp_flags 0), free for the next insert or update',
+  count(*) = 2 and bool_and(lp_flags = 0)) from page0 where lp in (4, 5);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## HOT updates skip the indexes
+
+Indexes point at addresses, so a new version at a new address normally needs a new entry in **every** index on the table. Our updates to account 1 didn't: they were **HOT** (heap-only tuple) updates, which stay on the same page and leave the indexes alone. That works only when **no indexed column changed** and **the new version fits on the same page**.
+
+Break the first rule and the update goes cold. Index `account_usage.updated_at`, then update account 2's `updated_at`, and the primary key gains a second entry for account 2, pointing at the new version's slot, while account 1 still has its single entry after three HOT updates.
+
+A packed page fails the second test. We loaded two copies of `users`, one at the default fillfactor of 100 and one at 85 ([Fillfactor leaves room for updates](/books/eight-kilobytes/storage#fillfactor-leaves-room-for-updates)), and updated every tenth row in each. At 100, not one of the 10,000 updates was HOT, and the table grew from 1,126 pages to 1,239. At 85, all 10,000 were HOT, and the table didn't grow a page. [Keep your updates HOT](/books/eight-kilobytes/hot) has the rest.
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'account 2 now has two primary key entries: the update changed an indexed column, so it was not HOT',
+  array_agg(ctid::text order by itemoffset) = '{"(0,2)","(0,4)"}')
+from bt_page_items('account_usage_pkey', 1)
+where data = '02 00 00 00 00 00 00 00';
+
+select lab.prove(
+  'fillfactor 100: 0 of 10,000 updates were HOT, and the table grew from 1,126 to 1,239 pages',
+  s.n_tup_upd = 10000 and s.n_tup_hot_upd = 0
+  and pg_relation_size('users_ff100') / 8192 between 1200 and 1280)
+from pg_stat_user_tables s where relname = 'users_ff100';
+select lab.prove(
+  'fillfactor 85: all 10,000 updates were HOT, and the table did not grow (1,322 pages)',
+  s.n_tup_upd = 10000 and s.n_tup_hot_upd = 10000
+  and pg_relation_size('users_ff85') / 8192 = 1322)
+from pg_stat_user_tables s where relname = 'users_ff85';
+```
+
+</ProveIt>
+
+## A snapshot picks one version
+
+With several versions of a row on the page, how does a query pick one? It works from a **snapshot**: a photograph of which transactions had committed, taken when the statement (or transaction) starts. You see a version if it was born before your photo and hadn't died by then. At most one version in a chain passes.
+
+Watch it from two sessions. Session A, transaction 869588, updates account 3 and leaves its transaction open:
+
+```sql
+-- session A
+begin;
+update account_usage set events_today = 100 where account_id = 3;
+-- (not committed yet)
+```
+
+Session B reads the same row:
+
+```sql
+-- session B
+select ctid, xmin, xmax, account_id, events_today
+from account_usage where account_id = 3;
+```
+
+```text
+ ctid  |  xmin  |  xmax  | account_id | events_today
+-------+--------+--------+------------+--------------
+ (0,3) | 869572 | 869588 |          3 |            0
+```
+
+B sees the old version, with A's XID already in its xmax. A hadn't committed when B's photo was taken, so as far as B knows the old row hasn't died and the new one hasn't been born. B didn't wait and didn't block A.
+
+When A commits, B's next statement sees `events_today = 100`. Had A rolled back, nothing on the page would change: its version would carry an aborted xmin, invisible to everyone ([Atomicity: nothing is ever undone](/books/eight-kilobytes/acid#atomicity-nothing-is-ever-undone)).
+
+<Callout type="info" title="Coming from MySQL">
+InnoDB updates rows in place and keeps old versions in an undo log. Postgres keeps them in the table itself: rollback is instant and reads of current data are cheap, but every update writes a whole row and leaves a dead tuple for vacuum ([Postgres is not MySQL](/books/eight-kilobytes/not-mysql)).
+</Callout>
+
+<DeepDive title="What a snapshot looks like, and the page during session A">
+
+```sql
+select pg_current_snapshot();
+```
+
+```text
+                      pg_current_snapshot
+----------------------------------------------------------------
+ 868807:869587:868807,868917,868951,868974,869184,869185,869537
+```
+
+The format is `xmin:xmax:in-progress list`. Every transaction below **868807** had finished. **869587** is one past the newest finished one; anything at or above it counts as still running, invisible whatever happens to it later. The list holds transactions in between that were still running (on a quiet server it's usually short or empty). Session B took this snapshot while A was open, which is why A's 869588 is invisible to it. Precisely: a version is visible when its xmin committed before the snapshot (or is your own transaction's earlier work), and its xmax is empty, aborted, not yet committed as far as the snapshot knows, or only a lock.
+
+At that moment both versions of account 3 were on the page, and `pg_xact_status('869588')` said `in progress`:
+
+```text
+ lp | t_xmin | t_xmax | t_ctid
+----+--------+--------+--------
+  3 | 869572 | 869588 | (0,5)
+  5 | 869588 |      0 | (0,5)
+```
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'session B still sees the old version at (0,3), with A''s xid already in its xmax',
+  ctid = '(0,3)' and xmax::text = :'a_xid' and events_today = 0)
+from account_usage where account_id = 3;
+
+select lab.prove(
+  'pg_xact_status says A is in progress',
+  pg_xact_status(:'a_xid'::xid8) = 'in progress');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A read can write
+
+How does a reader know whether transaction 869588 committed? It asks the **commit log** (`pg_xact`), two bits per transaction, and the first reader to find out caches the answer on the tuple itself, in its **hint bits**.
+
+Which means a read can write. The first `select` over freshly loaded rows sets hint bits on every tuple it reads, dirtying those pages so they're written back to disk. After a bulk load, run `vacuum analyze` so that burst happens on your schedule, not your users' ([Vacuum and analyze before you open the doors](/books/eight-kilobytes/loading#vacuum-and-analyze-before-you-open-the-doors)).
+
+<DeepDive title="Catching a select in the act of writing">
+
+```sql
+create table hint_demo2 (id int, v text);
+insert into hint_demo2 select g, md5(g::text) from generate_series(1, 200000) g;
+
+select raw_flags
+from heap_page_items(get_raw_page('hint_demo2', 100)),
+     heap_tuple_infomask_flags(t_infomask, t_infomask2)
+where lp = 1;
+```
+
+```text
+              raw_flags
+--------------------------------------
+ {HEAP_HASVARWIDTH,HEAP_XMAX_INVALID}
+```
+
+After a plain `select count(*) from hint_demo2`, the same tuple reads `{HEAP_HASVARWIDTH,HEAP_XMIN_COMMITTED,HEAP_XMAX_INVALID}`: the `select` checked the commit log and wrote the answer into every tuple it read. With data checksums on, that write can cost a full-page image in the WAL too ([With checksums, even a read writes WAL](/books/eight-kilobytes/wal#with-checksums-even-a-read-writes-wal)).
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'a freshly loaded tuple has no HEAP_XMIN_COMMITTED hint yet',
+  not ('HEAP_XMIN_COMMITTED' = any(raw_flags)))
+from heap_page_items(get_raw_page('hint_demo2', 100)),
+     heap_tuple_infomask_flags(t_infomask, t_infomask2)
+where lp = 1;
+
+select lab.prove(
+  'after a plain count(*), the tuple carries HEAP_XMIN_COMMITTED: a read modified the page',
+  'HEAP_XMIN_COMMITTED' = any(raw_flags))
+from heap_page_items(get_raw_page('hint_demo2', 100)),
+     heap_tuple_infomask_flags(t_infomask, t_infomask2)
+where lp = 1;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## A delete only stamps the row
+
+A delete is simpler than an update: it stamps xmax and does nothing else. Delete a row and it's still on the page at full size, with the deleter's XID in its xmax. It's gone from every new snapshot and still takes up the space. Deleting a million rows doesn't shrink a table; it makes a million dead tuples for vacuum to turn into reusable space.
+
+`truncate` is the exception. It stamps nothing: it swaps in a new, empty file, so a transaction whose snapshot predates it sees the table empty, not as it was ([TRUNCATE](https://www.postgresql.org/docs/18/sql-truncate.html)). Don't truncate a table that long-running readers, such as a report or a logical backup, may still be reading.
+
+<DeepDive title="When a transaction gets its XID, and why xmax doesn't always mean deleted">
+
+The row for account 4 was inserted just before, in a transaction that shows when an XID is assigned:
+
+```sql
+begin;
+select pg_current_xact_id_if_assigned();   -- nothing yet
+select count(*) from accounts;
+select pg_current_xact_id_if_assigned();   -- still nothing: reads don't need an xid
+insert into account_usage (account_id) values (4);
+select pg_current_xact_id_if_assigned();   -- 869595, assigned by the first write
+commit;
+```
+
+The delete itself:
+
+```sql
+delete from account_usage where account_id = 4 returning ctid, xmin, xmax;
+```
+
+```text
+ ctid  |  xmin  |  xmax
+-------+--------+--------
+ (0,7) | 869595 | 869597
+```
+
+Slot 7 is still in use at full size, with its `t_ctid` pointing at itself (there's no newer version) and the flag `HEAP_KEYS_UPDATED`, which every delete sets and row locks care about.
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove('still no xid after a read: reads don''t need one',
+                 pg_current_xact_id_if_assigned() is null);
+
+select lab.prove(
+  'the deleted row stays on the page at full size, with an xmax and HEAP_KEYS_UPDATED',
+  lp_flags = 1 and lp_len > 0 and t_xmax::text <> '0'
+  and t_ctid = :'deleted_ctid'::tid and 'HEAP_KEYS_UPDATED' = any(raw_flags))
+from page0 where lp = (:'deleted_ctid'::tid::text::point)[1]::int;
+```
+
+</ProveIt>
+
+An xmax isn't always a delete. Row 42 of `accounts`, which nobody has touched, has xmax 766, the seed's events transaction, with the flags `HEAP_XMAX_KEYSHR_LOCK` and `HEAP_XMAX_LOCK_ONLY`. Each event has a foreign key to `accounts`, and to stop the account being deleted mid-insert, Postgres took a lightweight `for key share` row lock on it. Row locks live in xmax, so even a foreign key check on insert writes to the referenced row's page. When several transactions lock one row at once, xmax holds a **MultiXact ID** instead, pointing to a list in `pg_multixact`; MultiXacts have their own wraparound limits, which [the vacuum chapter](/books/eight-kilobytes/vacuum) watches too. Row locks in general are in [Everyone waits in line](/books/eight-kilobytes/concurrency).
+
+</DeepDive>
+
+<DeepDive title="TRUNCATE empties the table for older snapshots too">
+
+A repeatable read session takes its snapshot. Another session runs `truncate imports` and `delete from deletes_demo` (500 rows each) and commits. The first session looks again:
+
+```text
+ imports_seen
+--------------
+            0
+
+ deletes_seen
+--------------
+          500
+```
+
+`delete` respects the snapshot. `truncate` swapped in a new empty file under an ACCESS EXCLUSIVE lock, and the old one is gone for everyone.
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'an older REPEATABLE READ snapshot sees the truncated table as empty',
+  (select n from dblink('session_a', 'select count(*) from imports') as t(n bigint)) = 0);
+select lab.prove(
+  'but still sees all 500 deleted rows',
+  (select n from dblink('session_a', 'select count(*) from deletes_demo') as t(n bigint)) = 500);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Vacuum frees space inside the table, not on disk
+
+Now the experiment from the start of the chapter, measured. The `pgstattuple` extension reads every page of a table and reports how its space is used:
+
+```sql
+select table_len, tuple_count, dead_tuple_count, free_percent
+from pgstattuple('users');
+```
+
+Run it fresh from the seed, again after `update users set name = upper(name)`, and again after `vacuum users`:
+
+```text
+              | table_len | tuple_count | dead_tuple_count | free_percent
+--------------+-----------+-------------+------------------+--------------
+ fresh        |   9224192 |      100000 |                0 |         0.84
+ after update |  18448384 |      100000 |           100000 |         0.84
+ after vacuum |  18448384 |      100000 |                0 |        50.25
+```
+
+The update doubled the table, and since none of it was HOT (the pages were full), both indexes got 100,000 new entries too. Vacuum removed the dead tuples and left an 18 MB table that's half free space. Vacuum makes **free space inside the pages**, not on disk: it can only hand back empty pages at the very end of the file, and here the old versions filled the first half.
+
+That space isn't wasted; a second full update reused it, and the table stayed at 18 MB, not 27. A table updated in bulk settles at its live rows plus the dead ones that pile up between vacuums. That extra is **bloat**. A little is normal, even useful. A table at 5x its live data is a problem: every scan reads 5x the pages, and the cache holds 5x fewer useful rows. And it came from something that looks harmless in application code: a one-off backfill that touches every row.
+
+<DeepDive title="The checks behind the doubling, and why the second update was barely HOT">
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'after updating every row: about 18 MB, 100,000 live and 100,000 dead tuples',
+  table_len between 18000000 and 19000000 and tuple_count = 100000 and dead_tuple_count = 100000)
+from pgstattuple('users');
+
+select lab.prove(
+  'after vacuum: no dead tuples, still about 18 MB, about half of it free space',
+  dead_tuple_count = 0 and table_len between 18000000 and 19000000 and free_percent between 45 and 55)
+from pgstattuple('users');
+
+select lab.prove(
+  'the next full update reuses the space: still about 18 MB, not 27',
+  pg_relation_size('users') between 18000000 and 19000000);
+```
+
+</ProveIt>
+
+The second full update was barely HOT: `pg_stat_user_tables` counted 50 HOT updates out of 100,000. The live rows were packed into the second half of the table, and all the free space was on other pages.
+
+</DeepDive>
+
+<Callout type="tip" title="Backfill in batches">
+When you must update most of a large table, do it in batches of a few thousand rows with a vacuum (or enough [autovacuum](/books/eight-kilobytes/glossary#autovacuum)) in between, so later batches reuse the space earlier ones freed. [Backfill in short batches that walk the primary key](/books/eight-kilobytes/migrations#backfill-in-short-batches-that-walk-the-primary-key) has the pattern. Shrinking an already bloated table takes a rewrite, covered in [the vacuum chapter](/books/eight-kilobytes/vacuum).
+</Callout>
+
+## Long transactions hold everything back
+
+Vacuum can only remove a dead tuple no snapshot could still see. So one old snapshot, anywhere in the database, holds back cleanup in every table. It's one of the most common causes of runaway bloat, and you can watch it happen.
+
+Session A starts a [repeatable-read](/books/eight-kilobytes/glossary#isolation-level) transaction (so its snapshot is fixed until it ends), reads something, and sits there. `pg_stat_activity` shows its snapshot's horizon as `backend_xmin`, 868917: the oldest transaction still running when A took its snapshot. Meanwhile, session B deletes half of a table and vacuums it:
+
+```sql
+-- session B
+delete from users_ff100 where id % 2 = 0;
+vacuum (verbose) users_ff100;
+```
+
+```text
+...
+tuples: 0 removed, 110000 remain, 60000 are dead but not yet removable
+removable cutoff: 868917, which was 2038 XIDs old when operation ended
+...
+```
+
+**60,000 dead but not yet removable:** the 50,000 just deleted, plus 10,000 left by the fillfactor experiment. The cutoff is exactly session A's `backend_xmin`. A never touched `users_ff100`, and it doesn't matter: its snapshot predates the delete, so it could still ask for those rows. Once A commits, the same vacuum removes all 60,000 and truncates the table from 1,239 pages to 1,126.
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'vacuum removes nothing: the 50,000 deleted rows are still there, dead but not yet removable',
+  dead_tuple_count = 50000) from pgstattuple('users_ff100');
+
+select lab.prove(
+  'once A commits, the same vacuum removes them',
+  dead_tuple_count = 0) from pgstattuple('users_ff100');
+
+select lab.prove(
+  'and truncates the table from 1,239 to 1,126 pages',
+  pg_relation_size('users_ff100') / 8192 = 1126);
+```
+
+</ProveIt>
+
+In production the blocker is a connection left [`idle in transaction`](/books/eight-kilobytes/glossary#idle-in-transaction) by a missing commit, a six-hour analytics query, or a migration someone started in `psql` before lunch. The usual suspects: long transactions (including on a replica with `hot_standby_feedback` on), idle-in-transaction sessions (set `idle_in_transaction_session_timeout`), unconsumed [replication slots](/books/eight-kilobytes/glossary#replication-slot), and forgotten prepared transactions. Alert when any transaction has been open longer than a few minutes; [Vacuum can't remove what an old snapshot might need](/books/eight-kilobytes/vacuum#vacuum-cant-remove-what-an-old-snapshot-might-need) has the queries that find each one.
+
+## Old rows must be frozen before the XID counter wraps
+
+XIDs on disk are 32 bits, and Postgres compares them in a circle, so a row whose xmin fell more than about 2.1 billion transactions behind would suddenly look like it came from the future and vanish. Vacuum prevents that by **freezing** old rows, marking them visible to everyone forever, and a page whose rows are all frozen is skipped by every later vacuum. If freezing falls behind, usually because something holds the xmin horizon back, Postgres stops accepting writes; [Wraparound stops writes before anything is corrupted](/books/eight-kilobytes/vacuum#wraparound-stops-writes-before-anything-is-corrupted) covers the settings, the monitoring, and the recovery.
+
+<DeepDive title="Frozen is two hint bits that can't otherwise coexist">
+
+`relfrozenxid` is a table's guarantee that no unfrozen tuple is older; `account_usage`'s was 869572, 27 transactions old. Freeze it explicitly (the deleted row for account 4 goes in the same pass):
+
+```sql
+vacuum (freeze) account_usage;
+
+select lp, combined_flags,
+       'HEAP_XMIN_COMMITTED' = any(raw_flags) as committed,
+       'HEAP_XMIN_INVALID' = any(raw_flags) as invalid
+from heap_page_items(get_raw_page('account_usage', 0)),
+     heap_tuple_infomask_flags(t_infomask, t_infomask2)
+where lp_flags = 1;
+```
+
+```text
+ lp |   combined_flags   | committed | invalid
+----+--------------------+-----------+---------
+  4 | {HEAP_XMIN_FROZEN} | t         | t
+  5 | {HEAP_XMIN_FROZEN} | t         | t
+  6 | {HEAP_XMIN_FROZEN} | t         | t
+```
+
+Freezing sets the "committed" and "invalid" hint bits together, a combination that otherwise makes no sense; the pair means frozen. The original xmin stays for debugging but is no longer consulted. `relfrozenxid` jumps to the present (age 1), and the visibility map marks page 0 all-visible and all-frozen. You never run `vacuum freeze` by hand in normal operation; autovacuum freezes as part of its regular work.
+
+<ProveIt lab="05-mvcc">
+
+```sql
+select lab.prove(
+  'after vacuum (freeze), every live tuple is HEAP_XMIN_FROZEN: committed and invalid together',
+  count(*) = 3 and bool_and('HEAP_XMIN_FROZEN' = any(combined_flags))
+  and bool_and('HEAP_XMIN_COMMITTED' = any(raw_flags) and 'HEAP_XMIN_INVALID' = any(raw_flags)))
+from page0 where lp_flags = 1;
+
+select lab.prove(
+  'the visibility map marks the page all-visible and all-frozen',
+  all_visible and all_frozen) from pg_visibility_map('account_usage') where blkno = 0;
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Isolation levels mostly decide when the snapshot is taken
+
+Snapshots explain the isolation levels too: the main thing a level changes is **when the snapshot is taken**. Read committed, the default, takes one per statement, so two `select`s in one transaction can see different data. Repeatable read and serializable take one per transaction, so updating a row someone changed since then fails with a serialization error, and the application must retry ([Only serializable rules out every anomaly](/books/eight-kilobytes/acid#only-serializable-rules-out-every-anomaly) and [Everyone waits in line](/books/eight-kilobytes/concurrency) have the rest). At every level, an open transaction's snapshot holds back vacuum. Keep transactions short.
+
+## The short version
+
+- Postgres never updates a row in place. An `update` writes a complete new version and stamps the old one with the updater's XID; a `delete` only stamps it. Both leave dead tuples.
+- A snapshot decides which version of each row a query sees, so readers and writers never block each other.
+- HOT updates skip every index when no indexed column changes and the new version fits on the page. Don't index columns that change on every update without deciding it's worth it.
+- Vacuum turns dead tuples into reusable space inside the table; it rarely shrinks the file. Do big updates in batches.
+- One long or idle-in-transaction session blocks cleanup in the whole database. Alert on transaction age.
+- Old rows must be frozen before their XIDs fall about 2 billion transactions behind; the vacuum chapter covers watching it.
+- The first read of fresh rows writes hint bits; after a bulk load, run `vacuum analyze` before users hit the data.
+
+## Further reading
+
+- [Concurrency control: introduction](https://www.postgresql.org/docs/18/mvcc-intro.html) and [transaction isolation](https://www.postgresql.org/docs/18/transaction-iso.html), PGDG. The official model, and exactly what each isolation level guarantees.
+- [Preventing transaction ID wraparound failures](https://www.postgresql.org/docs/18/routine-vacuuming.html#VACUUM-FOR-WRAPAROUND), PGDG. Freezing, the age settings, and what happens near the limit.
+- [src/backend/access/heap/README.tuplock](https://github.com/postgres/postgres/blob/master/src/backend/access/heap/README.tuplock), PostgreSQL source. How row locks and MultiXacts live in `xmax`.
+- [Hint Bits](https://wiki.postgresql.org/wiki/Hint_Bits), PostgreSQL wiki. Why reads can write, in more detail.
+- [Concurrency control](https://www.interdb.jp/pg/pgsql05.html), Hironobu Suzuki, The Internals of PostgreSQL. The visibility rules worked through with diagrams.

@@ -1,0 +1,428 @@
+---
+title: Someone else runs the box
+description: What a managed Postgres service takes off your plate and what it leaves you, from admin roles and settings to I/O ceilings, poolers, upgrades, and failover.
+part: Running it
+builds_on: [configuration, observability, backups]
+---
+
+The graph says read [IOPS](/books/eight-kilobytes/glossary#iops) have been flat at exactly 3,000 for an hour. Not near 3,000: exactly. Latency climbs, the app times out, and the dashboard shows the database "healthy". Nothing is broken. You bought a volume with a ceiling, and your workload found it.
+
+That's a managed service on most days. The provider patches the OS, takes the backups, and promotes the standby at 3 a.m. It does not choose your indexes or tune autovacuum. Those were never the server's job. They were yours, and they still are. This chapter is the diff, starting with how much of the box to hand over at all.
+
+<Callout type="note" title="Examples, as of October 2026">
+
+Provider behavior here is quoted from each provider's documentation as of October 2026; check the link before you build on it. The services are examples of the mechanics, not a ranking. [Pick a provider you can leave](/books/eight-kilobytes/providers) holds the per-vendor numbers.
+
+</Callout>
+
+## Buy as much management as you can afford
+
+Running Postgres well is a full-time skill, and most teams don't have anyone whose full time it is. Backups that restore, failover that doesn't split the brain, upgrades, vacuum, pooling, and a pager someone answers: every one is a job, and every job is done by somebody. The only question is who.
+
+Our answer, for most teams: let someone else do as many of those jobs as your budget allows.
+
+### Management is a spectrum, not a switch
+
+From the most work on your side to the least:
+
+1. **Self-hosted** on VMs or bare metal: total control, total responsibility, and the pager.
+2. **A Kubernetes operator** ([Self-managing gives you the superuser and the pager](/books/eight-kilobytes/providers#self-managing-gives-you-the-superuser-and-the-pager)) automates replicas, backups, and failover; you still run the cluster under it.
+3. **A hyperscaler's managed service** ([the hyperscalers](/books/eight-kilobytes/providers#hyperscalers-win-on-breadth-and-cost-you-complexity)) runs the machine, backups, standby, and patching, and hands you an admin role.
+4. **A specialist managed service** ([specialist managed Postgres](/books/eight-kilobytes/providers#specialists-buy-you-closer-support-and-fewer-regions)): the same platform jobs, with a support desk that should know Postgres internals. Test that with a real question.
+5. **Managed plus expert help**: a top support tier or a fractional DBA, so a human who has tuned a thousand databases looks at yours.
+
+No rung is right for everyone. Each moves jobs from your column to someone else's, at a price.
+
+### Some jobs stay yours whoever runs the box
+
+Here is how the jobs this book teaches split. The hyperscaler and specialist columns came out identical, so they share one.
+
+| Job | Self-hosted | Operator | Managed service |
+|---|---|---|---|
+| [Backups taken](/books/eight-kilobytes/backups#use-a-backup-tool) | you | shared | provider |
+| [Restore testing](/books/eight-kilobytes/backups#test-your-restores) | you | you | you |
+| [Point-in-time recovery](/books/eight-kilobytes/backups#point-in-time-recovery-is-replay-that-keeps-going) | you | shared | shared |
+| [Failover and HA](/books/eight-kilobytes/replication#dont-hand-roll-failover) | you | shared | shared |
+| [Upgrades and OS patching](/books/eight-kilobytes/backups#take-minor-releases-promptly-rehearse-major-ones) | you | shared | provider (minor), shared (major) |
+| [Vacuum and configuration](/books/eight-kilobytes/configuration#autovacuums-defaults-suit-small-tables-and-slow-disks) | you | you | you, in a [console](#settings-live-in-a-parameter-group) |
+| [Connection pooling](/books/eight-kilobytes/connections#pool-in-the-app-and-in-front-of-the-database) | you | shared | shared |
+| [Monitoring and on-call](/books/eight-kilobytes/observability#alert-only-on-what-needs-a-human-soon) | you | you | shared |
+| [Capacity planning](/books/eight-kilobytes/scale#the-question-is-which-resource-runs-out-first) | you | you | you |
+| [Query, index, and schema design](/books/eight-kilobytes/btree#design-an-index-from-a-query-not-a-column) | you | you | you |
+
+Read the last row again. It says "you" in every column, and it is most of this book.
+
+"Shared" hides the real division of labor. The provider takes the backups; only you can prove *your* restore meets *your* RTO. The provider promotes the standby; your app has to reconnect and retry. The provider pages itself for a dead disk; your pager still covers slow queries, lock queues, and full connection slots.
+
+<DeepDive title="What shared means, job by job, and what expert help moves">
+
+- **Backups and PITR:** an operator schedules base backups and WAL archiving, and you own the bucket, its lifecycle rules, and the credentials. A provider archives and replays; you pick the retention window, notice the mistake inside it, and repoint everything at the new server the restore creates.
+- **Failover:** an operator depends on the Kubernetes cluster you run; a provider's promotion still needs your app to [reconnect and retry](#failover-is-dns-and-your-pool-has-to-notice). You schedule the drills either way.
+- **Upgrades:** an operator rolls the version you choose through the replicas (some automate majors; check yours). A provider patches minors in a window you pick, and for majors runs `pg_upgrade` or [blue/green](#bluegreen-is-the-logical-upgrade-limits-included) while you test the app and extensions and run `analyze`.
+- **Vacuum and configuration:** the provider sets defaults sized for the instance, not your hottest table, and locks some settings. Per-table autovacuum, `work_mem`, timeouts, and logging are yours.
+
+Expert help moves a few cells, never to "provider":
+
+| Job | Managed alone | Plus a support contract | Plus a fractional DBA |
+|---|---|---|---|
+| Restore testing | you | you | shared |
+| Vacuum and configuration tuning | you | shared (advice on request) | shared |
+| Incident at 3 a.m. | you, with provider escalation | shared, on the contract's response time | shared, if their hours cover it |
+| Query, index, and schema review | you | you, or advice by ticket | shared |
+
+</DeepDive>
+
+### Self-managing costs people, not servers
+
+The VM is the cheap part. Self-managing costs the expertise in the whole operations half of this book, and an on-call rotation of several people who can each restore a backup and promote a replica. One expert is a single point of failure with a vacation calendar. It also carries the failure modes that end companies: backups nobody had proven by a restore ([GitLab, 2017](/books/eight-kilobytes/backups#test-your-restores)), or [two primaries taking writes](/books/eight-kilobytes/replication#the-old-primary-doesnt-know). Neither needs bad engineers, only a job nobody owned.
+
+Price both sides in the same unit:
+
+```text
+  self-managed = servers + storage + backup storage
+               + hours a month on the database  x  loaded hourly cost
+               + the on-call rotation
+               + chance of a bad incident  x  what it would cost you
+
+  managed      = the provider's bill (compute, storage, I/O, support tier)
+               + hours a month you still spend  x  loaded hourly cost
+```
+
+The managed side's second line never reaches zero; the table's last rows never leave you. But the people lines usually dwarf the markup until the fleet is large, steady, and staffed. Count the hours you'd really spend, not the hours you hope to.
+
+### Managed costs markup, control, and an exit
+
+The service has its own price, and the rest of this chapter itemizes it: a markup, with I/O priced in ways that [have their own failure modes](#the-bill-has-its-own-failure-modes); less control (no [superuser](#there-is-no-superuser), no `postgresql.conf`, no [shell](#you-cant-ssh-in-so-plan-your-logs)); the provider's calendar; and an [exit cost](/books/eight-kilobytes/providers#plan-the-exit-before-you-need-it). For most teams that's less than an on-call rotation. Write it down anyway.
+
+### Managed doesn't mean optimized
+
+A provider keeps your database running. It does not make it fast. It won't notice your dashboard query reading 35,249 pages to return 20 rows, but it will sell you the next instance size in one click. A bigger box hides the query, the cost compounds monthly, and the query is still at the top of the list ([Earn the bigger box](/books/eight-kilobytes/scale#earn-the-bigger-box)).
+
+### Hand a provider the operations; keep the design yourself
+
+Concretely, and especially without a dedicated database engineer: let a provider own backups, [PITR](/books/eight-kilobytes/glossary#pitr), failover, patching, and the hardware. Add expert help when you can; an hour of a specialist on your slowest queries is often worth more than a size up.
+
+Then spend your own expertise where no provider can: query, index, and schema design. That's most of this book, and where the large wins live: the dashboard query above drops to 91 pages with [its first index](/books/eight-kilobytes/btree#the-first-index-35249-pages-to-91), and no service tier does that for you.
+
+Self-manage for a concrete reason, with the people to own it: cost at a scale where the markup pays for a team, control you can name, compliance, or an extension no provider runs. "Cheaper on paper" isn't a reason until the people lines are in the math. And none of it is permanent; stay on community PostgreSQL features and you can move either way.
+
+## There is no superuser
+
+Every managed service withholds `SUPERUSER` and gives you an admin role instead: `rds_superuser`, `cloudsqlsuperuser`, `azure_pg_admin`. The reason is that a superuser can read server files and run programs as the server's OS user, which is a shell on the provider's machine.
+
+Expect `alter system`, `pg_read_file`, `copy ... to program`, C functions, and untrusted extensions to fail, so test your runbooks' commands before an incident does. For monitoring and on-call accounts, grant predefined roles (`pg_monitor`, `pg_read_all_stats`, `pg_signal_backend`), never the admin password.
+
+<DeepDive title="The admin role, rebuilt on stock Postgres, and each provider's version">
+
+The lab's `mg_admin` has `LOGIN CREATEROLE CREATEDB` and nothing else. `alter system`, `pg_read_file`, `pg_ls_dir`, `copy ... to program`, `create function ... language c`, `set log_min_duration_statement`, and `create extension pg_visibility` (untrusted) all fail with `42501`; `create extension hstore` (trusted) works. Without `pg_read_all_stats`, another role's session shows its query as `<insufficient privilege>`. Even `pageinspect`, which this book uses for raw pages, is superuser-only by default.
+
+<ProveIt lab="33-managed">
+
+```sql
+create role mg_admin login createrole createdb;
+
+set role mg_admin;
+
+select lab.prove(
+  'reading a server file with pg_read_file is denied (42501)',
+  try_sql($$ select pg_read_file('postgresql.conf') $$) = '42501');
+
+select lab.prove(
+  'a function in the untrusted language C is denied (42501)',
+  try_sql($$ create function mg_c() returns int language c as 'nothing', 'nothing' $$) = '42501');
+
+select lab.prove(
+  'setting a superuser-only parameter for the session is denied (42501)',
+  try_sql($$ set log_min_duration_statement = 0 $$) = '42501');
+```
+
+</ProveIt>
+
+<ProveIt lab="33-managed">
+
+```sql
+set role mg_watch;
+select lab.prove(
+  'without pg_read_all_stats, another role''s query shows as <insufficient privilege>',
+  (select query = '<insufficient privilege>' and wait_event is null
+   from pg_stat_activity where application_name = 'mg_sleeper'));
+
+select lab.prove(
+  'without pg_signal_backend, cancelling another role''s query is denied (42501)',
+  try_sql(format('select pg_cancel_backend(%s)',
+    (select pid from pg_stat_activity where application_name = 'mg_sleeper'))) = '42501');
+reset role;
+
+grant pg_read_all_stats, pg_signal_backend to mg_watch;
+```
+
+</ProveIt>
+
+The providers, as of October 2026: AWS's [rds_superuser page](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.PostgreSQL.CommonDBATasks.Roles.rds_superuser.html) prints `CREATE ROLE postgres WITH LOGIN NOSUPERUSER INHERIT CREATEDB CREATEROLE ...` and says `rds_superuser` can add RDS's extensions, see every session, and terminate any connection. [Cloud SQL](https://docs.cloud.google.com/sql/docs/postgres/users) customers "cannot create or have access to users with superuser attributes"; [AlloyDB](https://docs.cloud.google.com/alloydb/docs/database-users/about) grants `alloydbsuperuser`. On Azure, "only Microsoft is part of the superuser role" ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/security/security-access-control)). [Neon's](https://neon.com/docs/manage/roles) `neon_superuser` holds `pg_monitor` and `pg_signal_backend` with `ADMIN OPTION`; [Supabase](https://supabase.com/docs/guides/database/postgres/roles) keeps `supabase_admin` for itself. The admin role should then create the owner, migrator, and app roles from [The app never connects as postgres](/books/eight-kilobytes/security#the-app-never-connects-as-postgres).
+
+</DeepDive>
+
+## Settings live in a parameter group
+
+No superuser also means no config file. You can't edit `postgresql.conf`; the provider writes it from a console object ([managed notes](/books/eight-kilobytes/configuration#on-managed-services-the-settings-that-matter-still-move)).
+
+### Static means restart, and the console won't do it for you
+
+A setting that [needs a restart](/books/eight-kilobytes/configuration#context-decides-reload-or-restart) is "static". On RDS, a static change sits in `pending-reboot`, which "doesn't result in an automatic reboot during the next maintenance window" ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/parameter-groups-overview.html)), so it can wait for months and arrive with an unrelated reboot. Batch static changes into a window you choose.
+
+### The defaults are not the book's defaults
+
+Providers size memory from the instance, not by [the 25 percent rule](/books/eight-kilobytes/configuration#shared_buffers-starts-at-25-of-ram-not-80): Cloud SQL gives `shared_buffers` one third of memory, Aurora roughly two thirds. Read `pg_settings` before you assume.
+
+### Per-role settings are the portable tool
+
+`alter role ... set` needs no console and moves with you between providers. Keep timeouts, `work_mem` overrides, and `search_path` per role in migrations; leave the console for memory, logging, and autovacuum.
+
+<DeepDive title="Restarts on the other consoles, and the settings a role can't take">
+
+<ProveIt lab="33-managed">
+
+```sql
+select lab.prove(
+  'shared_buffers, max_connections and shared_preload_libraries need a restart (context postmaster)',
+  (select bool_and(context = 'postmaster') from pg_settings
+   where name in ('shared_buffers', 'max_connections', 'shared_preload_libraries'))
+  and (select count(*) from pg_settings
+       where name in ('shared_buffers', 'max_connections', 'shared_preload_libraries')) = 3);
+```
+
+</ProveIt>
+
+[Cloud SQL's flags table](https://docs.cloud.google.com/sql/docs/postgres/flags) marks each flag "Restart Required?" and gives `shared_buffers` "one-third of the instance's total VM memory". [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.Reference.ParameterGroups.html) sets it to `SUM(DBInstanceClassMemory/12038,-50003)` 8 KB pages. Azure says `shared_preload_libraries` "requires a server restart" ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-load-libraries)). RDS default parameter groups can't be edited; create a custom one first. In `pg_settings`, `source` says whether the provider or you set a value.
+
+A setting marked `superuser` is refused per role until someone runs `GRANT SET ON PARAMETER` (PostgreSQL 15+), the hook a provider can use to delegate it. On stock Postgres, `alter role mg_app set statement_timeout = '5s'` works, and the same for `log_min_duration_statement` fails with `42501`.
+
+<ProveIt lab="33-managed">
+
+```sql
+select lab.prove(
+  'ALTER ROLE ... SET works for an ordinary parameter (statement_timeout)',
+  try_sql($$ alter role mg_app set statement_timeout = '5s' $$) = 'ok');
+
+select lab.prove(
+  'ALTER ROLE ... SET fails for a superuser-only parameter (log_min_duration_statement): 42501',
+  try_sql($$ alter role mg_app set log_min_duration_statement = 250 $$) = '42501');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Extensions come from an allowlist
+
+You can only `create extension` what the provider compiled and allowed, and the footnotes matter as much as the list: a version behind, a restart-requiring flag, a missing background worker, a paid plan. Check before you design around one ([what each is for](/books/eight-kilobytes/extensions)), and run `alter extension ... update` after every major upgrade; extensions don't upgrade themselves.
+
+### The provider adds its own gate on CREATE EXTENSION
+
+Since PostgreSQL 13, a **trusted** extension can be installed by a non-superuser with `CREATE` on the database. Untrusted ones need a superuser, which here means the provider or nobody. Providers add their own gate, with opposite defaults: RDS allows everything available, Azure nothing until you list it.
+
+<DeepDive title="Five extensions across six services, with the fine print">
+
+| Extension | RDS | Aurora | Cloud SQL | AlloyDB | Azure | Neon |
+|---|---|---|---|---|---|---|
+| `pg_stat_statements` | yes | yes | yes | yes | yes | yes |
+| `vector` | 0.8.2 | 0.8.2 | 0.8.5 | 0.8.2 | 0.8.2 | yes |
+| `pg_partman` | 5.4.3 | 5.4.3 | 5.4.3¹ | 5.4.3 | 5.4.3 | 5.1.0 |
+| `pg_repack` | 1.5.3 | 1.5.3 | 1.5.2 | 1.5.3 | 1.5.3 | paid² |
+| `pg_hint_plan` | 1.8.0 | 1.8.0 | flag | flag | 1.8.0 | 1.8.0 |
+
+Versions on PostgreSQL 18 (18.6 on RDS and Aurora). ¹ No background worker. ² Paid plans only. Sources, October 2026: [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html), [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/AuroraPostgreSQL.Extensions.html), [Cloud SQL](https://docs.cloud.google.com/sql/docs/postgres/extensions), [AlloyDB](https://docs.cloud.google.com/alloydb/docs/reference/extensions), [Azure](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-versions), [Neon](https://neon.com/docs/extensions/pg-extensions); [Supabase](https://supabase.com/docs/guides/database/extensions) lists all but `pg_hint_plan`. Cloud SQL's `pg_partman` "doesn't include the background worker" (call maintenance from `pg_cron` instead); `pg_hint_plan` hides behind `cloudsql.enable_pg_hint_plan` (restart required) or `alloydb.enable_pg_hint_plan`; Neon's `pg_repack` is "available only on paid Neon plans"; AlloyDB can't autoprewarm "because you can't configure the shared_preload_libraries", so the [autoprewarm trick](/books/eight-kilobytes/buffers#autoprewarm-restores-the-last-cache) is out.
+
+`pg_available_extension_versions` shows `trusted` for each. As the lab's admin role, `create extension hstore` (trusted) works and `create extension pg_visibility` (untrusted) fails with `42501`.
+
+<ProveIt lab="33-managed">
+
+```sql
+select lab.prove(
+  'the admin role can create a trusted extension (hstore)',
+  try_sql($$ create extension hstore $$) = 'ok');
+
+select lab.prove(
+  'the admin role cannot create an untrusted extension (pg_visibility): 42501',
+  try_sql($$ create extension pg_visibility $$) = '42501');
+```
+
+</ProveIt>
+
+RDS's `rds.allowed_extensions` defaults to `'*'` and is dynamic ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Concepts.General.FeatureSupport.Extensions.html)); Azure says to "add them to the allow list" in `azure.extensions` first ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-allow-extensions)); on Cloud SQL, only `cloudsqlsuperuser` members create extensions. AWS: extension versions "don't automatically upgrade during engine version upgrade workflows".
+
+</DeepDive>
+
+## The volume is your bottleneck now
+
+On a managed service you rarely run out of CPU first. You run out of I/O, because the database sits on [network block storage](/books/eight-kilobytes/latency#iops-are-capped-by-reads-in-flight-not-by-what-you-paid) with a provisioned ceiling, and the numbers are smaller than people expect: an RDS gp3 volume under 400 GiB has a baseline of 3,000 IOPS, a 128 GiB Azure Premium SSD 500.
+
+### Two ceilings, and you hit the lower one
+
+The disk has a limit, the instance has a limit, and you get the smaller.
+
+```text
+  what you get = min( volume IOPS,  instance IOPS cap )
+
+  ┌──────────────┐   instance cap      ┌──────────────────┐
+  │   instance   │ ──────────────────▶ │   network volume │
+  │  2 vCPU      │   (often burstable) │  16,000 IOPS     │
+  └──────────────┘                     └──────────────────┘
+        a 16,000 IOPS volume behind a small instance
+        delivers what the small instance can push
+```
+
+A faster volume behind a small instance buys you nothing, and the small instance's [burst](/books/eight-kilobytes/latency#burst-credits-run-out-in-the-middle-of-the-job) runs out with no change in your traffic.
+
+### Throttled I/O shows as flat IOPS and rising latency
+
+Inside Postgres, active sessions wait on `IO`, mostly `DataFileRead` (a page that wasn't in shared buffers); [sample the wait events](/books/eight-kilobytes/observability#sample-waits-to-see-where-the-time-goes) a few times. In the provider's metrics, it's the opening of this chapter: IOPS flat against a number while latency and queue depth climb. Then fix it in this book's order: read fewer pages, give the working set more RAM, and buy IOPS last.
+
+<DeepDive title="What each provider sells, and the metrics that show the ceiling">
+
+As of October 2026: **RDS gp3** gives 3,000 IOPS and 125 MiB/s for 20 to 399 GiB, and from 400 GiB stripes four volumes for 12,000 IOPS and 500 MiB/s; gp2 gives 3 IOPS per GiB and bursts to 3,000 ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Storage.html)). **Azure Premium SSD** gives 128 GiB 500 IOPS, "up to 3,500" bursting, and 512 GiB 2,300; v2 starts at 3,000 at any size ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/compute-storage/concepts-storage)). **Cloud SQL** SSD IOPS follow machine type and capacity, and "you can't configure the values"; Hyperdisk Balanced defaults to 4,000 IOPS for 20 to 256 GB ([Google](https://docs.cloud.google.com/sql/docs/postgres/storage-options-overview)). **Supabase** says it plainly: "The effective IOPS is the lower of the IOPS supported by the compute size or the provisioned IOPS of the disk", and its Micro compute has a 500 IOPS baseline ([Supabase](https://supabase.com/docs/guides/platform/compute-and-disk)). AWS warns an instance "might not be able to fully utilize the provisioned IOPS"; Microsoft that the VM type "also has IOPS limits"; Google that "the machine type sets the maximum".
+
+| Signal | RDS (CloudWatch) | Azure |
+|---|---|---|
+| I/O pinned at a ceiling | `ReadIOPS`, `WriteIOPS`, `ReadThroughput` | `disk_iops_consumed_percentage` |
+| Requests queuing | `DiskQueueDepth`, `ReadLatency` | `disk_queue_depth` |
+| I/O burst running out | `BurstBalance` (gp2), `EBSIOBalance%` | `disk_iops_consumed_percentage` near 100 |
+| CPU burst running out | `CPUCreditBalance` (T classes) | `cpu_credits_remaining` (Burstable) |
+
+Names from [AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-metrics.html) and [Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/monitor/concepts-monitoring); AWS's [`IO:DataFileRead` page](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/wait-event.iodatafileread.html) describes the same wait. `EBSIOBalance%` is the instance's burst bucket: a gp3 volume has no burst, but the instance in front of it might.
+
+</DeepDive>
+
+## Disaggregated storage changes some rules
+
+Aurora, AlloyDB, and Neon keep Postgres above the buffer cache and replace what's below it: the server ships WAL to a distributed storage service that builds the pages ([how that changes benchmarks](/books/eight-kilobytes/providers#storage-decides-the-benchmark)). On Aurora and AlloyDB, which skip full-page writes, the [post-checkpoint WAL spike](/books/eight-kilobytes/wal#the-first-change-after-a-checkpoint-logs-the-whole-page) goes away, so don't port a checkpoint tuning guide. Replicas share storage instead of copying it, I/O can be a line item, and a cache miss is a network fetch. Row versions, vacuum, bloat, and the planner's page counting don't change at all.
+
+<DeepDive title="What Aurora, AlloyDB, and Neon say about their storage">
+
+As of October 2026:
+
+- **Aurora** replicates writes "to six storage nodes" across three Availability Zones; replicas read the same volume, with lag "usually much less than 100 milliseconds" ([storage](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Overview.StorageReliability.html), [replication](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Replication.html), [HA](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.AuroraHighAvailability.html)). Its parameter reference doesn't list `checkpoint_timeout`, `max_wal_size`, or `full_page_writes`. Aurora Standard bills "per 1 million requests for I/O operations"; I/O-Optimized doesn't, and is "the best choice when your I/O spending is 25% or more of your total Aurora database spend".
+- **AlloyDB** writes WAL to "a low-latency, regional log storage service", with "no need to checkpoint the database layer" and no full-page writes ([Google Cloud blog, 2022](https://cloud.google.com/blog/products/databases/alloydb-for-postgresql-intelligent-scalable-storage)).
+- **Neon** commits "once a quorum of safekeepers has acknowledged the WAL record via the Paxos protocol", and pageservers rebuild pages on request ([Neon](https://neon.com/docs/introduction/architecture-overview)). A compute that scales to zero wakes with empty buffers ([its entry](/books/eight-kilobytes/providers#serverless-platforms-optimize-for-the-developers-day) has the timings). Read-your-writes still [needs care](/books/eight-kilobytes/replication#after-a-write-a-replica-can-show-the-old-value): lag is small, not zero.
+
+</DeepDive>
+
+## Provider dashboards are wait-event samplers
+
+Every provider's performance dashboard is the [wait-event profile](/books/eight-kilobytes/observability#sample-waits-to-see-where-the-time-goes), sampled and stored. Read it the same way: an IO band means pages coming from storage, a Lock band a [lock queue](/books/eight-kilobytes/concurrency). The fix is still in the query.
+
+### "CPU" is not a wait event
+
+Every dashboard has a CPU band, and Postgres has no wait event by that name. The band is sessions `active` with no wait event: running, or waiting for the OS scheduler, which is how it can rise above the core count.
+
+<DeepDive title="What each dashboard samples, per its docs">
+
+<ProveIt lab="33-managed">
+
+```sql
+select lab.prove(
+  'PostgreSQL has no wait event called CPU (pg_wait_events, PostgreSQL 17+)',
+  not exists (select 1 from pg_wait_events where name ilike 'cpu'));
+
+select lab.prove(
+  'a CPU-bound session samples as active with no wait event (at least 8 of 10 samples)',
+  (select count(*) filter (where state = 'active' and wait_event is null) >= 8
+   from mg_samples));
+```
+
+</ProveIt>
+
+As of October 2026: RDS Database Insights "samples the number of sessions concurrently running a query" every second and defines CPU as "active in CPU or is waiting for CPU" ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.Overview.ActiveSessions.html)). Cloud SQL Query Insights shows wait events only on Enterprise Plus ([Google](https://docs.cloud.google.com/sql/docs/postgres/using-query-insights)), and Google notes CPU load "can go beyond the maximum core line". AlloyDB splits "CPU and CPU Wait", "IO Wait", and "Lock Wait" ([Google](https://docs.cloud.google.com/alloydb/docs/using-query-insights)). Azure Query Store samples waits, but not on Burstable, "as it causes performance problems" ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/monitor/concepts-query-store)). Dashboards have retention limits; the observability chapter's SQL works everywhere.
+
+</DeepDive>
+
+## A managed pooler either pins sessions or leaks state
+
+In transaction mode, session state either breaks or has to be tracked ([Transaction pooling breaks session state](/books/eight-kilobytes/connections#transaction-pooling-breaks-session-state)), and managed poolers pick different sides.
+
+RDS Proxy **pins**: once a client changes session state (a `SET`, a prepared statement, even `nextval`), it gets its own server connection until it disconnects. Correct, and the multiplexing you paid for is gone; an ORM that sets a variable on checkout pins every connection. The [PgBouncer](/books/eight-kilobytes/glossary#pgbouncer)-style poolers on Cloud SQL, Azure, Neon, and Supabase **don't track** SQL-level session state (`SET`, `PREPARE`, advisory locks): full multiplexing, and silent leaks. Some do track protocol-level prepared statements, the kind most drivers send, when the provider turns that on.
+
+Know which you have, and use `SET LOCAL` and per-role settings either way.
+
+<DeepDive title="Each managed pooler's rules, as documented">
+
+As of October 2026: **RDS Proxy** also pins on cursors, `LISTEN`, temp tables, session advisory locks, and statements over 16 KB, and a pool that resets with `DISCARD ALL` pins everything; watch `DatabaseConnectionsCurrentlySessionPinned` ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy-pinning.html)). **Cloud SQL** pooling needs Enterprise Plus, and enabling it "results in a database restart"; `SET`, `LISTEN`, and `PREPARE` "aren't supported" in transaction mode ([Google](https://docs.cloud.google.com/sql/docs/postgres/managed-connection-pooling)). **Azure's** PgBouncer 1.25.2 ships with `pgbouncer.max_prepared_statements` at 0, "isn't supported on Burstable", and restarts with every failover ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/connectivity/concepts-pgbouncer)). **Neon** runs PgBouncer behind a `-pooler` hostname ([Neon](https://neon.com/docs/connect/connection-pooling)); **Supabase's** transaction mode "does not support prepared statements" ([Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres)).
+
+</DeepDive>
+
+## Backups are snapshots plus WAL, and restores make new servers
+
+Every service builds point-in-time recovery the way the [backups chapter](/books/eight-kilobytes/backups#point-in-time-recovery-is-replay-that-keeps-going) describes, from snapshots plus archived WAL. The button works. It doesn't mention that retention is a fixed window (each provider's is in [Superuser access and retention rule services out](/books/eight-kilobytes/providers#superuser-access-and-retention-rule-services-out)), that the last few minutes of WAL may not have shipped, or that deleting an instance can take its automated backups with it.
+
+### Restore time is longer than the button suggests
+
+A managed restore is **a new server**, so your app, pooler, secrets, and firewall rules all have to follow it. **Its data may not be there yet**: RDS loads a restored snapshot's blocks lazily, so the first hours can run at object-storage speed. And **its cache is cold**. *Available in 20 minutes* can mean *production-ready in four hours*. [Time a restore](/books/eight-kilobytes/backups#test-your-restores) of production-sized data, warm-up included, and keep your own `pg_dump` where the provider account can't delete it.
+
+<DeepDive title="RPO, deletion, and lazy loading, per provider">
+
+As of October 2026:
+
+- **RDS** "uploads transaction logs ... to Amazon S3 every five minutes", and unless told otherwise, "all automated backups are deleted with the DB instance" ([PITR](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PIT.html), [backups](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html)). A restored block not yet loaded "immediately downloads the requested data from Amazon S3"; AWS suggests full-table scans to warm hot tables ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_RestoreFromSnapshot.html)).
+- **Cloud SQL**: "A point-in-time recovery always creates a new instance" ([Google](https://docs.cloud.google.com/sql/docs/postgres/backup-recovery/pitr)); for a deleted instance, contact support "within four days" ([backups](https://docs.cloud.google.com/sql/docs/postgres/backup-recovery/backups)).
+- **Azure**: "the delay RPO ... can be up to five minutes" ([Microsoft](https://learn.microsoft.com/en-us/azure/postgresql/backup-restore/concepts-backup-restore)).
+
+</DeepDive>
+
+## Blue/green is the logical upgrade, limits included
+
+In-place upgrades run `pg_upgrade` with downtime, and can surprise you: Cloud SQL's "deletes all existing logical replication slots on the instance", and RDS can only go back by restoring the old snapshot. The low-downtime path is the [logical replication upgrade](/books/eight-kilobytes/backups#logical-replication-shrinks-upgrade-downtime-to-the-cutover), which RDS sells as Blue/Green Deployments. Its limits come along (freeze DDL, a primary key on every table), so rehearse on a clone and let the rehearsal find the table without one.
+
+<DeepDive title="The in-place and blue/green fine print">
+
+In-place: [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_UpgradeDBInstance.PostgreSQL.html) says "You experience an outage until the upgrade is complete"; [Cloud SQL](https://docs.cloud.google.com/sql/docs/postgres/upgrade-major-db-version-inplace); [Azure](https://learn.microsoft.com/en-us/azure/postgresql/configure-maintain/concepts-major-version-upgrade) says to "run the ANALYZE command in each database". RDS Blue/Green uses logical replication for supported major upgrades ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/blue-green-deployments-replication-type.html)), says switchover "typically takes under a minute", and per its [considerations](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/blue-green-deployments-considerations.html): DDL on blue degrades replication and forces a rebuild (disable `pg_partman`, which runs DDL on its own), sequences sync only at switchover, large objects and unlogged tables don't replicate, and single-threaded apply can fall behind a busy blue.
+
+</DeepDive>
+
+## Failover is DNS, and your pool has to notice
+
+Failover is the main thing you pay a provider for. Documented times mostly land between 30 and 120 seconds, and every connection dies. Most services then point a DNS name at the new primary (Cloud SQL and AlloyDB keep a static IP instead); either way, your pool holds dead connections until it notices. Your side of the contract: reconnect instead of caching the old address (AWS recommends a JVM DNS TTL of "no more than 60 seconds"), retry the whole transaction, check that logical replication slots survived, and fail over on purpose, in business hours, on a schedule ([the three questions to ask](/books/eight-kilobytes/replication#dont-hand-roll-failover)).
+
+<DeepDive title="Documented failover times, and the fine print that stretches them">
+
+| Setup | Typical failover, per its docs |
+|---|---|
+| RDS Multi-AZ instance | typically 60 to 120 seconds |
+| RDS Multi-AZ cluster (two readable standbys) | "typically under 35 seconds" |
+| Aurora with a replica | "less than 60 seconds, and often less than 30" |
+| Aurora without a replica | "typically takes less than 10 minutes" |
+| Cloud SQL HA | unavailable "about sixty seconds" |
+| AlloyDB HA | detection "up to 30 seconds", then "typically less than 30 seconds" |
+| Azure zone-redundant HA | "within 60-120 seconds with zero data loss" |
+
+Sources, October 2026: [RDS Multi-AZ](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZ.Failover.html), [RDS cluster](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/multi-az-db-clusters-concepts-failover.html), [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.AuroraHighAvailability.html), [Cloud SQL](https://docs.cloud.google.com/sql/docs/postgres/high-availability), [AlloyDB](https://docs.cloud.google.com/alloydb/docs/high-availability), [Azure](https://learn.microsoft.com/en-us/azure/postgresql/high-availability/concepts-high-availability). AWS: "large transactions or a lengthy recovery process can increase failover time". Microsoft: the standby "typically recovers WAL files at 40 MB/s", and slot synchronization to the standby is native from PostgreSQL 17 when configured. RDS and Azure move DNS; Cloud SQL and AlloyDB keep a static IP.
+
+</DeepDive>
+
+## You can't SSH in, so plan your logs
+
+No shell means no `tail -f`. Logs live where the provider puts them, for as long as it keeps them: RDS keeps log files 3 days by default, 7 at most ([AWS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_LogAccess.Concepts.PostgreSQL.overview.parameter-groups.html)). Set the [logging that pays off](/books/eight-kilobytes/configuration#cheap-logging-answers-most-3-am-questions) on day one and ship it somewhere you control, or the evidence is gone before the incident review.
+
+## The bill has its own failure modes
+
+Managed pricing turns performance problems into line items, so a slow query shows up twice: once on the dashboard, once on the invoice. On Aurora Standard, every unneeded sequential scan is billed I/O. AWS charges "$0.01 per GB in/out" across Availability Zones ([AWS](https://aws.amazon.com/rds/pricing/), October 2026), so an app reading a replica in another zone pays for every result set.
+
+The most expensive trap is the instance you upsized for a slow query: the [relationships chapter's](/books/eight-kilobytes/relationships) delete reads all 35,173 pages of `events` without an index and three with one. RAM hides that; the index fixes it, for nothing a month.
+
+## The short version
+
+- Buy as much management as you can afford, and spend your own expertise on query, index, and schema design. Self-manage only for a concrete reason, with the people to own it.
+- Managed doesn't mean optimized. Price both options in people hours, not only the bill.
+- There is no superuser: give monitoring and on-call accounts predefined roles, not the admin password.
+- Static settings wait for a reboot you schedule; keep per-role settings in migrations. Check the extension list's footnotes before designing around one.
+- You get the lower of the volume's and the instance's I/O limits. Flat IOPS plus `DataFileRead` waits means fix pages first, buy IOPS last.
+- Know whether your pooler pins or leaks. Time a real restore, rehearse upgrades on a clone, and make your app reconnect and retry through failover.
+
+## Further reading
+
+- [Understanding the rds_superuser role](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.PostgreSQL.CommonDBATasks.Roles.rds_superuser.html), AWS documentation. The exact attributes of the RDS admin role and what it can do.
+- [Avoiding pinning an RDS Proxy](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy-pinning.html), AWS documentation. The full list of what pins a PostgreSQL session, and how to see it.
+- [RDS Blue/Green Deployments considerations](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/blue-green-deployments-considerations.html), AWS documentation. Every logical-replication limit you'll meet in a blue/green major upgrade.
+- [PgBouncer in Azure Database for PostgreSQL](https://learn.microsoft.com/en-us/azure/postgresql/connectivity/concepts-pgbouncer), Microsoft documentation. A managed transaction pooler's settings and limits, spelled out.
+- [Cloud SQL high availability](https://docs.cloud.google.com/sql/docs/postgres/high-availability), Google Cloud documentation. How a regional standby fails over, and what your app sees while it does.
+- [Neon architecture overview](https://neon.com/docs/introduction/architecture-overview), Neon documentation. Safekeepers, pageservers, and what a quorum commit means.
+- [Predefined roles](https://www.postgresql.org/docs/18/predefined-roles.html), PostgreSQL documentation. What each built-in role grants, for building least-privilege accounts on any provider.

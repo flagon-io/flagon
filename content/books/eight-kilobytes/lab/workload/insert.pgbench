@@ -1,0 +1,5 @@
+-- Watch it run: one event per request, each in its own transaction.
+\set a random(1, 1000)
+\set p random(1, 20000)
+\set u random(1, 100000)
+insert into events (account_id, project_id, user_id, kind, payload) values (:a, :p, :u, 'deploy', jsonb_build_object('status', 'ok'));

@@ -748,3 +748,546 @@ label[for] {
     border-top: 1px solid var(--hairline);
   }
 }
+
+/* ── Book print edition (/books/<book>/print, printed to the PDF) ──────
+ * A 7 x 10 in trade page. Every page shares one set of margins: Chrome lays
+ * the whole document out at one width and won't paint into a margin, so a
+ * full-bleed cover page would clip or shrink everything after it. The cover
+ * fills the first page's content area instead. Named pages drop the page
+ * number from the cover and front matter. The whole type system is rem-based,
+ * so the root size sets the book's scale in one place. On screen the same
+ * page reads as one long document. */
+@page book {
+  size: 7in 10in;
+  margin: 0.85in 0.8in 0.9in;
+  @bottom-center {
+    content: counter(page);
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 8pt;
+    color: #8a8a93;
+  }
+}
+@page front {
+  size: 7in 10in;
+  margin: 0.85in 0.8in 0.9in;
+}
+
+:root:has(.book-print) { font-size: 13px; background: #fff; }
+:root:has(.book-print) body { background: #fff; }
+.book-print {
+  page: book;
+  max-width: 7in;
+  margin-inline: auto;
+  padding: 2rem 1.5rem 4rem;
+  color: #111114;
+}
+@media print {
+  .book-print { padding: 0; max-width: none; }
+}
+
+.book-print .print-cover {
+  page: front;
+  /* 10in less the top and bottom margins of @page front. */
+  height: 8.25in;
+  break-after: page;
+  margin-bottom: 3rem;
+}
+@media print {
+  .book-print .print-cover { margin: 0; }
+}
+.book-print .print-front { page: front; break-after: page; }
+
+.book-print .print-titlepage {
+  display: flex;
+  min-height: 8in;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.book-print .print-titlepage h1 {
+  font-size: 3.4rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin-top: 1.5in;
+}
+.book-print .print-subtitle {
+  margin-top: 1rem;
+  max-width: 26rem;
+  font-size: 1.15rem;
+  line-height: 1.5;
+  color: #44444b;
+}
+.book-print .print-byline {
+  margin-top: 2rem;
+  font-family: var(--font-heading);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+.book-print .print-publisher {
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  color: #55555c;
+}
+.book-print .print-colophon {
+  border-top: 1px solid #d4d4d8;
+  padding-top: 1rem;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: #55555c;
+}
+.book-print .print-colophon a { color: inherit; text-decoration: underline; }
+
+.book-print .print-contents h2 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.01em; }
+.book-print .print-contents-part { margin-top: 1.4rem; break-inside: avoid; }
+.book-print .print-contents-partname {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: #6b6b73;
+  border-bottom: 1px solid #e4e4e7;
+  padding-bottom: 0.3rem;
+}
+.book-print .print-contents a {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.28rem 0;
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+.book-print .print-contents-no {
+  width: 1.5rem;
+  flex-shrink: 0;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: #0f766e;
+  padding-top: 0.1rem;
+}
+
+.book-print .print-part {
+  display: flex;
+  min-height: 7.5in;
+  flex-direction: column;
+  justify-content: center;
+}
+.book-print .print-part h2 {
+  font-size: 2.6rem;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.book-print .print-part h2 span,
+.book-print .print-chapter-head h3 span {
+  display: block;
+  margin-bottom: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #0f766e;
+}
+
+.book-print .print-chapter { break-before: page; }
+.book-print .print-chapter-head {
+  margin-bottom: 2rem;
+  padding: 1.2in 0 1.4rem;
+  border-bottom: 1px solid #d4d4d8;
+}
+.book-print .print-chapter-head h3 {
+  font-size: 2.1rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+}
+.book-print .print-dek {
+  margin-top: 0.8rem;
+  font-size: 1.05rem;
+  line-height: 1.5;
+  color: #55555c;
+}
+
+/* Prose on paper: darker text, demoted headings styled as h2/h3, and code
+ * that wraps rather than being cut off at the margin. */
+.book-print .prose { line-height: 1.6; }
+.book-print .prose :is(p, ul, ol, li, blockquote) { color: #26262b; orphans: 3; widows: 3; }
+.book-print .prose h4 {
+  margin-top: 2.2rem;
+  font-size: 1.35rem;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  break-after: avoid;
+}
+.book-print .prose h5 {
+  margin-top: 1.6rem;
+  font-size: 1.1rem;
+  font-weight: 650;
+  break-after: avoid;
+}
+.book-print .prose :is(h4, h5) + * { margin-top: 0.5rem; }
+.book-print .prose :is(h4, h5) a { color: inherit; text-decoration: none; }
+.book-print .prose pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  background: #fafafa;
+  border-color: #e4e4e7;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  padding: 0.7rem 0.85rem;
+}
+/* Diagrams are drawn under 72 columns and about 89 fit, so they never wrap;
+ * wide query plans do, rather than running off the page. */
+.book-print .prose pre[data-language="text"],
+.book-print .prose pre[data-language="text"] code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.book-print .prose pre[data-language="text"] {
+  font-size: 0.74rem;
+  line-height: 1.22;
+}
+.book-print .prose :is(table, [role="note"], tr, img) { break-inside: avoid; }
+.book-print .prose table { display: table; font-size: 0.85rem; }
+.book-print .prose a { color: #0f766e; }
+/* A Prove it box on paper: the claims its checks prove, and the lab file. */
+.book-print .prose .print-prove {
+  margin: 0.9rem 0;
+  border-left: 2px solid #0f766e;
+  padding-left: 0.7rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #55555c;
+  break-inside: avoid;
+}
+.book-print .prose .print-prove-head {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b6b73;
+}
+.book-print .prose .print-prove ul { margin: 0.25rem 0 0; padding-left: 1rem; list-style: disc; }
+.book-print .prose .print-prove li { margin: 0.1rem 0; color: #55555c; }
+
+/* The back-of-book index: two columns of small type, grouped by letter. */
+.book-print .print-index-cols { column-count: 2; column-gap: 1.6rem; font-size: 0.78rem; line-height: 1.4; }
+.book-print .print-index-group { margin-bottom: 0.8rem; }
+.book-print .print-index-letter {
+  break-after: avoid;
+  margin-bottom: 0.2rem;
+  font-family: var(--font-heading);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.book-print .print-index-entry { padding-left: 1em; text-indent: -1em; break-inside: avoid; }
+.book-print .print-index-entry code { font-size: 0.92em; }
+.book-print .print-index-see { font-style: italic; }
+
+/* ── Print-on-demand interior (/books/<book>/print/book) ─────────────
+ * Layered on the screen print styles above. Page geometry, mirrored margins,
+ * folios and running heads come from the <style> the page renders for its
+ * exact trim (components/book-print.tsx). Here: which pages carry what, and a
+ * black-and-white interior that prints cleanly on any press. */
+.book-print.book-edition { page: auto; color: #000; }
+.book-edition .print-halftitle,
+.book-edition .print-titlepage,
+.book-edition .print-copyright,
+.book-edition .print-part { page: opener; }
+.book-edition .print-contents { page: auto; }
+.book-print .print-blank { page: blank; break-before: page; height: 0; }
+
+.book-print .print-halftitle {
+  display: flex;
+  min-height: 7in;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--font-heading);
+  font-size: 1.6rem;
+  font-weight: 700;
+  break-after: page;
+}
+.book-print .print-copyright {
+  display: flex;
+  min-height: 8in;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: #333;
+  break-after: page;
+}
+.book-print .print-titlepage .print-publisher {
+  font-family: var(--font-heading);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* Contents with real page numbers and dot leaders. */
+.book-edition .print-contents-title { display: flex; flex: 1; min-width: 0; }
+.book-edition .print-contents-title::after {
+  content: "";
+  flex: 1;
+  margin: 0 0.4rem 0.32rem;
+  border-bottom: 1px dotted #999;
+}
+.book-edition .print-contents-page {
+  min-width: 2rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Black and white: no color carries meaning on the page. */
+.book-edition .print-part h2 span,
+.book-edition .print-chapter-head h3 span,
+.book-edition .print-contents-no { color: #000; }
+.book-edition .prose a { color: inherit; text-decoration: none; }
+.book-edition .prose a[data-url]::after {
+  content: " (" attr(data-url) ")";
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  color: #444;
+  overflow-wrap: anywhere;
+}
+.book-edition .print-pageref { color: #444; font-size: 0.92em; }
+.book-edition .prose pre {
+  background: none;
+  border: 0.5pt solid #aaa;
+}
+.book-edition .prose pre,
+.book-edition .prose pre span { color: #111 !important; }
+/* GitHub-light's comment color, wherever Shiki put it. */
+.book-edition .prose pre span[style*="#6A737D" i] { color: #555 !important; font-style: italic; }
+.book-edition .prose :not(pre) > code { background: none; border-color: #bbb; color: #000; }
+.book-edition .prose [role="note"] { background: none !important; border-color: #999 !important; }
+.book-edition .prose [role="note"] svg { color: #444 !important; }
+.book-edition .prose [role="note"] div { color: #222; }
+.book-edition .prose .print-prove { border-left-color: #999; color: #444; }
+.book-edition .prose th { background: #eee; }
+
+/* ── Deep dives (components/deep-dive.tsx) ───────────────────────────
+ * One text, two depths. <html data-depth> is set before first paint; in
+ * simple mode a deep dive shows only its head until the reader opens it, and
+ * its headings drop out of the on-this-page rail. */
+.prose .deep-dive {
+  margin: 2.5rem 0;
+  border-top: 1px solid var(--color-hairline);
+  border-bottom: 1px solid var(--color-hairline);
+}
+/* The label is an eyebrow above the title, so the title gets the full width
+ * and long titles wrap rarely and cleanly; the toggle centres against both. */
+.prose .deep-dive-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.3rem 1rem;
+  padding: 0.9rem 0;
+}
+.prose .deep-dive-label {
+  grid-column: 1;
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-brand);
+}
+/* Trim the caps to their own height so they centre on the icon optically. */
+.prose .deep-dive-label-text { text-box: trim-both cap alphabetic; }
+.prose .deep-dive-title {
+  grid-column: 1;
+  grid-row: 2;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--color-foreground);
+  text-wrap: pretty;
+}
+.prose .deep-dive-toggle {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.4rem;
+  margin-right: -0.4rem;
+  font-size: 0.8rem;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--color-muted-foreground);
+}
+.prose .deep-dive-toggle:hover { color: var(--color-foreground); }
+.prose .deep-dive-toggle:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+.prose .deep-dive-body { padding-bottom: 1.25rem; }
+.prose .deep-dive-body > :first-child { margin-top: 0; }
+html[data-depth="simple"] .prose .deep-dive:not([data-open]) .deep-dive-body { display: none; }
+html[data-depth="deep"] .prose .deep-dive-toggle { display: none; }
+html[data-depth="simple"] [data-toc-deep] { display: none; }
+@media print {
+  .prose .deep-dive .deep-dive-body { display: block !important; }
+  .prose .deep-dive-toggle { display: none !important; }
+}
+
+/* Deep dives on paper: printed in full, ruled off and set a touch smaller so
+ * the essay track reads straight through. */
+.book-print .prose .print-deep-dive {
+  margin: 1.8rem 0;
+  padding: 0.9rem 0 0.4rem 1rem;
+  border-left: 2pt solid #0f766e;
+  font-size: 0.94em;
+}
+.book-edition .prose .print-deep-dive { border-left-color: #777; }
+.book-print .prose .print-deep-dive-label {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #0f766e;
+  break-after: avoid;
+}
+.book-edition .prose .print-deep-dive-label { color: #444; }
+.book-print .prose .print-deep-dive-title {
+  margin-top: 0.15rem;
+  font-weight: 650;
+  color: #000;
+  break-after: avoid;
+}
+
+/* KDP wants no transparency in an interior (flattening it can rasterize
+ * text), so the print edition swaps every translucent token for an opaque
+ * gray. Everything in it is black, white, or a solid gray. */
+.book-print.book-edition {
+  --hairline: #d4d4d4;
+  --mark: #c4c4c4;
+  --panel: #f2f2f2;
+  --card: #ffffff;
+  --border: #d4d4d4;
+  --input: #d4d4d4;
+  --muted-foreground: #333333;
+  --subtle: #555555;
+  --foreground: #000000;
+  --brand: #333333;
+  --link: #000000;
+  --art-card: #ffffff;
+  --color-hairline: #d4d4d4;
+  --color-panel: #f2f2f2;
+  --color-muted-foreground: #333333;
+  --color-subtle: #555555;
+  --color-brand: #333333;
+  --color-link: #000000;
+  --color-foreground: #000000;
+}
+
+/* The book's figures on paper: opaque grays only (no alpha anywhere, so the
+ * interior stays free of transparency), and every fill at least 10% gray so
+ * it survives black-ink printing. The accent becomes black. */
+.book-print.book-edition,
+.book-edition-preview {
+  --fig-paper: #ffffff;
+  --fig-shade: #e6e6e6;
+  --fig-shade-2: #cccccc;
+  --fig-ink: #1a1a1a;
+  --fig-line: #666666;
+  --fig-faint: #b3b3b3;
+  --fig-accent: #000000;
+  --fig-accent-fill: #bfbfbf;
+}
+.book-edition * { opacity: 1 !important; box-shadow: none !important; text-shadow: none !important; }
+
+/* Task-list checkboxes on paper: a drawn box, not a native (disabled,
+ * translucent) form control, which would put transparency in the PDF. */
+.book-print input[type="checkbox"] {
+  appearance: none;
+  width: 0.75em;
+  height: 0.75em;
+  margin: 0 0.45em 0 0;
+  vertical-align: -0.05em;
+  border: 0.75pt solid #000;
+  border-radius: 0;
+  background: #fff;
+  opacity: 1;
+}
+.book-print .prose h6.print-deep-dive-title { font-size: 1em; margin: 0.15rem 0 0; }
+
+/* The book's figures (components/book-art) read the site's line-art tokens
+ * on screen. */
+:root {
+  --fig-paper: var(--art-top);
+  --fig-shade: var(--art-left);
+  --fig-shade-2: var(--art-right);
+  --fig-ink: var(--art-ink);
+  --fig-line: var(--art-line);
+  --fig-faint: var(--art-faint);
+  --fig-accent: var(--art-accent);
+  --fig-accent-fill: var(--art-accent-fill);
+}
+.book-figure { margin: 2.25rem 0; }
+.book-figure svg { overflow: visible; }
+.book-figure figcaption {
+  margin-top: 0.85rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+  text-wrap: pretty;
+}
+.book-figure figcaption strong { color: var(--foreground); font-weight: 600; }
+@media (width >= 64rem) {
+  .book-figure-wide { margin-inline: -2.5rem; }
+  .book-figure-wide figcaption { margin-inline: 2.5rem; }
+}
+.book-print .book-figure { break-inside: avoid; margin: 1.4rem 0; }
+.book-print .book-figure svg { max-height: 4.6in; width: 100%; }
+.book-print .book-figure figcaption { font-size: 0.82rem; color: #333; }
+
+/* A part's drawing: on its opener page in print, atop its first chapter on
+ * screen. */
+.book-part-art { width: 100%; }
+.book-print .print-part .book-part-art { margin-top: 0.6in; max-height: 4.2in; }
+.book-figure figcaption p { margin: 0; }
+
+/* A book on its stage (components/book-stage). At rest it leans back a little,
+ * tips with the site's slant, and turns its spine toward you; it drifts on a
+ * slow float the whole time, and on hover it rises and turns to face you. */
+.book-float {
+  transform-style: preserve-3d;
+  animation: book-float 9s ease-in-out infinite;
+}
+.book-3d {
+  transform: rotateZ(3.5deg) rotateX(9deg) rotateY(26deg);
+  transition: transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.group:hover .book-3d,
+.book-stage-book:hover .book-3d { transform: rotateZ(2deg) rotateX(4deg) rotateY(10deg) translateY(-12px) translateZ(24px); }
+.book-shadow { animation: book-shadow 9s ease-in-out infinite; }
+@keyframes book-float {
+  0%, 100% { transform: translateY(0) rotateY(0deg) rotateX(0deg); }
+  50% { transform: translateY(-7px) rotateY(-5deg) rotateX(1.5deg); }
+}
+@keyframes book-shadow {
+  0%, 100% { transform: translateX(6%) scaleX(1); opacity: 1; }
+  50% { transform: translateX(4%) scaleX(0.9); opacity: 0.8; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .book-float, .book-shadow { animation: none; }
+  .book-3d { transition: none; }
+}
+
+/* On a phone, a figure squeezed to the column would shrink its labels past
+ * reading; keep it at a readable width and let it scroll sideways instead. */
+@media (width < 40rem) {
+  .book-figure { overflow-x: auto; overscroll-behavior-x: contain; }
+  .book-figure svg { min-width: 34rem; }
+  .book-figure figcaption { position: sticky; left: 0; max-width: calc(100vw - 3rem); }
+}

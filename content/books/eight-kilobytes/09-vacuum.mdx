@@ -1,0 +1,556 @@
+---
+title: Vacuum is not optional
+description: What vacuum does to your pages, when autovacuum fires, what stops it working, and how to measure and fix bloat before it becomes an outage.
+part: The machine
+builds_on: [storage, mvcc]
+---
+
+Sooner or later you'll watch a table keep growing while `pg_stat_user_tables` says autovacuum ran on it an hour ago. You already know where the growth comes from: every update and delete leaves a dead row version behind ([Updates are inserts](/books/eight-kilobytes/mvcc)). This chapter is about the process that's supposed to clean up after them, and why it sometimes doesn't.
+
+When vacuum keeps up, nobody notices. Tables churn and stay the same size. Vacuum also keeps transaction IDs from running out, [index-only scans](/books/eight-kilobytes/glossary#index-only-scan) working, and statistics fresh. When it falls behind, tables bloat, queries read pages they shouldn't, and in the worst case the database stops accepting writes.
+
+Vacuum is the only part of Postgres that everyone ignores until it's the only thing anyone talks about. Learn it before then.
+
+## Measure dead tuples with pgstattuple
+
+Start by measuring, with the same `pgstattuple` that watched `users` double in [Vacuum frees space inside the table, not on disk](/books/eight-kilobytes/mvcc#vacuum-frees-space-inside-the-table-not-on-disk). This time the table is `vac_demo`, a copy of the first half million `events`, autovacuum off. Update every second row, then look:
+
+```sql
+update vac_demo set payload = payload || '{"seen": true}' where id % 2 = 0;
+
+select tuple_count, dead_tuple_count, dead_tuple_percent, free_percent
+from pgstattuple('vac_demo');
+```
+
+```text
+ tuple_count | dead_tuple_count | dead_tuple_percent | free_percent
+-------------+------------------+--------------------+--------------
+      500000 |           250000 |              31.13 |         0.59
+```
+
+Same 500,000 live rows, plus 250,000 dead ones taking 31% of the table. The packed pages had no room for the new versions, so they went to 4,807 new pages at the end. Every sequential scan now reads 55% more pages.
+
+`pgstattuple` is exact but reads the whole table. On big production tables, use `pgstattuple_approx()`, which skips all-visible pages, or the cheap estimates `n_live_tup` and `n_dead_tup` in `pg_stat_user_tables`.
+
+<ProveIt lab="09-vacuum">
+
+```sql
+select lab.prove(
+  'updating every second row leaves 250,000 dead tuples, about 31% of the table',
+  tuple_count = 500000 and dead_tuple_count = 250000
+  and dead_tuple_percent between 29 and 33)
+from pgstattuple('vac_demo');
+
+select lab.prove(
+  'the table grew about 55% (to about 13,600 pages) with nothing inserted',
+  pg_relation_size('vac_demo') / 8192 between 13400 and 13800);
+```
+
+</ProveIt>
+
+## Vacuum does five jobs
+
+Clearing those 250,000 dead rows is only the first of vacuum's jobs. Plain `VACUUM` (not `VACUUM FULL`) works in place and takes only a `SHARE UPDATE EXCLUSIVE` [lock](/books/eight-kilobytes/glossary#lock-modes), which blocks neither reads nor writes. It works a fixed route: it walks the table, then every index, then the table again.
+
+```text
+ heap pass 1               index pass             heap pass 2
+ -----------               ----------             -----------
+ for each page:            for each index:        for each page with
+  - prune dead versions     - delete entries       dead line pointers:
+  - remember dead TIDs        pointing at the       - mark them unused
+  - freeze old tuples         dead TIDs             - update FSM
+  - set VM bits                                     - set VM bits
+                                                  then: truncate empty
+                                                  pages at the end
+```
+
+<Callout type="info" title="Coming from MySQL">
+InnoDB's background purge threads clean old row versions out of its undo logs. Postgres's old versions live in the table, so vacuum does purge's job on the heap and every index, and one risk has no InnoDB equivalent: transaction ID wraparound ([Postgres is not MySQL](/books/eight-kilobytes/not-mysql)).
+</Callout>
+
+### 1. Remove dead row versions
+
+A row version is **dead** when the transaction that deleted or replaced it committed and no running transaction could still need it. Vacuum computes that boundary, the xmin horizon from [A version is dead only when no snapshot can see it](/books/eight-kilobytes/mvcc#a-version-is-dead-only-when-no-snapshot-can-see-it), and its output calls it the **removable cutoff**: the oldest transaction ID any current snapshot might care about. Remember the phrase "dead but not yet removable". It's the most important line in vacuum's output.
+
+Indexes point at heap tuples by location (the TID, a `(page, slot)` address), so vacuum removes dead versions in stages. It prunes each heap page and collects the dead TIDs in memory; scans every index in full, deleting entries that point at them; then frees the heap slots. Every index multiplies vacuum's cost. (Ordinary queries prune pages too, as they pass: [Pruning waits for a nearly full page](/books/eight-kilobytes/hot#pruning-waits-for-a-nearly-full-page).)
+
+<DeepDive title="When vacuum scans every index twice">
+
+The dead TIDs live in `maintenance_work_mem` (or `autovacuum_work_mem`). If they don't fit, vacuum does an index pass, empties the list, and continues, so too little memory means several full scans of every index. `index scans: 1` in the verbose output means once. PostgreSQL 17 replaced the TID array with a far more compact structure and lifted its 1 GB cap, so this is rare on 17+. On older versions, give vacuum enough memory that `index scans:` stays at 1.
+
+</DeepDive>
+
+### 2. Record the free space
+
+Freed space goes into the **free space map** (FSM), so later writes fill existing pages instead of extending the file ([Inserts find room without scanning the table](/books/eight-kilobytes/storage#inserts-find-room-without-scanning-the-table)). Vacuum makes the space *reusable*, not smaller.
+
+After the vacuum, `vac_demo` was still 13,601 pages, but dead tuples went to zero and free space rose from 0.6% to 31.7%. Then we inserted 100,000 rows. Not one page was added; free space fell to 19.3%.
+
+That's the steady state you want: a table that churns but stays the same size. Bloat is what you get when that loop breaks.
+
+<ProveIt lab="09-vacuum">
+
+```sql
+select lab.prove(
+  'the table is the same size, and the dead space is now about 32% free space',
+  pg_relation_size('vac_demo') / 8192 = :pages_after_update
+  and free_percent between 29 and 34)
+from pgstattuple('vac_demo');
+
+select lab.prove(
+  '100,000 new rows land in that free space: not one page added',
+  pg_relation_size('vac_demo') / 8192 = :pages_after_update);
+```
+
+</ProveIt>
+
+### 3. Truncate empty pages at the end
+
+Plain vacuum shrinks the file only when whole pages *at the end* are empty, taking a brief `ACCESS EXCLUSIVE` lock to cut them off. Delete the newest half of a time-ordered table and vacuum halves the file. Delete the oldest half and the space sits at the front: reusable, never returned to the operating system.
+
+<DeepDive title="Which half you delete decides whether the file shrinks">
+
+```sql
+create table trunc_demo with (autovacuum_enabled = off) as
+  select * from events where id <= 100000;
+delete from trunc_demo where id > 50000;
+vacuum (verbose) trunc_demo;
+```
+
+```text
+INFO:  table "trunc_demo": truncated 1792 to 880 pages
+```
+
+`events` is ordered by time, so the newest half sat at the end of the file. The truncation lock is short, but replicas replay it, which can cause a visible stall. Disable it per table with the `vacuum_truncate` storage parameter, or per run with `vacuum (truncate false)`; PostgreSQL 18 adds a `vacuum_truncate` server setting too.
+
+<ProveIt lab="09-vacuum">
+
+```sql
+select lab.prove(
+  'deleting the newest half and vacuuming cuts the file roughly in half (about 1,790 to 880 pages)',
+  :trunc_before between 1750 and 1850
+  and pg_relation_size('trunc_demo') / 8192 between 860 and 900);
+
+select lab.prove(
+  'deleting the oldest half instead frees the space at the front, and the file does not shrink',
+  pg_relation_size('front_demo') / 8192 = :trunc_before);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### 4. Freeze old tuples
+
+Transaction IDs (XIDs) are stored in 32 bits, about 4.3 billion values, and the counter wraps around like an odometer. So Postgres compares XIDs in a circle: for any XID, about 2.1 billion are "in the past" and 2.1 billion "in the future". A tuple whose inserting XID fell more than 2.1 billion behind the counter would suddenly look like it came from the future and vanish from every query. That's **transaction ID wraparound**.
+
+**Freezing** prevents it. Once a tuple's inserting transaction is so old that every snapshot sees it as committed, vacuum marks the tuple **frozen**: visible to everyone, forever, whatever the counter says. Each table's `relfrozenxid` says every older XID in it has been frozen out, and `age(relfrozenxid)`, how many XIDs ago that was, must never approach two billion. Vacuum doesn't bother freezing rows younger than `vacuum_freeze_min_age` (50 million transactions); `vacuum (freeze)` freezes everything it can, now. A page whose tuples are all frozen is marked all-frozen in the visibility map, so later vacuums never read it again.
+
+<DeepDive title="Frozen is two hint bits that can't otherwise coexist">
+
+Here is the three-row `account_usage` table from [Updates are inserts](/books/eight-kilobytes/mvcc), frozen explicitly:
+
+```sql
+vacuum (freeze) account_usage;
+
+select lp, t_xmin, combined_flags
+from heap_page_items(get_raw_page('account_usage', 0)),
+     heap_tuple_infomask_flags(t_infomask, t_infomask2)
+where lp_flags = 1;
+```
+
+```text
+ lp | t_xmin | combined_flags
+----+--------+--------------------
+  4 | 869586 | {HEAP_XMIN_FROZEN}
+  5 | 869588 | {HEAP_XMIN_FROZEN}
+  6 | 869580 | {HEAP_XMIN_FROZEN}
+```
+
+`HEAP_XMIN_FROZEN` is the "committed" and "invalid" hint bits set together, a combination that otherwise makes no sense. The original `t_xmin` stays for debugging but is no longer consulted, `relfrozenxid` jumps to the present, and the visibility map marks the page all-visible and all-frozen. You never need `vacuum (freeze)` in normal operation; the settings below decide when autovacuum does it.
+
+</DeepDive>
+
+### 5. Maintain the visibility map
+
+The **visibility map** (VM) keeps two bits per heap page: *all-visible* and *all-frozen* ([Two bits per page let scans and vacuum skip work](/books/eight-kilobytes/storage#two-bits-per-page-let-scans-and-vacuum-skip-work)). Vacuum sets them; any change to the page clears them. Index-only scans skip the heap for all-visible pages, vacuum skips them, and freezing vacuums skip all-frozen ones.
+
+So append-only tables need vacuum too. Nothing dies in them, but without vacuum their pages never become all-visible (no index-only scans) or all-frozen (so one day a giant anti-wraparound vacuum freezes the whole table at once). And `vacuum (analyze)` refreshes [planner statistics](/books/eight-kilobytes/planner) while it's there.
+
+<DeepDive title="What vacuum (verbose) says about each job">
+
+```sql
+vacuum (verbose) vac_demo;
+```
+
+```text
+pages: 0 removed, 13601 remain, 13601 scanned (100.00% of total), 0 eagerly scanned
+tuples: 250000 removed, 500000 remain, 0 are dead but not yet removable
+removable cutoff: 11733, which was 5 XIDs old when operation ended
+frozen: 0 pages from table (0.00% of total) had 0 tuples frozen
+visibility map: 13601 pages set all-visible, 0 pages set all-frozen ...
+index scan needed: 8794 pages from table (64.66% of total) had 250000 dead
+  item identifiers removed
+...
+```
+
+`tuples:` is job 1 and its `dead but not yet removable` count is the line to watch; `index scan needed` is job 1's index pass; `pages: 0 removed` is job 3 finding nothing to truncate; `frozen:` is job 4; `visibility map:` is job 5. Free space (job 2) shows up only in `pgstattuple`.
+
+</DeepDive>
+
+## Autovacuum fires on dead rows, inserts, or age
+
+The autovacuum launcher wakes every minute (`autovacuum_naptime`) and starts a worker, up to `autovacuum_max_workers` (default 3), on any table past one of three thresholds:
+
+- **Dead tuples.** `n_dead_tup` exceeds `autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor * reltuples`: 50 plus 20% of the live rows. PostgreSQL 18 caps it at `autovacuum_vacuum_max_threshold` (100 million).
+- **Inserts** (PostgreSQL 13+). `n_ins_since_vacuum` exceeds 1,000 plus 20% of the table. This gives append-only tables their visibility bits and freezing in small doses. In PostgreSQL 18 the scaled part counts only the not-yet-frozen share.
+- **Age.** `age(relfrozenxid)` exceeds `autovacuum_freeze_max_age` (200 million). This is an **anti-wraparound** vacuum, and it runs even if autovacuum is disabled.
+
+Analyze fires when changed rows exceed 50 plus 10% of the table.
+
+### The defaults are wrong for big tables
+
+A scale factor of 0.2 means "vacuum when a fifth of the table is dead":
+
+| live rows     | dead rows before autovacuum | what it means                     |
+|---------------|-----------------------------|-----------------------------------|
+| 1,000         | 250                         | fine                              |
+| 2,000,000     | 400,050                     | `events` today: 400k dead first   |
+| 100,000,000   | 20,000,050                  | 20 million dead rows of bloat     |
+| 1,000,000,000 | 100,000,000 (PostgreSQL 18 cap) | 200 million without the cap  |
+
+On a big table, 20% dead is gigabytes of dead rows every query scans, and a vacuum that takes hours when it finally starts. Analyze has the same problem: at 10%, a year-long time-series table like `events` can go more than a month between analyzes, so its statistics miss the newest rows, the ones queries ask about most. The fix is per-table settings:
+
+```sql
+alter table events set (
+  autovacuum_vacuum_scale_factor        = 0.01,
+  autovacuum_vacuum_threshold           = 1000,
+  autovacuum_vacuum_insert_scale_factor = 0.01,
+  autovacuum_analyze_scale_factor       = 0.02,
+  autovacuum_vacuum_cost_limit          = 1000
+);
+```
+
+Now `events` is vacuumed at about 21,000 dead rows instead of 400,000. Frequent small vacuums beat rare huge ones in every way. Our rule: past a few million rows, use a scale factor of 0.01 to 0.05, or 0 with a fixed threshold ([Autovacuum's defaults suit small tables and slow disks](/books/eight-kilobytes/configuration#autovacuums-defaults-suit-small-tables-and-slow-disks) has the global settings).
+
+<ProveIt lab="09-vacuum">
+
+```sql
+select lab.prove(
+  'for events (2,000,000 rows), the default trigger is 400,050 dead rows',
+  (select count(*) from events) = 2000000
+  and least(100000000, 50 + 0.2 * (select count(*) from events)) = 400050);
+
+select lab.prove(
+  'with scale factor 0.01 and threshold 1000, events is vacuumed at about 21,000 dead rows',
+  1000 + 0.01 * (select count(*) from events) = 21000);
+```
+
+</ProveIt>
+
+<Callout type="warn" title="Never disable autovacuum to fix a problem">
+Turning autovacuum off never fixes anything: dead tuples pile up, statistics rot, and the anti-wraparound vacuum still comes, at the worst possible size. If autovacuum is expensive, make it run *more* often on less work, with more I/O budget so it finishes.
+</Callout>
+
+## Autovacuum runs on a budget, and the default is small
+
+Autovacuum throttles itself with a point budget: 1 point per page found in shared buffers, 2 per page read from outside, 20 per page dirtied. When a worker spends `vacuum_cost_limit` (200) points, it sleeps for `autovacuum_vacuum_cost_delay` (2 ms). Manual `VACUUM` isn't throttled.
+
+That's 100,000 points per second: 50,000 pages read (about 390 MB/s, plenty) but only 5,000 pages dirtied (about 39 MB/s), shared by all three workers. On SSDs with real write volume, vacuum falls behind and bloat grows no matter how low the scale factors go. Raising `autovacuum_vacuum_cost_limit` to 1,000 to 2,000 is one of the most effective changes you can make. (Vacuum also reads through a small buffer ring, sized by `vacuum_buffer_usage_limit`: [Big operations get a ring](/books/eight-kilobytes/buffers#big-operations-get-a-ring).)
+
+## Vacuum can't remove what an old snapshot might need
+
+The oldest thing that might still need old versions sets the removable cutoff. [Long transactions hold everything back](/books/eight-kilobytes/mvcc#long-transactions-hold-everything-back) showed why: one idle repeatable-read session, which never touched the table, kept 60,000 dead rows in it until it committed. Here is what that looks like from vacuum's side, and how to find each kind of holder.
+
+The symptom is one line of `vacuum (verbose)`: `0 removed`, and a large count of **dead but not yet removable**, dead to everyone except the snapshot holding the cutoff. Vacuum runs, burns I/O, and removes nothing, which is the usual answer to "autovacuum is running but the table keeps bloating". A session holding the cutoff shows up in `pg_stat_activity` with a non-null `backend_xmin`, often in the state `idle in transaction`.
+
+How much it costs depends on the writes behind it. On a quiet table a few seconds costs nothing; on one taking thousands of updates a second, a few seconds is enough to push updates off HOT and grow the table for good ([A long transaction turns HOT off](/books/eight-kilobytes/hot#a-long-transaction-turns-hot-off)). Three hours on a busy table is millions of dead rows, and the bloat outlives the transaction.
+
+<DeepDive title="An open snapshot makes vacuum remove nothing">
+
+On `vac_demo`, with 100,000 rows updated:
+
+```text
+tuples: 0 removed, 654564 remain, 100000 are dead but not yet removable
+```
+
+The `remain` count (654,564) is vacuum's estimate from the 60% of pages it scanned; it skipped the rest because the visibility map marked them all-visible. The table held 600,000 live rows.
+
+<ProveIt lab="09-vacuum">
+
+```sql
+select lab.prove(
+  'vacuum removes nothing: 100,000 rows are dead but not yet removable',
+  dead_tuple_count = 100000) from pgstattuple('vac_demo');
+
+select lab.prove(
+  'once that transaction ends, the next vacuum removes all 100,000',
+  dead_tuple_count = 0) from pgstattuple('vac_demo');
+```
+
+</ProveIt>
+
+<ProveIt lab="09-vacuum">
+
+```sql
+select lab.prove(
+  'the culprit shows up in pg_stat_activity with a non-null backend_xmin',
+  count(*) = 1)
+from pg_stat_activity
+where datname = current_database() and pid <> pg_backend_pid()
+  and backend_xmin is not null and state = 'idle in transaction';
+```
+
+</ProveIt>
+
+</DeepDive>
+
+What holds back the cutoff:
+
+- **Long-running transactions and queries**, read-only ones included.
+- **Sessions idle in transaction**: the app ran `BEGIN`, then waited on a network call or leaked the connection. The most common real cause; `idle_in_transaction_session_timeout` is the cure ([Connections aren't free](/books/eight-kilobytes/connections)).
+- **[Replication slots](/books/eight-kilobytes/glossary#replication-slot)**. A physical slot whose standby used `hot_standby_feedback` holds the cutoff for every table, and keeps holding it after the standby is gone. A logical slot holds it only for the system catalogs. Both keep WAL.
+- **Replicas with `hot_standby_feedback = on`**, where a long replica query holds back the primary.
+- **Orphaned prepared transactions** ([Two-phase commit is rarely the answer](/books/eight-kilobytes/acid#two-phase-commit-is-rarely-the-answer)).
+
+Slots and prepared transactions never appear in `pg_stat_activity`, and a standby's feedback shows up there only as a walsender's `backend_xmin` (or on its slot), so check `pg_replication_slots` and `pg_prepared_xacts` too ([Four queries tell you whether vacuum is keeping up](#four-queries-tell-you-whether-vacuum-is-keeping-up)).
+
+<Callout type="danger" title="One forgotten transaction can bloat everything">
+One session left `idle in transaction` over a weekend can hold back vacuum for its whole database; an abandoned physical replication slot can do it for the entire cluster. Set `idle_in_transaction_session_timeout` for application roles, alert on the oldest `backend_xmin` and on inactive slots, and set `max_slot_wal_keep_size` so a dead slot can't also fill the disk.
+</Callout>
+
+<DeepDive title="Vacuum also loses lock fights">
+
+Vacuum's `SHARE UPDATE EXCLUSIVE` lock conflicts with most DDL, including `ALTER TABLE`, `CREATE INDEX` (even `CONCURRENTLY`), and another vacuum. A regular autovacuum that blocks a conflicting lock request cancels itself after `deadlock_timeout`, so frequent DDL or `LOCK TABLE` can keep a table from ever finishing a vacuum (`log_autovacuum_min_duration` logs the cancellations). Anti-wraparound vacuums don't yield, which is one way a migration ends up queued behind one.
+
+</DeepDive>
+
+## Index bloat often costs more than table bloat
+
+Lookups spend their pages in indexes, so a bloated index slows every query that goes through it. **Bloat** is space that isn't live data and won't be reused soon; some free space is healthy, since the next updates land there. For tables, `pgstattuple` gives `dead_tuple_percent` plus `free_percent`. For B-tree indexes, `pgstatindex` reports leaf density.
+
+A fresh B-tree packs its leaves to about 90%. After this chapter's updates, each of which added a primary key entry for its new row version because none could stay on its page, `vac_demo`'s primary key was at 49%. `REINDEX CONCURRENTLY` (PostgreSQL 12+) rebuilds an index online, building a new copy and swapping it in:
+
+```sql
+select index_size, avg_leaf_density from pgstatindex('vac_demo_pkey');
+reindex index concurrently vac_demo_pkey;
+select index_size, avg_leaf_density from pgstatindex('vac_demo_pkey');
+```
+
+```text
+ index_size | avg_leaf_density
+------------+------------------
+   24731648 |            49.22
+
+ index_size | avg_leaf_density
+------------+------------------
+   13500416 |               90
+```
+
+23.6 MB down to 12.9 MB, 45% smaller, without blocking writes. Cheaper bloat estimates, without reading every page, are in [Watch it run](/books/eight-kilobytes/observability).
+
+<ProveIt lab="09-vacuum">
+
+```sql
+select lab.prove(
+  'after all those non-HOT updates, the primary key''s leaves are only about half full',
+  avg_leaf_density between 40 and 65) from idx_before;
+
+select lab.prove(
+  'REINDEX CONCURRENTLY packs the leaves back to about 90%',
+  avg_leaf_density between 88 and 92) from pgstatindex('vac_demo_pkey');
+
+select lab.prove(
+  'and the index is over a third smaller',
+  (select index_size from pgstatindex('vac_demo_pkey'))
+    < 0.67 * (select index_size from idx_before));
+```
+
+</ProveIt>
+
+### VACUUM FULL is an outage on a big table
+
+`VACUUM FULL` rewrites the table into a new file holding only live rows, then rebuilds every index. On `vac_demo` it went from 13,601 pages to 10,961. The catch: an `ACCESS EXCLUSIVE` lock for the whole rewrite, blocking every read and write, and disk for a second copy. On a large table, that's an outage. (`CLUSTER` is the same operation, ordering rows by an index.) Keep it for small tables and maintenance windows; rebuild big ones online ([Rebuild bloated tables without locking them](/books/eight-kilobytes/extensions#rebuild-bloated-tables-without-locking-them)).
+
+But first, ask why the table bloated. If vacuum was blocked or too slow, a rebuild just resets the clock. Fix the cause, and new writes reuse the free space already there, as the insert test showed.
+
+<DeepDive title="VACUUM FULL writes a brand-new file">
+
+```sql
+select pg_relation_filenode('vac_demo');   -- 18189
+vacuum full vac_demo;
+select pg_relation_filenode('vac_demo');   -- 19527
+```
+
+The filenode changed: a brand-new file, with the old one deleted when the transaction committed.
+
+<ProveIt lab="09-vacuum">
+
+```sql
+select lab.prove(
+  'VACUUM FULL writes a new file (the filenode changes)',
+  pg_relation_filenode('vac_demo') <> :filenode_before);
+
+select lab.prove(
+  'compacted from about 13,600 to about 11,000 pages, under 1% free',
+  table_len / 8192 between 10700 and 11200 and tuple_count = 600000 and free_percent < 1)
+from pgstattuple('vac_demo');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Wraparound stops writes before anything is corrupted
+
+The database refuses new writes, and the log says it's doing so to prevent data loss. Nothing is corrupt. You've used up most of the XID space, and Postgres stopped before the counter wraps.
+
+Every writing transaction consumes an XID (read-only ones don't). At 1,000 write transactions a second that's 86 million a day, so a busy system goes through hundreds of millions a month. The defense is layered:
+
+| XID age | Setting or limit | What happens |
+|---|---|---|
+| 150 million | `vacuum_freeze_table_age` | vacuums turn aggressive: every page not all-frozen |
+| 200 million | `autovacuum_freeze_max_age` | anti-wraparound autovacuum, even if autovacuum is off |
+| 1.6 billion | `vacuum_failsafe_age` (PostgreSQL 14+) | vacuum drops throttling and index cleanup to finish |
+| 40 million from the end | | warnings in the log and to clients |
+| 3 million from the end | | no new XIDs: no writes at all |
+
+"The end" is the wraparound point, about 2.1 billion XIDs.
+
+Normally, anti-wraparound vacuums run every few hundred million transactions and nobody notices. Emergencies happen when something stops them finishing: a blocker holding the cutoff back (vacuum can't freeze tuples newer than it), throttling so slow a huge table never finishes, or a run repeatedly blocked or killed.
+
+It happens to real companies: [Sentry](https://blog.sentry.io/transaction-id-wraparound-in-postgres/) in 2015 was down for most of a working day, and [Mandrill](https://mailchimp.com/what-we-learned-from-the-recent-mandrill-outage/) in 2019 for about 40 hours. Same shape both times: vacuum fell behind on big, busy tables long before anyone looked.
+
+<DeepDive title="How the two outages ended">
+
+Both incidents ended the same way. Sentry's write-heavy database stopped accepting writes when autovacuum couldn't keep up, and after hours of vacuuming, truncating one huge, non-critical table restored writes. Mandrill hit wraparound on a shard its hashing had made hotter than the rest; the highest estimate for the vacuum was 40 days, and truncating the largest tables (terabytes, where most were megabytes) let it finish about an hour later.
+
+</DeepDive>
+
+To avoid it:
+
+- **Monitor `age(datfrozenxid)`** per database and `age(relfrozenxid)` for the largest tables. Alert well before the failsafe, say at 500 million to 1 billion.
+- **Keep vacuum blockers in check.** They're behind almost every wraparound incident.
+- **Let insert-driven autovacuum freeze append-only tables** in small doses.
+- **Don't kill anti-wraparound vacuums** to let a migration through. `relfrozenxid` only advances when a run finishes, so the work toward it is lost, and autovacuum starts another one straight away.
+
+If writes are already refused: remove the blocker (terminate the old session, resolve the prepared transaction, drop the dead slot), then run plain `VACUUM` (not `VACUUM FULL`, which needs an XID) on the oldest tables, unthrottled. Current documentation recommends normal multi-user mode over the old single-user procedure; see [Routine Vacuuming](https://www.postgresql.org/docs/18/routine-vacuuming.html) for your version's exact steps.
+
+<DeepDive title="Multixacts wrap too, and PostgreSQL 18 freezes earlier">
+
+**Multixact IDs**, used when several transactions lock the same row (for example, many sessions' foreign key checks taking `FOR KEY SHARE`), have their own counters, ages (`mxid_age(relminmxid)`), and freeze settings, and can wrap the same way ([Shared row locks make multixacts, and multixacts wrap too](/books/eight-kilobytes/concurrency#shared-row-locks-make-multixacts-and-multixacts-wrap-too)).
+
+PostgreSQL 18 also **eagerly freezes** a limited share of all-visible pages during normal vacuums (the `eagerly scanned` count in the verbose output, tuned by `vacuum_max_eager_freeze_failure_rate`), spreading out the cost the aggressive vacuum would otherwise pay at once.
+
+</DeepDive>
+
+## Four queries tell you whether vacuum is keeping up
+
+Run these when investigating, and turn the important ones into graphs and alerts ([Watch it run](/books/eight-kilobytes/observability) collects them with the rest). Four questions:
+
+1. **Which tables are closest to autovacuum, and has it run?** A table whose `n_dead_tup` stays far above its threshold is blocked or can't keep up.
+2. **How far is each table from a forced freeze?** `age(relfrozenxid)` against `autovacuum_freeze_max_age`.
+3. **What is holding back the cutoff?** Sessions (`pg_stat_activity`), slots (`pg_replication_slots`), and prepared transactions (`pg_prepared_xacts`): check all three.
+4. **What is vacuum doing right now?** `pg_stat_progress_vacuum`.
+
+And make autovacuum report on itself: `log_autovacuum_min_duration` (default 10 minutes) logs every longer run with `VACUUM VERBOSE` detail. At `1s` you get a running history of what was vacuumed, how long it took, and what was dead but not removable.
+
+<DeepDive title="Four queries for the vacuum dashboard">
+
+**Which tables are closest to autovacuum, and has it run?** On a fresh copy of the sample data after updating 6,000 events and 300 accounts:
+
+```sql
+select s.relname,
+       s.n_dead_tup,
+       round(current_setting('autovacuum_vacuum_threshold')::int
+             + current_setting('autovacuum_vacuum_scale_factor')::float8
+               * c.reltuples) as vacuum_at,
+       s.last_autovacuum
+from pg_stat_user_tables s
+join pg_class c on c.oid = s.relid
+order by s.n_dead_tup desc
+limit 10;
+```
+
+```text
+ relname  | n_dead_tup | vacuum_at |       last_autovacuum
+----------+------------+-----------+------------------------------
+ events   |       6000 |    400052 |
+ accounts |          0 |       250 | 2026-10-06 05:57:21.08907+00
+...
+```
+
+The 300 crossed `accounts`' threshold of 250, and autovacuum cleaned them up within a minute. The 6,000 on `events` are nowhere near 400,052. This uses global settings, so tables with per-table overrides trigger earlier than `vacuum_at` shows.
+
+**How far is each table from a forced freeze?**
+
+```sql
+select c.oid::regclass as table_name,
+       age(c.relfrozenxid) as xid_age,
+       round(100.0 * age(c.relfrozenxid)
+             / current_setting('autovacuum_freeze_max_age')::int, 1)
+         as pct_of_freeze_max,
+       pg_size_pretty(pg_total_relation_size(c.oid)) as size
+from pg_class c
+where c.relkind in ('r', 'm', 't')
+order by age(c.relfrozenxid) desc
+limit 10;
+
+select datname, age(datfrozenxid), mxid_age(datminmxid)
+from pg_database order by 2 desc;
+```
+
+**What is holding back the cutoff?**
+
+```sql
+select pid, datname, usename, state,
+       now() - xact_start as xact_age,
+       backend_xmin, left(query, 60) as query
+from pg_stat_activity
+where backend_xmin is not null
+order by age(backend_xmin) desc
+limit 5;
+
+select slot_name, slot_type, active, xmin, catalog_xmin,
+       pg_size_pretty(
+         pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) as retained_wal
+from pg_replication_slots;
+
+select gid, prepared, owner, database, age(transaction) as xid_age
+from pg_prepared_xacts;
+```
+
+**What is vacuum doing right now?**
+
+```sql
+select p.pid, p.relid::regclass as table_name, p.phase,
+       p.heap_blks_scanned, p.heap_blks_total, p.index_vacuum_count,
+       now() - a.xact_start as running_for
+from pg_stat_progress_vacuum p
+join pg_stat_activity a using (pid);
+```
+
+`index_vacuum_count` above 1 on a big table means vacuum ran out of memory for dead TIDs and scanned the indexes more than once. The `vacuum_at` in the first query uses `reltuples`, a sampled estimate, so it lands near the 400,050 that exactly 2,000,000 rows would give, not on it.
+
+</DeepDive>
+
+## The short version
+
+- Updates and deletes leave dead row versions; vacuum removes them and records the space for reuse. Plain vacuum doesn't shrink the file except for empty pages at the end.
+- Measure with `pgstattuple` (exact) or `n_dead_tup` (cheap); measure indexes with `pgstatindex`, and fix index bloat with `REINDEX CONCURRENTLY`.
+- Vacuum also freezes old tuples and sets visibility map bits. Append-only tables need it too.
+- Autovacuum fires at 50 + 20% dead rows by default. For tables past a few million rows, set per-table scale factors of 0.01 to 0.05.
+- Raise `autovacuum_vacuum_cost_limit` well above 200 on SSDs; the default budget is shared by all workers.
+- "Dead but not yet removable" means something is holding back the cutoff: a long or idle-in-transaction session, a slot, a replica with feedback, or a prepared transaction. Find it and end it.
+- `VACUUM FULL` blocks the table for the whole rewrite; rebuild big tables online, and fix whatever caused the bloat first.
+- Alert on `age(datfrozenxid)` long before the 1.6 billion failsafe, and never disable autovacuum or kill anti-wraparound vacuums.
+
+## Further reading
+
+- [Routine vacuuming](https://www.postgresql.org/docs/18/routine-vacuuming.html), PostgreSQL documentation. The reference for freezing, wraparound, and the recovery steps if the server stops accepting writes.
+- [Vacuuming settings](https://www.postgresql.org/docs/18/runtime-config-vacuum.html), PostgreSQL documentation. Every autovacuum, cost, and freeze setting, including the PostgreSQL 18 additions.
+- [pgstattuple](https://www.postgresql.org/docs/18/pgstattuple.html), PostgreSQL documentation. Exact and approximate bloat measurement, with every output column explained.
+- [src/backend/access/heap/vacuumlazy.c](https://github.com/postgres/postgres/blob/master/src/backend/access/heap/vacuumlazy.c), PostgreSQL source. The header comment walks through vacuum's phases and PostgreSQL 18's eager freezing.
+- [VACUUM won't remove dead rows: 4 reasons why](https://www.cybertec-postgresql.com/en/reasons-why-vacuum-wont-remove-dead-rows/), Laurenz Albe, CYBERTEC. A crisp tour of everything that holds back the cutoff.
+- [Transaction ID Wraparound in Postgres](https://blog.sentry.io/transaction-id-wraparound-in-postgres/), Sentry, and [What We Learned from the Recent Mandrill Outage](https://mailchimp.com/what-we-learned-from-the-recent-mandrill-outage/), Mailchimp. Two wraparound postmortems, worth reading before you need them.
+

@@ -61,6 +61,7 @@ const nav: readonly NavItem[] = [
     ],
   },
   { label: "Handbook", href: "/handbook" },
+  { label: "Books", href: "/books" },
   { label: "Blog", href: "/blog" },
   {
     label: "Company",

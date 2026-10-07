@@ -1,0 +1,55 @@
+# The lab for "Eight Kilobytes": PostgreSQL 18 with the book's sample data,
+# so you can rerun every claim in the book yourself.
+#
+#   ./lab 16-btree                     # one chapter (16 or btree work too); starts this for you
+#   ./lab all                          # every chapter, in reading order
+#   ./lab                              # list the chapters
+#   docker compose exec postgres psql -c "create database scratch template book"
+#   docker compose exec postgres psql -d scratch      # poke around in your own copy
+#   docker compose down -v             # throw it all away
+#
+# ./lab runs `docker compose up -d --wait` (the first start seeds the data,
+# about a minute), then `docker compose exec postgres lab 16-btree`, which
+# you can also run yourself. Chapters that need more than one server
+# (replication, sharding, the MySQL comparison) have their own compose files
+# next to this one; ./lab starts and removes those too.
+name: eight-kilobytes
+
+services:
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+      # Give the one-time seeding server time to shut down on a slow disk.
+      PGCTLTIMEOUT: "600"
+      # Tells the lab script it is running in here, not on your machine.
+      LAB_IN_CONTAINER: "1"
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - track_io_timing=on
+    shm_size: 512m
+    ports:
+      # Override with LAB_PORT to run a second copy alongside this one.
+      - "127.0.0.1:${LAB_PORT:-5418}:5432"
+    volumes:
+      - ./:/lab:ro
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - ./lab:/usr/local/bin/lab:ro
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      # Healthy only once the seed has finished, the template exists, and the
+      # real server is up. Connecting over TCP matters: the temporary server
+      # that runs the seed listens only on a local socket, so this can't
+      # succeed until it has shut down and the final server has started.
+      test: ["CMD-SHELL", "psql -h 127.0.0.1 -U postgres -Atc \"select 1 from pg_database where datname = 'book' and datistemplate\" | grep -q 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+volumes:
+  pgdata:

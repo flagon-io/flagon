@@ -1,0 +1,34 @@
+# Two servers side by side for "Postgres is not MySQL": PostgreSQL 18 and
+# MySQL 8.4, both with default settings. 10-not-mysql.sh starts them, loads
+# the same accounts and users into each, runs the chapter's checks, and
+# throws everything away. No ports are published; the script talks to both
+# servers through `docker compose exec`.
+#
+#   ./lab 10
+name: ek-not-mysql
+
+services:
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: book
+    healthcheck:
+      # The entrypoint runs a temporary server during first-time setup;
+      # checking over TCP waits for the real one.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pmysql --silent"]
+      interval: 2s
+      timeout: 5s
+      retries: 90
+      start_period: 10s

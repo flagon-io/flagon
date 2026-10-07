@@ -1,0 +1,528 @@
+---
+title: ACID, honestly
+description: What each ACID letter guarantees in Postgres, the mechanism behind it, what it costs, how it gets switched off, and exactly where it stops.
+part: The machine
+builds_on: [mvcc, wal]
+---
+
+We committed three rows, got `COMMIT` back three times, killed the server, started it again, and the rows were gone. Postgres was working exactly as configured. One session setting, `synchronous_commit = off`, had traded those rows for speed, and the trade was in the documentation all along.
+
+ACID gets treated like a badge: the database "is ACID", so your data is safe. It's four separate promises, each kept by one specific mechanism, each with a price, a switch that turns it off, and an edge where it stops. Most data loss in Postgres-backed systems happens at those edges, not inside them.
+
+## Four promises, four mechanisms
+
+Here's the whole chapter on one table. The rest of it proves each row.
+
+| Letter | Kept by | Costs | Switched off by | Ends at |
+|---|---|---|---|---|
+| Atomicity | row versions, `pg_xact` status | dead tuples per abort | autocommit | your transaction boundary |
+| Consistency | your constraints | a check per write | not declaring them | rules across rows |
+| Isolation | snapshots, locks, [SSI](/books/eight-kilobytes/glossary#ssi) | waits, retries | read committed | the level you chose |
+| Durability | WAL flushed at commit | a flush per commit | `synchronous_commit`, `fsync`, lying disks | this machine's disk |
+
+They fail independently, so we'll take them one at a time.
+
+## Atomicity: nothing is ever undone
+
+Atomicity means a transaction happens completely or not at all. You probably picture an undo log: on rollback, the database puts the old values back.
+
+Postgres has no undo. Rollback doesn't touch the table at all.
+
+### A rollback leaves its rows on the page
+
+Every row version carries the ID of the transaction that created it (`xmin`), and whether it counts depends on what the commit log, `pg_xact`, says about that transaction ([Updates are inserts](/books/eight-kilobytes/mvcc)). It works like a checkbook register: a cancelled check isn't erased, it's stamped VOID.
+
+Insert three rows into a small `credits` table of account balances and roll back. `pageinspect` still finds all three tuples on the page, byte for byte what the insert wrote, and `pg_xact_status()` says their transaction `aborted`. Two bits in `pg_xact` are the only thing hiding them. Every query that reads them checks that status and skips them, and they stay until vacuum removes them.
+
+That's the whole of rollback: flip a status, leave the mess for later. It's why a rollback takes the same time for one row or ten million.
+
+### A failed statement changes nothing, and still costs
+
+Atomicity applies to every statement too. Charge every account 10 credits, where account 1000, the last row, only has 5:
+
+```sql
+update credits set balance = balance - 10;
+```
+
+```text
+ERROR:  new row for relation "credits" violates check constraint
+        "credits_balance_check"
+DETAIL:  Failing row contains (1000, -5).
+```
+
+Nothing changed: 999 balances are still 100. But the update wrote 999 new row versions before it hit row 1000, and they're all still in the table, dead:
+
+```text
+ pages | tuple_count | dead_tuple_count
+-------+-------------+------------------
+    11 |        1000 |              999
+```
+
+The table grew from 6 pages to 11 for a statement that changed nothing, and wrote over 100,000 bytes of WAL. A failed bulk update costs about as much I/O as a successful one and leaves a table's worth of dead tuples for [vacuum](/books/eight-kilobytes/vacuum). A batch job that fails on its last row and retries every five minutes is a bloat machine.
+
+Validate before you write when failure is likely (`where balance >= 10`, or a pre-check query), and run big changes in batches so a failure wastes one batch, not the table. Inside a transaction, a savepoint gives the same all-or-nothing at a finer grain ([Savepoints contain the damage](/books/eight-kilobytes/concurrency#savepoints-contain-the-damage)).
+
+<DeepDive title="What a rollback and a failed update leave on the page">
+
+```sql
+begin;
+insert into credits values (5001, 50), (5002, 50), (5003, 50);
+select pg_current_xact_id();   -- 854733
+rollback;
+
+select lp, t_xmin from heap_page_items(get_raw_page('credits', 5))
+where t_xmin = '854733';
+```
+
+```text
+ lp | t_xmin
+----+--------
+ 77 | 854733
+ 78 | 854733
+ 79 | 854733
+```
+
+<ProveIt lab="08-acid">
+
+```sql
+begin;
+insert into credits values (5001, 50), (5002, 50), (5003, 50);
+select pg_current_xact_id() as aborted_xid \gset
+rollback;
+
+select lab.prove(
+  'after rollback, all three row versions are still on the page',
+  (select count(*) = 3
+   from heap_page_items(get_raw_page('credits', (pg_relation_size('credits') / 8192 - 1)::int))
+   where t_xmin::text = :'aborted_xid'));
+
+select lab.prove(
+  'pg_xact says their transaction aborted',
+  pg_xact_status(:'aborted_xid') = 'aborted');
+```
+
+</ProveIt>
+
+Run the failed update by hand and the dead count can land a little under 999: a later read of a nearly full page can prune some aborted versions early ([Pruning waits for a nearly full page](/books/eight-kilobytes/hot#pruning-waits-for-a-nearly-full-page)). The lab holds an older snapshot open so the count is exact. The first query to read an aborted tuple also caches the verdict on it as a hint bit, `HEAP_XMIN_INVALID`, so later readers skip the `pg_xact` lookup ([A read can write](/books/eight-kilobytes/mvcc#a-read-can-write)).
+
+<ProveIt lab="08-acid">
+
+```sql
+-- s1 holds a snapshot older than the failed UPDATE, so nothing prunes early.
+call lab.on('s1', 'begin isolation level repeatable read');
+select x as _ from dblink('s1', 'select 1') as t(x int) \gset
+
+select lab.prove(
+  'the failed UPDATE left 999 dead row versions behind',
+  (select dead_tuple_count = 999 from pgstattuple('credits')));
+
+select lab.prove(
+  'the failed UPDATE grew the table from 6 to 11 pages',
+  :pages_before = 6 and pg_relation_size('credits') / 8192 = 11);
+
+select lab.prove(
+  'the failed UPDATE still wrote over 100,000 bytes of WAL',
+  lab.my_wal() - :wal_before > 100000);
+
+select lab.prove(
+  'no query sees them',
+  (select count(*) = 0 from credits where account_id > 5000));
+select lab.prove(
+  'the charge failed on its last row, and all 999 other rows are unchanged',
+  (select count(*) filter (where balance = 100) = 999 from credits));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Commit is one small record
+
+So what makes a transaction committed? The 34-byte `COMMIT` record from [A WAL record is small; a page image is not](/books/eight-kilobytes/wal#a-wal-record-is-small-a-page-image-is-not): write it, flush the WAL through it, mark the transaction committed in `pg_xact`, then make it visible. The moment the flush returns is the moment of commit. A crash a microsecond later replays the record and the commit stands; a microsecond earlier, the transaction never happened ([Recovery only redoes](/books/eight-kilobytes/wal#recovery-only-redoes)). A rollback's `ABORT` record isn't even flushed: a transaction with no commit record counts as aborted anyway.
+
+## Consistency is the part you write
+
+The C is the odd letter out. Atomicity, isolation, and durability are things the database does. Consistency means "the transaction moves the data from one valid state to another", and "valid" is defined by you: `not null`, `check`, `unique`, foreign keys, and exclusion constraints ([Constraints, chosen on purpose](/books/eight-kilobytes/relationships) is their home). Postgres enforces exactly the rules you declare, and not one more.
+
+### Constraints fire per statement, or at commit
+
+Postgres checks most constraints as it writes each row, and foreign keys at the end of each statement. A unique, primary key, foreign key, or exclusion constraint declared `deferrable initially deferred` waits until `COMMIT` instead, so a transaction can insert invoice lines before their invoice. If the invoice never arrives, the `COMMIT` fails. (`check` and `not null` can't be deferred.)
+
+So **`COMMIT` can fail**. Deferred constraints, serialization failures, and lost connections all surface there, and after any earlier error `COMMIT` quietly comes back as `ROLLBACK` ([One error aborts the whole transaction](/books/eight-kilobytes/concurrency#one-error-aborts-the-whole-transaction)). Code that ignores the result of `commit` will tell users their data is saved when it isn't.
+
+<DeepDive title="A COMMIT that fails">
+
+```sql
+create table invoice_lines (
+  invoice_id bigint not null references invoices (id) deferrable initially deferred,
+  amount     int not null
+);
+
+begin;
+insert into invoice_lines values (777, 10);   -- no invoice 777: fine, for now
+commit;
+```
+
+```text
+INSERT 0 1
+ERROR:  insert or update on table "invoice_lines" violates foreign key
+        constraint "invoice_lines_invoice_id_fkey"
+DETAIL:  Key (invoice_id)=(777) is not present in table "invoices".
+```
+
+The insert succeeded; the `COMMIT` failed, and nothing was kept. Insert invoice 777 before committing and the same transaction commits cleanly.
+
+</DeepDive>
+
+### Rules across rows are invisible to constraints
+
+Most real business rules span rows: "a free account has at most 3 seats", "debits equal credits". A `check` constraint sees only the row being written, so the usual next move is a trigger that counts the account's seats and raises an exception at 3.
+
+It works, one request at a time. Now two requests add a seat to an account that has 2, at the same moment. Each trigger counts 2, because the other insert hasn't committed. Both commit. The account has 4 seats, and the trigger never raised.
+
+Nothing was wrong with the code. **A rule that reads other rows is only as strong as the isolation it runs under.** Three fixes, strongest first:
+
+1. **Make it a constraint.** "No two rows conflict" is an exclusion constraint ([An exclusion constraint makes overlaps impossible](/books/eight-kilobytes/relationships#an-exclusion-constraint-makes-overlaps-impossible)), and a count limit can become one: a `seat_number` with `check (seat_number between 1 and 3)` and `unique (account_id, seat_number)` caps seats at three.
+2. **Run the writers at serializable**, which aborts one of them with a retryable error.
+3. **Serialize on a parent row**: `perform 1 from accounts where id = new.account_id for no key update` at the top of the trigger. Use `for no key update`, not `for update`: `for update` also blocks the foreign key checks of every insert, into any table, that references that account, until the trigger's transaction ends.
+
+<DeepDive title="The racing trigger, and why a function in a check constraint lies">
+
+The trigger, and the race the lab runs against it:
+
+```sql
+create function seats_limit() returns trigger language plpgsql as $$
+begin
+  if (select count(*) from seats where account_id = new.account_id) >= 3 then
+    raise exception 'account % already has 3 seats', new.account_id;
+  end if;
+  return new;
+end $$;
+```
+
+<ProveIt lab="08-acid">
+
+```sql
+insert into seats values (1, 1), (1, 2);
+
+call lab.on('s1', 'begin');
+call lab.on('s1', 'insert into seats values (1, 3)');
+call lab.on('s2', 'begin');
+call lab.on('s2', 'insert into seats values (1, 4)');
+call lab.on('s1', 'commit');
+call lab.on('s2', 'commit');
+
+select lab.prove(
+  'two concurrent inserts each counted 2 seats, so the trigger let both in: 4 seats',
+  (select count(*) = 4 from seats where account_id = 1));
+```
+
+</ProveIt>
+
+A subquery in a check is refused outright (`cannot use subquery in check constraint`). Wrapping it in a function gets past the parser, and then lies to you. Postgres assumes a check's result for a row never changes, so it won't re-check when the other rows do, and a later dump and restore can fail on rows that no longer pass.
+
+"Consistency" also means something else in distributed systems. In CAP and in replication talk, it's whether every copy returns the latest write; ACID's C is whether your rules hold. A replica can be perfectly ACID-consistent and still seconds behind ([After a write, a replica can show the old value](/books/eight-kilobytes/replication#after-a-write-a-replica-can-show-the-old-value)).
+
+</DeepDive>
+
+## Isolation is a dial, not a guarantee
+
+Isolation decides which effects of concurrent transactions yours can see. The ideal is that transactions behave as if they ran one at a time. Postgres offers that, at a price, and defaults to something weaker. Here's the model; [Pick an isolation level on purpose](/books/eight-kilobytes/concurrency#pick-an-isolation-level-on-purpose) is the practical side.
+
+### Only serializable rules out every anomaly
+
+An **anomaly** is a result no serial order of the transactions could produce. The SQL standard defines its levels by three of them; [Berenson et al.](https://www.microsoft.com/en-us/research/publication/a-critique-of-ansi-sql-isolation-levels/) showed in 1995 that the list was incomplete. What Postgres does at each level:
+
+| Anomaly | Read committed | Repeatable read | Serializable |
+|---|---|---|---|
+| Dirty read: see uncommitted data | never | never | never |
+| Non-repeatable read: a row changes between reads | yes | never | never |
+| Phantom: new matching rows appear | yes | never | never |
+| Lost update: read, compute, overwrite | yes, silently | error (`40001`) | error (`40001`) |
+| [Write skew](/books/eight-kilobytes/glossary#write-skew): two read, each writes a different row | yes | yes | error (`40001`) |
+| Read-only anomaly: a reader sees an impossible state | yes | yes | error (`40001`) |
+
+- **There's no dirty read anywhere.** Postgres accepts `read uncommitted` and gives you read committed.
+- **Read committed takes a snapshot per statement, repeatable read one per transaction** ([A snapshot picks one version](/books/eight-kilobytes/mvcc#a-snapshot-picks-one-version)). Request handlers want the first. A report that runs five queries and adds them up wants the second, or its totals won't reconcile.
+- **Only serializable catches the bottom two rows**, by making you retry. Lost update and write skew are demonstrated in [Read committed loses updates computed in the app](/books/eight-kilobytes/concurrency#read-committed-loses-updates-computed-in-the-app) and [Serializable catches the write skew repeatable read misses](/books/eight-kilobytes/concurrency#serializable-catches-the-write-skew-repeatable-read-misses). The last row is here.
+
+### Even a read-only transaction can see the impossible
+
+Here's the anomaly that surprises people most, because the victim never writes anything. Billing works in periods. A control row holds the current period; charges are recorded against it; at month end someone closes the period by bumping the number, and a report totals the closed period. Three transactions:
+
+```text
+T1: add a charge         T2: close period 1       T3: report
+-----------------------  -----------------------  -----------------------
+begin;
+insert into charges
+  select current_period
+  ... (reads period 1)
+                         begin;
+                         update billing_period
+                           set current_period
+                             = 2;
+                         commit;
+                                                  begin;
+                                                  select current_period;
+                                                    -> 2: 1 is closed
+                                                  select count(*),
+                                                    sum(amount)
+                                                    from charges
+                                                    where period = 1;
+                                                    -> 3, 600
+                                                  commit;
+commit;
+```
+
+At repeatable read, everything succeeds. T3 reported period 1 final at 3 charges totalling 600. Then T1 committed its charge into period 1, which now holds 4 charges and 700. No serial order produces that: if T1 ran before T2, the report would include its charge; if after, the charge would land in period 2.
+
+At `serializable`, the report gets the same 3 charges, but T1's commit fails with `could not serialize access due to read/write dependencies among transactions`. T1 retries, reads period 2, and its charge lands where it belongs. No two transactions wrote the same row, so only a level that tracks reads can catch it.
+
+<DeepDive title="How serializable catches it without blocking anyone">
+
+<ProveIt lab="08-acid">
+
+```sql
+call lab.run_billing('repeatable read');
+select lab.prove(
+  'then T1 commits fine',
+  lab.try_on('s1', 'commit') = 'ok');
+select lab.prove(
+  'and the closed period 1 now has 4 charges, 700',
+  (select count(*) = 4 and sum(amount) = 700 from charges where period = 1));
+
+call lab.run_billing('serializable');
+select lab.prove(
+  'but now T1''s commit fails with a serialization error',
+  lab.try_on('s1', 'commit') like 'could not serialize access%');
+```
+
+</ProveIt>
+
+Postgres implements serializable with **serializable snapshot isolation** ([Ports and Grittner, 2012](https://vldb.org/pvldb/vol5/p1850_danrkports_vldb2012.pdf)). Every transaction runs on a snapshot, exactly as in repeatable read, and also records what it read as non-blocking `SIReadLock` entries. When one transaction writes something a concurrent one read, that's a read-write dependency. Every serialization anomaly needs a "pivot": a transaction with a dependency coming in and one going out. When Postgres sees one, it aborts a transaction with SQLSTATE `40001`. Nobody blocks; somebody retries. Here, T1 is the pivot: the report read the period-1 charges before T1 added one (a dependency into T1), and T1 read the period that T2 then changed (a dependency out of T1). T1 is the one cancelled, and the error says so: `Reason code: Canceled on identification as a pivot, during commit attempt.`
+
+The bookkeeping is coarse (it can track whole pages or relations instead of rows), so there are false positives, and the cost is real but usually modest. For long reports, `begin isolation level serializable read only deferrable` waits until it can take a snapshot that can't be part of any anomaly, then runs without tracking and can never fail.
+
+</DeepDive>
+
+## Durability is an fsync
+
+Durability means a committed transaction survives a crash: its commit record reached disk before `COMMIT` returned. [Commit means flush](/books/eight-kilobytes/wal#commit-means-flush) measured what that costs: one fsync per commit, and about 130 commits per second for one client on a disk with 7.7 ms flushes. Here we break it on purpose.
+
+### synchronous_commit = off loses a window
+
+With `synchronous_commit = off`, `COMMIT` returns before its record is flushed, so a crash can take up to about 600 ms of acknowledged commits ([synchronous_commit = off can lose about 600 ms of commits](/books/eight-kilobytes/wal#synchronous_commit--off-can-lose-about-600-ms-of-commits)). The risk is loss, never corruption. The subtle part: the transaction is **visible** before it's durable. Other sessions can read its rows, act on them, send an email about them, and then the crash erases them.
+
+### A real crash took three acknowledged commits
+
+This chapter's lab runs its own server so it can kill it. It widens the window (`wal_writer_delay` at 10 seconds, the maximum), commits three rows with `synchronous_commit = off`, and checks their WAL is still only in shared memory. Then it sends `SIGKILL` to the container: no shutdown checkpoint, no final flush. On restart, recovery replays to the end of valid WAL, and `select count(*) from crash_test` returns 0.
+
+Three acknowledged commits, gone. The same inserts with the default `synchronous_commit = on`, and the same kill, come back with all three rows. And with `wal_writer_delay` at 1 second, rows committed more than 3 seconds before the kill survive. The window is real, and exactly as wide as the docs say.
+
+So use it per transaction, only for writes you could lose.
+
+<DeepDive title="A killed container is not a power cut">
+
+The restart log tells the story:
+
+```text
+LOG:  database system was not properly shut down; automatic recovery in progress
+LOG:  redo starts at 0/1796688
+LOG:  invalid record length at 0/1796758: expected at least 24, got 0
+LOG:  redo done at 0/17966E0 ...
+```
+
+"got 0" is the end of valid WAL, not an error. The lab knew the commits were still in memory because `pg_current_wal_lsn()` (how far WAL has been written out) was behind `pg_current_wal_insert_lsn()` (how far it's been generated).
+
+Killing the container killed Postgres, and the host's kernel kept running. Anything Postgres had already handed to the operating system with `write()`, but not forced to disk with `fsync()`, sat in the kernel's page cache and survived. That's why the lab checks that the WAL hadn't even been *written* before the kill.
+
+A real power loss also takes the page cache, and then the disk's own cache. Testing that needs pulled plugs or a VM you can hard-reset, and tools built for it (the docs point to `diskchecker.pl`). Our test shows the window between `COMMIT` returning and WAL leaving Postgres's memory. Below that line is the operating system's and the hardware's job, and they can fail at it.
+
+<ProveIt lab="08-acid.sh">
+
+```bash
+prove "three async commits returned, and their WAL was still only in shared memory" $lost_ok
+prove "after SIGKILL and restart, all three async-committed rows are gone" \
+  holds "select count(*) = 0 from crash_test"
+prove "after SIGKILL and restart, all three sync-committed rows are there" \
+  holds "select count(*) = 3 from crash_test where how = 'sync'"
+prove "after SIGKILL, async commits older than 3 x wal_writer_delay survive" \
+  holds "select count(*) = 2 from crash_test where id in (4, 5)"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### fsync = off and full_page_writes = off belong only in CI
+
+Two settings remove durability for the whole server. **`fsync = off`** stops Postgres forcing anything to disk, and a power failure can leave data files and WAL out of step: "unrecoverable data corruption", in the docs' words. **`full_page_writes = off`** drops the page images that repair torn pages ([The first change after a checkpoint logs the whole page](/books/eight-kilobytes/wal#the-first-change-after-a-checkpoint-logs-the-whole-page)), safe only on storage that can't tear an 8 KB write, such as ZFS. Both make benchmarks look great. Use them on a throwaway CI database, and nowhere else.
+
+### fsync is only as honest as the drive
+
+`fsync` only works if the drive tells the truth when it says "done". Many consumer drives acknowledge a write once it's in their own volatile cache, which a power cut erases. Use storage with **power-loss protection**, run `pg_test_fsync` on the volume, and distrust flushes faster than the hardware could physically manage ([Where the time goes](/books/eight-kilobytes/latency)).
+
+Keep **data checksums** on, too (the `initdb` default since PostgreSQL 18). A flipped bit from a disk or controller becomes an error instead of silently wrong rows. They detect damage; backups repair it ([With checksums, even a read writes WAL](/books/eight-kilobytes/wal#with-checksums-even-a-read-writes-wal) has their WAL cost).
+
+<DeepDive title="When the operating system lied, and the checksum upgrade trap">
+
+In 2018, Postgres developers found that on Linux a failed `fsync()` could report the error once and then mark the dirty pages clean, so retrying "succeeded" without the data reaching disk. Since then, Postgres treats an fsync failure on a data file as a crash (`PANIC`) and recovers from WAL rather than trusting a retry; the change shipped in PostgreSQL 12 and was backported to the versions supported at the time ([Fsync Errors](https://wiki.postgresql.org/wiki/Fsync_Errors)).
+
+`pg_upgrade` requires matching checksum settings, so moving an old cluster without checksums onto a fresh 18 cluster needs `initdb --no-data-checksums`, or `pg_checksums` to enable them on the old cluster first, offline. Checksums protect data pages only, not memory or internal structures.
+
+</DeepDive>
+
+### Durable here is not durable everywhere
+
+Everything so far is about one machine's disk. With default asynchronous replication, a commit returns once it's flushed on the primary, and replicas get it a moment later. [Fail over](/books/eight-kilobytes/glossary#failover) inside that moment and commits your users saw succeed are gone, with the new primary perfectly consistent ([Asynchronous is the default, and it can lose commits](/books/eight-kilobytes/replication#asynchronous-is-the-default-and-it-can-lose-commits)). Synchronous replication closes the window for a network round trip per commit ([Synchronous commit costs a round trip](/books/eight-kilobytes/replication#synchronous-commit-costs-a-round-trip)).
+
+Decide how many acknowledged commits you can lose, as a number, before the incident decides for you.
+
+## ACID stops at one transaction in one database
+
+Every guarantee above has the same boundary: one transaction, in one database. Your business operations rarely respect it.
+
+### Autocommit splits one operation into two
+
+A transfer of 30 credits from account 1 to account 2 is one business operation. Written as two statements with no `begin`, it's two transactions, and many ORMs work this way by default: each `save()` is its own commit. Crash the app between the two:
+
+```sql
+update credits set balance = balance - 30 where account_id = 1;
+-- the process dies here
+update credits set balance = balance + 30 where account_id = 2;
+```
+
+`sum(balance)` dropped by exactly 30. Thirty credits vanished, and no database guarantee was broken: each statement was atomic, consistent, isolated, and durable. The *operation* wasn't, because nobody told the database it was one. Wrapped in `begin` and `commit`, the same crash rolls everything back.
+
+Put every business operation in one explicit transaction, and find out what your ORM does by default. Keep it short: no HTTP calls or waiting on a user inside it, because an open transaction holds locks and [holds back vacuum](/books/eight-kilobytes/mvcc#long-transactions-hold-everything-back).
+
+<ProveIt lab="08-acid">
+
+```sql
+call lab.on('s1', 'update credits set balance = balance - 30 where account_id = 1');
+-- The app crashes here, before its second statement runs.
+select dblink_disconnect('s1') = 'OK' as gone \gset
+select lab.prove(
+  'two autocommit statements, a crash between them: 30 credits vanished',
+  (select sum(balance) = :total_before - 30 from credits));
+
+-- ... restore, then the same with an explicit transaction:
+call lab.on('s1', 'begin');
+call lab.on('s1', 'update credits set balance = balance - 30 where account_id = 1');
+select dblink_disconnect('s1') = 'OK' as gone \gset
+select lab.prove(
+  'one explicit transaction, the same crash: nothing changed',
+  (select sum(balance) = :total_before from credits)
+  and (select balance = 100 from credits where account_id = 1));
+```
+
+</ProveIt>
+
+### Two-phase commit is rarely the answer
+
+When one operation spans two databases, the textbook answer is two-phase commit. Postgres supports its side (`prepare transaction`, then `commit prepared`), but a prepared transaction belongs to no session: if the coordinator dies, it sits there through restarts, holding locks and holding back vacuum. That's why `max_prepared_transactions` defaults to 0. And a message broker, a payment API, or an email service doesn't speak two-phase commit at all.
+
+<DeepDive title="A prepared transaction survives a crash, and so do its locks">
+
+```sql
+begin;
+insert into crash_test values (6, 'prepared');
+update crash_test set how = 'locked by a prepared transaction' where id = 1;
+prepare transaction 'transfer-42';
+```
+
+After a `SIGKILL` and restart, `transfer-42` is still in `pg_prepared_xacts`, its insert is still invisible, and an update of row 1 still waits on its lock. If you turn the feature on, alert on any row in `pg_prepared_xacts` older than a minute ([Vacuum can't remove what an old snapshot might need](/books/eight-kilobytes/vacuum#vacuum-cant-remove-what-an-old-snapshot-might-need)).
+
+<ProveIt lab="08-acid.sh">
+
+```bash
+crash
+prove "after SIGKILL and restart, the prepared transaction is still in pg_prepared_xacts" \
+  holds "select count(*) = 1 from pg_prepared_xacts where gid = 'transfer-42'"
+prove "it still holds its row lock: an update of row 1 gives up waiting" \
+  fails_with "lock timeout" -c "set lock_timeout = '500ms'" -c "update crash_test set how = 'x' where id = 1"
+prove "it holds back vacuum: a row deleted after it was prepared stays dead, not removed" \
+  holds "select dead_tuple_count >= 1 from pgstattuple('crash_test')"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Put the message in the same transaction as the order
+
+Here's the case that bites almost every application. Placing an order writes the order and publishes an "order placed" message for other services. Two systems, so whichever you do first, a crash between them leaves them disagreeing: an order nobody hears about, or a message about an order that doesn't exist.
+
+The fix is to stop writing to two systems. Write the message into a table, in the same transaction as the order, and let a separate process deliver it:
+
+```sql
+with o as (
+  insert into orders (account_id, total_cents) values (42, 1999)
+  returning id, account_id, total_cents
+)
+insert into outbox (topic, payload)
+select 'order.placed',
+       jsonb_build_object('order_id', id, 'account_id', account_id,
+                          'total_cents', total_cents)
+from o;
+```
+
+Now atomicity covers both: the order and its message commit together or not at all. A relay process claims a batch with [`for update skip locked`](/books/eight-kilobytes/glossary#skip-locked), publishes it, and deletes what it sent, in one transaction. That transaction is the one deliberate exception to "no network calls inside a transaction": keep its batches small and give the relay's role an `idle_in_transaction_session_timeout`, so a stuck broker can't hold it open.
+
+If the relay dies after publishing and before its `delete` commits, the next relay sends those messages again. That's **at-least-once** delivery, and the deal is that consumers deduplicate by message id. It beats "sometimes the message is lost". The same shape works for emails and charges: record the intent in the transaction, act after commit, and make the action safe to repeat ([Retry the whole transaction](/books/eight-kilobytes/concurrency#retry-the-whole-transaction)).
+
+<DeepDive title="Two relays never claim the same message">
+
+```sql
+begin;
+select id, topic, payload from outbox
+order by id limit 100
+for update skip locked;
+-- publish each message, and wait for the broker's acknowledgment
+delete from outbox where id = any ($1);   -- the ids you published
+commit;
+```
+
+`skip locked` lets several relays run side by side without double-claiming ([A Postgres queue commits with the business write](/books/eight-kilobytes/concurrency#a-postgres-queue-commits-with-the-business-write)). In the lab, two relays asking for 5 messages each at once get 10 different ones. At very high volume, logical decoding can read outbox inserts straight from the WAL instead of polling, but a polling relay carries most applications a long way.
+
+<ProveIt lab="08-acid">
+
+```sql
+select lab.prove(
+  'every order has its message, and a rolled-back order has neither',
+  (select count(*) = 2 from orders) and (select count(*) = 2 from outbox)
+  and not exists (select 1 from orders o
+                  where not exists (select 1 from outbox m
+                                    where (m.payload ->> 'order_id')::bigint = o.id)));
+
+select lab.prove(
+  'two relays with FOR UPDATE SKIP LOCKED claim disjoint batches of 5',
+  (select count(*) = 10 and count(distinct id) = 10 from claimed));
+
+select lab.prove(
+  'the relay that died after publishing left its batch in the outbox: it gets sent again',
+  (select count(*) = 5 from outbox where id in (select id from claimed where relay = 's2')));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## The short version
+
+- Rollback undoes nothing: aborted row versions stay on the page until vacuum. A failed statement still writes its rows, its WAL, and its bloat.
+- A transaction is committed the moment its commit record is flushed. Check the result of every `COMMIT`.
+- Consistency is only the rules you declare. A check that reads other rows is a race; use a constraint, serializable, or a lock on a parent row.
+- Read uncommitted is read committed. Only serializable catches write skew and the read-only anomaly, and it needs retries.
+- `synchronous_commit = off` can lose about 600 ms of acknowledged, already-visible commits. Use it per transaction, for data you can lose.
+- Never run production with `fsync = off` or `full_page_writes = off`. Use storage with power-loss protection and keep checksums on.
+- A commit is durable on one machine. With asynchronous replicas, a failover can lose acknowledged commits; pick your number before an incident does.
+- Put each business operation in one explicit transaction. To notify another system, write an outbox row in the same transaction and relay it.
+
+## Further reading
+
+- [Transaction isolation](https://www.postgresql.org/docs/18/transaction-iso.html), PostgreSQL documentation. The exact guarantees of each level, including serializable's read-only deferrable mode.
+- [Reliability](https://www.postgresql.org/docs/18/wal-reliability.html), PostgreSQL documentation. What a durable commit requires from disks, caches, and controllers, and how to test yours.
+- [Asynchronous commit](https://www.postgresql.org/docs/18/wal-async-commit.html), PostgreSQL documentation. The risk window of `synchronous_commit = off`, in the developers' own words.
+- [A Critique of ANSI SQL Isolation Levels](https://www.microsoft.com/en-us/research/publication/a-critique-of-ansi-sql-isolation-levels/), Berenson, Bernstein, Gray, Melton, O'Neil, and O'Neil, SIGMOD 1995. The paper that showed the standard's anomaly list was incomplete and defined snapshot isolation.
+- [Serializable Snapshot Isolation in PostgreSQL](https://vldb.org/pvldb/vol5/p1850_danrkports_vldb2012.pdf), Ports and Grittner, PVLDB 2012. How Postgres's serializable level works, from the people who built it. The [SSI wiki page](https://wiki.postgresql.org/wiki/SSI) has the batch-closing example this chapter adapts.

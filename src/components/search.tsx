@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
-import { BookOpen, FileText, Newspaper, Search as SearchIcon } from "lucide-react";
+import { BookOpen, FileText, Library, Newspaper, Search as SearchIcon } from "lucide-react";
 import type { SearchDoc } from "@/lib/search";
 
-const GROUPS = ["Pages", "Handbook", "Blog"] as const;
-const GROUP_ICON = { Pages: FileText, Handbook: BookOpen, Blog: Newspaper };
+const GROUPS = ["Pages", "Handbook", "Books", "Blog"] as const;
+const GROUP_ICON = { Pages: FileText, Handbook: BookOpen, Books: Library, Blog: Newspaper };
 
 /**
  * Title-weighted substring scoring. Beats cmdk's default fuzzy matcher for docs:

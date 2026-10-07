@@ -2,7 +2,7 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
-import readingTime from "reading-time";
+import { readingMinutes } from "@/lib/reading";
 
 /**
  * The handbook lives in this repo as MDX under content/handbook/<folder>/<page>.mdx.
@@ -148,7 +148,7 @@ export async function getHandbookPage(slug: string): Promise<HandbookPage | null
   if (!file) return null;
   return {
     ...file,
-    readingMinutes: Math.max(1, Math.round(readingTime(file.content).minutes)),
+    readingMinutes: readingMinutes(file.content),
   };
 }
 

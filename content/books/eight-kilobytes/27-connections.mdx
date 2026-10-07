@@ -1,0 +1,445 @@
+---
+title: Connections aren't free
+description: Size connection pools from cores and latency, choose a pooling mode knowingly, and set the timeouts that keep one bad client from exhausting the server.
+part: Running it
+builds_on: [buffers, mvcc]
+---
+
+It goes like this. The app gets slower under load, so the team scales it out. Four pods become forty. Each pod has a pool of 20, so the database now sees 800 connections, and `max_connections` goes up to 1,000 to make room. Throughput drops. p99 latency triples. Database CPU sits at 100 percent while doing less work than before.
+
+No query is wrong. The database is juggling 800 conversations on a 16-core machine that can do 16 things at once, and the juggling has become the workload.
+
+More connections is not more capacity. Each one is a process with memory, CPU, and setup costs, and the right number comes from the database's cores and disks, not your user count.
+
+## Every connection is a process
+
+When a client connects, the postmaster (the server's parent process) forks a new operating system process for it. That process, a **backend**, parses, plans, and runs your queries and holds your session's state until you disconnect. It never serves anyone else. `pg_stat_activity` lists them:
+
+```sql
+select backend_type, count(*) from pg_stat_activity group by 1 order by 2 desc;
+```
+
+```text
+         backend_type         | count
+------------------------------+-------
+ client backend               |     3
+ io worker                    |     3
+ autovacuum launcher          |     1
+ checkpointer                 |     1
+ ...
+```
+
+Each `client backend` is one connection. The rest are housekeeping (the `io worker` processes run asynchronous I/O, PostgreSQL 18+). The model buys crash isolation and lets the OS schedule each connection. The price is that every connection is heavyweight.
+
+<Callout type="info" title="Coming from MySQL">
+
+MySQL runs one thread per connection, with a thread cache, and its docs describe Linux handling 500 to 1,000 connections routinely. Postgres forks a whole process per connection. Teams that ran MySQL with 2,000 direct connections need a pooler and a much lower `max_connections` here ([Postgres is not MySQL](/books/eight-kilobytes/not-mysql)).
+
+</Callout>
+
+<DeepDive title="Proof that a connection is an OS process">
+
+On the database host, `ps` shows each backend as its own `postgres` process, retitled to say who it serves and what it's doing, such as `postgres: app book 10.0.0.7(51234) idle`. Killing one with `kill -9` is not like closing a connection: the postmaster treats an unexpected backend death as a crash and restarts every other session with it, so end sessions with `pg_terminate_backend()` instead. The lab opens a second connection with `dblink` and finds its process.
+
+<ProveIt lab="27-connections">
+
+```sql
+select dblink_connect('c1', 'dbname=' || current_database()) \g /dev/null
+select p as c1_pid from dblink('c1', 'select pg_backend_pid()') t(p int) \gset
+select lab.prove('a new connection gets its own backend process, with its own pid',
+  :c1_pid <> pg_backend_pid()
+  and (select backend_type from pg_stat_activity where pid = :c1_pid) = 'client backend');
+select lab.prove('that backend is an operating system process named postgres',
+  pg_read_file('/proc/' || :c1_pid || '/status') like 'Name:%postgres%');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Memory: 1.5 MB idle, 109 MB mid-sort
+
+An idle connection is cheap. A working one is not. Every backend has private memory that isn't shared buffers ([Backend memory is private](/books/eight-kilobytes/buffers#backend-memory-is-private)), and on our lab server an idle backend held about 1.5 MB of it in its memory contexts. With [`work_mem`](/books/eight-kilobytes/glossary#work_mem) raised to 256 MB, the same backend sorting two columns of all 2 million `events` rows used 109 MB, because `work_mem` is granted per sort or hash node, per backend ([work_mem is per node, and you can see it](/books/eight-kilobytes/buffers#work_mem-is-per-node-and-you-can-see-it)). At the default 4 MB the same sort spills to disk instead.
+
+Memory also grows with the schema. A backend that touched 1,000 small tables grew from 1.5 MB to about 14 MB, because [the catalog caches only grow](/books/eight-kilobytes/buffers#the-catalog-caches-only-grow). With thousands of tables and partitions, each backend can settle at tens of megabytes.
+
+Multiply by 800.
+
+<DeepDive title="One backend's memory, idle and mid-sort">
+
+Measured from `pg_backend_memory_contexts` and from `/proc/<pid>/status` in the container, with `work_mem` at 256 MB:
+
+```text
+idle backend
+  memory contexts:   1.5 MB
+  RssAnon:          3232 kB    private memory in use
+
+same backend, sorting 2 million rows (work_mem = 256MB)
+  Sort Method: quicksort  Memory: 111653kB
+  RssAnon afterwards: 11496 kB    private memory still held
+```
+
+After the sort it keeps some of what it grabbed. Your numbers will differ slightly; the [configuration chapter](/books/eight-kilobytes/configuration#work_mem-multiply-before-you-raise-it) multiplies `work_mem` by plan nodes and connections.
+
+<ProveIt lab="27-connections">
+
+```sql
+select lab.prove('an idle backend holds a few MB of private memory',
+  :idle_ctx < 4 * 1024 * 1024 and :idle_anon < 10 * 1024);
+select lab.prove('mid-sort, one backend used over 100 MB of private memory',
+  :sort_kb > 100 * 1024);
+select lab.prove('afterwards it keeps more private memory than when idle',
+  :after_anon > :idle_anon);
+select lab.prove('touching 1,000 tables grows a backend''s caches by more than 10 MB',
+  :after_ctx - :before_ctx > 10 * 1024 * 1024);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### CPU: past the core count, connections wait in line
+
+A query that needs 2 ms of CPU still needs 2 ms when 800 run at once. With 16 cores, 16 make progress and the rest wait in line, while the OS burns cycles switching between them. Shared structures (the lock manager, buffer mapping, WAL insertion) see more contention with every active backend, so past a point more connections add contention faster than throughput.
+
+### Setup: reconnecting cost a factor of seventy
+
+Opening a connection means a TCP handshake, usually TLS, authentication (SCRAM adds two round trips of its own), a fork, backend initialization, then cold caches. The same primary key lookup on `users`, 4 clients for 5 seconds with [pgbench](/books/eight-kilobytes/benchmarking#pgbench-is-already-installed), first on persistent connections, then reconnecting per transaction (`-C`):
+
+```text
+tps = 38551.781280 (without initial connection time)
+...
+tps = 533.066200 (including reconnection times)
+```
+
+A factor of seventy, over a local Unix socket with no TLS. Over a real network, setup easily takes 10 to 50 ms, dwarfing a 1 ms query. It costs pages, too: in [the playbook's experiment](/books/eight-kilobytes/playbook#the-proof-one-app-eight-changes), an insert on a fresh connection read about 239 pages, mostly catalog pages to set up its foreign key checks, and 36 on a pooled one.
+
+Open few connections, keep them open, and share them.
+
+<DeepDive title="The reconnect benchmark, in full">
+
+```bash
+# lookup.sql:  \set id random(1, 100000)
+#              select * from users where id = :id;
+pgbench -n -f lookup.sql -c 4 -T 5 scratch
+pgbench -n -f lookup.sql -c 4 -T 5 -C scratch   # -C: new connection per transaction
+```
+
+```text
+latency average = 0.104 ms
+initial connection time = 6.117 ms
+tps = 38551.781280 (without initial connection time)
+
+latency average = 7.504 ms
+average connection time = 1.844 ms
+tps = 533.066200 (including reconnection times)
+```
+
+Timings are noisy; the ratio is the point.
+
+<ProveIt lab="27-connections">
+
+```sql
+-- 50 connect-query-disconnect cycles versus 50 lookups on one connection, via dblink
+select lab.prove('a new connection per query is several times slower than reusing one',
+  (select ms_per_query from setup_cost where how = 'reconnect')
+  > 5 * (select ms_per_query from setup_cost where how = 'persistent'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## max_connections in the thousands hurts
+
+`max_connections` (default 100, restart required) is not a capacity dial. It's a ceiling, and the right one stops the server from accepting more concurrent work than it can do. Raising it into the thousands hurts three ways:
+
+- **Memory.** A server fine at 200 connections swaps or meets the OOM killer at 2,000 on a bad day, which is exactly the day every connection runs a heavy query.
+- **Shared memory sized by it.** The lock table, for one, is `max_locks_per_transaction` times the connection slots, paid even when idle.
+- **It hides the real problem.** Hitting the limit means the app doesn't pool, holds connections during non-database work, or leaks them. Raising the limit removes the symptom and keeps the disease.
+
+A few hundred is a reasonable `max_connections` for most servers, with a pooler in front if the app needs more.
+
+Past the limit, clients get `FATAL:  sorry, too many clients already`. Keep a door open for yourself: `superuser_reserved_connections` (default 3), and since PostgreSQL 16, `reserved_connections` for roles granted `pg_use_reserved_connections`, the right home for monitoring and admin roles.
+
+<DeepDive title="Checking the defaults, and reserving a slot for monitoring">
+
+`pg_settings` holds each setting's compiled-in default (`boot_val`) and what it takes to change it (`context`, where `postmaster` means a restart). Reserved slots come out of `max_connections`, not on top of it: with the default 100 and 3 superuser slots, ordinary roles get 97. To keep monitoring connected when the app has used up the rest:
+
+```sql
+alter system set reserved_connections = 5;   -- restart required
+grant pg_use_reserved_connections to monitoring;
+```
+
+<ProveIt lab="27-connections">
+
+```sql
+select lab.prove('max_connections defaults to 100 and needs a restart',
+  (select boot_val = '100' and context = 'postmaster' from pg_settings where name = 'max_connections'));
+select lab.prove('superuser_reserved_connections defaults to 3',
+  (select boot_val from pg_settings where name = 'superuser_reserved_connections') = '3');
+select lab.prove('reserved_connections (16+) exists, default 0, with the pg_use_reserved_connections role',
+  (select boot_val from pg_settings where name = 'reserved_connections') = '0'
+  and exists (select 1 from pg_roles where rolname = 'pg_use_reserved_connections'));
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Pool in the app and in front of the database
+
+Always use your driver's or framework's pool; a connection per request is the slow `pgbench -C` result, every time. But app pools multiply: total connections is processes times pool size, and your autoscaler changes the process count without asking the database:
+
+```text
+  40 app pods x pool of 20  =  800 server connections
+  ┌───────┐ ┌───────┐ ┌───────┐          ┌───────┐
+  │ pod 1 │ │ pod 2 │ │ pod 3 │   ...    │pod 40 │
+  │ 20 ▣  │ │ 20 ▣  │ │ 20 ▣  │          │ 20 ▣  │
+  └───┬───┘ └───┬───┘ └───┬───┘          └───┬───┘
+      └─────────┴────┬────┴──────────────────┘
+                     ▼
+            ┌──────────────────┐
+            │  postgres        │  800 backends, 16 cores,
+            │  max_conn = 1000 │  most of them idle or waiting
+            └──────────────────┘
+```
+
+An external pooler such as [PgBouncer](/books/eight-kilobytes/glossary#pgbouncer) sits in between. Clients open as many connections to it as they like (cheap: PgBouncer is one event-driven process, not a backend per client), and it lends them a small, fixed set of server connections:
+
+```text
+  800 cheap client connections from 40 pods
+                     ▼
+            ┌──────────────────┐
+            │    pgbouncer     │   queues clients, lends
+            │ pool_size = 40   │   server connections
+            └────────┬─────────┘
+                     ▼
+            ┌──────────────────┐
+            │    postgres      │   40 busy backends
+            └──────────────────┘
+```
+
+Use both. The app pool avoids setup cost to the pooler; the pooler caps what reaches the database no matter how many pods exist. If your managed service offers a built-in pooler in the PgBouncer role, turn it on ([A managed pooler either pins sessions or leaks state](/books/eight-kilobytes/managed#a-managed-pooler-either-pins-sessions-or-leaks-state)).
+
+## Transaction pooling breaks session state
+
+A pooler must decide when a server connection can go to a different client, and that choice decides what your app may do.
+
+| Mode | Server connection returned | Multiplexing | Session features |
+|---|---|---|---|
+| session | when the client disconnects | low | all work |
+| transaction | at the end of each transaction | high | many break |
+| statement | after each statement | highest | multi-statement transactions break |
+
+**Session pooling** is safe but barely reduces connection count. **Transaction pooling** is the big win: a client holds a server connection only inside a transaction, so 800 mostly idle clients can share a few dozen. **Statement pooling** forbids multi-statement transactions and suits only narrow workloads.
+
+The catch with transaction pooling: consecutive transactions from one client may run on different backends. Anything that lives in the **session** leaks or vanishes:
+
+- **`SET`.** A plain `SET statement_timeout` changes the backend, which the next client inherits, while your next transaction lands somewhere without it. Use `SET LOCAL` inside the transaction, or per-role defaults with `alter role ... set ...`. Tenant variables for [row-level security](/books/eight-kilobytes/security) need the same care: `set_config('app.tenant_id', $1, true)`, where `true` means transaction-local.
+- **Session advisory locks.** `pg_advisory_lock` belongs to the backend. Use `pg_advisory_xact_lock`, released at transaction end.
+- **Driver prepared statements.** Most drivers prepare parameterized queries at the protocol level, on one backend; the next transaction may land on a backend that never saw them. PgBouncer 1.21 and later re-prepare them for you; with an older pooler, or a managed one that doesn't, turn off statement preparation in the driver.
+- **`LISTEN`.** Notifications go to the backend that listened. Keep listeners on a dedicated direct connection.
+- **Temporary tables** that outlive a transaction, `WITH HOLD` cursors, SQL-level `PREPARE`, and anything else that assumes "my connection" across transactions.
+
+<Callout type="warn" title="Transaction pooling bugs are silent">
+
+A session `SET` under transaction pooling doesn't fail. It succeeds, then quietly applies to some other client's transactions. A tenant id set with plain `SET` can be read by the next request on that backend. Audit every `SET`, `set_config(..., false)`, advisory lock, and `LISTEN` before switching a pooler to transaction mode.
+
+</Callout>
+
+<DeepDive title="A leaked SET, caught in the act">
+
+Client A runs a plain `SET statement_timeout = '7s'` and finishes. Client B's next transaction lands on the same backend and inherits a 7-second timeout it never asked for. The transaction-scoped versions behave: `SET LOCAL` and `set_config(..., true)` are gone at commit. Advisory locks split the same way. A session lock taken with `pg_advisory_lock` is still in `pg_locks` after the transaction that took it ends, held for whoever gets the backend next; `pg_advisory_xact_lock` is released with the transaction. The lab plays both clients on one shared server connection through `dblink`.
+
+<ProveIt lab="27-connections">
+
+```sql
+-- client A, on the shared server connection
+select dblink_exec('server', 'set statement_timeout = ''7s''') \g /dev/null
+-- client B, next transaction on the same backend
+select lab.prove('a plain SET by one client stays on the backend for the next client',
+  (select v from dblink('server', 'show statement_timeout') t(v text)) = '7s');
+select lab.prove('SET LOCAL and set_config(..., true) reset at commit',
+  (select v from dblink('server', 'show statement_timeout') t(v text)) = '0'
+  and (select coalesce(v, '') from dblink('server',
+         $$select current_setting('app.tenant_id', true)$$) t(v text)) = '');
+select lab.prove('a session advisory lock outlives the transaction; an xact lock does not',
+  (select count(*) from pg_locks where locktype = 'advisory'
+     and pid = (select p from dblink('server', 'select pg_backend_pid()') t(p int))
+     and objid = 1) = 1
+  and (select count(*) from pg_locks where locktype = 'advisory' and objid = 2
+          and pid = (select p from dblink('server', 'select pg_backend_pid()') t(p int))) = 0);
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="What newer PgBouncer fixes, and what it still can't">
+
+As of October 2026:
+
+- **Protocol-level prepared statements.** PgBouncer 1.21 (October 2023) added tracking that re-prepares them on whichever server connection a client lands on, enabled by a non-zero `max_prepared_statements`; since 1.24 (January 2025) it defaults to 200, so it's on. Before 1.21, the standard advice was to turn off statement preparation in the driver.
+- **Reported parameters.** PgBouncer 1.26 (September 2026) tracks every parameter Postgres reports to clients by default, notably `search_path` on PostgreSQL 18+ and `default_transaction_read_only` on 14+. On older PgBouncer, or before PostgreSQL 18 (which doesn't report `search_path`), a client's `SET search_path` leaks to the next user of that server connection. Parameters Postgres doesn't report, such as `statement_timeout` and custom settings like `app.tenant_id`, still leak; keep using `SET LOCAL`.
+
+</DeepDive>
+
+## Size the pool from cores, not users
+
+The pool size that maximizes throughput is far smaller than you'd expect. A running backend is either on a core or waiting on disk or a lock. With the working set in memory, backends beyond one per core just queue for CPU. If queries wait on disk, a few extra per core keep the cores busy. A widely used starting point, from experience rather than theory:
+
+```text
+  connections = (cores x 2) + effective number of disks
+```
+
+For a 16-core server on network storage, that's roughly 32 to 40 active connections. Measure from there: grow the pool under a realistic load and stop where throughput flattens and latency climbs.
+
+Check from the other direction with Little's law: busy connections equal throughput times the time each transaction holds a connection. An app serving 2,000 requests a second, each holding a connection for 5 ms, keeps 2,000 x 0.005 s = 10 connections busy on average. A load like that needs a pool of a dozen or two for bursts, not hundreds. (The `pgbench` run above obeys the law by construction: 38,500 lookups a second at about 0.1 ms each is its 4 clients.)
+
+Little's law also shows what really inflates connection counts: holding a connection while not using it. A handler that opens a transaction, calls a payment API for 800 ms, then commits holds a connection 400 times longer than its 2 ms of database work needs. Do slow external calls before or after the transaction, never inside.
+
+When the pool is exhausted, requests wait. That's correct: a short queue in front of a pool beats the same queue inside Postgres. Give the wait a timeout of a few seconds.
+
+<Callout type="tip" title="Pool size is a total, not a per-process number">
+
+Decide how many server connections the database should have (say 40), then divide it among everything that connects: app pods, workers, cron jobs, the migration runner, monitoring. Give 40 pods a pool of 20 each and you've chosen 800 without meaning to.
+
+</Callout>
+
+## Every timeout defaults to off
+
+A query runs forever, a transaction is forgotten, an idle connection holds a slot, a client vanishes. Postgres has a timeout for each. All default to 0 (disabled), and all can be set per role:
+
+- **`statement_timeout`** cancels a statement that runs too long (SQLSTATE `57014`); the connection survives. A statement that outlives the request's deadline is wasted work holding locks.
+- **`lock_timeout`** bounds the wait for a lock; [migrations](/books/eight-kilobytes/migrations#rule-one-lock_timeout-and-retry) make it rule one. A bit shorter than `statement_timeout` turns a lock pile-up into fast errors.
+- **`transaction_timeout`** (PostgreSQL 17+) ends a session whose transaction has been open too long, busy or idle: it catches many small statements in one huge transaction, which the others miss.
+- **`idle_session_timeout`** (PostgreSQL 14+) ends a session idle outside a transaction. Pooled connections are idle by design, so use it only on roles for humans and ad-hoc tools, or set it longer than your pools' idle timeouts.
+
+A baseline for an application role:
+
+```sql
+alter role app set statement_timeout = '5s';
+alter role app set lock_timeout = '3s';
+alter role app set idle_in_transaction_session_timeout = '30s';
+alter role app set transaction_timeout = '5min';   -- PostgreSQL 17+
+```
+
+`lock_timeout` sits below `statement_timeout`, and the idle timeout far below `transaction_timeout`, so the most specific one fires first and its error says what went wrong. Run migrations, backfills, and batch jobs as a separate role with its own, longer limits (or `set local` them per transaction), so the app's baseline never kills a deliberate long job.
+
+### idle_in_transaction_session_timeout matters most
+
+Of all the timeouts, this one prevents the most damage. It ends a session that sits idle inside an open transaction. A transaction left open (an exception path that skips the rollback, a paused debugger, a script waiting for input) holds its locks indefinitely and stops vacuum from cleaning up anything newer than its snapshot. That's how a forgotten `begin` becomes table bloat and blocked migrations. Set it for every application role; 30 seconds is a good default, a few minutes at most.
+
+It, `transaction_timeout`, and `idle_session_timeout` are FATAL: they close the whole connection, and many drivers report only a broken connection. Treat that as a normal event; good pools discard the connection and open another.
+
+<DeepDive title="What each timeout looks like when it fires">
+
+Three sessions, one per timeout:
+
+```sql
+set statement_timeout = '1s';
+select pg_sleep(2);
+
+set idle_in_transaction_session_timeout = '1s';
+begin; select 1;
+-- (wait two seconds)
+select 2;
+
+set transaction_timeout = '2s';
+begin; select pg_sleep(1); select pg_sleep(1.5);
+```
+
+```text
+ERROR:  57014: canceling statement due to statement timeout
+FATAL:  25P03: terminating connection due to idle-in-transaction timeout
+FATAL:  25P04: terminating connection due to transaction timeout
+```
+
+In the last one, no statement was slow and the session was never idle; the total was too long. `idle_session_timeout` ends with `FATAL:  57P05: terminating connection due to idle-session timeout`. The SQLSTATEs (shown with psql's `\set VERBOSITY verbose`) are what the server sends, but a server that kills an idle session can't deliver the error until the client next talks to it, so many drivers see only SQLSTATE `08006`, a broken connection.
+
+<ProveIt lab="27-connections">
+
+```sql
+-- psql runs from the server (COPY ... FROM PROGRAM) so the lab can read what it printed
+select lab.prove('idle_in_transaction_session_timeout: FATAL 25P03, terminating connection due to idle-in-transaction timeout',
+  (select line from fatal where timeout = 'idle_in_transaction_session_timeout')
+  = 'FATAL:  25P03: terminating connection due to idle-in-transaction timeout');
+select lab.prove('transaction_timeout (17+): FATAL 25P04, even though no statement was slow and the session was never idle',
+  (select line from fatal where timeout = 'transaction_timeout')
+  = 'FATAL:  25P04: terminating connection due to transaction timeout');
+select lab.prove('idle_session_timeout (14+): FATAL 57P05',
+  (select line from fatal where timeout = 'idle_session_timeout')
+  = 'FATAL:  57P05: terminating connection due to idle-session timeout');
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### A dead client can hold its slot for hours
+
+If a client crashes or the network drops, the backend waits for a next query that never comes, holding its slot and maybe a transaction. TCP keepalives probe the silent peer. The defaults (0) mean "use the OS settings", which on Linux typically wait two hours before the first probe. Set them to minutes.
+
+<DeepDive title="Keepalive settings, and the query whose client left">
+
+```ini
+tcp_keepalives_idle = 60        # seconds of silence before the first probe
+tcp_keepalives_interval = 10    # seconds between probes
+tcp_keepalives_count = 6        # unanswered probes before giving up
+```
+
+The reverse case, a backend running a long query for a client that has gone, is handled by `client_connection_check_interval` (PostgreSQL 14+, on Linux and a few other platforms), which makes a running query periodically check for its client and cancel if it's gone. Set driver keepalives too, so the app notices a dead database connection instead of hanging.
+
+</DeepDive>
+
+## Connection storms feed themselves
+
+Serverless and aggressive autoscaling turn multiplication into bursts: hundreds of instances start within seconds, each opening connections, and the failures retry at once. Deploys and failovers do the same, and so does a slow database: requests take longer, so pools grow, so more connections arrive, so the database gets slower.
+
+Defenses, roughly by value:
+
+1. **Put a pooler in front.** For serverless this is not optional; use the platform's pooler or run one, and mind transaction-mode semantics.
+2. **Cap pools tightly and keep minimum sizes small.** A pool that eagerly opens 20 connections at startup turns 100 starting instances into 2,000 connection attempts.
+3. **Retry with exponential backoff and jitter.** Clients retrying in lockstep turn a brief overload into a long one.
+4. **Fail fast on pool exhaustion.** A short acquisition timeout sheds load instead of amplifying it.
+5. **Roll deploys gradually**, so pools reconnect in waves.
+
+## Count connections from the server's side
+
+The first query to run when connections are in question:
+
+```sql
+select usename, application_name, state, count(*)
+  from pg_stat_activity
+ where backend_type = 'client backend'
+ group by 1, 2, 3
+ order by 4 desc;
+```
+
+Set `application_name` in every connection string so this names the owner.
+
+Then read the states. A large `idle` count means oversized pools. Any `idle in transaction` deserves a look ([backend_xmin names the transaction holding vacuum back](/books/eight-kilobytes/observability#backend_xmin-names-the-transaction-holding-vacuum-back) shows for how long). If `active` regularly exceeds a couple of times your cores, a smaller pool with a queue in front will likely improve both throughput and latency.
+
+Pool config is a plan; `pg_stat_activity` is what happened.
+
+## The short version
+
+- Every connection is an OS process with its own memory: a few MB idle, a hundred or more mid-sort with a generous `work_mem`. Connections are scarce, not free.
+- Keep `max_connections` in the low hundreds. Hitting the limit means the app needs pooling, not a bigger limit. Reserve slots for admin and monitoring.
+- Size total server connections from cores and disks (start near cores x 2 plus disks, then measure), and divide that total among everything that connects.
+- Always use an app-side pool, and add an external pooler when many processes or serverless functions connect.
+- Transaction pooling breaks session state: use `SET LOCAL` or `set_config(..., true)`, transaction-scoped advisory locks, and a direct connection for `LISTEN`.
+- Never hold a transaction open across slow non-database work.
+- Set `statement_timeout`, `lock_timeout`, and `idle_in_transaction_session_timeout` for every application role, plus `transaction_timeout` on PostgreSQL 17+ (5s, 3s, 30s, and 5min to start). Run migrations and batch jobs as a separate role.
+- Survive connection storms with a pooler, small minimum pools, short acquisition timeouts, and retries with backoff and jitter.
+
+## Further reading
+
+- [How Connections Are Established](https://www.postgresql.org/docs/18/connect-estab.html), PostgreSQL documentation. The process-per-connection model from the source of truth.
+- [Connections and Authentication](https://www.postgresql.org/docs/18/runtime-config-connection.html) and [Client Connection Defaults](https://www.postgresql.org/docs/18/runtime-config-client.html), PostgreSQL documentation. `max_connections`, keepalives, and every timeout in this chapter.
+- [Analyzing the Limits of Connection Scalability in Postgres](https://techcommunity.microsoft.com/blog/adforpostgresql/analyzing-the-limits-of-connection-scalability-in-postgres/1757266), Andres Freund, Microsoft, 2020. Why idle connections cost, and what PostgreSQL 14 fixed.
+- [PgBouncer features](https://www.pgbouncer.org/features.html) and [configuration](https://www.pgbouncer.org/config.html), PgBouncer project. The pooling-mode compatibility table and `max_prepared_statements`.
+- [PgBouncer changelog](https://www.pgbouncer.org/changelog.html), PgBouncer project. Check what your version fixed; 1.21, 1.24, and 1.26 each changed transaction pooling.
+- [About Pool Sizing](https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing), Brett Wooldridge, HikariCP wiki. The classic argument for small pools.
+- [Number Of Database Connections](https://wiki.postgresql.org/wiki/Number_Of_Database_Connections), PostgreSQL wiki. Where the cores-times-two starting point comes from.

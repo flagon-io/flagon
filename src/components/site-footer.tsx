@@ -72,6 +72,7 @@ export function SiteFooter() {
 
         <FooterCol title="Community">
           <FooterLink href="/blog">Blog</FooterLink>
+          <FooterLink href="/books">Books</FooterLink>
           <FooterLink href={site.links.discord} external>
             Discord
           </FooterLink>

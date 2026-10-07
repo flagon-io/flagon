@@ -1,0 +1,560 @@
+---
+title: Copies of the truth
+description: Build streaming replicas, measure their lag, price synchronous commits, route reads safely, fail over without split brain, and use logical replication.
+part: Scaling out
+builds_on: [wal, mvcc, backups]
+---
+
+We put a standby five milliseconds away from a primary, made it synchronous, and ran one client inserting single rows. Commits per second fell from 757 to 136. Then we stopped the standby and ran one more insert with a three-second `statement_timeout`. It waited two minutes and eight seconds, until we cancelled it by hand, and when it returned, the row was committed anyway.
+
+A replica, the first rung past the bigger box, is not a cache, not a backup, and not a second primary. It's a copy of the primary's pages, always a little behind. That "a little behind" is this chapter: how far, what closing the gap costs, and what happens to reads and data that fall into it. (Every demo ran on three disposable containers: a primary, a replica, and a logical subscriber.)
+
+## A replica is a server stuck in recovery
+
+After a crash, Postgres reapplies WAL from the last checkpoint to the data pages ([Write it down first](/books/eight-kilobytes/wal)). A streaming replica does that forever, with WAL that arrives over the network.
+
+<Fig name="streaming-replica">
+
+**A replica replays the primary's WAL forever.** The walsender streams WAL to the standby's walreceiver, the startup process replays it into pages, and the standby reports its LSN positions back to pg_stat_replication. It takes reads and refuses writes with 25006.
+
+</Fig>
+
+The standby reports its progress as **LSNs**, byte offsets in the WAL stream ([LSNs are byte offsets](/books/eight-kilobytes/wal#lsns-are-byte-offsets)). Replaying physical WAL makes it a byte-for-byte copy of the whole cluster: no single tables, no replica-only indexes, no mixed versions. Those are jobs for [logical replication](#logical-replication-copies-rows-not-pages).
+
+It takes reads and refuses anything that writes, even a temp table, with SQLSTATE `25006`. In production logs, that code means a write was routed to a replica, or a failover demoted your "primary".
+
+<Callout type="info" title="Coming from MySQL">
+A MySQL replica replays a logical binlog and can be writable. A Postgres streaming replica replays pages: identical schema, no writes. The binlog-like feature is logical replication ([Postgres is not MySQL](/books/eight-kilobytes/not-mysql)).
+</Callout>
+
+<DeepDive title="Everything a hot standby refuses">
+
+```text
+ERROR:  cannot execute INSERT in a read-only transaction
+ERROR:  cannot execute CREATE TABLE in a read-only transaction
+ERROR:  cannot execute ANALYZE during recovery
+ERROR:  cannot execute pg_current_xact_id() during recovery
+```
+
+Those are an `insert`, a `create temp table`, an `analyze`, and `select txid_current()` (the older name for `pg_current_xact_id()`, which is why the error names the new one). With verbose errors the first reads `ERROR:  25006: cannot execute INSERT in a read-only transaction`; `25006` is `read_only_sql_transaction`, so your app can catch it.
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+prove "not even a temp table" \
+  has "$(err replica 'create temp table t (id int)')" "ERROR:  25006: cannot execute CREATE TABLE in a read-only transaction"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## One command copies a primary into a standby
+
+On a managed service, a replica is a button. By hand, you need `wal_level` of at least `replica` (the default), a role with the `replication` attribute allowed in `pg_hba.conf`, and then one command that copies the data directory as a standby:
+
+```bash
+pg_basebackup -h repl-primary -U replicator \
+  -D /var/lib/postgresql/18/docker \
+  -X stream -R -P -v \
+  --slot=replica1 --create-slot \
+  -d 'application_name=replica1'
+```
+
+`-R` writes the standby settings, `--slot` with `--create-slot` creates a replication slot (next section), and `application_name` is how the standby shows up everywhere: name every one.
+
+<DeepDive title="What -R wrote, and the checkpoint we waited for">
+
+Replication connections match the database name `replication` in `pg_hba.conf`, not `all`. Our first `pg_basebackup` sat at "waiting for checkpoint to complete" for over two minutes: by default it requests a spread checkpoint. Add `--checkpoint=fast` when you're waiting. `-R` appended this to `postgresql.auto.conf`:
+
+```ini
+primary_conninfo = 'user=replicator password=replpw ... host=''repl-primary''
+                    port=5432 application_name=replica1 sslmode=prefer ...'
+primary_slot_name = 'replica1'
+```
+
+That password sits in plain text in the data directory; in production use `.pgpass` or certificates. Started, the replica logs:
+
+```text
+LOG:  entering standby mode
+LOG:  consistent recovery state reached at 0/508CA38
+LOG:  database system is ready to accept read-only connections
+LOG:  started streaming WAL from primary at 0/6000000 on timeline 1
+```
+
+At "consistent", it has replayed past the end of the backup, and reads are safe.
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+auto=$(compose exec -T replica bash -c 'test -f "$PGDATA/standby.signal" && echo SIGNAL; cat "$PGDATA/postgresql.auto.conf"' | tr -d '\r')
+prove "-R wrote standby.signal" has "$auto" "SIGNAL"
+prove "--slot with --create-slot recorded primary_slot_name" has "$auto" "primary_slot_name = 'replica1'"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Replication slots are a promise to keep WAL
+
+A **replication slot** is the primary's record of how far one consumer has gotten, and the primary won't recycle WAL a slot still needs. With one, a replica can be down an hour and catch up. Without one, a replica that falls far enough behind finds its WAL recycled and has to be rebuilt.
+
+The promise has no expiry by default. With our replica stopped, twenty seconds of pgbench left its slot holding 173 MB. A forgotten slot holds WAL until the disk fills, and a full `pg_wal` stops the primary. Capped with `max_slot_wal_keep_size` (PostgreSQL 13+), a forgotten slot is marked `lost` instead and the primary keeps running. A replica recloned in minutes beats a primary with a full disk.
+
+<Callout type="danger" title="Every slot needs an owner and an alert">
+Set `max_slot_wal_keep_size` well below the disk on every primary with slots. Alert on inactive slots and on retained WAL. Decommission a replica or subscriber and its slot in the same change.
+</Callout>
+
+<DeepDive title="A slot holding WAL, then invalidated by the cap">
+
+```sql
+select slot_name, active, inactive_since, wal_status,
+       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) as retained
+from pg_replication_slots;
+```
+
+```text
+ slot_name | active |        inactive_since         | wal_status | retained
+-----------+--------+-------------------------------+------------+----------
+ replica1  | f      | 2026-10-06 03:31:14.019976+00 | reserved   | 173 MB
+```
+
+A slot named `forgotten`, with no consumer and a 256 MB cap, went from `unreserved` (327 MB retained, `safe_wal_size` of -71 MB) to this after the next checkpoint (the lab repeats it at a smaller scale, 100 MB against a 64 MB cap):
+
+```text
+ slot_name | active | wal_status | restart_lsn | invalidation_reason
+-----------+--------+------------+-------------+---------------------
+ replica1  | t      | reserved   | 0/8D6EAA48  |
+ forgotten | f      | lost       |             | wal_removed
+```
+
+`invalidation_reason` and `inactive_since` are PostgreSQL 17+; PostgreSQL 18 adds `idle_replication_slot_timeout`, which invalidates a slot left idle too long (off by default). A slot carrying an `xmin` (from `hot_standby_feedback`, below) also blocks [vacuum](/books/eight-kilobytes/vacuum).
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+# ... create slot "forgotten", write 100 MB, cap at 64 MB, checkpoint
+prove "after a checkpoint, the slot is lost: invalidation_reason wal_removed" \
+  wait_for 30 primary "select wal_status = 'lost' and invalidation_reason = 'wal_removed'
+                       from pg_replication_slots where slot_name = 'forgotten'"
+prove "the replica's own slot is untouched: active and reserved" \
+  is "$(on primary -c "select active, wal_status from pg_replication_slots where slot_name = 'replica1'")" "t|reserved"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Four LSNs show where a standby falls behind
+
+One view on the primary tells you how far behind each standby is. `pg_stat_replication` has a row per connected standby, and its four positions read as a pipeline: `sent_lsn` (sent), `write_lsn` (written to the standby's OS), `flush_lsn` (durable on its disk), `replay_lsn` (applied, visible to queries). A gap between `flush_lsn` and `replay_lsn` means replay is falling behind, the common case. Byte lag is `pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn)`, and `replay_lag` is the same in time.
+
+The alert that matters most is a standby missing from the view: it isn't connected at all.
+
+<DeepDive title="The standby's side, and the lag clock that lies when idle">
+
+When the primary goes idle, the `*_lag` columns turn NULL: "nothing to measure", not "broken". On the standby, `pg_stat_wal_receiver` shows the same connection (no row means disconnected). `now() - pg_last_xact_replay_timestamp()` there is the lag humans understand, but it grows forever while the primary is idle; alert on byte lag, or keep it honest with a heartbeat write every few seconds.
+
+</DeepDive>
+
+### Lag follows WAL volume
+
+Under 16 pgbench clients (about 2,070 transactions per second) the replica stayed kilobytes behind, worst sample 31 ms. One bulk `update` across 1.2 million rows wrote 574 MB of WAL in 9.8 seconds, and the replica fell at worst 24 MB and 0.7 seconds behind, catching up half a second after it finished. (The lab repeats it with 400,000 rows.) That's a floor on a shared laptop disk, not a forecast, but the shape transfers: lag follows WAL volume, so batch bulk work ([A big load forces checkpoints and floods replicas](/books/eight-kilobytes/loading#a-big-load-forces-checkpoints-and-floods-replicas)).
+
+<DeepDive title="The lag samples during the bulk update">
+
+Every half second: bytes behind for sent, flush, and replay, then `replay_lag`, from `pg_wal_lsn_diff(pg_current_wal_lsn(), ...)` over `pg_stat_replication`:
+
+```text
+     sampled  |  sent   |  flush  | replay  |   replay_lag
+--------------+---------+---------+---------+-----------------
+ 03:18:16.194 | 0 bytes | 0 bytes | 0 bytes | 00:00:00.001356
+ 03:18:19.694 | 8192 kB | 16 MB   | 24 MB   | 00:00:00.687615
+ 03:18:26.194 | 0 bytes | 0 bytes | 0 bytes | 00:00:00.097072
+```
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+# sample pg_stat_replication while "update commit_test set n = n + 1" (400,000 rows) runs
+prove "during the burst, the replica fell behind" gt "$maxlag" 0
+prove "after it, the lag closes: the replica replays to the primary's position" caught_up
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Replay is one process
+
+The primary generates WAL from every backend at once; a standby applies it with a single startup process, record by record, in order. Through PostgreSQL 18 there is no parallel replay. So a primary writing on dozens of cores can produce WAL faster than one core can apply it, and then replay lag grows steadily however big the replica is: more cores on the standby don't help, because only the speed of one core and the storage behind it matter. The fixes are on the primary's side: write less WAL (batch bulk work, drop unused indexes, turn on `wal_compression` for full-page images), or split the writes across primaries ([Every write funnels into one WAL stream](/books/eight-kilobytes/scale#every-write-funnels-into-one-wal-stream) puts numbers on the volume). Alert on `replay_lag` that keeps rising under normal load: it's the first sign that one primary is outgrowing its replicas.
+
+## Asynchronous is the default, and it can lose commits
+
+Lag isn't only a stale read. By default a commit returns once its WAL is flushed on the primary; replicas get it milliseconds later. If the primary dies inside that window and you promote a replica, commits the app saw succeed are gone ([Durable here is not durable everywhere](/books/eight-kilobytes/acid#durable-here-is-not-durable-everywhere)). For most apps that's fine. Write it down as an RPO ([Write down RPO and RTO first](/books/eight-kilobytes/backups#write-down-rpo-and-rto-first)). If the answer is "zero lost commits", you need synchronous replication, and its price.
+
+## Synchronous commit costs a round trip
+
+Synchronous replication makes a commit wait until a standby named in `synchronous_standby_names` confirms it; `synchronous_commit` says how far it must have gotten. With a synchronous standby 5 ms away and one client inserting single rows:
+
+| `synchronous_commit` | Commit returns after... | Mean latency | Commits/s |
+|---|---|---|---|
+| `off` | WAL in memory on the primary | 0.051 ms | 19,571 |
+| `local` | flushed on the primary | 1.32 ms | 757 |
+| `remote_write` | ...and written on the standby | 6.41 ms | 156 |
+| `on` | ...and flushed on the standby | 7.35 ms | 136 |
+| `remote_apply` | ...and replayed on the standby | 7.62 ms | 131 |
+
+The jump that matters is `local` to `remote_write`: five milliseconds, one round trip. In the same zone it shrinks toward a millisecond; across a continent every commit pays 60 ms or more. With 16 clients, [group commit](/books/eight-kilobytes/glossary#group-commit) shares round trips, and `on` cost half the throughput instead of five sixths.
+
+You don't have to pay it everywhere. Set it per transaction, so payments wait for the standby and page-view logging doesn't:
+
+```sql
+begin;
+set local synchronous_commit = on;  -- waits for the standby's flush
+insert into payments ...;
+commit;
+```
+
+`on` is enough for durability. `remote_apply` costs a little more and buys something else: the row is already visible on the standby when the commit returns, which matters for [reads after a write](#after-a-write-a-replica-can-show-the-old-value).
+
+<DeepDive title="How we measured the round trip, and FIRST against ANY">
+
+We set `synchronous_standby_names = 'FIRST 1 (replica1)'`, added `tc qdisc ... netem delay 5ms` on the standby, and changed the setting per connection: ten seconds per level, five rounds, medians (the local flush was noisy, 1.1 to 2.8 ms). With 16 clients, `local` ran 1,708 commits per second at 9.37 ms and `on` 854 at 18.73 ms. It hurts most where your app is least concurrent, like a batch job committing row by row.
+
+Without a synchronous standby, `remote_write`, `on`, and `remote_apply` all behave like `local`, which is why `on` is a safe default. `set local synchronous_commit = off` goes the other way, for writes you could lose in a crash ([synchronous_commit = off can lose about 600 ms of commits](/books/eight-kilobytes/wal#synchronous_commit--off-can-lose-about-600-ms-of-commits)).
+
+The list takes a count, by priority or by quorum:
+
+```ini
+synchronous_standby_names = 'FIRST 1 (replica1, replica2)'
+synchronous_standby_names = 'ANY 1 (replica1, replica2, replica3)'
+```
+
+With `FIRST`, `replica2` becomes synchronous only when `replica1` disappears. With `ANY`, each commit waits for whichever answers first, smoothing out one slow standby, but at failover your tooling must work out which standby has every commit.
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+# No injected delay in the lab, so it times off against local, then proves the mechanism.
+prove "off is far cheaper than local: no flush at all (over 5 times faster)" gt "$(median local)" "$(awk -v x="$(median off)" 'BEGIN { print 5 * x }')"
+on replica -c "select pg_wal_replay_pause()"
+prove "with replay paused, a remote_apply commit waits (wait event SyncRep)" \
+  is "$(on primary -c "select count(*) from pg_stat_activity
+                       where wait_event = 'SyncRep' and query like '%remote_apply%'")" 1
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### When the synchronous standby goes away, writes stop
+
+This is the part that bites. We stopped the synchronous standby and ran one insert with `statement_timeout = '3s'`. It hung in wait event `SyncRep`; the timeout never fired. Two minutes later, we cancelled it:
+
+```text
+WARNING:  canceling wait for synchronous replication due to user request
+DETAIL:  The transaction has already committed locally, but might not have been replicated to the standby.
+INSERT 0 1
+Time: 128415.478 ms (02:08.415)
+```
+
+Read the detail twice. The commit was written locally before the wait began, so cancelling can't undo it: the row exists, and a client that gave up on a timeout believes it failed. Every write queues like this until a synchronous standby returns.
+
+<Callout type="warn" title="One synchronous standby means two points of failure">
+With one synchronous standby, losing either server stops writes. Run two candidates (`FIRST 1 (a, b)` or `ANY 1 (a, b)`), alert on `sync_state` in `pg_stat_replication`, and decide in advance whether failover may drop to asynchronous.
+</Callout>
+
+<DeepDive title="Why the timeout never fired, and the proof">
+
+`statement_timeout` covers running the statement, and Postgres disarms it before the commit begins. The wait for the synchronous standby happens inside the commit, after the commit record is already flushed locally, so no timeout of yours interrupts it. `pg_cancel_backend()` or a client-side cancel ends the wait with the warning above, and `pg_terminate_backend()` ends the session; neither can take the commit back. That's why the fix is a second candidate standby, not a shorter timeout. The lab stops the standby, starts the insert in the background, and checks it six seconds later.
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+compose stop replica
+bg "$tmp/hang.txt" primary -c "set statement_timeout = '3s'" -c "insert into accounts (name) values ('Waits for the standby')"
+sleep 6
+prove "the insert hangs past its 3 s statement_timeout, waiting on SyncRep" \
+  is "$(on primary -c "select wait_event_type || ' ' || wait_event, now() - query_start > interval '3 seconds'
+                       from pg_stat_activity where wait_event = 'SyncRep'")" "IPC SyncRep|t"
+on primary -c "select pg_cancel_backend(pid) from pg_stat_activity where wait_event = 'SyncRep'"
+prove "the row exists" is "$(on primary -c "select count(*) from accounts where name = 'Waits for the standby'")" 1
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Read replicas scale reads, not writes
+
+Every replica replays every write, so replicas add no write capacity, and they inherit the primary's bloat, missing indexes, and slow queries. A query that reads 35,000 pages reads 35,000 pages on the replica too. Fix it first ([Scale up before you scale out](/books/eight-kilobytes/scale)).
+
+When reads really are the bottleneck, replicas serve the ones that tolerate being a little behind: dashboards, search, exports, reports. Route them in the app, two pools and an explicit choice per call site. A proxy that guesses gets fooled by a `select` that calls a function that writes.
+
+### After a write, a replica can show the old value
+
+The classic replica bug: a user changes their name, the redirect reads from a replica that hasn't replayed the update, and they see their old name. They change it again. Support gets a ticket. (We reproduced it by pausing replay: the replica had *received* the update but not *replayed* it.) The fixes, simplest first:
+
+1. **Stick to the primary after a write**, for a few seconds. Enough for most apps.
+2. **Route by need**: anything that renders the user's own action reads from the primary.
+3. **Wait for the LSN**: after the write commits, read `pg_current_wal_lsn()` in a separate statement, carry it, and read from a replica once its `pg_last_wal_replay_lsn()` has passed it, else fall back. Take it after the commit, not inside the transaction (`returning pg_current_wal_lsn()` is too early): the commit record comes later in the WAL, and a replica past the earlier LSN can still hide the row.
+4. **`remote_apply`**, per transaction, for the few writes worth its price.
+
+<DeepDive title="The stale read, and the LSN check that fixes it">
+
+After the update committed, `select pg_current_wal_lsn()` on the primary returned `0/9FAFAB90`. On the replica, with replay paused:
+
+```text
+ pg_last_wal_receive_lsn | pg_last_wal_replay_lsn | pg_is_wal_replay_paused
+-------------------------+------------------------+-------------------------
+ 0/9FAFAB90              | 0/9FAF37E8             | t
+```
+
+`select pg_last_wal_replay_lsn() >= '0/9FAFAB90'::pg_lsn` said `f`. After `pg_wal_replay_resume()` the very next check still said `f`, because resuming is asynchronous; a moment later, `t`. So the app polls, then falls back:
+
+```ts
+async function readAfter(lsn: string, sql: string, params: unknown[]) {
+  for (let i = 0; i < 5; i++) {
+    const { rows } = await replica.query(
+      "select pg_last_wal_replay_lsn() >= $1::pg_lsn as ok", [lsn]);
+    if (rows[0].ok) return replica.query(sql, params);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return primary.query(sql, params); // replica too far behind: don't wait forever
+}
+```
+
+Exact, works with any number of replicas, one extra round trip. PostgreSQL 19 (in beta as of October 2026) adds a `WAIT FOR` command that makes the standby wait for an LSN itself; until then, this loop works on every version since 10.
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+prove "with replay paused, the replica still shows the old name" is "$(on replica -c 'select name from users where id = 42')" "User 42"
+prove "it has received the write's LSN but not replayed it" \
+  is "$(on replica -c "select pg_last_wal_receive_lsn() >= '$lsn', pg_last_wal_replay_lsn() >= '$lsn' as caught_up, pg_is_wal_replay_paused()")" "t|f|t"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+## Replica queries fight replay
+
+A replica query holds a [snapshot](/books/eight-kilobytes/glossary#snapshot), and replay sometimes has to change pages out from under it. The common case: vacuum on the primary removes row versions no primary query needs, but a replica query still does. The primary has no idea that query exists. So replay waits, up to `max_standby_streaming_delay` (30 seconds by default), lag grows, and then the replica cancels the query:
+
+```text
+ERROR:  canceling statement due to conflict with recovery
+DETAIL:  User query might have needed to see row versions that must be removed.
+```
+
+Each way out moves the cost. **Let replay wait longer**, and lag grows. **Turn on `hot_standby_feedback`**, and vacuum on the primary spares the replica's rows: no cancellations, but bloat, as if a long transaction ran on the primary ([Long transactions hold everything back](/books/eight-kilobytes/mvcc#long-transactions-hold-everything-back)). Or **retry** (SQLSTATE `40001`).
+
+So separate the workloads: app-read replicas with feedback off and retries, a reporting replica with feedback on and a `statement_timeout`. Never use a replica that can fall minutes behind as your failover candidate.
+
+<DeepDive title="What feedback cost the primary">
+
+Without feedback, our replica's `replay_lsn` froze for half a minute while a repeatable-read query held its snapshot, a row inserted on the primary stayed invisible on the replica, and the query was cancelled after 33.7 seconds. `pg_stat_database_conflicts` counted it as `confl_snapshot`. (`confl_lock` comes from replaying an `access exclusive` lock: `drop table`, `truncate`, many `alter table` forms, vacuum truncating a table's end.)
+
+With `hot_standby_feedback = on` and the same long query, the primary deleted half of a table and vacuumed:
+
+```text
+tuples: 0 removed, 1133508 remain, 1133508 are dead but not yet removable
+removable cutoff: 2492494, which was 1 XIDs old when operation ended
+```
+
+The replica's query finished undisturbed. The feedback lived in the replica's slot `xmin`, 2492494, the same number as vacuum's cutoff, not in `backend_xmin`. It arrives every `wal_receiver_status_interval` (10 seconds by default); once it moved on, the next vacuum read `tuples: 1133508 removed`.
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+out=$(cat "$tmp/conflict.txt")
+prove "the replica cancels the query: 40001 canceling statement due to conflict with recovery" \
+  has "$out" "ERROR:  40001: canceling statement due to conflict with recovery"
+prove "vacuum on the primary removes nothing: the dead rows are not yet removable" \
+  bash -c "grep -Eq 'tuples: 0 removed, [0-9]+ remain, [1-9][0-9]* are dead but not yet removable' <<<'$vac'"
+```
+
+</ProveIt>
+
+</DeepDive>
+
+<DeepDive title="Cascading: replicas that feed replicas">
+
+Point a new replica's `primary_conninfo` at an existing replica and it streams from there. WAL crosses an expensive link once, to a replica in another region, which fans it out to its neighbors and takes walsender load off the primary. The cost: lags add up along the chain, only standbys connected directly to the primary can be synchronous, and the middle replica needs its own `max_wal_senders` and slots.
+
+</DeepDive>
+
+## Promotion takes one call and starts a new timeline
+
+When the primary dies, you promote a replica with `select pg_promote()`. Ours took writes 200 ms later, on a new **timeline**, a branch of history forked at that point. (Its first id was 1035 where the old primary stopped at 1004: sequences log values ahead. If your app treats ids as dense, it was already wrong.)
+
+### The old primary doesn't know
+
+Promotion is the easy half. Our old primary was still running, because nothing told it to stop, and it took an insert. Two servers accepting writes, each with rows the other lacks: **split brain**, and nothing merges it back. Any client still pointed at the old primary writes into a branch about to be discarded.
+
+<DeepDive title="The split brain, proved, and bringing the old primary back">
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+prove "the new primary writes on timeline 2 (WAL file names start 00000002)" \
+  is "$(on replica -c "select left(pg_walfile_name(pg_current_wal_lsn()), 8)")" "00000002"
+prove "split brain: the old primary doesn't know, and still accepts writes" \
+  is "$(on primary -c "select pg_is_in_recovery()" -c "insert into accounts (name) values ('Written to the OLD primary') returning 'ok'" | tr '\n' ' ')" "f ok "
+```
+
+</ProveIt>
+
+Restarted as a standby of the new primary, the old one refused to follow:
+
+```text
+LOG:  new timeline 2 forked off current database system timeline 1 before current recovery point 0/9FB37B20
+```
+
+It had written past the fork. **pg_rewind** copies back only the blocks changed since then; it needs data checksums (on by default in PostgreSQL 18's `initdb`) or `wal_log_hints = on`, plus the old primary's WAL back to the last checkpoint before the fork. Ours had recycled it:
+
+```text
+pg_rewind: error: could not open file ".../pg_wal/00000001000000000000009E":
+No such file or directory
+```
+
+With an archive, `pg_rewind -c` fetches it through `restore_command`; without one, you reclone. (Then recreate the slot on the new primary: slots aren't part of a base backup.) The row "Written to the OLD primary" was gone. In a real split brain those are customer writes, dug out by hand before the old server is wiped.
+
+</DeepDive>
+
+### Don't hand-roll failover
+
+A script that calls `pg_promote()` when a health check fails makes split brain on purpose. A failover must decide the primary is really dead (a slow one looks dead), **fence** it so it can't take writes, pick the replica with the most WAL, move clients, and rejoin the old primary.
+
+Patroni is the most widely used open-source tool for this: nodes compete for a leader lock with a time-to-live in a consensus store, and a primary that can't renew it demotes itself. On Kubernetes, operators such as CloudNativePG do the job; on a [managed service](/books/eight-kilobytes/managed#failover-is-dns-and-your-pool-has-to-notice), it's what you pay for. Either way, fail over on purpose, on a schedule: an unexercised failover is the [untested backup](/books/eight-kilobytes/backups#test-your-restores) of availability.
+
+## Logical replication copies rows, not pages
+
+Streaming replication copies pages. **Logical replication** copies row changes: the publisher decodes its WAL into "insert this row, update that one", and a subscriber applies them to ordinary tables. The subscriber is a normal, writable database with its own indexes and tables, even on a different major version. It needs `wal_level = logical` on the publisher (changing it takes a restart, so plan it), a publication, and a subscription:
+
+```sql
+-- on the publisher
+create publication app_pub for table accounts, users, projects;
+
+-- on the subscriber, after copying the schema with pg_dump --schema-only
+create subscription app_sub
+  connection 'host=repl-primary dbname=app user=replicator password=replpw'
+  publication app_pub;
+```
+
+It creates a logical slot on the publisher, copies the existing rows, and streams; ours applied changes within a second. Everything about slots applies: a stalled subscriber holds WAL on the publisher.
+
+### Logical replication skips DDL and sequences
+
+Logical replication leaves things behind: DDL, sequence state (through PostgreSQL 18), large objects, and views. Two of those bite:
+
+- **DDL.** Add a column on the publisher and use it, and the subscription stops (`missing replicated column: "region"`) while its slot holds WAL. **Additive DDL goes to the subscriber first.**
+- **Sequences.** The subscriber's never move, so its first insert collided with id 1. Before an upgrade cutover, `setval` every sequence. (PostgreSQL 19, in beta as of October 2026, lets a publication include sequences with `for all sequences` and syncs them on request.)
+
+And give every table a primary key: the subscriber finds rows by **replica identity**, the primary key by default, and a keyless table in a publication makes every update to it fail *on the publisher*, in your app's write path.
+
+<DeepDive title="The errors behind those rules, and row filters">
+
+```text
+ERROR:  cannot update table "feature_flags" because it does not have a replica identity and publishes updates
+HINT:  To enable updating the table, set REPLICA IDENTITY using ALTER TABLE.
+```
+
+A primary key fixed it. The alternatives are `replica identity using index` or `replica identity full`, which logs the whole old row: more WAL, and possibly a table scan on the subscriber per change. The DDL error repeated in the subscriber's log until we added the column there; `pg_stat_subscription_stats` (PostgreSQL 15+) counts such failures. And the initial copy is a plain `select` run on the publisher as the user in the subscription's connection string, so a table added without a `grant select` stays empty.
+
+Since PostgreSQL 15 a publication can send a subset of rows and columns:
+
+```sql
+create publication big_accounts
+  for table accounts (id, name, plan) where (plan = 'enterprise')
+  with (publish = 'insert');
+```
+
+The `publish = 'insert'` is load-bearing. If a publication publishes updates or deletes (the default), row filters may only reference replica identity columns, checked on the publisher's write path: without that option, this filter made every `update` of `accounts` fail.
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+prove "sequences aren't replicated: an insert on the subscriber collides with id 1 (23505)" \
+  has "$(err subscriber "insert into accounts (name) values ('Written on the subscriber')")" "ERROR:  23505: duplicate key value violates unique constraint \"accounts_pkey\""
+out=$(err primary "update feature_flags set enabled = true where account_id = 1")
+prove "on the publisher, updating a published table without a replica identity fails (55000)" \
+  has "$out" 'ERROR:  55000: cannot update table "feature_flags" because it does not have a replica identity and publishes updates'
+```
+
+</ProveIt>
+
+<ProveIt lab="37-replication.sh">
+
+```bash
+on primary -c "create publication big_accounts for table accounts (id, name, plan) where (plan = 'enterprise')"
+prove "a row filter on a non-identity column, in a publication that publishes updates, makes updates fail" \
+  has "$(err primary "update accounts set name = name where id = 3")" 'cannot update table "accounts"'
+```
+
+</ProveIt>
+
+</DeepDive>
+
+### Logical replication is for upgrades, moves, and feeds
+
+Reach for it when the copy has to differ from the source: a major version upgrade with seconds of downtime ([the cutover](/books/eight-kilobytes/backups#logical-replication-shrinks-upgrade-downtime-to-the-cutover)), a few tables synced elsewhere, a move between providers, or a feed for change-data-capture, search, and cache consumers.
+
+One catch: logical slots live on the server that made them, so after our promotion the subscriber still followed the old primary. PostgreSQL 17's **failover slots** fix that (`failover = true`, `sync_replication_slots = on`); before 17, resync after every failover.
+
+<DeepDive title="Decoding from a standby, and upgrades without the initial copy">
+
+Since PostgreSQL 16, logical decoding works on a standby (with `wal_level = logical` there too):
+
+```sql
+select slot_name, lsn
+from pg_create_logical_replication_slot('standby_decoding', 'test_decoding');
+
+select lsn, xid, data
+from pg_logical_slot_get_changes('standby_decoding', null, null);
+```
+
+```text
+ 0/9FB377D8 | 2492514 | BEGIN 2492514
+ 0/9FB377D8 | 2492514 | table public.accounts: UPDATE: id[bigint]:7 ...
+ 0/9FB37880 | 2492514 | COMMIT 2492514
+```
+
+Slot creation on a standby waits for a snapshot record; `pg_log_standby_snapshot()` on the primary produces one. With failover slots, `synchronized_standby_slots` on the primary keeps logical consumers behind the standbys that might replace it. And `pg_createsubscriber` (PostgreSQL 17+) turns a physical standby into a subscriber, skipping the initial copy.
+
+</DeepDive>
+
+## Streaming for failover, logical for a job
+
+| You need | Use |
+|---|---|
+| A failover target with no data loss window to speak of | Streaming, synchronous to at least one of two standbys |
+| A failover target, small loss window acceptable | Streaming, asynchronous |
+| More capacity for stale-tolerant reads | Streaming replicas, routed per call site |
+| A different major version, or an upgrade | Logical |
+| A few tables, or a filtered subset, elsewhere | Logical |
+| Row changes for a queue, search, or cache | Logical decoding |
+| More write capacity | Neither. See [Shard last](/books/eight-kilobytes/sharding) |
+
+Most production setups end up with both: streaming standbys for failover, run by a tool that knows how to promote them, and logical replication brought in for a specific job, often temporarily.
+
+## The short version
+
+- A streaming replica is an identical, read-only copy of the whole cluster, always a little behind.
+- Cap every slot with `max_slot_wal_keep_size` and alert on inactive ones.
+- Synchronous commit costs a round trip per commit (1.3 ms became 7.4 ms with a standby 5 ms away). Set it per transaction; run two candidates.
+- Route reads per call site; for read-your-writes, pin to the primary or wait for the write's LSN.
+- Long replica queries get cancelled, delay replay, or bloat the primary. Keep failover candidates apart from reporting replicas.
+- Never hand-roll failover, and practice it on a schedule.
+- Logical replication copies rows, not DDL or sequences: additive DDL to the subscriber first, a primary key on every table.
+
+## Further reading
+
+- [Log-shipping standby servers](https://www.postgresql.org/docs/18/warm-standby.html), PostgreSQL documentation. Streaming replication, slots, cascading, and synchronous replication with `FIRST` and `ANY`, from the source.
+- [Hot standby](https://www.postgresql.org/docs/18/hot-standby.html), PostgreSQL documentation. What runs on a standby, every kind of replay conflict, and how each setting changes them.
+- [Replication settings](https://www.postgresql.org/docs/18/runtime-config-replication.html), PostgreSQL documentation. Defaults and exact semantics for every setting in this chapter, including slot limits and failover slot synchronization.
+- [Logical replication](https://www.postgresql.org/docs/18/logical-replication.html), PostgreSQL documentation. Publications, subscriptions, row filters, conflicts, failover, and upgrades.
+- [pg_rewind](https://www.postgresql.org/docs/18/app-pgrewind.html), PostgreSQL documentation. Its requirements, and what to do when the WAL it needs is gone.
+- [Patroni](https://github.com/patroni/patroni), GitHub. The most widely used open-source failover manager; its docs explain leader locks, fencing, and synchronous mode.
