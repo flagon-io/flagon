@@ -154,7 +154,8 @@ So **`COMMIT` can fail**. Deferred constraints, serialization failures, and lost
 
 ```sql
 create table invoice_lines (
-  invoice_id bigint not null references invoices (id) deferrable initially deferred,
+  invoice_id bigint not null
+    references invoices (id) deferrable initially deferred,
   amount     int not null
 );
 

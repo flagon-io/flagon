@@ -80,14 +80,14 @@ The v7 values on the left share a prefix and increase. The v4 values on the righ
 RFC 9562 (2024) defines the versions; besides 4 and 7, version 1 leaks a MAC address and 3 and 5 hash a name. `gen_random_uuid()` makes v4; PostgreSQL 18 adds `uuidv7()` and the alias `uuidv4()`, and 17 added functions to look inside:
 
 ```sql
-select u, uuid_extract_version(u), uuid_extract_timestamp(u)
+select u, uuid_extract_version(u) as version, uuid_extract_timestamp(u) as ts
 from (select uuidv7() as u) x;
 ```
 
 ```text
-                  u                   | uuid_extract_version |   uuid_extract_timestamp
---------------------------------------+----------------------+----------------------------
- 01a10f20-21b6-7697-8e50-2eeedd76f055 |                    7 | 2026-10-06 02:52:06.454+00
+                  u                   | version |             ts
+--------------------------------------+---------+----------------------------
+ 01a10f20-21b6-7697-8e50-2eeedd76f055 |       7 | 2026-10-06 02:52:06.454+00
 ```
 
 For a v4 it returns null: there's no time inside. Postgres fills the 12 bits after a v7's version digit with sub-millisecond time and guarantees each value is a step past the last on that backend, so a tight loop never goes backward. A million calls in one statement spanned about 500 milliseconds, roughly 2,000 ids each, every one larger than the last.

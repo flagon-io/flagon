@@ -563,7 +563,8 @@ Compression is per column. The default is `pglz`; since PostgreSQL 14 you can ch
 ```sql
 alter table docs alter column body set compression lz4;
 insert into docs (body) values (repeat('a', 100000));
-select id, pg_column_size(body), pg_column_compression(body) from docs where id = 6;
+select id, pg_column_size(body), pg_column_compression(body)
+from docs where id = 6;
 ```
 
 ```text

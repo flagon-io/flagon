@@ -151,7 +151,8 @@ create table settings_cols (
   retention_days      int     not null check (retention_days > 0),
   auto_deploy         boolean not null default false,
   deploy_branch       text    not null default 'main',
-  max_parallel_builds int     not null check (max_parallel_builds between 1 and 64),
+  max_parallel_builds int     not null
+                      check (max_parallel_builds between 1 and 64),
   notify_email        text
 );
 create index on settings_cols (region, auto_deploy);

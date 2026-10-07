@@ -16,19 +16,19 @@ So do the least work per row while loading, then pay the deferred costs yourself
 We loaded the same events-shaped rows into a fresh copy of `events` ten ways, each on a server of its own with stock settings, and counted rows per second and **WAL**, the log every change is written to before it reaches the data files ([Write it down first](/books/eight-kilobytes/wal)). The two single-row methods load 1,000 rows, because a million would take hours; the rest load 1,000,000:
 
 ```text
-                     method                     |  rows   | rows_per_s |  wal   | wal/row
-------------------------------------------------+---------+------------+--------+---------
- 1. single-row INSERT, autocommit               |    1000 |       1187 | 305 kB |     312
- 2. single-row INSERT, one transaction          |    1000 |      17224 | 273 kB |     279
- 3. multi-row VALUES, 1,000 rows each           | 1000000 |      79735 | 228 MB |     239
- 4. INSERT ... SELECT from unnest               | 1000000 |      84872 | 228 MB |     239
- 5. COPY                                        | 1000000 |     507966 | 184 MB |     193
- 6. COPY FREEZE                                 | 1000000 |     493756 | 185 MB |     194
- 7. COPY, table created in the same transaction | 1000000 |     525823 | 184 MB |     193
- 8a. COPY into an unlogged table                | 1000000 |     468208 | 34 kB  |       0
- 8b. ... then ALTER TABLE SET LOGGED            | 1000000 |     959712 | 181 MB |     190
- 9. COPY with 3 indexes and 3 FKs in place      | 1000000 |      64047 | 346 MB |     363
- 10. COPY bare, then indexes, then FKs          | 1000000 |     431132 | 174 MB |     182
+                  method                   |  rows   | rows_per_s |  wal   | wal/row
+-------------------------------------------+---------+------------+--------+---------
+ 1. single-row INSERT, autocommit          |    1000 |       1187 | 305 kB |     312
+ 2. single-row INSERT, one transaction     |    1000 |      17224 | 273 kB |     279
+ 3. multi-row VALUES, 1,000 rows each      | 1000000 |      79735 | 228 MB |     239
+ 4. INSERT ... SELECT from unnest          | 1000000 |      84872 | 228 MB |     239
+ 5. COPY                                   | 1000000 |     507966 | 184 MB |     193
+ 6. COPY FREEZE                            | 1000000 |     493756 | 185 MB |     194
+ 7. COPY, table created in the transaction | 1000000 |     525823 | 184 MB |     193
+ 8a. COPY into an unlogged table           | 1000000 |     468208 | 34 kB  |       0
+ 8b. ... then ALTER TABLE SET LOGGED       | 1000000 |     959712 | 181 MB |     190
+ 9. COPY with 3 indexes and 3 FKs in place | 1000000 |      64047 | 346 MB |     363
+ 10. COPY bare, then indexes, then FKs     | 1000000 |     431132 | 174 MB |     182
 ```
 
 From about 1,200 rows a second to half a million. Each step down the table removes one kind of per-row overhead, and the rest of the chapter reads it a pair of rows at a time. (Row 8b's rate is the speed of a table rewrite, not of a load.)
@@ -84,7 +84,8 @@ If your driver can bind arrays, use `unnest`. Neither form saves disk: both writ
 The `unnest` form, prepared:
 
 ```sql
-prepare load_events (bigint[], bigint[], bigint[], text[], jsonb[], timestamptz[]) as
+prepare load_events
+  (bigint[], bigint[], bigint[], text[], jsonb[], timestamptz[]) as
   insert into events (account_id, project_id, user_id, kind, payload, created_at)
   select * from unnest($1, $2, $3, $4, $5, $6);
 ```
@@ -446,7 +447,8 @@ select lab.prove('COPY FREEZE works on one partition truncated in the same trans
 Syncing a feed into an existing table usually gets written as one `INSERT ... ON CONFLICT` per incoming row: the single-row pattern from the top of the chapter, plus an index lookup. Stage it instead:
 
 ```sql
-create temp table stage (project_id bigint, events bigint, last_event_at timestamptz);
+create temp table stage
+  (project_id bigint, events bigint, last_event_at timestamptz);
 \copy stage from 'feed.csv' with (format csv)
 
 insert into project_stats

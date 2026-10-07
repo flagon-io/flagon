@@ -935,10 +935,19 @@ label[for] {
   overflow: visible;
   background: #fafafa;
   border-color: #e4e4e7;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   line-height: 1.45;
   padding: 0.7rem 0.85rem;
 }
+/* Keep code with its context on paper. A block that fits on a page never
+ * splits (a taller one still must, but leaves at least four lines on each
+ * side), and the sentence that introduces a block, usually ending in a
+ * colon, stays on the same page as it, as does a deep dive's title. */
+.book-print .prose figure[data-rehype-pretty-code-figure],
+.book-print .prose pre { break-inside: avoid; orphans: 4; widows: 4; }
+.book-print .prose :is(p, li):has(+ figure[data-rehype-pretty-code-figure], + pre) { break-after: avoid; }
+.book-print .prose :is(.print-deep-dive-label, .print-deep-dive-title) { break-after: avoid; }
+.book-print .prose .print-deep-dive-title + :is(p, ul, ol) { break-inside: avoid; }
 /* Diagrams are drawn under 72 columns and about 89 fit, so they never wrap;
  * wide query plans do, rather than running off the page. */
 .book-print .prose pre[data-language="text"],
@@ -1143,7 +1152,7 @@ html[data-depth="simple"] [data-toc-deep] { display: none; }
  * the essay track reads straight through. */
 .book-print .prose .print-deep-dive {
   margin: 1.8rem 0;
-  padding: 0.9rem 0 0.4rem 1rem;
+  padding: 0.9rem 0 0.4rem 0.7rem;
   border-left: 2pt solid #0f766e;
   font-size: 0.94em;
 }

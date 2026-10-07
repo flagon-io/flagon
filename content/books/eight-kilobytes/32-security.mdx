@@ -255,7 +255,8 @@ alter table app.events
 ```
 
 ```text
-ERROR:  insert or update on table "events" violates foreign key constraint "events_project_fk"
+ERROR:  insert or update on table "events" violates foreign key constraint
+        "events_project_fk"
 DETAIL:  Key is not present in table "projects".
 ```
 
@@ -355,7 +356,10 @@ export async function withTenant<T>(
   try {
     await client.query("begin");
     // true = transaction-local: gone at commit, never seen by the next request
-    await client.query("select set_config('app.account_id', $1, true)", [accountId]);
+    await client.query(
+      "select set_config('app.account_id', $1, true)",
+      [accountId],
+    );
     const result = await fn(client);
     await client.query("commit");
     return result;
@@ -399,7 +403,8 @@ Before the index:
    ...
                ->  Parallel Seq Scan on events (actual rows=160.67 loops=3)
                      Filter: ((kind = 'deploy'::text) AND (account_id =
-                       (NULLIF(current_setting('app.account_id'::text, true), ...))::bigint))
+                       (NULLIF(current_setting('app.account_id'::text, true),
+                               ...))::bigint))
                      Rows Removed by Filter: 666506
 ```
 
@@ -410,9 +415,11 @@ After:
    Buffers: shared hit=685 read=1351
    ->  Bitmap Heap Scan on events (actual rows=482.00 loops=1)
          ...
-         ->  Bitmap Index Scan on events_account_id_created_at_idx (actual rows=2084.00 ...)
+         ->  Bitmap Index Scan on events_account_id_created_at_idx
+                 (actual rows=2084.00 ...)
                Index Cond: (account_id =
-                 (NULLIF(current_setting('app.account_id'::text, true), ''::text))::bigint)
+                 (NULLIF(current_setting('app.account_id'::text, true),
+                         ''::text))::bigint)
 ```
 
 `current_setting` is stable, so in an index condition Postgres evaluates it once and probes the index with the value. In the sequential scan's filter, it runs for every row. The newest-20 query is an `Index Scan Backward` on the same index, `Buffers: shared hit=23`.
@@ -477,7 +484,8 @@ As `postgres` (which bypasses RLS), with the tenant in the query, `where account
    ->  Bitmap Heap Scan on events (actual rows=1.00 loops=1)
          ->  BitmapAnd (actual rows=0.00 loops=1)
                ->  Bitmap Index Scan on events_payload_idx (actual rows=403.00 ...)
-               ->  Bitmap Index Scan on events_account_id_created_at_idx (actual rows=2084.00 ...)
+               ->  Bitmap Index Scan on events_account_id_created_at_idx
+                       (actual rows=2084.00 ...)
 ```
 
 As the app role, through the policy, `where payload @> '{"duration_ms": 1234}'`:
@@ -488,7 +496,8 @@ As the app role, through the policy, `where payload @> '{"duration_ms": 1234}'`:
    ->  Bitmap Heap Scan on events (actual rows=1.00 loops=1)
          Filter: (payload @> '{"duration_ms": 1234}'::jsonb)
          Rows Removed by Filter: 2083
-         ->  Bitmap Index Scan on events_account_id_created_at_idx (actual rows=2084.00 ...)
+         ->  Bitmap Index Scan on events_account_id_created_at_idx
+                 (actual rows=2084.00 ...)
 ```
 
 <ProveIt lab="32-security">
@@ -517,8 +526,10 @@ create index on app.events (account_id, duration_ms);
 ```text
  Aggregate (actual rows=1.00 loops=1)
    Buffers: shared hit=1 read=3
-   ->  Index Only Scan using events_account_id_duration_ms_idx on events (actual rows=1.00 ...)
-         Index Cond: ((account_id = (NULLIF(current_setting(...), ''::text))::bigint)
+   ->  Index Only Scan using events_account_id_duration_ms_idx on events
+           (actual rows=1.00 ...)
+         Index Cond: ((account_id =
+                       (NULLIF(current_setting(...), ''::text))::bigint)
                       AND (duration_ms = 1234))
          Heap Fetches: 0
 ```
@@ -555,7 +566,9 @@ begin
   perform set_config('lab.ran_as', current_user, false);
   return $1 + 1;
 end $$;
-create aggregate wg_app.count(*) (sfunc = wg_app.steal, stype = bigint, initcond = '0');
+create aggregate wg_app.count(*) (
+  sfunc = wg_app.steal, stype = bigint, initcond = '0'
+);
 set search_path = wg_app, pg_catalog;
 select app.unpinned_event_count(42);
 ```

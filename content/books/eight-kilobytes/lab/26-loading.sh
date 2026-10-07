@@ -214,7 +214,7 @@ select fresh('l_same_tx');
 \copy l_same_tx (account_id, project_id, user_id, kind, payload, created_at) from '/tmp/events.csv' with (format csv)
 commit;
 select pg_stat_force_next_flush() as flushed \gset
-select record('7. COPY, table created in the same transaction', 1000000, :'t0', :w0, :f0, :c0, 'l_same_tx');
+select record('7. COPY, table created in the transaction', 1000000, :'t0', :w0, :f0, :c0, 'l_same_tx');
 
 -- 8. COPY into an unlogged table, then SET LOGGED.
 select fresh('l_unlogged', 'unlogged');
@@ -296,7 +296,7 @@ prove "COPY writes less WAL than multi-row VALUES" \
 prove "COPY FREEZE writes about the same WAL as COPY (within 25%)" \
   holds "select wal('6. COPY FREEZE') < 1.25 * wal('5. COPY')"
 prove "at wal_level replica, creating the table in the same transaction saves no WAL (at least 90% of COPY)" \
-  holds "select wal('7. COPY, table created in the same transaction') > 0.9 * wal('5. COPY')"
+  holds "select wal('7. COPY, table created in the transaction') > 0.9 * wal('5. COPY')"
 prove "COPY into an unlogged table writes under 1% of the WAL of a logged COPY" \
   holds "select wal('8a. COPY into an unlogged table') < 0.01 * wal('5. COPY')"
 prove "SET LOGGED writes WAL about the size of the table and its index (0.7x to 1.3x)" \

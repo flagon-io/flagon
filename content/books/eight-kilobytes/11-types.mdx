@@ -225,7 +225,8 @@ insert into users_ci values (1000001, 2, 'USER1@EXAMPLE.COM');
 ```
 
 ```text
-ERROR:  duplicate key value violates unique constraint "users_ci_account_id_email_key"
+ERROR:  duplicate key value violates unique constraint
+        "users_ci_account_id_email_key"
 ```
 
 `ks-level2` ignores case; `ks-level1` ignores accents too. Equality uses the index, 7 pages for the uppercase lookup. `like` works only from PostgreSQL 18, and then as a scan:
@@ -276,16 +277,19 @@ insert into tags values ('apple'), ('Banana'), ('cherry'), ('_draft'), ('Zebra')
 insert into tags select 'tag' || g from generate_series(1, 5000) g;
 insert into tags select 'Tag' || g from generate_series(1, 5000) g;
 
-update pg_collation set collcollate = 'C.utf8', collctype = 'C.utf8', collversion = null
+update pg_collation
+set collcollate = 'C.utf8', collctype = 'C.utf8', collversion = null
 where collname = 'app_en';
 ```
 
 In a new session, `name = 'Zebra'` returns nothing and `name >= 'Tag1' and name < 'Tag2'` counts 0; with index scans off, `Zebra` and 1,111 rows. Then:
 
 ```text
-insert into tags values ('Zebra');   -> INSERT 0 1
-reindex index tags_pkey;             -> ERROR:  could not create unique index "tags_pkey"
-                                        DETAIL:  Key (name)=(Zebra) is duplicated.
+insert into tags values ('Zebra');
+INSERT 0 1
+reindex index tags_pkey;
+ERROR:  could not create unique index "tags_pkey"
+DETAIL:  Key (name)=(Zebra) is duplicated.
 ```
 
 <ProveIt lab="11-types">

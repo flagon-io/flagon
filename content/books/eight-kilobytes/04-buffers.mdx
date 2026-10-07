@@ -481,7 +481,7 @@ explain select * from users order by account_id, email limit 30000;
          ->  Seq Scan on users  (cost=0.00..2126.00 rows=100000 width=55)
 
  Limit  (cost=0.42..2720.65 rows=30000 width=55)
-   ->  Index Scan using users_account_id_email_key on users  (cost=0.42..9067.86 ...)
+   ->  Index Scan using users_account_id_email_key on users  (cost=...)
 ```
 
 At 1 MB the planner assumes nearly every page fetched through the index is a fresh random read, and sorts a sequential scan instead. At 4 GB it walks the index. Nothing about memory changed; any session can set it. The cost model itself is in [The planner is guessing](/books/eight-kilobytes/planner).
@@ -511,7 +511,8 @@ begin;
 declare two_sorts cursor for
   select *
   from (select user_id, created_at from events where id <= 300000) a
-  join (select user_id, created_at from events where id > 1700000) b using (user_id);
+  join (select user_id, created_at from events where id > 1700000) b
+    using (user_id);
 fetch 1 from two_sorts;
 
 select name, level, total_bytes

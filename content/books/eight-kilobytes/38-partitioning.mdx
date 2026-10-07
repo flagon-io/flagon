@@ -47,7 +47,7 @@ So partition for what only partitioning gives you: cheap retention, per-partitio
 ```text
  Append (actual rows=1.00 loops=1)
    Buffers: shared hit=31 read=8
-   ->  Index Scan using events_p_2025_10_pkey on events_p_2025_10 ... (actual rows=0.00 ...)
+   ->  Index Scan using events_p_2025_10_pkey on ... (actual rows=0.00 ...)
          Index Cond: (id = 1234567)
          Buffers: shared hit=3
    ...  (one scan per partition, 14 in all)
@@ -184,7 +184,8 @@ select lab.prove('one month reads about 3,000 pages on events_p and all ~35,000 
  Finalize Aggregate (actual rows=1.00 loops=1)
    Buffers: shared hit=149 read=2839
    ...
-         ->  Parallel Seq Scan on events_p_2026_03 events_p (actual rows=84931.50 loops=2)
+         ->  Parallel Seq Scan on events_p_2026_03 events_p
+                 (actual rows=84931.50 loops=2)
 ```
 
 The other thirteen partitions never show up. With `where created_at >= now() - interval '7 days'` (PostgreSQL 11+ prunes at run time):
@@ -207,11 +208,11 @@ Newest first, stopping early (PostgreSQL 12+ appends range partitions in order i
  Limit (actual rows=20.00 loops=1)
    Buffers: shared hit=21 read=2
    ->  Append (actual rows=20.00 loops=1)
-         ->  Index Scan Backward using events_p_2026_11_account_id_created_at_idx ...
+         ->  Index Scan Backward using events_p_2026_11_account_id_created_at_idx
                Buffers: shared hit=2
-         ->  Index Scan Backward using events_p_2026_10_account_id_created_at_idx ...
+         ->  Index Scan Backward using events_p_2026_10_account_id_created_at_idx
                Buffers: shared hit=19 read=2
-         ->  Index Scan Backward using events_p_2026_09_account_id_created_at_idx ...
+         ->  Index Scan Backward using events_p_2026_09_account_id_created_at_idx
                Index Searches: 0
          ...  (the other 11 also never executed)
  Planning:
@@ -376,8 +377,8 @@ ERROR:  cannot detach partitions concurrently when a default partition exists
 
 ```text
 ERROR:  cannot drop table events_p_default because other objects depend on it
-DETAIL:  constraint deliveries_p_event_id_event_created_at_fkey on table deliveries_p
-depends on table events_p_default
+DETAIL:  constraint deliveries_p_event_id_event_created_at_fkey on table
+         deliveries_p depends on table events_p_default
 ```
 
 (We emptied it, then `detach partition events_p_default` followed by `drop table` worked.)

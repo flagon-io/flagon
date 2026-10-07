@@ -143,9 +143,11 @@ select st_distance('SRID=4326;POINT(8.68 50.11)'::geometry,
        st_distance('SRID=4326;POINT(8.68 50.11)'::geography,
                    'SRID=4326;POINT(4.90 52.37)'::geography)  as geography,
        st_distance(st_transform('SRID=4326;POINT(8.68 50.11)'::geometry, 3857),
-                   st_transform('SRID=4326;POINT(4.90 52.37)'::geometry, 3857)) as mercator_3857,
+                   st_transform('SRID=4326;POINT(4.90 52.37)'::geometry, 3857))
+                   as mercator_3857,
        st_distance(st_transform('SRID=4326;POINT(8.68 50.11)'::geometry, 3035),
-                   st_transform('SRID=4326;POINT(4.90 52.37)'::geometry, 3035)) as laea_3035;
+                   st_transform('SRID=4326;POINT(4.90 52.37)'::geometry, 3035))
+                   as laea_3035;
 ```
 
 (Output rounded.) A degree of longitude shrinks as you go north, and Mercator stretches distances more the farther you get from the equator. Store everything in one SRID; mixing them is an error at best and a wrong answer after a careless `st_transform` at worst.
@@ -230,7 +232,8 @@ select lab.prove('a 50 km ST_Buffer is a 32-sided polygon, so intersecting it mi
 
  Limit (actual rows=5.00 loops=1)
    Buffers: shared hit=12
-   ->  Index Scan using user_locations_gist on user_locations (actual rows=5.00 loops=1)
+   ->  Index Scan using user_locations_gist
+         on user_locations (actual rows=5.00 loops=1)
          Order By: (last_seen <-> '0101...'::geography)
 ```
 
@@ -310,9 +313,11 @@ In production, `call add_columnstore_policy('events', after => interval '7 days'
 
 ```text
  ->  Custom Scan (ColumnarScan) on _hyper_1_48_chunk (actual rows=2820.00 loops=1)
-       Vectorized Filter: (created_at >= '2026-09-01 00:00:00+00'::timestamp with time zone)
+       Vectorized Filter:
+         (created_at >= '2026-09-01 00:00:00+00'::timestamp with time zone)
        Buffers: shared hit=42
-       ->  Index Scan using _hyper_1_48_chunk_compressed_kind__ts_meta_v2_first_created_idx
+       ->  Index Scan using
+             _hyper_1_48_chunk_compressed_kind__ts_meta_v2_first_created_idx
              on _hyper_1_48_chunk_compressed (actual rows=3.00 loops=1)
 ```
 
@@ -416,7 +421,7 @@ explain select * from users where email = 'user4242@example.com';
 ```
 
 ```text
- Index Scan using "<13640>btree_users_email" on users  (cost=0.04..8.06 rows=1 width=55)
+ Index Scan using "<13640>btree_users_email" on users  (cost=0.04..8.06 rows=1 ...)
 ```
 
 `explain analyze` ignores hypothetical indexes, so the real run still read 1,126 pages; after building the real index it read under 5. `hypopg_relation_size()` estimated the index within 25 percent, and `hypopg_hide_index()` hides a real index from your session to ask "what if I dropped it?".
@@ -457,7 +462,8 @@ set search_path = ag_catalog, "$user", public;
 select create_graph('org');
 select * from cypher('org', $$
   create (:Team {name: 'Engineering'})-[:PARENT_OF]->(:Team {name: 'Platform'})
-         -[:PARENT_OF]->(:Team {name: 'Databases'})-[:PARENT_OF]->(:Team {name: 'Postgres'})
+         -[:PARENT_OF]->(:Team {name: 'Databases'})
+         -[:PARENT_OF]->(:Team {name: 'Postgres'})
 $$) as (v agtype);
 select * from cypher('org', $$
   match (:Team {name: 'Engineering'})-[:PARENT_OF*1..]->(t:Team) return t.name

@@ -110,7 +110,8 @@ Set `max_slot_wal_keep_size` well below the disk on every primary with slots. Al
 
 ```sql
 select slot_name, active, inactive_since, wal_status,
-       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) as retained
+       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn))
+         as retained
 from pg_replication_slots;
 ```
 
@@ -255,7 +256,8 @@ This is the part that bites. We stopped the synchronous standby and ran one inse
 
 ```text
 WARNING:  canceling wait for synchronous replication due to user request
-DETAIL:  The transaction has already committed locally, but might not have been replicated to the standby.
+DETAIL:  The transaction has already committed locally, but might not have been
+         replicated to the standby.
 INSERT 0 1
 Time: 128415.478 ms (02:08.415)
 ```
@@ -410,7 +412,8 @@ prove "split brain: the old primary doesn't know, and still accepts writes" \
 Restarted as a standby of the new primary, the old one refused to follow:
 
 ```text
-LOG:  new timeline 2 forked off current database system timeline 1 before current recovery point 0/9FB37B20
+LOG:  new timeline 2 forked off current database system timeline 1
+      before current recovery point 0/9FB37B20
 ```
 
 It had written past the fork. **pg_rewind** copies back only the blocks changed since then; it needs data checksums (on by default in PostgreSQL 18's `initdb`) or `wal_log_hints = on`, plus the old primary's WAL back to the last checkpoint before the fork. Ours had recycled it:
@@ -458,7 +461,8 @@ And give every table a primary key: the subscriber finds rows by **replica ident
 <DeepDive title="The errors behind those rules, and row filters">
 
 ```text
-ERROR:  cannot update table "feature_flags" because it does not have a replica identity and publishes updates
+ERROR:  cannot update table "feature_flags" because it does not have a replica
+        identity and publishes updates
 HINT:  To enable updating the table, set REPLICA IDENTITY using ALTER TABLE.
 ```
 

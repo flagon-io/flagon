@@ -374,7 +374,8 @@ update ev_skewed set project_id = floor(exp(random() * ln(20000)))::bigint;
 The aging, one statement per "day" (psql's `\gexec` runs each on its own, because `VACUUM` can't run inside a function or a `DO` block):
 
 ```sql
-select format('update projects_aged set name = name || %L where id %% 3 = %s', '', d % 3),
+select format('update projects_aged set name = name || %L where id %% 3 = %s',
+              '', d % 3),
        case when d % 7 = 0 then 'vacuum projects_aged' end
 from generate_series(1, 30) d
 order by d

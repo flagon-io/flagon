@@ -85,7 +85,7 @@ select count(*) from events where project_id = 4242;
    Buffers: shared hit=2049 read=33124
    I/O Timings: shared read=8.623
 ...
-         ->  Parallel Seq Scan on events (actual time=1.522..24.278 rows=28.33 loops=3)
+         ->  Parallel Seq Scan on events (actual ... rows=28.33 loops=3)
                Filter: (project_id = 4242)
                Rows Removed by Filter: 666638
 ...

@@ -342,7 +342,7 @@ With the GiST index, the plan is an index scan ordered by distance:
 ```text
  Limit (actual time=14.166..14.184 rows=5.00 loops=1)
    Buffers: shared hit=1427
-   ->  Index Scan using users_email_trgm_gist on users (actual ... rows=5.00 loops=1)
+   ->  Index Scan using users_email_trgm_gist on users (actual rows=5.00 loops=1)
          Order By: (email <-> 'usr4242@exmaple.com'::text)
 ```
 
@@ -395,7 +395,7 @@ That index hides a lesson. With 480,000 freezes loaded, "which projects were fro
 <DeepDive title="Why the constraint's index lost to a sequential scan">
 
 ```text
- Bitmap Heap Scan on deploy_freezes (actual time=81.942..84.276 rows=470.00 loops=1)
+ Bitmap Heap Scan on deploy_freezes (actual time=81.942..84.276 rows=470.00 ...)
    Buffers: shared hit=35 read=7153
    ->  Bitmap Index Scan on deploy_freezes_project_id_during_excl (actual ...)
          Index Cond: (during @> (now() - '100 days'::interval))
@@ -407,7 +407,7 @@ GiST has no strict "leading column", but the first column still decides how entr
 ```text
  Bitmap Heap Scan on deploy_freezes (actual time=1.418..9.701 rows=470.00 loops=1)
    Buffers: shared read=460
-   ->  Bitmap Index Scan on deploy_freezes_during_idx (actual ... rows=470.00 loops=1)
+   ->  Bitmap Index Scan on deploy_freezes_during_idx (actual rows=470.00 loops=1)
          Buffers: shared read=7
 ```
 
@@ -490,7 +490,7 @@ The day is `created_at >= '2026-05-01' and created_at < '2026-05-02'`, grouped b
    ->  Bitmap Heap Scan on events (actual ... rows=5480.00 loops=1)
          Rows Removed by Index Recheck: 9078
          Heap Blocks: lossy=256
-         ->  Bitmap Index Scan on events_created_brin (actual ... rows=2560.00 loops=1)
+         ->  Bitmap Index Scan on events_created_brin (actual rows=2560.00 loops=1)
                Buffers: shared hit=5
 ```
 

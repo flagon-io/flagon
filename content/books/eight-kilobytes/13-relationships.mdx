@@ -58,7 +58,8 @@ Two statements are the whole fix:
 ```sql
 alter table projects add constraint projects_id_account_uq unique (id, account_id);
 alter table events add constraint events_project_account_fk
-  foreign key (project_id, account_id) references projects (id, account_id) not valid;
+  foreign key (project_id, account_id)
+  references projects (id, account_id) not valid;
 ```
 
 The unique constraint looks redundant, since `id` alone is unique, but a foreign key can only reference columns that a unique constraint covers exactly. `not valid` skips the existing two million rows and checks every new one; validate them later without blocking writes ([Add foreign keys NOT VALID, then validate](/books/eight-kilobytes/migrations#add-foreign-keys-not-valid-then-validate)). Now moving an event to another account, or pointing it at another account's project, fails on the line that tries.

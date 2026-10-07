@@ -291,8 +291,10 @@ A shard can only check its own rows, so Citus rejects any primary key, unique, o
 ```sql
 select create_reference_table('accounts');
 select create_distributed_table('users',    'account_id');
-select create_distributed_table('projects', 'account_id', colocate_with => 'users');
-select create_distributed_table('events',   'account_id', colocate_with => 'users');
+select create_distributed_table('projects', 'account_id',
+                                colocate_with => 'users');
+select create_distributed_table('events',   'account_id',
+                                colocate_with => 'users');
 ```
 
 Each table hashes into 32 shards (the default `citus.shard_count`); distributing a 2.4-million-row copy of `events` took about ten seconds on our laptop cluster. (Distribute first and add foreign keys after; the other order failed.) The constraint error:

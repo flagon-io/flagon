@@ -77,9 +77,9 @@ That's the planner's entire picture of a two-million-row table:
 Here's the MCV list for `kind`:
 
 ```text
-          most_common_vals          |              most_common_freqs
-------------------------------------+---------------------------------------------
- {build,deploy,login,comment,alert} | {0.3713,0.25146666,0.12726666,0.12716667,0.1228}
+-[ RECORD 1 ]-----+-------------------------------------------------
+most_common_vals  | {build,deploy,login,comment,alert}
+most_common_freqs | {0.3713,0.25146666,0.12726666,0.12716667,0.1228}
 ```
 
 So `where kind = 'deploy'` is estimated at `rows=502927`: 0.25146666 times the table's 1,999,974 rows. A value in the MCV list gets its frequency; anything else shares the leftover evenly. Ranges count histogram buckets: the week of September 1, 2026 on `created_at` was estimated at 36,613 rows, against an actual 38,356.
@@ -439,14 +439,14 @@ The 30,000-row sample usually misses all 20 incidents, so the statistics count 5
  Limit  (cost=8.46..8.46 rows=1 width=16) (actual ... rows=10.00 loops=1)
    Buffers: shared hit=20 read=3
    ->  Sort  (cost=8.46..8.46 rows=1 width=16) (actual ... rows=10.00 loops=1)
-         ->  Index Scan using events_kind_idx on events  (cost=0.43..8.45 rows=1 ...)
-                 (actual ... rows=20.00 loops=1)
+         ->  Index Scan using events_kind_idx on events
+                 (cost=0.43..8.45 rows=1 ...) (actual ... rows=20.00 loops=1)
 
 -- execute latest('build')
  Limit  (cost=0.43..1.66 rows=10 width=16) (actual ... rows=10.00 loops=1)
    Buffers: shared hit=3 read=2
    ->  Index Scan Backward using events_created_at_idx on events
-           (cost=0.43..92124.34 rows=745065 width=16) (actual ... rows=10.00 loops=1)
+           (cost=0.43..92124.34 rows=745065 ...) (actual ... rows=10.00 loops=1)
          Rows Removed by Filter: 19
 ```
 

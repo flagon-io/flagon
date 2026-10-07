@@ -560,7 +560,8 @@ max_connections = 100
 shared_buffers = 4GB                 # 25% of RAM (restart)
 huge_pages = try                     # 'on' once vm.nr_hugepages is set
 effective_cache_size = 12GB
-work_mem = 32MB                      # per sort/hash node, per process; raise per role
+# per sort/hash node, per process; raise per role
+work_mem = 32MB
 hash_mem_multiplier = 2.0
 maintenance_work_mem = 1GB
 autovacuum_work_mem = 512MB

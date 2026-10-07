@@ -352,7 +352,8 @@ The row for account 4 was inserted just before, in a transaction that shows when
 begin;
 select pg_current_xact_id_if_assigned();   -- nothing yet
 select count(*) from accounts;
-select pg_current_xact_id_if_assigned();   -- still nothing: reads don't need an xid
+-- still nothing: reads don't need an xid
+select pg_current_xact_id_if_assigned();
 insert into account_usage (account_id) values (4);
 select pg_current_xact_id_if_assigned();   -- 869595, assigned by the first write
 commit;

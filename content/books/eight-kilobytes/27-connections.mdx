@@ -122,7 +122,8 @@ Open few connections, keep them open, and share them.
 # lookup.sql:  \set id random(1, 100000)
 #              select * from users where id = :id;
 pgbench -n -f lookup.sql -c 4 -T 5 scratch
-pgbench -n -f lookup.sql -c 4 -T 5 -C scratch   # -C: new connection per transaction
+# -C: new connection per transaction
+pgbench -n -f lookup.sql -c 4 -T 5 -C scratch
 ```
 
 ```text
