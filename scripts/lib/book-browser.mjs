@@ -4,6 +4,7 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 // Box-drawing diagrams need a monospace font that has those glyphs. Desktop
@@ -39,12 +40,22 @@ export async function launchBrowser() {
     throw new Error("no Chrome found; set CHROME_PATH to a Chrome or Chromium binary");
   }
   const chromium = (await import("@sparticuz/chromium")).default;
-  await chromium.font(DIAGRAM_FONT);
-  return puppeteer.launch({
-    executablePath: await chromium.executablePath(),
-    args: chromium.args,
-    headless: true,
-  });
+  // Unpacking the browser also unpacks its fonts into <tmp>/fonts, the folder
+  // its fontconfig scans. (Older releases had chromium.font(url) for adding
+  // one; it's gone, so the diagram font goes into that folder directly.)
+  const executablePath = await chromium.executablePath();
+  await installFont(DIAGRAM_FONT, path.join(os.tmpdir(), "fonts"));
+  return puppeteer.launch({ executablePath, args: chromium.args, headless: true });
+}
+
+/** Download a font into a fontconfig folder, once. */
+async function installFont(url, dir) {
+  const file = path.join(dir, path.basename(new URL(url).pathname));
+  if (fs.existsSync(file)) return;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`couldn't download the diagram font (${res.status} ${url})`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
 }
 
 /** Start the built site (next start) on a port and wait until it answers. */
