@@ -13,7 +13,8 @@
     "book:lab": "node scripts/book-lab.mjs",
     "book:renumber": "node scripts/book-renumber.mjs",
     "book:print": "node scripts/book-print.mjs",
-    "book:cover": "node scripts/book-cover.mjs"
+    "book:cover": "node scripts/book-cover.mjs",
+    "brand:icons": "node scripts/brand-icons.mjs"
   },
   "dependencies": {
     "@icons-pack/react-simple-icons": "^13.15.1",

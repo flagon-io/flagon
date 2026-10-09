@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 75 75" fill="none" role="img" aria-label="Flagon">
+  <rect width="75" height="75" fill="#000000" />
+  <svg x="14.5" y="14.5" width="46" height="46" viewBox="11.95 13.05 39.5 39.5" overflow="visible">
+  <defs>
+    <clipPath id="flagon-body">
+      <path d="M19.5 23 L34.5 23 L36.5 46 Q36.7 48 34.3 48 L19.7 48 Q17.3 48 17.5 46 Z" />
+    </clipPath>
+    <linearGradient id="flagon-brew" x1="0" y1="0.3" x2="0" y2="1">
+      <stop offset="0" stop-color="#14b8a6" />
+      <stop offset="1" stop-color="#0f766e" />
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#flagon-body)">
+    <path d="M13 27 q3.75 -0.7 7.5 0 t7.5 0 t7.5 0 t7.5 0 t7.5 0 L51 52 L13 52 Z" fill="url(#flagon-brew)" />
+    <path d="M19.7 30 q-1.1 6 -0.4 12" stroke="rgba(255,255,255,0.6)" stroke-width="1.5" stroke-linecap="round" fill="none" />
+  </g>
+  <path d="M37 27 L45.5 27 L48.5 30 L48.5 36.5 L45.5 39.5 L38 39.5" fill="none" stroke="#ededed" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M17.5 21 L36.5 21 L38.6 47 Q39 50 36 50 L18 50 Q15 50 15.4 47 Z" fill="none" stroke="#ededed" stroke-width="3.1" stroke-linejoin="round" />
+  <path d="M17 21 Q16.3 16.3 20 15.6 L33 15.6 Q37.2 16.2 37 21 Z" fill="none" stroke="#ededed" stroke-width="3" stroke-linejoin="round" />
+  <path d="M36.7 17.1 L39.4 16.1" stroke="#ededed" stroke-width="2.4" stroke-linejoin="round" />
+  <circle cx="40.3" cy="15.8" r="1.4" fill="#ededed" />
+  </svg>
+</svg>
