@@ -167,6 +167,10 @@ export const PRODUCTS: Product[] = [
           title: "Previews on every pull request",
           body: "Projects deploy to g1t.page: a preview for every pull request, production on merge, and your own domain when you're ready.",
         },
+        {
+          title: "On your desktop and your phone",
+          body: "A desktop app for Windows, macOS and Linux, and a phone app, Android first and in testing now: chat with your team and its agents, and get notified when one is waiting on you. Both work with g1t.sh or a g1t you run yourself.",
+        },
       ],
       pricing: {
         summary:
@@ -193,6 +197,11 @@ export const PRODUCTS: Product[] = [
           label: "See the prices",
           href: "https://g1t.sh/pricing",
           hint: "g1t.sh/pricing",
+        },
+        {
+          label: "Get the apps",
+          href: "https://g1t.sh/download",
+          hint: "g1t.sh/download",
         },
         {
           label: "Read the code",
