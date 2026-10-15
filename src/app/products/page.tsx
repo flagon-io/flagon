@@ -13,7 +13,7 @@ import { site } from "@/lib/site";
 export const metadata: Metadata = {
   title: "Products",
   description:
-    "The products Flagon, Inc. builds, starting with g1t: where your team's code lands. Each one has its own site and its own team, held to the same standard.",
+    "The products Flagon, Inc. builds, starting with g1t: where your team and its coding agents ship code. Each one has its own site and its own team, held to the same standard.",
 };
 
 const TRAITS: { title: string; body: string; art: SceneName }[] = [

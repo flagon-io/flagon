@@ -176,10 +176,7 @@ export default async function ProductPage({
 
         {/* How it works */}
         <Section divider bleed="end">
-          <SectionHeader
-            title="How it works"
-            lead="The workflow you already know, built for a lot more hands on it."
-          />
+          <SectionHeader title={page.stepsHeader.title} lead={page.stepsHeader.lead} />
           <Schematic bleed className="mt-10">
             <SchematicGrid cols={4}>
               {page.steps.map((s, i) => (
@@ -201,10 +198,7 @@ export default async function ProductPage({
 
         {/* What's different */}
         <Section divider bleed="end">
-          <SectionHeader
-            title={`What makes ${product.name} different`}
-            lead="Hosting git is table stakes. This is the part we care about."
-          />
+          <SectionHeader title={page.featuresHeader.title} lead={page.featuresHeader.lead} />
           <Schematic bleed className="mt-10">
             <SchematicGrid cols={3}>
               {page.features.map((f) => (
