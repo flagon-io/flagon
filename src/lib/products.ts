@@ -94,9 +94,9 @@ export const PRODUCTS: Product[] = [
     name: "g1t",
     url: "https://g1t.sh",
     domain: "g1t.sh",
-    tagline: "Git for AI scale.",
+    tagline: "Where your team's code lands.",
     description:
-      "A git forge built for the agentic world. Issues, pull requests and review work the way you expect, except any number of agents can take a run at an issue, each in its own fork with a recording of how the change was made, and you merge the one that's right.",
+      "A workspace for teams that ship with coding agents. Repositories, pull requests, a merge queue and deployments, with chat and docs for the whole company alongside. Connect Claude Code, Codex or Cursor, and their work lands through the same checks as everyone's.",
     status: "In development",
     logo: {
       light: "https://g1t.sh/brand/g1t-logo.svg",
@@ -117,84 +117,91 @@ export const PRODUCTS: Product[] = [
       artClass: "art-g1t",
     },
     page: {
-      pitch:
-        "A git forge for the agentic world. Hand off the outcome, and a team of agents ships it.",
+      pitch: "Where your team's code lands, whoever wrote it.",
       story: [
-        "Coding agents are part of everyday work now, and the forge is where it falls apart. One agent per pull request, a person refereeing every collision, and the reasoning behind a change gone the moment the session closes. The tools were built for a handful of people, not for a fleet of agents working the same codebase at once.",
-        "So we're building the forge we want to use. Everything you expect from a forge is there, so an engineer is at home on day one, and moving in is easy: import a repository from any git host and bring the workflows you already run. What changes is how many hands are on the work and how it finds its way onto main: agents that know what the others are doing, checks that decide what lands, and a record of why every change exists.",
-        "g1t started as our entry in Cloudflare's competition to build the next git platform. It's in active development, and we build it on g1t.",
+        "Coding agents write a real share of the code now, and the tools around them haven't caught up. The code lives in one place, the conversation about it in another, the docs in a third, and the reasoning behind an agent's change is gone the moment its session closes. Five agents can open pull requests in an afternoon, and someone still has to keep main passing.",
+        "So we're building one workspace for all of it. Underneath is plain git and a complete forge, so an engineer is at home on day one. Around it are chat for everyone in the company, docs that notice when the code changes under them, and a Home page that tells you each morning what landed, what's live and what needs you. The coding agents you already use connect as you, and their work goes through the same checks and the same merge queue as anyone's.",
+        "g1t started as our entry in Cloudflare's competition to build the next git platform. It's in alpha, and we build it on g1t: its own source lives there and lands through its own merge queue.",
       ],
       steps: [
         {
-          title: "Open an issue",
-          body: "A person files it, an agent files it, or your error tracker does. Write down what done looks like as acceptance checks: the commands that have to pass.",
+          title: "Ask",
+          body: "Open an issue, or raise it in a channel: what should change, and what done looks like.",
         },
         {
-          title: "Agents take a run at it",
-          body: "Any number of agents can open a pull request for the same issue, each in its own copy-on-write fork, each with a recording of how the change was made.",
+          title: "Change",
+          body: "You or your coding agent push a branch and open a pull request. The agent's session, what it read, ran and decided, is recorded onto it.",
         },
         {
-          title: "Checks decide",
-          body: "g1t runs the issue's checks against every pull request in a clean sandbox, not the agent being checked. Each one shows which others touch the same files while the work is still going.",
+          title: "Check and review",
+          body: "Required checks run on g1t's runners, or free on your own. Every pull request gets a live preview, and a person approves it.",
         },
         {
-          title: "Merge the right one",
-          body: "Land the best pull request through the merge queue. The issue records which one resolved it, and the rest close as superseded. Nothing is lost, and main only moves forward.",
+          title: "Land",
+          body: "The merge queue tests each change together with what lands ahead of it. One that breaks goes back to its author, so main only moves to what passed, and production follows main.",
         },
       ],
       features: [
         {
-          title: "Everything you'd miss, already here",
-          body: "Issues, pull requests, review, protected branches and automation workflows, working the way you expect. Import a repository from any git host and keep going.",
+          title: "Start the day on Home",
+          body: "What landed, what's live and what still needs you. Notifications settle themselves once a later event resolves them, Start here picks the one to do first, and What changed tells you in plain English what happened while you were away.",
         },
         {
-          title: "Agents that see each other",
-          body: "Every pull request shows the others changing the same files, while the work is still in progress, so collisions get caught before anyone tries to merge.",
+          title: "A forge for many changes at once",
+          body: "Repositories, issues, pull requests, reviews, protected branches and code owners, the way your team already works. Conflicts show up on every push, and a merge queue keeps main passing.",
         },
         {
-          title: "Review at scale",
-          body: "Line comments and approve or request-changes verdicts, from people and from agents. Ask a g1t agent for a review and get a summary and a verdict.",
+          title: "Many agents, no collisions",
+          body: "Connect Claude Code, Codex, Cursor or any MCP client, and it works as you. Each agent claims the issue it takes, its session shows live, and two that start on the same files are told while they work.",
         },
         {
-          title: "Every decision on the record",
-          body: "Each agent run is kept with its steps, its cost and its session, so any change can answer the question of why it's there.",
+          title: "Every line knows why it's there",
+          body: "Pick any line to see its commit, its pull request and issue, and the session the agent recorded as it worked. The reasoning stays with the code, for people and for the next agent.",
         },
         {
-          title: "Bring your own agent",
-          body: "Connect Claude Code or any MCP client and sign in through the browser. No pasted tokens. There's a REST API over the same operations.",
+          title: "Chat, free for everyone",
+          body: "Channels, direct messages and threads, next to the code they're about. Everyone in the company joins for free, with no history cutoff, on the web, the desktop and Android.",
         },
         {
-          title: "Previews on every pull request",
-          body: "Projects deploy to g1t.page: a preview for every pull request, production on merge, and your own domain when you're ready.",
+          title: "Docs that keep themselves true",
+          body: "Docs edited together live, with history, comments and backlinks. When a merged change touches something a doc cites, its owner is told to update it. Slides, designs and dashboards are next.",
         },
         {
-          title: "On your desktop and your phone",
-          body: "A desktop app for Windows, macOS and Linux, and a phone app, Android first and in testing now: chat with your team and its agents, and get notified when one is waiting on you. Both work with g1t.sh or a g1t you run yourself.",
+          title: "Every change, live",
+          body: "Turn on deployments and every pull request gets its own address on g1t.page, and merging ships production. Bring your own domain. An app nobody visits costs nothing.",
+        },
+        {
+          title: "Safe to hand the work to",
+          body: "Scopes, branch rules, guardrails and an audit log hold the same for a person and for the agent working as them. Push protection, dependency upgrades and code scanning are built in.",
+        },
+        {
+          title: "Moving in is an import",
+          body: "Bring repositories from GitHub with full history, and keep your Actions workflows by renaming .github to .g1t. Leaving is a git clone, and the core forge runs on your own machine with Docker Compose.",
         },
       ],
       pricing: {
         summary:
-          "g1t charges what its providers charge it, plus 20%, for everything, from the first second. The price book is public, so you can check the math.",
+          "Chat and the forge are free, with no card. The g1t plan is $21 a month per workspace, and everything g1t runs is priced from what it costs g1t plus 20%. The price book is public, so you can check the math.",
         points: [
-          "No per-seat pricing. Add as many people and agents as you like.",
-          "A workspace pays for what it uses, and nothing else.",
-          "Spending limits from the start, so a bill never surprises you.",
-          "Itemized invoices, and price changes recorded with their reason.",
+          "No seats, ever. A ten-person team pays $21 a month, not $21 a person.",
+          "The plan includes $10 of usage each month for checks, workflows, the merge queue and deployments.",
+          "Your own runners are free, and so is connecting your coding agents.",
+          "Spend limits and alerts from the start, and every price change recorded with its reason.",
         ],
       },
       tryIt: {
-        lead: "Make an account at g1t.sh, import a repository, then connect Claude Code and ask it to open a pull request for an issue.",
+        lead: "Make a workspace at g1t.sh, push or import a repository, then connect Claude Code and point it at an issue.",
         command: "claude mcp add --transport http g1t https://mcp.g1t.sh",
       },
       links: [
-        { label: "Make the move", href: "https://g1t.sh", hint: "g1t.sh" },
+        { label: "Get started", href: "https://g1t.sh", hint: "g1t.sh" },
         {
-          label: "Get started",
+          label: "Read the quickstart",
           href: "https://docs.g1t.sh/quickstart/",
           hint: "docs.g1t.sh",
         },
         {
-          label: "See the prices",
+          label: "See every price",
           href: "https://g1t.sh/pricing",
           hint: "g1t.sh/pricing",
         },
