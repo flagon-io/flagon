@@ -110,7 +110,6 @@ export default function Home() {
             art="open"
             chips={[
               { label: "Open source", href: "/handbook/open-source" },
-              { label: "g1t's code", href: "https://g1t.sh/flagon-io/g1t", external: true },
               { label: "This site", href: site.links.repo, external: true },
             ]}
           >

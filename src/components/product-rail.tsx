@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { SCENES } from "@/components/art/scenes";
 import { slantForAspect } from "@/lib/slant";
 import { Tag } from "@/components/slant";
+import { FlagonMark } from "@/brand/flagon-mark";
 import {
   PRODUCTS,
   productHref,
@@ -16,7 +17,8 @@ import {
  * Every product, side by side, as tall cards with slanted edges that scroll
  * sideways: each product shown in its own colors, the way a studio lines up
  * its games. Products we haven't announced yet hold their place as quiet
- * placeholders, and the last card is an invitation to come build one.
+ * placeholders, and the last card is an invitation to come build one. Before
+ * the first product ships, the row opens on a card for the one that's brewing.
  *
  * The slant is a clip-path (.product-rail-clip), so the content inside stays
  * upright. Unlike the rest of the site's slanted shapes, the rail clips rather
@@ -55,14 +57,19 @@ function clearOfSlant(top: number, bottom: number): CSSProperties {
 const HEAD = clearOfSlant(0.08, 0.25);
 const FOOT = clearOfSlant(0.7, 0.95);
 
-/** Unannounced products, held in place on the rail. */
+/** Nothing has shipped yet, so the rail leads with what's brewing. */
+const BREWING = PRODUCTS.length === 0;
+
+/** Unannounced products, held in place on the rail. While the first is
+ * brewing, its own card stands in for "Next up". */
 const PLACEHOLDERS = [
   { key: "next", label: "Next up", note: "In the workshop. We'll show it when it's ready." },
   { key: "later", label: "After that", note: "Still a sketch on a whiteboard." },
-];
+].slice(BREWING ? 1 : 0);
 
-/** Every card on the rail: the products, the placeholders, and the invitation. */
-const COUNT = PRODUCTS.length + PLACEHOLDERS.length + 1;
+/** Every card on the rail: the products (or the one brewing), the
+ * placeholders, and the invitation. */
+const COUNT = Math.max(PRODUCTS.length, 1) + PLACEHOLDERS.length + 1;
 
 const SURFACE: Record<ProductSurface, { label: string; icon: typeof Globe }> = {
   web: { label: "Web", icon: Globe },
@@ -87,6 +94,11 @@ export function ProductRail({ className }: { className?: string }) {
       )}
     >
       <ul className="flex">
+        {BREWING && (
+          <Slot>
+            <BrewingTile />
+          </Slot>
+        )}
         {PRODUCTS.map((p) => (
           <Slot key={p.id}>
             <ProductTile product={p} />
@@ -209,6 +221,53 @@ function ProductTile({ product }: { product: Product }) {
       </div>
 
       <Outline className="text-white/10 transition-colors group-focus-visible:text-brand group-hover:text-white/25" />
+    </Link>
+  );
+}
+
+/**
+ * The first product, still in the workshop: the Flagon mark pouring on a card
+ * in the company's own brew, since the product doesn't have colors of its own
+ * to show yet. Links to /products, which says a little more.
+ */
+function BrewingTile() {
+  return (
+    <Link
+      href="/products"
+      className={cn(tileBase, "bg-panel text-foreground motion-safe:hover:-translate-y-1.5 motion-safe:focus-visible:-translate-y-1.5")}
+      style={{
+        backgroundImage: [
+          "radial-gradient(70% 45% at 50% 46%, color-mix(in oklab, var(--brew-top) 26%, transparent), transparent 70%)",
+          "radial-gradient(var(--hairline) 1px, transparent 1px)",
+        ].join(", "),
+        backgroundSize: "100% 100%, 18px 18px",
+      }}
+    >
+      <div className="relative flex flex-1 flex-col pb-8 pt-10">
+        <div className="flex flex-col items-center text-center" style={HEAD}>
+          <p className="font-mono text-[11px] uppercase tracking-widest text-subtle">
+            Product no. 01
+          </p>
+          <p className="mt-3 text-balance text-lg font-semibold leading-snug tracking-tight group-hover:text-brand">
+            Our first product is brewing.
+          </p>
+        </div>
+
+        <div className="mx-auto my-auto w-[46%] motion-safe:transition-transform motion-safe:duration-500 motion-safe:group-hover:scale-[1.04]">
+          <FlagonMark animated className="h-auto w-full" title="A flagon, filling" />
+        </div>
+
+        <div className="flex flex-col gap-3" style={FOOT}>
+          <Tag className="self-start text-brand before:border before:border-brand/40 before:bg-background">
+            In the workshop
+          </Tag>
+          <p className="min-h-[2lh] text-sm leading-snug text-muted-foreground">
+            We&rsquo;ll pour it here when it&rsquo;s ready.
+          </p>
+        </div>
+      </div>
+
+      <Outline className="text-mark transition-colors group-hover:text-brand group-focus-visible:text-brand" />
     </Link>
   );
 }

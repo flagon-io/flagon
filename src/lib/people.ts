@@ -32,7 +32,6 @@ export const PEOPLE: Person[] = [
     founder: true,
     bio: "Started Flagon to build the company he always wanted to work for: open by default, honest about how it works, and here for the long game.",
     links: [
-      { label: "g1t", href: "https://g1t.sh/u/syntaqx" },
       { label: "GitHub", href: "https://github.com/syntaqx" },
     ],
   },

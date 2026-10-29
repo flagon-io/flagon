@@ -17,7 +17,7 @@ export type SearchDoc = {
 const PAGES: SearchDoc[] = [
   { title: "Home", url: "/", group: "Pages", description: "Flagon, Inc.: a small company that builds products in the open." },
   { title: "About", url: "/about", group: "Pages", description: "Who we are and why we do it this way." },
-  { title: "Products", url: "/products", group: "Pages", description: "What we make, starting with g1t." },
+  { title: "Products", url: "/products", group: "Pages", description: "What we make, and what's brewing." },
   { title: "Handbook", url: "/handbook", group: "Pages", description: "How the whole company works, in the open." },
   { title: "Blog", url: "/blog", group: "Pages", description: "Notes from building in public." },
   { title: "Books", url: "/books", group: "Pages", description: "Free books, readable here or as a PDF." },

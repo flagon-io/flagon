@@ -2,11 +2,11 @@ import type { ComponentType } from "react";
 import {
   Boxes,
   FlaskConical,
-  GitBranch,
   Handshake,
   Info,
   LayoutGrid,
   Megaphone,
+  Package,
   Users,
 } from "lucide-react";
 import { SiDiscord, SiGithub } from "@icons-pack/react-simple-icons";
@@ -20,8 +20,6 @@ import { PRODUCTS, productHref } from "@/lib/products";
 
 const links = {
   github: "https://github.com/flagon-io",
-  /** The company's organization on g1t, our own forge. */
-  g1t: "https://g1t.sh/flagon-io",
   /** The repo backing this site (used for "edit on GitHub" links). */
   repo: "https://github.com/flagon-io/flagon",
   discord: "https://discord.gg/dtYQs6rPXN",
@@ -49,17 +47,21 @@ export type NavItem = NavLink | NavGroup;
  * then links out; the handbook, blog, and company pages follow.
  */
 const nav: readonly NavItem[] = [
-  {
-    label: "Products",
-    sections: [
-      PRODUCTS.map((p) => ({
-        label: p.name,
-        href: productHref(p),
-        icon: GitBranch,
-      })),
-      [{ label: "All products", href: "/products", icon: LayoutGrid }],
-    ],
-  },
+  // Until the first product ships there's nothing to drop down to, so it's a
+  // plain link to the page that shows what's brewing.
+  PRODUCTS.length > 0
+    ? {
+        label: "Products",
+        sections: [
+          PRODUCTS.map((p) => ({
+            label: p.name,
+            href: productHref(p),
+            icon: Package,
+          })),
+          [{ label: "All products", href: "/products", icon: LayoutGrid }],
+        ],
+      }
+    : { label: "Products", href: "/products" },
   { label: "Handbook", href: "/handbook" },
   { label: "Books", href: "/books" },
   { label: "Blog", href: "/blog" },
@@ -82,7 +84,6 @@ const nav: readonly NavItem[] = [
           icon: SiDiscord,
         },
         { label: "GitHub", href: links.github, external: true, icon: SiGithub },
-        { label: "Flagon on g1t", href: links.g1t, external: true, icon: GitBranch },
       ],
     ],
   },
@@ -95,7 +96,7 @@ export const site = {
   url: "https://www.flagon.io",
   tagline: "We build software in the open.",
   description:
-    "Flagon, Inc. is a small, independent software company. We build products for developers, starting with g1t, and we run the company in the open: the handbook, the pay, and the way we decide are all public.",
+    "Flagon, Inc. is a small, independent software company. We build products for developers, and we run the company in the open: the handbook, the pay, and the way we decide are all public.",
   links,
   nav,
 } as const;

@@ -2,7 +2,6 @@ import { SCENES, type SceneName } from "@/components/art/scenes";
 import { SlantBox } from "@/components/slant";
 import { DOTS } from "@/components/schematic";
 import { runForAspect } from "@/lib/slant";
-import { cn } from "@/lib/cn";
 
 /** A blog post's cover: its line drawing on a panel leaning at the site's
  * tilt, like the art cards. */
@@ -26,7 +25,7 @@ export function PostCover({
       run={run}
       className={className}
       style={{ aspectRatio: aspect }}
-      frameClassName={cn("rounded-sm border border-hairline bg-(--art-card)", art === "g1t" && "art-g1t")}
+      frameClassName="rounded-sm border border-hairline bg-(--art-card)"
     >
       <div className="h-full py-3" style={{ ...DOTS, paddingInline: run }}>
         <Scene id={id} className="h-full w-full" />

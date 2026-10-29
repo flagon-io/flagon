@@ -141,7 +141,7 @@ export function SlantSplit({
       <div className="relative flex flex-col justify-center px-6 py-14 sm:px-8 sm:py-20">
         {children}
       </div>
-      <div className={cn("relative min-h-72", art === "g1t" && "art-g1t")}>
+      <div className="relative min-h-72">
         <div
           aria-hidden
           className="absolute inset-0 border-t border-hairline bg-(--art-card) md:origin-bottom-left md:border-l md:border-t-0 md:slant-skew"

@@ -58,7 +58,9 @@ export function SiteFooter() {
               {p.name}
             </FooterLink>
           ))}
-          <FooterLink href="/products">All products</FooterLink>
+          <FooterLink href="/products">
+            {PRODUCTS.length > 0 ? "All products" : "What's brewing"}
+          </FooterLink>
         </FooterCol>
 
         <FooterCol title="Company">
@@ -78,9 +80,6 @@ export function SiteFooter() {
           </FooterLink>
           <FooterLink href={site.links.github} external>
             GitHub
-          </FooterLink>
-          <FooterLink href={site.links.g1t} external>
-            Flagon on g1t
           </FooterLink>
           <FooterLink href={`mailto:${site.links.email}`} external>
             Email

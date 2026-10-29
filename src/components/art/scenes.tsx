@@ -12,7 +12,6 @@ import {
   corners,
   frame,
   iso,
-  pts,
   type P3,
 } from "@/components/art/iso";
 
@@ -20,7 +19,7 @@ import {
  * The site's illustrations, composed from the iso kit. Each is a quiet,
  * technical line drawing about one idea, built back to front and framed on its
  * subject. They take color from the --art-* variables, so they follow the
- * theme, and a wrapper class (like .art-g1t) can repaint them.
+ * theme, and a wrapper class can repaint them in a product's own palette.
  *
  * They also answer the pointer: parts wrapped in <Move> or <Hop> act out the
  * idea while the drawing's host (an element with .art-host, like a card) is
@@ -357,176 +356,6 @@ export function TeamsArt({ id = "art-teams", className, label }: SceneProps) {
     </Art>
   );
 }
-
-/**
- * g1t, as an exploded stack: main is the base plate, and the fleet's forks
- * float above it, each one a copy of the code with its own change on it. The
- * checks grid at the side runs, and the mint fork, the one that passed, settles
- * onto main as a new commit. Animated in a slow loop (the .g1t-* rules in
- * globals.css); with reduced motion it holds still, just before the merge.
- * Drawn for g1t's own palette (.art-g1t): lavender for the fleet, mint for
- * what lands. Compact on purpose, so it still reads on a small card.
- */
-export function G1tArt({ id = "art-g1t", className, label }: SceneProps) {
-  const ids = artIds(id);
-  const baseAt: P3 = [-85, -65, 0];
-  const baseSize: P3 = [170, 130, 8];
-  const base = corners(baseAt, baseSize);
-  const top = baseAt[2] + baseSize[2];
-  const plate: P3 = [140, 100, 3];
-  // The forks, bottom to top: the one that lands, then the fleet, each a step
-  // higher and a little further back.
-  const forks = [0, 1, 2, 3].map((i) => ({
-    at: [-70 + i * 14, -50 - i * 14, top + 26 + i * 30] as P3,
-    won: i === 0,
-  }));
-  const highest = corners(forks[3].at, plate);
-  const issueAt: P3 = [-178, -10, 120];
-  const issueSize: P3 = [50, 36, 2];
-  const issue = corners(issueAt, issueSize);
-  const panelAt: P3 = [100, -48, 0];
-  const panelSize: P3 = [3, 96, 62];
-  const panel = corners(panelAt, panelSize);
-  const floor: P3[] = [
-    [-520, -520, 0],
-    [520, -520, 0],
-    [520, 520, 0],
-    [-520, 520, 0],
-  ];
-  return (
-    <Art
-      id={id}
-      viewBox={frame([base.b01, base.b11, base.b10, highest.t00, highest.t10, issue.t00, issue.t01, panel.t10, panel.b11], 1.3, 22, 0)}
-      className={className}
-      label={label}
-      guides={
-        <>
-          <polygon points={pts(floor)} fill={`url(#${ids.dots})`} />
-          {axes(base.b11)}
-          {/* Rails the forks float along, up from main's corners. */}
-          {[base.t00, base.t10, base.t01].map((p, i) => (
-            <Line key={i} ps={[p, [p[0], p[1], 240]]} ink="faint" dots />
-          ))}
-        </>
-      }
-    >
-      {/* Main: the base plate and its history. */}
-      <Box at={baseAt} size={baseSize} hatch="right" hatchId={ids.hatch} nodes />
-      <OnFace face="top" origin={[baseAt[0], baseAt[1], top]}>
-        <text
-          x={16}
-          y={98}
-          fontFamily="var(--font-mono)"
-          fontSize={9}
-          fontWeight={600}
-          letterSpacing="0.08em"
-          fill="var(--art-line)"
-        >
-          MAIN
-        </text>
-        <line x1={16} y1={110} x2={156} y2={110} stroke="var(--art-line)" strokeWidth={1.2} />
-        {[28, 58, 88].map((x) => (
-          <circle key={x} cx={x} cy={110} r={3.2} fill="var(--art-node)" stroke="var(--art-line)" strokeWidth={1.2} />
-        ))}
-        {/* What landing looks like: the plate lights, a new commit appears. */}
-        <rect
-          className="g1t-flash"
-          x={4}
-          y={4}
-          width={baseSize[0] - 8}
-          height={baseSize[1] - 8}
-          rx={3}
-          fill="var(--art-accent-fill)"
-          stroke="var(--art-accent)"
-          strokeWidth={1}
-        />
-        <line className="g1t-commit" x1={88} y1={110} x2={130} y2={110} stroke="var(--art-accent)" strokeWidth={1.6} />
-        <circle className="g1t-commit" cx={130} cy={110} r={4} fill="var(--art-accent)" />
-        <circle className="g1t-ping" cx={130} cy={110} r={5} fill="none" stroke="var(--art-accent)" strokeWidth={1} />
-      </OnFace>
-
-      {/* The forks. Each floats on its own rhythm; the mint one lands. */}
-      {forks.map((f, i) => (
-        <Move key={i} to={`translateY(-${i * 7}px)`} delay={i * 40}>
-          <g className={f.won ? "g1t-land" : `g1t-bob g1t-bob-${i}`}>
-            <Box
-              at={f.at}
-              size={plate}
-              top={f.won ? "accent" : "accent-2"}
-              ink={f.won ? "accent" : "accent-2"}
-              nodes={i === 3}
-            />
-            <OnFace face="top" origin={[f.at[0] + 14, f.at[1] + 14, f.at[2] + plate[2]]}>
-              <TextLines width={92} lines={4} gap={9} />
-              {[0, 1, 2].map((k) => (
-                <rect
-                  key={k}
-                  className="g1t-diff"
-                  style={{ animationDelay: `${-(i * 0.7 + k * 0.45)}s` }}
-                  x={100}
-                  y={11 + k * 18}
-                  width={10}
-                  height={4}
-                  rx={1}
-                  fill={f.won || k !== 1 ? "var(--art-accent)" : "var(--art-ink)"}
-                />
-              ))}
-            </OnFace>
-          </g>
-        </Move>
-      ))}
-
-      {/* The checks: a grid of runs that flicker, then sweep mint as one passes. */}
-      <Box at={panelAt} size={panelSize} ink="line" />
-      <OnFace face="right" origin={[panel.t11[0], panel.t11[1] - 10, panel.t11[2] - 10]}>
-        {Array.from({ length: 12 }, (_, n) => {
-          const col = n % 4;
-          const row = Math.floor(n / 4);
-          const x = col * 19;
-          const y = row * 14;
-          return (
-            <g key={n}>
-              <rect x={x} y={y} width={14} height={9} fill="none" stroke="var(--art-faint)" strokeWidth={0.8} />
-              <rect
-                className="g1t-cell"
-                style={{ animationDelay: `${-((n * 7) % 11) * 0.37}s` }}
-                x={x}
-                y={y}
-                width={14}
-                height={9}
-                fill="var(--art-accent-2)"
-              />
-              <rect
-                className="g1t-pass"
-                style={{ animationDelay: `${(col + row) * 0.08}s` }}
-                x={x}
-                y={y}
-                width={14}
-                height={9}
-                fill="var(--art-accent)"
-              />
-            </g>
-          );
-        })}
-      </OnFace>
-
-      {/* The issue that set the fleet going, floating off to the side. */}
-      <Move to="translateY(-14px)" delay={80}>
-        <g className="g1t-bob g1t-bob-issue">
-          <Line ps={[issue.b11, [forks[2].at[0], forks[2].at[1] + plate[1], forks[2].at[2]]]} ink="line" dots />
-          <Box at={issueAt} size={issueSize} nodes />
-          <OnFace face="top" origin={[issueAt[0] + 8, issueAt[1] + 7, issueAt[2] + 2]}>
-            <text y={10} fontFamily="var(--font-mono)" fontSize={11} fontWeight={600} fill="var(--art-accent)">
-              #128
-            </text>
-            <TextLines y={17} width={32} lines={2} heading={false} gap={6} />
-          </OnFace>
-        </g>
-      </Move>
-    </Art>
-  );
-}
-
 /** Crafted: one box, measured carefully. */
 export function CraftArt({ id = "art-craft", className, label }: SceneProps) {
   const ids = artIds(id);
@@ -685,7 +514,6 @@ export const SCENES = {
   open: OpenArt,
   pricing: PricingArt,
   teams: TeamsArt,
-  g1t: G1tArt,
   craft: CraftArt,
   panels: PanelsArt,
   stairs: StairsArt,

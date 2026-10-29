@@ -9,11 +9,12 @@ import type { SceneName } from "@/components/art/scenes";
 import { ProductRail } from "@/components/product-rail";
 import { SlantBeams, SlantSplit } from "@/components/slant";
 import { site } from "@/lib/site";
+import { PRODUCTS } from "@/lib/products";
 
 export const metadata: Metadata = {
   title: "Products",
   description:
-    "The products Flagon, Inc. builds, starting with g1t: where your team and its coding agents ship code. Each one has its own site and its own team, held to the same standard.",
+    "The products Flagon, Inc. builds, each with its own site and its own team, held to the same standard. The first one is brewing.",
 };
 
 const TRAITS: { title: string; body: string; art: SceneName }[] = [
@@ -62,11 +63,28 @@ export default function ProductsPage() {
 
         {/* The portfolio */}
         <Section divider>
-          <SectionHeader
-            title="Our products"
-            lead="Pick one to hear why we're building it and how it works, then head over to the product itself. More are on the way."
-          />
+          {PRODUCTS.length > 0 ? (
+            <SectionHeader
+              title="Our products"
+              lead="Pick one to hear why we're building it and how it works, then head over to the product itself. More are on the way."
+            />
+          ) : (
+            <SectionHeader
+              title="On the workbench"
+              lead="Our first product is still brewing. We'll introduce it here when it's ready to pour, with why we're building it and how it works."
+            />
+          )}
           <ProductRail className="mt-8" />
+          {PRODUCTS.length === 0 && (
+            <div className="mt-4 flex flex-col gap-3 px-6 sm:flex-row sm:px-8">
+              <Cta href="/blog" variant="secondary">
+                Follow along on the blog
+              </Cta>
+              <Cta href={site.links.discord} external variant="secondary">
+                Hear first on Discord
+              </Cta>
+            </div>
+          )}
         </Section>
 
         {/* The standard */}
