@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
@@ -10,13 +10,27 @@ import { DepthScript } from "@/components/deep-dive";
 // Three roles, kept clean: Geist is the neutral body/UI workhorse, Hanken
 // Grotesk gives headlines a tighter, more distinct voice, and JetBrains Mono
 // carries code and labels as its own separate thing.
-const bodyFont = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const displayFont = Hanken_Grotesk({
-  variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
+//
+// The files are in the repo (./fonts, latin variable cuts from Fontsource,
+// OFL-licensed) so the build never fetches from Google: a failed download
+// there fails the whole deploy.
+const bodyFont = localFont({
+  src: "./fonts/geist.woff2",
+  variable: "--font-geist-sans",
+  weight: "100 900",
 });
-const mono = JetBrains_Mono({ variable: "--font-jetbrains-mono", subsets: ["latin"] });
+const displayFont = localFont({
+  src: "./fonts/hanken-grotesk.woff2",
+  variable: "--font-display",
+  weight: "100 900",
+});
+const mono = localFont({
+  src: "./fonts/jetbrains-mono.woff2",
+  variable: "--font-jetbrains-mono",
+  weight: "100 800",
+  // The size-adjusted fallback is tuned for Arial, which would skew a mono.
+  adjustFontFallback: false,
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(site.url),
