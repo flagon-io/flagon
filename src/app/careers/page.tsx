@@ -30,7 +30,7 @@ export default function CareersPage() {
             place you&rsquo;ve been looking for, we&rsquo;d love to hear from you.
           </p>
           <div className="mt-9 flex flex-col items-start gap-3 sm:flex-row">
-            <Cta href={`mailto:${site.links.email}`} external={false}>
+            <Cta href="/contact?topic=careers">
               Introduce yourself
             </Cta>
             <Cta href="/handbook" variant="secondary">
@@ -146,7 +146,7 @@ export default function CareersPage() {
             work on. We read every note.
           </p>
           <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
-            <Cta href={`mailto:${site.links.email}`}>Email us</Cta>
+            <Cta href="/contact?topic=careers">Get in touch</Cta>
             <Cta href={site.links.discord} external variant="secondary">
               Say hi in Discord
             </Cta>

@@ -52,7 +52,9 @@ export function SiteFooter() {
           </div>
         </div>
 
-        <FooterCol title="Products">
+        <FooterCol title="Studio">
+          <FooterLink href="/work">Work with us</FooterLink>
+          <FooterLink href="/work#rates">Rates</FooterLink>
           {PRODUCTS.map((p) => (
             <FooterLink key={p.id} href={productHref(p)}>
               {p.name}
@@ -69,6 +71,7 @@ export function SiteFooter() {
           <FooterLink href="/handbook">Handbook</FooterLink>
           <FooterLink href="/media">Media</FooterLink>
           <FooterLink href="/careers">Careers</FooterLink>
+          <FooterLink href="/contact">Contact</FooterLink>
           <FooterLink href="/handbook/brand-overview">Brand</FooterLink>
         </FooterCol>
 

@@ -89,11 +89,11 @@ export function MobileNav() {
         >
           <div className="mb-3 border-b border-hairline pb-4">
             <Link
-              href="/careers"
+              href="/contact?topic=project"
               onClick={() => setOpen(false)}
               className={buttonClasses({ variant: "default", className: "w-full" })}
             >
-              Careers
+              Start a project
             </Link>
           </div>
           {site.nav.map((item) => {

@@ -12,7 +12,7 @@ This is the mechanical companion to [how we build](/handbook/how-we-build): not 
 1. **Branch off `main`.** Keep the change small and focused. If it's growing arms and legs, that's a signal to split it, not to push on.
 2. **Open a pull request.** Describe what it does and, more usefully, why. Draft it early if you want eyes before it's finished.
 3. **Get it reviewed.** Small changes get fast, real reviews; that's the deal in [how we review code](/handbook/code-review), and the step-by-step is in [how we review PRs](/handbook/how-we-review-prs). Keep the noisy commits (a rename, a formatting pass) separate from the substantive one so the reviewer isn't hunting for signal.
-4. **Merge to `main`.** Checks run the [tests](/handbook/testing) and, when they're green, the change deploys. How it deploys is up to each product and written in its README: this website goes out on Vercel, and g1t lands changes through its own merge queue, which tests each one with what's ahead of it before it reaches `main`. Either way, there's no separate "release" ceremony to schedule.
+4. **Merge to `main`.** Checks run the [tests](/handbook/testing) and, when they're green, the change deploys. How it deploys is up to each product and written in its README: this website goes out on Vercel the moment `main` changes. Either way, there's no separate "release" ceremony to schedule.
 
 ## Main stays releasable, always
 

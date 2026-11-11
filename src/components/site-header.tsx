@@ -28,10 +28,10 @@ export function SiteHeader() {
           <ThemeToggle />
           <div className="hidden md:block">
             <Link
-              href="/careers"
+              href="/contact?topic=project"
               className={buttonClasses({ variant: "default", size: "sm" })}
             >
-              Careers
+              Start a project
             </Link>
           </div>
           <MobileNav />

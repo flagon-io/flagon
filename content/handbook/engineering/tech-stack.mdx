@@ -5,7 +5,7 @@ section: Engineering
 order: 2
 ---
 
-Flagon doesn't have one tech stack. Each product picks its own, because each product is its own thing with its own small team, and that team is the one living with the choice every day. What the company does have is a set of defaults and a couple of rules that hold everywhere. This page is those, with the stacks we actually run as worked examples. None of it is exotic. That's the point: we spend our interesting-technology budget on the product, not the plumbing, exactly as [how we build](/handbook/how-we-build) describes.
+Flagon doesn't have one tech stack. Each product picks its own, because each product is its own thing with its own small team, and that team is the one living with the choice every day. What the company does have is a set of defaults and a couple of rules that hold everywhere. This page is those, with the stack we actually run as a worked example. None of it is exotic. That's the point: we spend our interesting-technology budget on the product, not the plumbing, exactly as [how we build](/handbook/how-we-build) describes.
 
 ## What we reach for by default
 
@@ -27,17 +27,11 @@ This is the rule that holds across every product, whatever it's written in. The 
 
 How that looks varies a lot by product, which is fine. The boundary is what matters, not the shape on either side of it.
 
-## The stacks we run today
-
-### g1t
-
-[g1t](https://g1t.sh) is Rust and TypeScript on Cloudflare Workers. The site is server-rendered React on a Worker, and it holds no data. Everything that isn't a web UI is written in Rust: the REST API and MCP server, and a set of services (accounts and workspaces, repositories, issues and pull requests, events, and the runner that starts sandboxes), each its own Worker with its own database. The services call each other through service bindings and react to each other through events, so each one owns its slice of the data outright. Acceptance checks and g1t's own agents run in sandboxes on Cloudflare Containers. The REST API and the MCP server sit over the same operations, described by one OpenAPI document, so there's one contract and two ways in.
+## The stack we run today
 
 ### This website
 
 The company site you're reading is the simplest thing that works: a Next.js App Router app in TypeScript and React, styled with Tailwind CSS v4, deployed on Vercel. The handbook and the blog are MDX files in the repo, rendered with `next-mdx-remote`. There's no database at all. The content is the files, so changing a handbook page is a pull request like any other change, and the data owner is git.
-
-The two look nothing alike, and that's the model working. A forge for thousands of agents and a company website have different jobs, so they got different tools.
 
 ## How to read this page later
 

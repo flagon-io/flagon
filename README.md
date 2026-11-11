@@ -1,8 +1,8 @@
 # flagon
 
 The [Flagon, Inc.](https://www.flagon.io) company site, built in the open.
-Flagon is the company; the products it builds (starting with
-[g1t](https://g1t.sh)) each have their own site. One Next.js app holds the
+Flagon is the company; the products it builds each have their own
+site. One Next.js app holds the
 company pages, the products portfolio, the public [handbook](https://www.flagon.io/handbook),
 and the [blog](https://www.flagon.io/blog). The content is Markdown/MDX you can
 read, edit, and send a pull request against, and it all lives in this repo.
@@ -89,7 +89,7 @@ Body goes here.
 
 Posts are sorted newest-first by `date`. Every post gets a cover drawing: name
 one with `art:` in the frontmatter (`handbook`, `open`, `pricing`, `teams`,
-`craft`, `panels`, `stairs`, or a product's own, like `g1t`), or leave it out
+`craft`, `panels`, `stairs`, or a product's own), or leave it out
 and one is picked from the slug.
 
 ### Line art
@@ -99,7 +99,7 @@ The illustrations are isometric line drawings built in code, in
 sheets, faces, guide lines, corner markers, and `OnFace` for laying a logo or
 text flat onto a surface), and `scenes.tsx` composes it into the named
 drawings. Colors come from the `--art-*` variables in `globals.css`, so every
-drawing follows light and dark mode, and a class like `.art-g1t` repaints one
+drawing follows light and dark mode, and a class like `.art-<product>` repaints one
 in a product's own palette. `ArtCard` (`src/components/art-card.tsx`) is the
 card that leads with a drawing and ends in link chips.
 

@@ -23,18 +23,7 @@ If a newcomer has to ask a person any of those, the README has a bug.
 
 When pieces of a product change together, they live together, so a change that crosses them lands in one reviewable pull request instead of several that have to merge in a careful order. That usually means one repo per product, with its apps, services and shared packages side by side. When pieces don't change together, they don't need to share a repo just because the same company owns them.
 
-### Two real maps
-
-[g1t](https://g1t.sh) is one repo holding everything it ships, hosted on g1t itself:
-
-```text
-apps/web          the site: server-rendered React on a Worker, holds no data
-apps/docs         the documentation site, with the API explorer
-apps/api          the REST API and MCP server (Rust)
-services/*        identity, repos, work, events, runner: one Worker and database each
-crates/*          Rust shared by the services, and the program that runs in a sandbox
-packages/*        TypeScript contracts and the shared design tokens
-```
+### A real map
 
 This website is a single Next.js app, and its repo, [flagon](https://github.com/flagon-io/flagon), is about as small as a map gets:
 
@@ -46,11 +35,11 @@ src/components    site chrome and MDX rendering
 src/lib           content loaders and config
 ```
 
-Both READMEs carry these maps, and both are more current than this page will ever be. Read the README, not this.
+The README carries this map, and it's more current than this page will ever be. Read the README, not this.
 
 ## How to find your way in
 
-The fastest way to understand a repo isn't to read the whole tree, it's to follow one request end to end. Pick something small and trace it: the page that renders it, the call it makes, the thing that owns the data behind that call, and back. In g1t that means a route in `apps/web` asking a service for something; here it means a URL resolving to an `.mdx` file through a loader in `src/lib`. One thread like that teaches you more than an afternoon of browsing, and it makes [who owns the data](/handbook/tech-stack) concrete instead of abstract.
+The fastest way to understand a repo isn't to read the whole tree, it's to follow one request end to end. Pick something small and trace it: the page that renders it, the call it makes, the thing that owns the data behind that call, and back. Here it means a URL resolving to an `.mdx` file through a loader in `src/lib`. One thread like that teaches you more than an afternoon of browsing, and it makes [who owns the data](/handbook/tech-stack) concrete instead of abstract.
 
 <Callout type="note" title="When you can't find where something goes">
   If a change doesn't have an obvious home, that's worth surfacing in review, not silently forcing. The usual question is which side of the data boundary it belongs on: is this logic that belongs with the thing that owns the data, or is it presentation? When that's unclear, the confusion is information.

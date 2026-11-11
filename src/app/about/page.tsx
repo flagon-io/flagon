@@ -100,13 +100,14 @@ export default function AboutPage() {
                 out.
               </Right>
               <Right title="No bill shock">
-                Our products are priced close to what they cost us, with the markup
-                stated plainly. You will never open an invoice and gasp. If pricing
-                surprises you, we got it wrong.
+                Our rates are published, and our products are priced close to what
+                they cost us, with the markup stated plainly. You will never open an
+                invoice and gasp. If pricing surprises you, we got it wrong.
               </Right>
-              <Right title="Try it without us">
-                No &ldquo;book a demo&rdquo; wall in front of the thing. Use it,
-                self-serve, and decide for yourself before you ever talk to a human.
+              <Right title="No demo wall">
+                Our products are self-serve: use them and decide for yourself before
+                you ever talk to a human. When you hire us, you talk to the person
+                doing the work, not a salesperson.
               </Right>
               <Right title="Support from builders">
                 The people who make it help support it. No offshored script-readers,

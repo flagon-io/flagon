@@ -17,9 +17,12 @@ export function Schematic({
   children,
   className,
   bleed = false,
+  dots = true,
 }: {
   children: ReactNode;
   className?: string;
+  /** The blueprint dot grid behind the frame. Turn it off behind body text. */
+  dots?: boolean;
   /**
    * Span the full width of the content column: draw only top and bottom rules
    * and let the column's own side rails close the frame.
@@ -29,7 +32,7 @@ export function Schematic({
   return (
     <div
       className={cn("relative border-hairline", bleed ? "border-y" : "border", className)}
-      style={DOTS}
+      style={dots ? DOTS : undefined}
     >
       <CornerMarks />
       {children}
@@ -58,20 +61,48 @@ const COLS: Record<2 | 3 | 4, string> = {
   4: "lg:grid-cols-4 lg:divide-y-0 slant-rules-4",
 };
 
+/** Straight-ruled columns. Each cell draws a rule on its top and left edge,
+ * and the grid is pulled up and left by 1px inside a clipping wrapper, so the
+ * outer rules vanish and only the rules between cells show, however the rows
+ * wrap. Cells stay transparent, so the Schematic's dots show through. */
+const STRAIGHT: Record<2 | 3 | 4, string> = {
+  2: "sm:grid-cols-2",
+  3: "sm:grid-cols-3",
+  4: "sm:grid-cols-2 lg:grid-cols-4",
+};
+
 /**
  * A grid that divides its cells with hairlines: stacked with horizontal rules on
- * mobile, columns with slanted rules from the breakpoint up. Drop it inside a
- * Schematic.
+ * mobile, columns from the breakpoint up. Rules lean at the site's tilt by
+ * default; pass rules="straight" for cells full of body text, where a slanted
+ * rule fights the reading line. Drop it inside a Schematic.
  */
 export function SchematicGrid({
   children,
   cols = 3,
+  rules = "slant",
   className,
 }: {
   children: ReactNode;
   cols?: 2 | 3 | 4;
+  rules?: "slant" | "straight";
   className?: string;
 }) {
+  if (rules === "straight") {
+    return (
+      <div className="overflow-hidden">
+        <div
+          className={cn(
+            "-ml-px -mt-px grid *:min-w-0 *:border-l *:border-t *:border-hairline",
+            STRAIGHT[cols],
+            className,
+          )}
+        >
+          {children}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={cn("slant-rules grid divide-y divide-hairline *:min-w-0", COLS[cols], className)}>
       {children}

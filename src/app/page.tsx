@@ -4,14 +4,17 @@ import { ArrowRight } from "lucide-react";
 import { Frame } from "@/components/frame";
 import { HexField } from "@/components/hex-field";
 import { FlagonPour } from "@/components/flagon-pour";
-import { Schematic } from "@/components/schematic";
 import { ProductRail } from "@/components/product-rail";
 import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
 import { ArtCard } from "@/components/art-card";
+import { EmployerLogos } from "@/components/employer-logos";
+import { Schematic, SchematicGrid } from "@/components/schematic";
 import { SlantBeams, SlantSplit } from "@/components/slant";
 import { site } from "@/lib/site";
 import { getAllPosts, formatDate } from "@/lib/blog";
+import { OFFERS } from "@/lib/work";
+import { contactHref } from "@/lib/contact";
 
 export const metadata: Metadata = {
   description: site.description,
@@ -35,7 +38,7 @@ export default function Home() {
           className="rise mt-8 max-w-3xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl"
           style={{ animationDelay: "120ms" }}
         >
-          We make good software,{" "}
+          We build good software,{" "}
           <span className="bg-linear-to-r from-brand-bright to-brand bg-clip-text text-transparent">
             in the open.
           </span>
@@ -45,27 +48,64 @@ export default function Home() {
           className="rise mt-6 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg"
           style={{ animationDelay: "180ms" }}
         >
-          {site.legalName} is a small, independent software company. We build
-          products for developers, and we run the whole company where you can
-          see it: the handbook, the pay, and the way we decide.
+          {site.legalName} is a small, independent software studio. We build
+          software for clients, brew products of our own, and run the whole
+          company where you can see it: the handbook, the rates, and the way
+          we decide.
         </p>
 
         <div
           className="rise mt-9 flex flex-col items-center gap-3 sm:flex-row"
           style={{ animationDelay: "240ms" }}
         >
-          <Cta href="/products">See what we&rsquo;re building</Cta>
-          <Cta href="/handbook" variant="secondary">
-            Read the handbook
+          <Cta href={contactHref("project")}>Start a project</Cta>
+          <Cta href="/work" variant="secondary">
+            See how we work
           </Cta>
         </div>
       </section>
 
+      {/* Track record */}
+      <Section divider>
+        <p className={`${GUTTER} text-center font-mono text-[11px] uppercase tracking-widest text-subtle`}>
+          Before Flagon, Chase built software at
+        </p>
+        <EmployerLogos className={`mt-10 ${GUTTER}`} />
+      </Section>
+
+      {/* Work with us */}
+      <Section divider bleed="end">
+        <SectionHeader
+          title="Work with us."
+          lead="We take on a few client projects at a time, built by senior people who've done it at scale. One published rate for everyone, right on the page."
+        />
+        <Schematic bleed className="mt-10">
+          <SchematicGrid cols={4} rules="straight">
+            {OFFERS.map((o) => (
+              <Link
+                key={o.id}
+                href="/work#rates"
+                className="group flex flex-col p-6 transition hover:bg-panel sm:p-8"
+              >
+                <h3 className="text-base font-semibold tracking-tight group-hover:text-brand">
+                  {o.title}
+                </h3>
+                <p className="mt-3 text-2xl font-semibold tracking-tight">{o.price}</p>
+                <p className="mt-1 font-mono text-[11px] uppercase tracking-widest text-subtle">
+                  {o.terms}
+                </p>
+                <p className="mt-4 text-sm leading-relaxed text-muted-foreground">{o.body}</p>
+              </Link>
+            ))}
+          </SchematicGrid>
+        </Schematic>
+      </Section>
+
       {/* What we're building */}
       <Section divider>
         <SectionHeader
-          title="What we're building."
-          lead="Flagon is the company; the products are their own things, each with its own name and room to grow. Here's what's in the workshop."
+          title="In the workshop."
+          lead="Client work pays the bills and shows us what's missing. Our own products grow out of it, each with its own name and room to grow."
         />
         <ProductRail className="mt-8" />
         <div className="mt-4 px-6 sm:px-8">
@@ -124,8 +164,8 @@ export default function Home() {
               { label: "How we make money", href: "/handbook/how-we-make-money" },
             ]}
           >
-            What it costs us, plus a markup we say out loud. No seats, no
-            surprise bills, and the price book is public.
+            Our rates are on the page, the same for everyone, and our products
+            charge what they cost us plus a markup we say out loud.
           </ArtCard>
           <ArtCard
             title="Small teams, whole ownership"
@@ -195,16 +235,16 @@ export default function Home() {
       {/* Closing CTA */}
       <SlantSplit art="craft" artId="home-cta">
         <h2 className="max-w-md text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-          Come build with us.
+          Got something worth building?
         </h2>
         <p className="mt-4 max-w-md text-pretty text-muted-foreground">
-          Read the handbook, see how we hire, or jump into Discord and tell us
-          what you wish existed. It&rsquo;s all in the open.
+          Tell us what you have in mind. You&rsquo;ll hear back from the person
+          who&rsquo;d do the work, even if the answer is no.
         </p>
         <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
-          <Cta href="/careers">Work with us</Cta>
-          <Cta href={site.links.discord} external variant="secondary">
-            Join the Discord
+          <Cta href={contactHref("project")}>Start a project</Cta>
+          <Cta href="/work#rates" variant="secondary">
+            See rates
           </Cta>
         </div>
       </SlantSplit>

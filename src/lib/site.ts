@@ -1,8 +1,8 @@
 import type { ComponentType } from "react";
 import {
+  BookOpen,
   Boxes,
   FlaskConical,
-  Handshake,
   Info,
   LayoutGrid,
   Megaphone,
@@ -42,11 +42,12 @@ export type NavGroup = {
 export type NavItem = NavLink | NavGroup;
 
 /**
- * Top nav is company-shaped: Flagon is the studio, and each product has its own
- * site. Products sit up front as a dropdown into each one's page here, which
- * then links out; the handbook, blog, and company pages follow.
+ * Top nav is studio-shaped: client work comes first, since that's how Flagon
+ * pays its way today. Products follow as a dropdown into each one's page here,
+ * which then links out; the handbook, blog, and company pages come after.
  */
 const nav: readonly NavItem[] = [
+  { label: "Work with us", href: "/work" },
   // Until the first product ships there's nothing to drop down to, so it's a
   // plain link to the page that shows what's brewing.
   PRODUCTS.length > 0
@@ -62,21 +63,19 @@ const nav: readonly NavItem[] = [
         ],
       }
     : { label: "Products", href: "/products" },
-  { label: "Handbook", href: "/handbook" },
-  { label: "Books", href: "/books" },
   { label: "Blog", href: "/blog" },
   {
     label: "Company",
     sections: [
       [
         { label: "About", href: "/about", icon: Info },
+        { label: "Handbook", href: "/handbook", icon: BookOpen },
         { label: "People", href: "/people", icon: Users },
         { label: "Small teams", href: "/teams", icon: Boxes },
         { label: "Media", href: "/media", icon: Megaphone },
       ],
       [
         { label: "Side projects", href: "/side-projects", icon: FlaskConical },
-        { label: "Partnerships", href: "/partnerships", icon: Handshake },
         {
           label: "Discord",
           href: links.discord,
@@ -87,6 +86,7 @@ const nav: readonly NavItem[] = [
       ],
     ],
   },
+  { label: "Contact", href: "/contact" },
 ];
 
 export const site = {
@@ -94,9 +94,9 @@ export const site = {
   legalName: "Flagon, Inc.",
   domain: "flagon.io",
   url: "https://www.flagon.io",
-  tagline: "We build software in the open.",
+  tagline: "We build good software, in the open.",
   description:
-    "Flagon, Inc. is a small, independent software company. We build products for developers, and we run the company in the open: the handbook, the pay, and the way we decide are all public.",
+    "Flagon, Inc. is a small, independent software studio. We build software for clients and products of our own, and we run the company in the open: the handbook, the rates, and the way we decide are all public.",
   links,
   nav,
 } as const;

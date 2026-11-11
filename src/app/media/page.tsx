@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { StubPage } from "@/components/stub-page";
-import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Media",
@@ -16,7 +15,7 @@ export default function MediaPage() {
       lead="Logos, the mark, and the plain facts about Flagon, free to use. The brand assets live in the handbook, and each of our products keeps its own on its own site. For a quote, a detail, or anything else, reach us directly."
       actions={[
         { label: "Brand assets", href: "/handbook/brand-assets", variant: "primary" },
-        { label: "Email us", href: `mailto:${site.links.email}`, external: true },
+        { label: "Contact us", href: "/contact?topic=press" },
       ]}
     />
   );
