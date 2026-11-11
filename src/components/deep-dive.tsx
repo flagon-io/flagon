@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Layers } from "lucide-react";
+import { InlineScript } from "@/components/inline-script";
 import { slug } from "github-slugger";
 import { cn } from "@/lib/cn";
 
@@ -26,15 +27,7 @@ export type Depth = "simple" | "deep";
 const script = `(function(){try{var d=localStorage.getItem("${STORAGE_KEY}");document.documentElement.dataset.depth=d==="deep"?"deep":"simple"}catch(e){document.documentElement.dataset.depth="simple"}})();`;
 
 export function DepthScript() {
-  // Same pattern as ThemeScript: executable on the server render, inert text on
-  // a client render (where a <script> never runs and React would warn).
-  return (
-    <script
-      type={typeof window === "undefined" ? "text/javascript" : "text/plain"}
-      dangerouslySetInnerHTML={{ __html: script }}
-      suppressHydrationWarning
-    />
-  );
+  return <InlineScript html={script} />;
 }
 
 /** Read the depth the pre-paint script settled on. */

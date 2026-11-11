@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BookCover } from "@/components/book-cover";
+import { InlineScript } from "@/components/inline-script";
 import { getBook, getParts } from "@/lib/books";
 import { site } from "@/lib/site";
 
@@ -57,11 +58,7 @@ export default async function CoverWrapPage(props: PageProps<"/books/[book]/prin
         @page { size: ${width}in ${height}in; margin: 0; }
         html, body { margin: 0; background: #0a1f1d; }
       `}</style>
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `document.documentElement.classList.remove("dark");`,
-        }}
-      />
+      <InlineScript html={`document.documentElement.classList.remove("dark");`} />
       <div
         className="relative overflow-hidden bg-[#0a1f1d] text-[#e9fbf7]"
         style={{ width: inch(width), height: inch(height) }}

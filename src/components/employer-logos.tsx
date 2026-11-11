@@ -8,7 +8,7 @@ import { EMPLOYERS, type EmployerId } from "@/lib/work";
  * whatever colors the original file uses.
  */
 const ASPECT: Record<EmployerId, number> = {
-  riot: 264.6 / 117.6,
+  riot: 503.45 / 163.51,
   imgur: 390 / 136,
   aptive: 135 / 45,
   entrata: 106 / 20,
@@ -26,7 +26,7 @@ const ASPECT: Record<EmployerId, number> = {
  * Re-measure when a logo file changes.
  */
 const WEIGHT: Record<EmployerId, number> = {
-  riot: 0.567,
+  riot: 0.498,
   imgur: 0.519,
   aptive: 0.486,
   entrata: 0.533,

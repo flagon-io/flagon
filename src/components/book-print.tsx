@@ -1,5 +1,6 @@
 import { isValidElement, type ComponentProps, type ReactNode } from "react";
 import { Mdx } from "@/components/mdx";
+import { InlineScript } from "@/components/inline-script";
 import { BookCover } from "@/components/book-cover";
 import { PART_ART } from "@/components/book-art";
 import { formatDate } from "@/lib/blog";
@@ -335,10 +336,8 @@ export function PrintBook({ book, edition }: { book: Book; edition: PrintEdition
     <>
       {/* Paper is white whatever the reader's theme: drop dark mode for this
           page before it paints. */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `document.documentElement.classList.remove("dark");document.documentElement.style.colorScheme="light";`,
-        }}
+      <InlineScript
+        html={`document.documentElement.classList.remove("dark");document.documentElement.style.colorScheme="light";`}
       />
       {isBook ? <style>{bookPageStyles(book, edition.geometry, edition.section)}</style> : null}
       <main className={isBook ? "book-print book-edition" : "book-print"}>
