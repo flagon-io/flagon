@@ -9,7 +9,8 @@ import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
 import { ArtCard } from "@/components/art-card";
 import { EmployerLogos } from "@/components/employer-logos";
-import { Schematic, SchematicGrid } from "@/components/schematic";
+import { Capabilities } from "@/components/capabilities";
+import { Schematic } from "@/components/schematic";
 import { SlantBeams, SlantSplit } from "@/components/slant";
 import { site } from "@/lib/site";
 import { getAllPosts, formatDate } from "@/lib/blog";
@@ -74,31 +75,40 @@ export default function Home() {
       </Section>
 
       {/* Work with us */}
-      <Section divider bleed="end">
+      <Section divider>
         <SectionHeader
           title="Work with us."
-          lead="We take on a few client projects at a time, built by senior people who've done it at scale. One published rate for everyone, right on the page."
+          lead="A full-service studio: strategy, UX, design, and engineering under one roof, from the first sketch to running in production. One small senior team, and one published rate for everyone."
         />
-        <Schematic bleed className="mt-10">
-          <SchematicGrid cols={4} rules="straight">
-            {OFFERS.map((o) => (
-              <Link
-                key={o.id}
-                href="/work#rates"
-                className="group flex flex-col p-6 transition hover:bg-panel sm:p-8"
-              >
-                <h3 className="text-base font-semibold tracking-tight group-hover:text-brand">
-                  {o.title}
-                </h3>
-                <p className="mt-3 text-2xl font-semibold tracking-tight">{o.price}</p>
-                <p className="mt-1 font-mono text-[11px] uppercase tracking-widest text-subtle">
-                  {o.terms}
-                </p>
-                <p className="mt-4 text-sm leading-relaxed text-muted-foreground">{o.body}</p>
-              </Link>
-            ))}
-          </SchematicGrid>
-        </Schematic>
+        <Capabilities compact className="mt-10" />
+        <div className={`mt-12 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between ${GUTTER}`}>
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-widest text-subtle">
+              Rates, in the open
+            </p>
+            <dl className="mt-4 grid grid-cols-2 gap-x-8 gap-y-5 sm:flex sm:flex-wrap sm:gap-x-12">
+              {OFFERS.map((o) => (
+                <div key={o.id}>
+                  <dt className="text-sm text-muted-foreground">{o.title}</dt>
+                  <dd className="mt-0.5 text-xl font-semibold tracking-tight">{o.price}</dd>
+                  <dd className="mt-1 font-mono text-[10px] uppercase tracking-widest text-subtle">
+                    {o.terms}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+          <Link
+            href="/work#rates"
+            className="group inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-brand"
+          >
+            See what&rsquo;s included
+            <ArrowRight
+              className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+              strokeWidth={2}
+            />
+          </Link>
+        </div>
       </Section>
 
       {/* What we're building */}

@@ -25,10 +25,10 @@ export const OFFERS: Offer[] = [
     id: "build",
     title: "Build weeks",
     price: "$7,500 / week",
-    terms: "Two-week minimum",
-    body: "Product work, start to finish: new apps, APIs, platforms, and the hard migrations nobody else wants to own. You buy focused weeks, not hours, so the incentive is to ship.",
+    terms: "Per person, two-week minimum",
+    body: "The whole job, start to finish: strategy, UX, design, and engineering for new products, apps, platforms, and the hard migrations nobody else wants to own. You buy focused weeks, not hours, so the incentive is to ship. Most projects run with one to three people, and we add design or engineering as the work calls for it, at the same rate.",
     includes: [
-      "A senior engineer on your project, full time",
+      "Senior people, added as the work needs them",
       "Working software every week, not status decks",
       "Code, docs, and infrastructure you own outright",
     ],
@@ -60,13 +60,62 @@ export const OFFERS: Offer[] = [
   {
     id: "care",
     title: "Care plan",
-    price: "$1,500 / month",
-    terms: "Cancel any time",
-    body: "Keep what we built healthy after launch: hosting, updates, monitoring, and the small changes that pile up. One flat price instead of a meter running.",
+    price: "From $500 / month",
+    terms: "Sized to the site, no contract",
+    body: "Keep what we built healthy after launch: hosting, updates, monitoring, and the small changes that pile up. One flat monthly price, set by how big the site is, instead of a meter running.",
     includes: [
       "Hosting, updates, and uptime monitoring",
       "Small changes and fixes, handled quickly",
       "A direct line to the person who built it",
+    ],
+  },
+];
+
+/**
+ * Everything we take on, grouped by where it sits in a project's life, so the
+ * list reads as one path from idea to running product rather than a pile of
+ * keywords. Any offer below can draw on all of it.
+ */
+export const CAPABILITIES: { stage: string; summary: string; items: string[] }[] = [
+  {
+    stage: "Strategy",
+    summary: "What to build, for whom, and in what order.",
+    items: [
+      "Product strategy",
+      "Discovery and research",
+      "Roadmaps",
+      "Technical due diligence",
+      "Fractional leadership",
+    ],
+  },
+  {
+    stage: "Design",
+    summary: "UX and interfaces people understand on sight.",
+    items: ["UX", "UI and visual design", "Design systems", "Prototyping", "Brand and identity"],
+  },
+  {
+    stage: "Build",
+    summary: "Apps, sites, platforms, and AI, built to last.",
+    items: [
+      "Web apps",
+      "Mobile apps",
+      "Websites",
+      "APIs and platforms",
+      "AI and agents",
+      "E-commerce",
+      "Migrations",
+    ],
+  },
+  {
+    stage: "Run",
+    summary: "Fast, secure, found in search, and looked after.",
+    items: [
+      "Cloud and DevOps",
+      "Performance and reliability",
+      "Security reviews",
+      "Analytics",
+      "SEO",
+      "Care and support",
     ],
   },
 ];

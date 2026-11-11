@@ -9,6 +9,7 @@ import { Section, SectionHeader, GUTTER } from "@/components/section";
 import { Cta } from "@/components/cta";
 import { SlantSplit } from "@/components/slant";
 import { CaseStudyCard, NextProjectCard } from "@/components/work-cards";
+import { Capabilities } from "@/components/capabilities";
 import { EmployerLogo, EmployerLogos } from "@/components/employer-logos";
 import { site } from "@/lib/site";
 import { contactHref } from "@/lib/contact";
@@ -17,7 +18,7 @@ import { CASE_STUDIES, EMPLOYERS, OFFERS, PROCESS, TRACK_RECORD } from "@/lib/wo
 export const metadata: Metadata = {
   title: "Work with us",
   description:
-    "Flagon builds software for clients: product builds, platforms and migrations, fractional CTO, and websites. Built by people who've done it at scale, with rates published up front.",
+    "Flagon is a full-service software studio: strategy, UX, design, and engineering for products, apps, platforms, and websites, built by people who've done it at scale, with rates published up front.",
 };
 
 export default function WorkPage() {
@@ -27,13 +28,14 @@ export default function WorkPage() {
         {/* Hero */}
         <SlantSplit art="craft" artId="work-hero" backdrop={<HexField />} divider={false}>
           <h1 className="max-w-xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
-            Software, built by people who&rsquo;ve done it at scale.
+            From the first sketch to the thing running in production.
           </h1>
           <p className="mt-6 max-w-lg text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-            Flagon takes on a small number of client projects at a time: new
-            products, platforms, the migration nobody wants to own, and websites
-            that pull their weight. Senior people doing the work, and the price
-            is right here on the page.
+            Flagon is a full-service studio: strategy, UX, design, and
+            engineering under one roof, for products, apps, platforms, and
+            websites. One small senior team from the first call to launch and
+            beyond, no handoffs between agencies, and the price is right here on
+            the page.
           </p>
           <div className="mt-9 flex flex-col items-start gap-3 sm:flex-row">
             <Cta href={contactHref("project")}>Start a project</Cta>
@@ -79,11 +81,21 @@ export default function WorkPage() {
           </Schematic>
         </Section>
 
+        {/* Capabilities */}
+        <Section divider bleed="end">
+          <div id="capabilities" className="scroll-mt-24" />
+          <SectionHeader
+            title="What we do"
+            lead="All of it, end to end. Bring us an idea, a half-built product, or a system that needs rescuing, and we'll take it from wherever it is to wherever it needs to be."
+          />
+          <Capabilities className="mt-10" />
+        </Section>
+
         {/* Offers and rates */}
         <Section divider bleed="end">
           <div id="rates" className="scroll-mt-24" />
           <SectionHeader
-            title="What we do, and what it costs"
+            title="How you hire us"
             lead={
               <>
                 One published rate for everyone. No quote that depends on how
