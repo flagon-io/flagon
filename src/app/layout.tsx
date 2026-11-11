@@ -73,6 +73,22 @@ export const viewport: Viewport = {
   colorScheme: "light dark",
 };
 
+/**
+ * Who we are, for search engines: the organization, its logo, how to reach
+ * it, and the profiles that are also us (sameAs), so they're tied to this site.
+ */
+const organization = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: site.legalName,
+  alternateName: site.name,
+  url: site.url,
+  logo: `${site.url}/brand/flagon-mark.svg`,
+  email: site.links.email,
+  description: site.description,
+  sameAs: [site.links.github, site.links.linkedin, site.links.discord],
+};
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
@@ -86,6 +102,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="flex min-h-dvh flex-col overflow-x-clip">
         {children}
+        <script
+          type="application/ld+json"
+          // Escaping "<" keeps the JSON from ever closing the script tag.
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(organization).replace(/</g, "\\u003c"),
+          }}
+        />
         <Analytics />
         <SpeedInsights />
       </body>

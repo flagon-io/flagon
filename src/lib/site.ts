@@ -10,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import { SiDiscord, SiGithub } from "@icons-pack/react-simple-icons";
+import { LinkedinIcon } from "@/components/linkedin-icon";
 import { PRODUCTS, productHref } from "@/lib/products";
 
 /**
@@ -23,6 +24,7 @@ const links = {
   /** The repo backing this site (used for "edit on GitHub" links). */
   repo: "https://github.com/flagon-io/flagon",
   discord: "https://discord.gg/dtYQs6rPXN",
+  linkedin: "https://www.linkedin.com/company/flagon-io",
   email: "hey@flagon.io",
 } as const;
 
@@ -83,6 +85,7 @@ const nav: readonly NavItem[] = [
           icon: SiDiscord,
         },
         { label: "GitHub", href: links.github, external: true, icon: SiGithub },
+        { label: "LinkedIn", href: links.linkedin, external: true, icon: LinkedinIcon },
       ],
     ],
   },

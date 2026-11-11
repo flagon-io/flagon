@@ -23,7 +23,7 @@ const variants: Record<ButtonVariant, string> = {
 
 const sizes: Record<ButtonSize, string> = {
   sm: "h-8 px-3.5 text-sm",
-  md: "h-[38px] px-5 text-sm",
+  md: "h-9.5 px-5 text-sm",
   lg: "h-11 px-7 text-[15px]",
 };
 

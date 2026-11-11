@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SiGithub, SiDiscord } from "@icons-pack/react-simple-icons";
+import { LinkedinIcon } from "@/components/linkedin-icon";
 import { Logo } from "@/components/logo";
 import { Plus } from "@/components/plus";
 import { site } from "@/lib/site";
@@ -49,6 +50,15 @@ export function SiteFooter() {
             >
               <SiDiscord className="size-4.5" />
             </a>
+            <a
+              href={site.links.linkedin}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Flagon on LinkedIn"
+              className="text-subtle transition hover:text-foreground"
+            >
+              <LinkedinIcon className="size-4" />
+            </a>
           </div>
         </div>
 
@@ -83,6 +93,9 @@ export function SiteFooter() {
           </FooterLink>
           <FooterLink href={site.links.github} external>
             GitHub
+          </FooterLink>
+          <FooterLink href={site.links.linkedin} external>
+            LinkedIn
           </FooterLink>
           <FooterLink href={`mailto:${site.links.email}`} external>
             Email

@@ -43,7 +43,9 @@ const eslintConfig = defineConfig([
       // Write classes the way Tailwind would: leading-tight, not leading-[1.25];
       // bg-brand/6, not bg-brand/[0.06]. Errors (and autofixable), so CI fails
       // on them instead of leaving editor warnings around.
-      "better-tailwindcss/enforce-canonical-classes": "error",
+      // rootFontSize lets px values map onto the spacing scale (left-[-7px] is
+      // -left-1.75), matching what the editor's Tailwind extension reports.
+      "better-tailwindcss/enforce-canonical-classes": ["error", { rootFontSize: 16 }],
       "better-tailwindcss/no-duplicate-classes": "error",
       "better-tailwindcss/no-deprecated-classes": "error",
       // Single spaces between classes (also tidies up after the fixes above).

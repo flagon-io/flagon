@@ -47,16 +47,23 @@ const BEAMS = [
   { left: "86%", width: "2.5%" },
 ];
 
-export function SlantBeams({ className }: { className?: string }) {
+export function SlantBeams({ className, height }: { className?: string; height?: number }) {
   return (
     <div aria-hidden className={cn("pointer-events-none absolute inset-0 -z-10 overflow-hidden", className)}>
-      {BEAMS.map((b) => (
-        <div
-          key={b.left}
-          className="slant-skew absolute inset-y-0 origin-bottom border-l border-brand/15 bg-linear-to-b from-brand/[0.07] via-brand/2 to-transparent"
-          style={{ left: b.left, width: b.width }}
-        />
-      ))}
+      {/* The beams skew from their bottom edge, so their tops move whenever
+          their height does. Pass \`height\` (px) to pin them at a fixed size
+          from the top, for sections that grow while you're on the page (a
+          form), so the beams hold still. They fade out downward, so the cut
+          at the bottom never shows. */}
+      <div className={height ? "absolute inset-x-0 top-0" : "absolute inset-0"} style={{ height }}>
+        {BEAMS.map((b) => (
+          <div
+            key={b.left}
+            className="slant-skew absolute inset-y-0 origin-bottom border-l border-brand/15 bg-linear-to-b from-brand/[0.07] via-brand/2 to-transparent"
+            style={{ left: b.left, width: b.width }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -150,8 +157,8 @@ export function SlantSplit({
           {/* A brand glow pooled behind the drawing, so the panel reads as a
               lit stage rather than a gap. */}
           <div className="absolute inset-0 bg-[radial-gradient(60%_55%_at_55%_60%,color-mix(in_oklab,var(--brand)_16%,transparent),transparent)]" />
-          <Plus className={cn(mark, "left-[-7px] top-[-7px]", !divider && "md:hidden")} />
-          <Plus className={cn(mark, "bottom-[-7px] left-[-7px]")} />
+          <Plus className={cn(mark, "-left-1.75 -top-1.75", !divider && "md:hidden")} />
+          <Plus className={cn(mark, "-bottom-1.75 -left-1.75")} />
         </div>
         <div className="relative flex h-full items-center justify-center px-8 py-10 md:pl-16">
           <Scene id={artId} className="w-full max-w-sm" />

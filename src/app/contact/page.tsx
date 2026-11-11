@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Mail } from "lucide-react";
 import { SiDiscord, SiGithub } from "@icons-pack/react-simple-icons";
+import { LinkedinIcon } from "@/components/linkedin-icon";
 import { Frame } from "@/components/frame";
 import { HexField } from "@/components/hex-field";
 import { SlantBeams } from "@/components/slant";
@@ -30,7 +31,7 @@ export default async function ContactPage({
         <section className="relative isolate py-14 sm:py-20">
           {/* Pinned: the form grows with the topic, and the backdrop shouldn't move. */}
           <HexField height={760} />
-          <SlantBeams />
+          <SlantBeams height={760} />
           <div className={`grid gap-12 ${GUTTER} lg:grid-cols-[1fr_1.6fr] lg:gap-16`}>
             <div>
               <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
@@ -61,6 +62,13 @@ export default async function ContactPage({
                   label="GitHub"
                   href={site.links.github}
                   value="Issues and pull requests welcome"
+                  external
+                />
+                <Channel
+                  icon={<LinkedinIcon className="size-3.5" />}
+                  label="LinkedIn"
+                  href={site.links.linkedin}
+                  value="Follow along as we grow"
                   external
                 />
               </ul>
