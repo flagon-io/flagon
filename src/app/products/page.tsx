@@ -112,7 +112,7 @@ export default function ProductsPage() {
             the job description.
           </p>
           <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row">
-            <Cta href="/careers">Work with us</Cta>
+            <Cta href="/careers">Join the team</Cta>
             <Cta href="/handbook" variant="secondary">
               Read the handbook
             </Cta>

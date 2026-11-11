@@ -18,6 +18,24 @@ const ASPECT: Record<EmployerId, number> = {
 };
 
 /**
+ * Where each logo's visual weight sits, as a fraction of its height from the
+ * top (0.5 is dead center). Measured from the rendered ink: a script wordmark
+ * with descenders (Outdoorsy) carries its weight high, a stacked lockup with a
+ * heavy lower line (Riot) carries it low. Each logo is nudged so its weight
+ * lands on the row's center line, which is what reads as "centered".
+ * Re-measure when a logo file changes.
+ */
+const WEIGHT: Record<EmployerId, number> = {
+  riot: 0.567,
+  imgur: 0.519,
+  aptive: 0.486,
+  entrata: 0.533,
+  outdoorsy: 0.424,
+  trugolf: 0.542,
+  bluehost: 0.563,
+};
+
+/**
  * One logo. `area` is its visual area in px²: logos of the same area look the
  * same size, so wide wordmarks don't shout over stacked ones.
  */
@@ -35,6 +53,8 @@ export function EmployerLogo({
   className?: string;
 }) {
   const ar = ASPECT[id];
+  const height = Math.sqrt(area / ar);
+  const nudge = (0.5 - WEIGHT[id]) * height;
   const src = `url(/work/logos/${id}.svg)`;
   const position = align === "left" ? "left center" : "center";
   return (
@@ -44,7 +64,8 @@ export function EmployerLogo({
       className={cn("block shrink-0 bg-current", className)}
       style={{
         width: Math.round(Math.sqrt(area * ar)),
-        height: Math.round(Math.sqrt(area / ar)),
+        height: Math.round(height),
+        transform: Math.abs(nudge) >= 0.5 ? `translateY(${nudge.toFixed(1)}px)` : undefined,
         maskImage: src,
         WebkitMaskImage: src,
         maskSize: "contain",

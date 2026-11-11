@@ -307,7 +307,7 @@ function JoinTile() {
           Want to build the next one?
         </p>
         <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand">
-          Work with us
+          Join the team
           <ArrowRight
             className="h-4 w-4 motion-safe:transition-transform motion-safe:group-hover:translate-x-0.5"
             strokeWidth={2}

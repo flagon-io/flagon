@@ -4,7 +4,7 @@ import type { PointerEvent } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as NavigationMenu from "@radix-ui/react-navigation-menu";
-import { ChevronDown } from "lucide-react";
+import { ArrowUpRight, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { site, isNavGroup, type NavLink } from "@/lib/site";
 
@@ -111,13 +111,23 @@ function DropdownLink({
   const Icon = link.icon;
   const current = !link.external && active(link.href);
   const cls = cn(
-    "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm outline-none transition-colors hover:bg-panel hover:text-foreground focus-visible:bg-panel focus-visible:text-foreground",
+    "group flex items-center gap-2.5 rounded-md px-3 py-2 text-sm outline-none transition-colors hover:bg-panel hover:text-foreground focus-visible:bg-panel focus-visible:text-foreground",
     current ? "font-medium text-foreground" : "text-muted-foreground",
   );
   const inner = (
     <>
       {Icon ? <Icon className="h-4 w-4 shrink-0 text-subtle" /> : null}
       {link.label}
+      {link.external ? (
+        <>
+          <ArrowUpRight
+            className="ml-auto h-4 w-4 shrink-0 text-subtle transition group-hover:-translate-y-px group-hover:translate-x-px group-hover:text-foreground group-focus-visible:text-foreground"
+            strokeWidth={2}
+            aria-hidden
+          />
+          <span className="sr-only">(opens in a new tab)</span>
+        </>
+      ) : null}
     </>
   );
 

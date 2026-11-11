@@ -56,12 +56,18 @@ const HEIGHT = (ROWS - 1) * ROW_STEP + R * 2;
 const MASK =
   "radial-gradient(95% 80% at 50% 34%, #000 0%, rgba(0,0,0,0.32) 46%, transparent 72%)";
 
-export function HexField() {
+/**
+ * By default the lattice fills its container, so it scales with it. Pass
+ * `height` (px) to pin it to the top at a fixed size instead, for sections
+ * whose height changes while you’re on the page (a form that grows), so
+ * the cells hold still rather than rescaling under you.
+ */
+export function HexField({ height }: { height?: number } = {}) {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
       <div
-        className="absolute inset-0 opacity-80"
-        style={{ maskImage: MASK, WebkitMaskImage: MASK }}
+        className={height ? "absolute inset-x-0 top-0 opacity-80" : "absolute inset-0 opacity-80"}
+        style={{ maskImage: MASK, WebkitMaskImage: MASK, height }}
       >
         <svg
           viewBox={`${-R} ${-R} ${WIDTH} ${HEIGHT}`}

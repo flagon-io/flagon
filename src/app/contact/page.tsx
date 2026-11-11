@@ -28,7 +28,8 @@ export default async function ContactPage({
     <Frame>
       <main>
         <section className="relative isolate py-14 sm:py-20">
-          <HexField />
+          {/* Pinned: the form grows with the topic, and the backdrop shouldn't move. */}
+          <HexField height={760} />
           <SlantBeams />
           <div className={`grid gap-12 ${GUTTER} lg:grid-cols-[1fr_1.6fr] lg:gap-16`}>
             <div>
@@ -74,7 +75,8 @@ export default async function ContactPage({
             </div>
 
             <div className="rounded-2xl border border-hairline bg-background/80 p-6 backdrop-blur-sm sm:p-8">
-              <ContactForm email={site.links.email} initialTopic={initialTopic} />
+              {/* Keyed by topic so moving between /contact links resets the picker. */}
+              <ContactForm key={initialTopic} email={site.links.email} initialTopic={initialTopic} />
             </div>
           </div>
         </section>
@@ -109,6 +111,7 @@ function Channel({
           className="text-muted-foreground transition hover:text-foreground"
         >
           {value}
+          {external && <span className="sr-only"> (opens in a new tab)</span>}
         </a>
       </div>
     </li>

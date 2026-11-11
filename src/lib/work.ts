@@ -11,9 +11,9 @@
 export type Offer = {
   id: string;
   title: string;
-  /** The price as people should read it ("$7,500 / week"). */
+  /** The price as people should read it ("$15,000 / month"). */
   price: string;
-  /** The terms that go with the price ("Two-week minimum"). */
+  /** The terms that go with the price ("Month to month"). */
   terms: string;
   body: string;
   /** What's included, short and concrete. */
@@ -22,22 +22,34 @@ export type Offer = {
 
 export const OFFERS: Offer[] = [
   {
-    id: "build",
-    title: "Build weeks",
-    price: "$7,500 / week",
-    terms: "Per person, two-week minimum",
-    body: "The whole job, start to finish: strategy, UX, design, and engineering for new products, apps, platforms, and the hard migrations nobody else wants to own. You buy focused weeks, not hours, so the incentive is to ship. Most projects run with one to three people, and we add design or engineering as the work calls for it, at the same rate.",
+    id: "studio",
+    title: "Product studio",
+    price: "$15,000 / month",
+    terms: "One workstream, pause any time",
+    body: "Software people sign in to and use: new products, apps, platforms, and the hard migrations nobody else wants to own. You pay for progress, not hours or headcount. A workstream is one priority list; add another for $12,000 a month to move two things at once.",
     includes: [
-      "Senior people, added as the work needs them",
-      "Working software every week, not status decks",
-      "Code, docs, and infrastructure you own outright",
+      "Strategy, design, engineering, and project management",
+      "As many initiatives as you like, worked in your order",
+      "Working software every week, code you own outright",
+    ],
+  },
+  {
+    id: "websites",
+    title: "Business websites",
+    price: "From $6,000",
+    terms: "Fixed price, quoted up front",
+    body: "Your public face: the pages that tell people who you are and get them to call, book, or buy. Designed, built, and launched for a price you know before we start. If people sign in and use it, it's a product, and Product studio is the better fit.",
+    includes: [
+      "Design, build, and launch on modern hosting",
+      "Content you can update yourself",
+      "Fast, accessible, and found in search and AI answers",
     ],
   },
   {
     id: "fractional",
     title: "Fractional CTO",
     price: "$10,000 / month",
-    terms: "Month to month",
+    terms: "About a day a week, month to month",
     body: "Engineering leadership without the full-time hire: architecture, platform and migration planning, hiring help, and an honest read on the team and the codebase.",
     includes: [
       "Architecture and roadmap you can actually execute",
@@ -46,23 +58,11 @@ export const OFFERS: Offer[] = [
     ],
   },
   {
-    id: "websites",
-    title: "Websites",
-    price: "From $6,000",
-    terms: "Fixed price, quoted up front",
-    body: "Fast, well-made sites for businesses that need to look as good online as they are in person. Designed, built, and launched, with a price you know before we start.",
-    includes: [
-      "Design, build, and launch on modern hosting",
-      "Mobile-first, accessible, and quick to load",
-      "Found by search engines and AI assistants alike",
-    ],
-  },
-  {
     id: "care",
     title: "Care plan",
     price: "From $500 / month",
-    terms: "Sized to the site, no contract",
-    body: "Keep what we built healthy after launch: hosting, updates, monitoring, and the small changes that pile up. One flat monthly price, set by how big the site is, instead of a meter running.",
+    terms: "Sized to fit, no contract",
+    body: "Keep what we built healthy after launch: hosting, updates, monitoring, and the small changes that pile up. One flat monthly price, set by the size of what we're looking after, instead of a meter running.",
     includes: [
       "Hosting, updates, and uptime monitoring",
       "Small changes and fixes, handled quickly",

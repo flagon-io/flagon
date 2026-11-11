@@ -6,6 +6,7 @@ import { MobileNav } from "@/components/mobile-nav";
 import { MainNav } from "@/components/main-nav";
 import { Search } from "@/components/search";
 import { buttonClasses } from "@/components/button";
+import { contactHref } from "@/lib/contact";
 
 export function SiteHeader() {
   return (
@@ -28,7 +29,7 @@ export function SiteHeader() {
           <ThemeToggle />
           <div className="hidden md:block">
             <Link
-              href="/contact?topic=project"
+              href={contactHref("project")}
               className={buttonClasses({ variant: "default", size: "sm" })}
             >
               Start a project

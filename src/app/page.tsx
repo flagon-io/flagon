@@ -90,7 +90,7 @@ export default function Home() {
               {OFFERS.map((o) => (
                 <div key={o.id}>
                   <dt className="text-sm text-muted-foreground">{o.title}</dt>
-                  <dd className="mt-0.5 text-xl font-semibold tracking-tight">{o.price}</dd>
+                  <dd className="mt-0.5 text-lg font-semibold tracking-tight sm:text-xl">{o.price}</dd>
                   <dd className="mt-1 font-mono text-[10px] uppercase tracking-widest text-subtle">
                     {o.terms}
                   </dd>

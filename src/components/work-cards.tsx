@@ -36,7 +36,7 @@ function SlantFrame({
         aria-hidden
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
-        className="pointer-events-none absolute inset-0 h-full w-full text-hairline transition-colors group-hover:text-brand/60"
+        className="pointer-events-none absolute inset-0 h-full w-full overflow-visible text-hairline transition-colors group-hover:text-brand/60"
       >
         <polygon
           points={`${S},0 100,0 ${100 - S},100 0,100`}

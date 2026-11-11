@@ -3,9 +3,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, X } from "lucide-react";
+import { ArrowUpRight, Menu, X } from "lucide-react";
 import { buttonClasses } from "@/components/button";
 import { site, isNavGroup } from "@/lib/site";
+import { contactHref } from "@/lib/contact";
 
 /**
  * Small-screen navigation: an accessible disclosure. The button owns
@@ -89,7 +90,7 @@ export function MobileNav() {
         >
           <div className="mb-3 border-b border-hairline pb-4">
             <Link
-              href="/contact?topic=project"
+              href={contactHref("project")}
               onClick={() => setOpen(false)}
               className={buttonClasses({ variant: "default", className: "w-full" })}
             >
@@ -111,9 +112,15 @@ export function MobileNav() {
                         target="_blank"
                         rel="noreferrer"
                         onClick={() => setOpen(false)}
-                        className="block rounded-md px-2 py-2.5 text-sm text-muted-foreground outline-none transition hover:bg-panel hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand"
+                        className="group flex items-center justify-between rounded-md px-2 py-2.5 text-sm text-muted-foreground outline-none transition hover:bg-panel hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand"
                       >
                         {sub.label}
+                        <ArrowUpRight
+                          className="h-4 w-4 shrink-0 text-subtle transition group-hover:text-foreground"
+                          strokeWidth={2}
+                          aria-hidden
+                        />
+                        <span className="sr-only">(opens in a new tab)</span>
                       </a>
                     ) : (
                       <Link

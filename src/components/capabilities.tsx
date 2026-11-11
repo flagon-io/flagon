@@ -63,11 +63,13 @@ export function Capabilities({
             <span className="ml-3 text-foreground">{c.stage}</span>
           </dt>
           <dd className="min-w-0">
-            <ul className="flex flex-wrap gap-y-2 text-lg font-medium tracking-tight sm:text-xl">
+            {/* Phones: a two-column list, so no separator ever dangles at a
+                line end. From sm up: one line of words with dot separators. */}
+            <ul className="grid grid-cols-2 gap-x-4 gap-y-2 text-base font-medium tracking-tight sm:flex sm:flex-wrap sm:gap-x-0 sm:text-xl">
               {c.items.map((item) => (
                 <li
                   key={item}
-                  className="whitespace-nowrap text-foreground/75 transition-colors after:mx-3 after:text-subtle/50 after:content-['·'] last:after:content-none hover:text-foreground"
+                  className="text-foreground/75 transition-colors hover:text-foreground sm:whitespace-nowrap sm:after:mx-3 sm:after:text-subtle/50 sm:after:content-['·'] sm:last:after:content-none"
                 >
                   {item}
                 </li>
