@@ -55,8 +55,8 @@ export function BookCover({
       className={cn(
         "@container relative isolate flex flex-col overflow-hidden bg-[#0a1f1d] text-[#e9fbf7]",
         print
-          ? "h-full w-full"
-          : "aspect-[2/3] rounded-[3px] shadow-[0_1px_0_rgba(255,255,255,0.06)_inset,0_18px_40px_-18px_rgba(0,0,0,0.55)]",
+          ? "size-full"
+          : "aspect-2/3 rounded-[3px] shadow-[0_1px_0_rgba(255,255,255,0.06)_inset,0_18px_40px_-18px_rgba(0,0,0,0.55)]",
         className,
       )}
       style={style}
@@ -67,7 +67,7 @@ export function BookCover({
       {/* A full-bleed drawing sits behind the type and runs off the edges. */}
       {Art && cover?.bleed ? (
         <div className="absolute inset-x-0 top-[34%] bottom-[15%]">
-          <Art className="h-full w-full" />
+          <Art className="size-full" />
         </div>
       ) : null}
 

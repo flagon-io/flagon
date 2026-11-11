@@ -86,12 +86,12 @@ export default function NotForEveryonePage() {
               <Column
                 heading="You'll fit right in if"
                 items={FOR}
-                icon={<Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" strokeWidth={2.5} />}
+                icon={<Check className="mt-0.5 size-4 shrink-0 text-brand" strokeWidth={2.5} />}
               />
               <Column
                 heading="You probably won't if"
                 items={NOT_FOR}
-                icon={<Minus className="mt-0.5 h-4 w-4 shrink-0 text-subtle" strokeWidth={2.5} />}
+                icon={<Minus className="mt-0.5 size-4 shrink-0 text-subtle" strokeWidth={2.5} />}
               />
             </SchematicGrid>
           </Schematic>
@@ -133,7 +133,7 @@ function Column({
         {items.map((item) => (
           <li key={item.lead} className="flex items-start gap-3">
             {icon}
-            <span className="text-sm leading-relaxed">
+            <span className="text-sm/relaxed">
               <span className="font-medium text-foreground">{item.lead}</span>{" "}
               <span className="text-muted-foreground">{item.body}</span>
             </span>

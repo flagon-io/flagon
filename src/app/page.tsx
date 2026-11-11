@@ -32,7 +32,7 @@ export default function Home() {
         <SlantBeams />
 
         <div className="rise" style={{ animationDelay: "0ms" }}>
-          <FlagonPour className="relative h-36 w-36 sm:h-44 sm:w-44" />
+          <FlagonPour className="relative size-36 sm:size-44" />
         </div>
 
         <h1
@@ -46,7 +46,7 @@ export default function Home() {
         </h1>
 
         <p
-          className="rise mt-6 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg"
+          className="rise mt-6 max-w-xl text-pretty text-base/relaxed text-muted-foreground sm:text-lg/relaxed"
           style={{ animationDelay: "180ms" }}
         >
           {site.legalName} is a small, independent software studio. We build
@@ -104,7 +104,7 @@ export default function Home() {
           >
             See what&rsquo;s included
             <ArrowRight
-              className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+              className="size-4 transition-transform group-hover:translate-x-0.5"
               strokeWidth={2}
             />
           </Link>
@@ -125,7 +125,7 @@ export default function Home() {
           >
             See everything we make
             <ArrowRight
-              className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+              className="size-4 transition-transform group-hover:translate-x-0.5"
               strokeWidth={2}
             />
           </Link>
@@ -215,7 +215,7 @@ export default function Home() {
                       <h3 className="text-lg font-semibold tracking-tight group-hover:text-brand">
                         {p.title}
                       </h3>
-                      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                      <p className="mt-1.5 text-sm/relaxed text-muted-foreground">
                         {p.description}
                       </p>
                     </div>
@@ -233,7 +233,7 @@ export default function Home() {
               >
                 All posts
                 <ArrowRight
-                  className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                  className="size-4 transition-transform group-hover:translate-x-0.5"
                   strokeWidth={2}
                 />
               </Link>

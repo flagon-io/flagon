@@ -30,7 +30,7 @@ export default function AboutPage() {
                 We make software. And we&rsquo;re building the company we always
                 wanted to work for.
               </h1>
-              <p className="mt-6 text-pretty text-lg leading-relaxed text-muted-foreground">
+              <p className="mt-6 text-pretty text-lg/relaxed text-muted-foreground">
                 {site.legalName} makes good software and runs the whole company in
                 the open. This is the long version of who we are, how we got here,
                 and why we do it this way. It&rsquo;s also, honestly, a pitch: for
@@ -39,7 +39,7 @@ export default function AboutPage() {
               </p>
             </div>
             <div className="flex justify-center lg:justify-end">
-              <FlagonPour className="relative h-40 w-40 sm:h-48 sm:w-48" />
+              <FlagonPour className="relative size-40 sm:size-48" />
             </div>
           </div>
         </Section>
@@ -211,7 +211,7 @@ export default function AboutPage() {
             <p className="font-mono text-[11px] uppercase tracking-widest text-subtle">
               tl;dr
             </p>
-            <p className="max-w-2xl text-pretty text-xl font-medium leading-relaxed tracking-tight sm:text-2xl">
+            <p className="max-w-2xl text-pretty text-xl/relaxed font-medium tracking-tight sm:text-2xl/relaxed">
               We make software, and we&rsquo;re building the company we always
               wanted to work for: open, honest, priced without games, and here for
               the long haul. If we haven&rsquo;t convinced you yet, read the handbook,
@@ -261,7 +261,7 @@ function Right({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="p-6 sm:p-8">
       <h3 className="text-base font-semibold tracking-tight">{title}</h3>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{children}</p>
+      <p className="mt-2 text-sm/relaxed text-muted-foreground">{children}</p>
     </div>
   );
 }

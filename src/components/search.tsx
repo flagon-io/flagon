@@ -89,9 +89,9 @@ export function Search() {
         aria-label="Search"
         className="flex h-8 items-center gap-2 rounded-md border border-hairline bg-panel px-2.5 text-subtle outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand"
       >
-        <SearchIcon className="h-4 w-4" strokeWidth={2} />
+        <SearchIcon className="size-4" strokeWidth={2} />
         <span className="hidden text-sm text-muted-foreground lg:inline">Search</span>
-        <kbd className="hidden rounded border border-hairline bg-background px-1.5 font-mono text-[10px] leading-4 text-subtle lg:inline">
+        <kbd className="hidden rounded-sm border border-hairline bg-background px-1.5 font-mono text-[10px]/4 text-subtle lg:inline">
           ⌘K
         </kbd>
       </button>
@@ -132,7 +132,7 @@ export function Search() {
                         keywords={keywords}
                         onSelect={() => go(d.url)}
                       >
-                        <Icon className="h-4 w-4" strokeWidth={2} aria-hidden />
+                        <Icon className="size-4" strokeWidth={2} aria-hidden />
                         <span className="flex-1 truncate">{d.title}</span>
                         {d.section ? (
                           <span className="shrink-0 text-xs text-subtle">{d.section}</span>

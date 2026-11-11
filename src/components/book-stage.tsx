@@ -60,10 +60,10 @@ function Book3D({ book, className }: { book: StageBook; className?: string }) {
     >
       <div className="relative h-full" style={{ aspectRatio: "2 / 3" }}>
         {/* The shadow the book casts on the stage; it tightens as the book rises. */}
-        <div className="book-shadow absolute inset-x-[4%] -bottom-[4%] h-[10%] rounded-[50%] bg-black/60 blur-2xl" />
-        <div className="book-float relative h-full w-full">
+        <div className="book-shadow absolute inset-x-[4%] bottom-[-4%] h-[10%] rounded-[50%] bg-black/60 blur-2xl" />
+        <div className="book-float relative size-full">
           <div
-            className="book-3d relative h-full w-full"
+            className="book-3d relative size-full"
             style={{ transformStyle: "preserve-3d" }}
           >
             {/* Spine, folded back from the left edge. */}
@@ -105,7 +105,7 @@ function Book3D({ book, className }: { book: StageBook; className?: string }) {
                 transform: "rotateY(90deg)",
               }}
             />
-            <BookCover book={book} className="absolute inset-0 h-full w-full" />
+            <BookCover book={book} className="absolute inset-0 size-full" />
           </div>
         </div>
       </div>

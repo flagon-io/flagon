@@ -22,7 +22,7 @@ export default function NotFound() {
             <h1 className="mt-4 text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
               Nothing on tap here.
             </h1>
-            <p className="mt-5 max-w-md text-pretty text-lg leading-relaxed text-muted-foreground">
+            <p className="mt-5 max-w-md text-pretty text-lg/relaxed text-muted-foreground">
               The page you&rsquo;re after doesn&rsquo;t exist, or it moved. No harm
               done. Here&rsquo;s the way back to something useful.
             </p>
@@ -34,7 +34,7 @@ export default function NotFound() {
             </div>
             <p className="mt-6 font-mono text-[11px] uppercase tracking-widest text-subtle">
               or press{" "}
-              <kbd className="rounded border border-hairline bg-panel px-1.5 py-0.5 not-italic">
+              <kbd className="rounded-sm border border-hairline bg-panel px-1.5 py-0.5 not-italic">
                 ⌘K
               </kbd>{" "}
               to search

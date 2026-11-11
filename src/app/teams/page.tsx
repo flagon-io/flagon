@@ -29,7 +29,7 @@ export default function TeamsPage() {
               {TEAMS.map((team) => (
                 <div key={team.name} className="p-6 sm:p-8">
                   <h3 className="text-base font-semibold tracking-tight">{team.name}</h3>
-                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                  <p className="mt-3 text-sm/relaxed text-muted-foreground">
                     {team.blurb}
                   </p>
                 </div>

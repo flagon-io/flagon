@@ -46,7 +46,7 @@ export function Toc({ items }: { items: TocItem[] }) {
             <a
               href={`#${item.id}`}
               className={cn(
-                "-ml-px block break-words border-l-2 py-1 text-sm transition-colors",
+                "-ml-px block wrap-break-word border-l-2 py-1 text-sm transition-colors",
                 item.depth === 3 ? "pl-7" : "pl-4",
                 activeId === item.id
                   ? "border-brand font-medium text-foreground"

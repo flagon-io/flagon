@@ -42,9 +42,9 @@ export function CopyCommand({ command }: { command: string }) {
         className="flex shrink-0 items-center gap-1.5 border-l border-hairline px-4 text-xs font-medium text-muted-foreground outline-none transition hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
       >
         {copied ? (
-          <Check className="h-4 w-4 text-brand" strokeWidth={2} aria-hidden />
+          <Check className="size-4 text-brand" strokeWidth={2} aria-hidden />
         ) : (
-          <Copy className="h-4 w-4" strokeWidth={2} aria-hidden />
+          <Copy className="size-4" strokeWidth={2} aria-hidden />
         )}
         <span>{copied ? "Copied" : "Copy"}</span>
       </button>

@@ -52,7 +52,7 @@ export default async function BlogPost({
           className="group inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-widest text-subtle transition hover:text-foreground"
         >
           <ArrowLeft
-            className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5"
+            className="size-3.5 transition-transform group-hover:-translate-x-0.5"
             strokeWidth={2}
           />
           All posts
@@ -74,7 +74,7 @@ export default async function BlogPost({
             <h1 className="mt-4 text-balance text-3xl font-semibold leading-[1.15] tracking-tight sm:text-4xl">
               {post.title}
             </h1>
-            <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
+            <p className="mt-4 text-pretty text-lg/relaxed text-muted-foreground">
               {post.description}
             </p>
             <p className="mt-5 text-sm text-subtle">

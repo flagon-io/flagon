@@ -87,12 +87,12 @@ export default async function ChapterPage(props: PageProps<"/books/[book]/[chapt
               {chapter.title}
             </h1>
             {chapter.description ? (
-              <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
+              <p className="mt-4 text-pretty text-lg/relaxed text-muted-foreground">
                 {chapter.description}
               </p>
             ) : null}
             {prereqs.length > 0 ? (
-              <p className="mt-5 text-sm leading-relaxed text-subtle">
+              <p className="mt-5 text-sm/relaxed text-subtle">
                 <span className="font-mono text-[11px] uppercase tracking-widest">Builds on</span>{" "}
                 {prereqs.map((c, i) => (
                   <span key={c.slug}>

@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { Check, Copy, Mail } from "lucide-react";
 import { Button } from "@/components/button";
 import { Select } from "@/components/select";
@@ -18,10 +25,18 @@ import { BUDGETS, OFFERS, TIMELINES } from "@/lib/work";
  * budget and timeline) and keeps ?topic= in the URL so the page can be linked
  * to with a topic already chosen.
  */
-export function ContactForm({ email, initialTopic }: { email: string; initialTopic: TopicId }) {
+export function ContactForm({
+  email,
+  initialTopic,
+}: {
+  email: string;
+  initialTopic: TopicId;
+}) {
   const id = useId();
   const [topicId, setTopicId] = useState<TopicId>(initialTopic);
-  const [sent, setSent] = useState<{ subject: string; body: string } | null>(null);
+  const [sent, setSent] = useState<{ subject: string; body: string } | null>(
+    null,
+  );
   const [copied, setCopied] = useState(false);
   const sentHeading = useRef<HTMLHeadingElement>(null);
   const topic = TOPICS.find((t) => t.id === topicId) ?? TOPICS[0];
@@ -74,7 +89,9 @@ export function ContactForm({ email, initialTopic }: { email: string; initialTop
   async function copy() {
     if (!sent) return;
     try {
-      await navigator.clipboard.writeText(`To: ${email}\nSubject: ${sent.subject}\n\n${sent.body.replace(/\r\n/g, "\n")}`);
+      await navigator.clipboard.writeText(
+        `To: ${email}\nSubject: ${sent.subject}\n\n${sent.body.replace(/\r\n/g, "\n")}`,
+      );
       setCopied(true);
     } catch {
       /* clipboard can be blocked; the address is on screen either way */
@@ -84,8 +101,11 @@ export function ContactForm({ email, initialTopic }: { email: string; initialTop
   return (
     <>
       {sent && (
-        <div className="rounded-xl border border-hairline bg-panel p-6 sm:p-8" role="status">
-          <Mail className="h-6 w-6 text-brand" strokeWidth={1.75} />
+        <div
+          className="rounded-xl border border-hairline bg-panel p-6 sm:p-8"
+          role="status"
+        >
+          <Mail className="size-6 text-brand" strokeWidth={1.75} />
           <h2
             ref={sentHeading}
             tabIndex={-1}
@@ -93,17 +113,24 @@ export function ContactForm({ email, initialTopic }: { email: string; initialTop
           >
             Your email is ready to send
           </h2>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-sm/relaxed text-muted-foreground">
             We opened your mail app with everything filled in; just hit send. If
             nothing opened, copy it and send it to{" "}
-            <a href={`mailto:${email}`} className="text-link underline underline-offset-2">
+            <a
+              href={`mailto:${email}`}
+              className="text-link underline underline-offset-2"
+            >
               {email}
             </a>
             .
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Button type="button" variant="secondary" onClick={copy}>
-              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? (
+                <Check className="size-4" />
+              ) : (
+                <Copy className="size-4" />
+              )}
               {copied ? "Copied" : "Copy message"}
             </Button>
             <Button
@@ -124,7 +151,9 @@ export function ContactForm({ email, initialTopic }: { email: string; initialTop
           details" brings back everything that was typed. */}
       <form onSubmit={send} hidden={!!sent} className="grid gap-8">
         <fieldset>
-          <legend className="text-sm font-medium">What&rsquo;s this about?</legend>
+          <legend className="text-sm font-medium">
+            What&rsquo;s this about?
+          </legend>
           <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
             {TOPICS.map((t) => (
               <label
@@ -133,7 +162,7 @@ export function ContactForm({ email, initialTopic }: { email: string; initialTop
                   "relative flex cursor-pointer flex-col rounded-lg border p-4 transition",
                   "has-focus-visible:ring-2 has-focus-visible:ring-brand has-focus-visible:ring-offset-2 has-focus-visible:ring-offset-background",
                   t.id === topic.id
-                    ? "border-brand bg-brand/[0.06]"
+                    ? "border-brand bg-brand/6"
                     : "border-hairline hover:border-input hover:bg-panel",
                 )}
               >
@@ -145,10 +174,17 @@ export function ContactForm({ email, initialTopic }: { email: string; initialTop
                   onChange={() => pick(t.id)}
                   className="sr-only"
                 />
-                <span className="pr-5 text-sm font-semibold tracking-tight">{t.label}</span>
-                <span className="mt-1 text-xs leading-snug text-muted-foreground">{t.hint}</span>
+                <span className="pr-5 text-sm font-semibold tracking-tight">
+                  {t.label}
+                </span>
+                <span className="mt-1 text-xs/snug text-muted-foreground">
+                  {t.hint}
+                </span>
                 {t.id === topic.id && (
-                  <Check className="absolute right-3 top-3 h-4 w-4 text-brand" strokeWidth={2.25} />
+                  <Check
+                    className="absolute right-3 top-3 size-4 text-brand"
+                    strokeWidth={2.25}
+                  />
                 )}
               </label>
             ))}
@@ -157,7 +193,13 @@ export function ContactForm({ email, initialTopic }: { email: string; initialTop
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Your name" htmlFor={`${id}-name`}>
-            <input id={`${id}-name`} name="name" required autoComplete="name" className={control} />
+            <input
+              id={`${id}-name`}
+              name="name"
+              required
+              autoComplete="name"
+              className={control}
+            />
           </Field>
           <Field label="Email" htmlFor={`${id}-email`}>
             <input
@@ -194,10 +236,19 @@ export function ContactForm({ email, initialTopic }: { email: string; initialTop
                 />
               </Field>
               <Field label="Total budget" htmlFor={`${id}-budget`}>
-                <Select id={`${id}-budget`} name="budget" options={BUDGETS} defaultValue="Not sure yet" />
+                <Select
+                  id={`${id}-budget`}
+                  name="budget"
+                  options={BUDGETS}
+                  defaultValue="Not sure yet"
+                />
               </Field>
               <Field label="Timeline" htmlFor={`${id}-timeline`}>
-                <Select id={`${id}-timeline`} name="timeline" options={TIMELINES} />
+                <Select
+                  id={`${id}-timeline`}
+                  name="timeline"
+                  options={TIMELINES}
+                />
               </Field>
             </>
           )}
@@ -220,9 +271,12 @@ export function ContactForm({ email, initialTopic }: { email: string; initialTop
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs leading-relaxed text-subtle">
+          <p className="text-xs/relaxed text-subtle">
             Opens your email app with this filled in. Prefer plain email?{" "}
-            <a href={`mailto:${email}`} className="text-link underline underline-offset-2">
+            <a
+              href={`mailto:${email}`}
+              className="text-link underline underline-offset-2"
+            >
               {email}
             </a>
           </p>
@@ -255,7 +309,9 @@ function Field({
     <div className={cn("grid content-start gap-1.5", className)}>
       <label htmlFor={htmlFor} className="text-sm font-medium">
         {label}
-        {optional && <span className="ml-1.5 font-normal text-subtle">optional</span>}
+        {optional && (
+          <span className="ml-1.5 font-normal text-subtle">optional</span>
+        )}
       </label>
       {children}
     </div>

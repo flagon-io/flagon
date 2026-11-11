@@ -14,7 +14,7 @@ export function Pager({ prev, next }: { prev: PagerLink | null; next: PagerLink 
           className="group rounded-lg border border-hairline p-5 transition hover:bg-panel"
         >
           <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-subtle">
-            <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} /> Previous
+            <ArrowLeft className="size-3.5" strokeWidth={2} /> Previous
           </span>
           <p className="mt-2 font-medium tracking-tight group-hover:text-brand">{prev.title}</p>
         </Link>
@@ -27,7 +27,7 @@ export function Pager({ prev, next }: { prev: PagerLink | null; next: PagerLink 
           className="group rounded-lg border border-hairline p-5 text-right transition hover:bg-panel"
         >
           <span className="flex items-center justify-end gap-1.5 font-mono text-[10px] uppercase tracking-widest text-subtle">
-            Next <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} />
+            Next <ArrowRight className="size-3.5" strokeWidth={2} />
           </span>
           <p className="mt-2 font-medium tracking-tight group-hover:text-brand">{next.title}</p>
         </Link>

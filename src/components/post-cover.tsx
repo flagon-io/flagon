@@ -28,7 +28,7 @@ export function PostCover({
       frameClassName="rounded-sm border border-hairline bg-(--art-card)"
     >
       <div className="h-full py-3" style={{ ...DOTS, paddingInline: run }}>
-        <Scene id={id} className="h-full w-full" />
+        <Scene id={id} className="size-full" />
       </div>
     </SlantBox>
   );

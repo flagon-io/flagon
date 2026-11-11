@@ -12,8 +12,8 @@ export function SiteFooter() {
     <footer className="relative border-t border-hairline bg-background/70 backdrop-blur-md">
       {/* divider-end marks; only shown once the column has outer margin (xl),
           so they never straddle the viewport edge on smaller screens */}
-      <Plus className="absolute left-0 top-0 hidden h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 text-mark xl:block" />
-      <Plus className="absolute right-0 top-0 hidden h-3.5 w-3.5 translate-x-1/2 -translate-y-1/2 text-mark xl:block" />
+      <Plus className="absolute left-0 top-0 hidden size-3.5 -translate-1/2 text-mark xl:block" />
+      <Plus className="absolute right-0 top-0 hidden size-3.5 translate-x-1/2 -translate-y-1/2 text-mark xl:block" />
 
       <div className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-8 px-6 py-12 sm:grid-cols-4">
         {/* brand */}
@@ -22,7 +22,7 @@ export function SiteFooter() {
             href="/"
             className="inline-flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
-            <Logo className="h-6 w-6 text-foreground" />
+            <Logo className="size-6 text-foreground" />
             <span className="text-[15px] font-semibold tracking-tight">
               Flagon
             </span>
@@ -38,7 +38,7 @@ export function SiteFooter() {
               aria-label="Flagon on GitHub"
               className="text-subtle transition hover:text-foreground"
             >
-              <SiGithub className="h-4.5 w-4.5" />
+              <SiGithub className="size-4.5" />
             </a>
             <a
               href={site.links.discord}
@@ -47,7 +47,7 @@ export function SiteFooter() {
               aria-label="Flagon on Discord"
               className="text-subtle transition hover:text-foreground"
             >
-              <SiDiscord className="h-4.5 w-4.5" />
+              <SiDiscord className="size-4.5" />
             </a>
           </div>
         </div>

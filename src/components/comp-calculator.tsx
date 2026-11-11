@@ -158,7 +158,7 @@ export function CompCalculator({
         </div>
       </div>
 
-      <p className="border-t border-hairline bg-panel px-5 py-3 text-xs leading-relaxed text-subtle sm:px-6">
+      <p className="border-t border-hairline bg-panel px-5 py-3 text-xs/relaxed text-subtle sm:px-6">
         Benchmarks are anchored to public market data as a starting point while we
         finalize our own bands. Same formula for every role, no negotiation.
       </p>
@@ -196,7 +196,7 @@ function Selector({
         <svg
           aria-hidden
           viewBox="0 0 16 16"
-          className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle"
+          className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-subtle"
           fill="none"
         >
           <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />

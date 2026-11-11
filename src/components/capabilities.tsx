@@ -41,12 +41,12 @@ export function Capabilities({
               <span className="mt-3 flex items-center gap-2 text-3xl font-semibold tracking-tight">
                 {c.stage}
                 <ArrowRight
-                  className="h-5 w-5 -translate-x-1 text-brand opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100"
+                  className="size-5 -translate-x-1 text-brand opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100"
                   strokeWidth={2}
                   aria-hidden
                 />
               </span>
-              <span className="mt-2 text-sm leading-relaxed text-muted-foreground">{c.summary}</span>
+              <span className="mt-2 text-sm/relaxed text-muted-foreground">{c.summary}</span>
             </Link>
           ))}
         </SchematicGrid>

@@ -53,7 +53,7 @@ export function SlantBeams({ className }: { className?: string }) {
       {BEAMS.map((b) => (
         <div
           key={b.left}
-          className="slant-skew absolute inset-y-0 origin-bottom border-l border-brand/15 bg-linear-to-b from-brand/[0.07] via-brand/[0.02] to-transparent"
+          className="slant-skew absolute inset-y-0 origin-bottom border-l border-brand/15 bg-linear-to-b from-brand/[0.07] via-brand/2 to-transparent"
           style={{ left: b.left, width: b.width }}
         />
       ))}
@@ -150,8 +150,8 @@ export function SlantSplit({
           {/* A brand glow pooled behind the drawing, so the panel reads as a
               lit stage rather than a gap. */}
           <div className="absolute inset-0 bg-[radial-gradient(60%_55%_at_55%_60%,color-mix(in_oklab,var(--brand)_16%,transparent),transparent)]" />
-          <Plus className={cn(mark, "-left-[7px] -top-[7px]", !divider && "md:hidden")} />
-          <Plus className={cn(mark, "-bottom-[7px] -left-[7px]")} />
+          <Plus className={cn(mark, "left-[-7px] top-[-7px]", !divider && "md:hidden")} />
+          <Plus className={cn(mark, "bottom-[-7px] left-[-7px]")} />
         </div>
         <div className="relative flex h-full items-center justify-center px-8 py-10 md:pl-16">
           <Scene id={artId} className="w-full max-w-sm" />

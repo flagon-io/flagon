@@ -39,7 +39,7 @@ export function Select({
         </span>
         <RadixSelect.Icon>
           <ChevronDown
-            className="h-4 w-4 text-subtle transition-transform group-data-[state=open]:rotate-180"
+            className="size-4 text-subtle transition-transform group-data-[state=open]:rotate-180"
             strokeWidth={2}
           />
         </RadixSelect.Icon>
@@ -59,7 +59,7 @@ export function Select({
               >
                 <RadixSelect.ItemText>{o}</RadixSelect.ItemText>
                 <RadixSelect.ItemIndicator className="absolute right-2.5">
-                  <Check className="h-4 w-4 text-brand" strokeWidth={2} aria-hidden />
+                  <Check className="size-4 text-brand" strokeWidth={2} aria-hidden />
                 </RadixSelect.ItemIndicator>
               </RadixSelect.Item>
             ))}

@@ -1,0 +1,9 @@
+{
+  // Non-canonical Tailwind classes (leading-[1.25] instead of leading-tight,
+  // h-4 w-4 instead of size-4) fail lint and CI, so show them as errors here
+  // too, and let ESLint fix them on save.
+  "tailwindCSS.lint.suggestCanonicalClasses": "error",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  }
+}

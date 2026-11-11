@@ -28,7 +28,7 @@ function SlantFrame({
   className?: string;
 }) {
   return (
-    <div className={cn("relative aspect-[16/10] w-full", className)}>
+    <div className={cn("relative aspect-16/10 w-full", className)}>
       <div className="absolute inset-0 overflow-hidden" style={{ clipPath: CLIP }}>
         {children}
       </div>
@@ -36,7 +36,7 @@ function SlantFrame({
         aria-hidden
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
-        className="pointer-events-none absolute inset-0 h-full w-full overflow-visible text-hairline transition-colors group-hover:text-brand/60"
+        className="pointer-events-none absolute inset-0 size-full overflow-visible text-hairline transition-colors group-hover:text-brand/60"
       >
         <polygon
           points={`${S},0 100,0 ${100 - S},100 0,100`}
@@ -63,7 +63,7 @@ export function CaseStudyCard({ study }: { study: CaseStudy }) {
               width={1288}
               height={932}
               sizes="(min-width: 1024px) 600px, 100vw"
-              className="h-full w-full object-cover object-top transition duration-500 group-hover:scale-[1.02]"
+              className="size-full object-cover object-top transition duration-500 group-hover:scale-[1.02]"
             />
           ) : null}
         </SlantFrame>
@@ -75,7 +75,7 @@ export function CaseStudyCard({ study }: { study: CaseStudy }) {
         </Tag>
       </div>
       <p className="mt-1 text-sm text-subtle">{study.kind}</p>
-      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{study.summary}</p>
+      <p className="mt-3 text-sm/relaxed text-muted-foreground">{study.summary}</p>
       <a
         href={study.url}
         target="_blank"
@@ -83,7 +83,7 @@ export function CaseStudyCard({ study }: { study: CaseStudy }) {
         className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-brand"
       >
         Visit {study.domain}
-        <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
+        <ArrowUpRight className="size-4" strokeWidth={2} />
       </a>
     </article>
   );
@@ -96,11 +96,11 @@ export function NextProjectCard({ href }: { href: string }) {
       <Link href={href} className="outline-none focus-visible:[&_svg]:text-brand">
         <SlantFrame dashed>
           <div
-            className="flex h-full flex-col items-center justify-center bg-panel text-center transition-colors group-hover:bg-brand/[0.05]"
+            className="flex h-full flex-col items-center justify-center bg-panel text-center transition-colors group-hover:bg-brand/5"
             style={DOTS}
           >
-            <span className="flex h-12 w-12 items-center justify-center rounded-full border border-dashed border-input text-muted-foreground transition group-hover:border-brand group-hover:text-brand">
-              <Plus className="h-5 w-5" strokeWidth={2} />
+            <span className="flex size-12 items-center justify-center rounded-full border border-dashed border-input text-muted-foreground transition group-hover:border-brand group-hover:text-brand">
+              <Plus className="size-5" strokeWidth={2} />
             </span>
             <p className="mt-4 text-xl font-semibold tracking-tight">Your project here</p>
             <p className="mt-1 font-mono text-[11px] uppercase tracking-widest text-subtle">
@@ -116,14 +116,14 @@ export function NextProjectCard({ href }: { href: string }) {
         </Tag>
       </div>
       <p className="mt-1 text-sm text-subtle">A product, a platform, a site, or a rescue</p>
-      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+      <p className="mt-3 text-sm/relaxed text-muted-foreground">
         We take a few projects at a time, so the slot next to Tavernacle is open.
         Tell us what you have in mind and you&rsquo;ll hear back from the person
         who&rsquo;d build it.
       </p>
       <Link href={href} className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-brand">
         Start a project
-        <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" strokeWidth={2} />
+        <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" strokeWidth={2} />
       </Link>
     </article>
   );

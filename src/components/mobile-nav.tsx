@@ -69,12 +69,12 @@ export function MobileNav() {
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((v) => !v)}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand"
+        className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand"
       >
         {open ? (
-          <X className="h-5 w-5" strokeWidth={2} />
+          <X className="size-5" strokeWidth={2} />
         ) : (
-          <Menu className="h-5 w-5" strokeWidth={2} />
+          <Menu className="size-5" strokeWidth={2} />
         )}
       </button>
 
@@ -116,7 +116,7 @@ export function MobileNav() {
                       >
                         {sub.label}
                         <ArrowUpRight
-                          className="h-4 w-4 shrink-0 text-subtle transition group-hover:text-foreground"
+                          className="size-4 shrink-0 text-subtle transition group-hover:text-foreground"
                           strokeWidth={2}
                           aria-hidden
                         />

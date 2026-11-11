@@ -25,7 +25,7 @@ export default function CareersPage() {
           <h1 className="max-w-xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
             Come build with us.
           </h1>
-          <p className="mt-6 max-w-lg text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
+          <p className="mt-6 max-w-lg text-pretty text-base/relaxed text-muted-foreground sm:text-lg/relaxed">
             Flagon is a small crew of misfits making software worth using, in the
             open. We hire rarely and carefully. If the way we work sounds like the
             place you&rsquo;ve been looking for, we&rsquo;d love to hear from you.
@@ -162,7 +162,7 @@ function Perk({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="p-6 sm:p-8">
       <h3 className="text-base font-semibold tracking-tight">{title}</h3>
-      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{children}</p>
+      <p className="mt-3 text-sm/relaxed text-muted-foreground">{children}</p>
     </div>
   );
 }

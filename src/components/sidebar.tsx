@@ -90,7 +90,7 @@ export function SidebarNav({
       <p className="border-b border-hairline bg-panel px-4 py-2.5 text-[13px] font-semibold tracking-tight text-foreground">
         {title}
       </p>
-      <div className="px-2 py-2">
+      <div className="p-2">
         <Link
           href={homeHref}
           aria-current={pathname === homeHref ? "page" : undefined}
@@ -157,7 +157,7 @@ function SoonRow({ name, badge, indented }: { name: string; badge?: string; inde
         indented ? "pl-6" : "pl-4",
       )}
     >
-      <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-40" strokeWidth={2} aria-hidden />
+      <ChevronRight className="size-3.5 shrink-0 opacity-40" strokeWidth={2} aria-hidden />
       <span className="flex-1 text-left">{name}</span>
       {badge ? (
         <span className="rounded-full border border-hairline px-1.5 py-px text-[9px] leading-tight tracking-widest text-subtle">
@@ -293,7 +293,7 @@ function SectionItem({
           )}
         >
           <ChevronRight
-            className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-90"
+            className="size-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-90"
             strokeWidth={2}
             aria-hidden
           />
@@ -443,7 +443,7 @@ export function MobileSidebar({
         >
           <span className="truncate">{toggleLabel}</span>
           <ChevronDown
-            className={cn("h-4 w-4 text-subtle transition-transform", open && "rotate-180")}
+            className={cn("size-4 text-subtle transition-transform", open && "rotate-180")}
             strokeWidth={2}
           />
         </button>

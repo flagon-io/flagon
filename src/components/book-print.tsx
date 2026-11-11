@@ -343,7 +343,7 @@ export function PrintBook({ book, edition }: { book: Book; edition: PrintEdition
       <main className={isBook ? "book-print book-edition" : "book-print"}>
         {!isBook ? (
           <section className="print-cover">
-            <BookCover book={book} size="lg" className="h-full w-full rounded-none shadow-none" />
+            <BookCover book={book} size="lg" className="size-full rounded-none shadow-none" />
           </section>
         ) : null}
 

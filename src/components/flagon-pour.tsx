@@ -16,7 +16,7 @@ export function FlagonPour({ className }: { className?: string }) {
             "radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--brew-top) 45%, transparent), transparent 68%)",
         }}
       />
-      <FlagonMark animated className="h-full w-full" />
+      <FlagonMark animated className="size-full" />
     </div>
   );
 }

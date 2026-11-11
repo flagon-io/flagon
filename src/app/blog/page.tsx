@@ -50,7 +50,7 @@ export default function BlogIndex() {
                       <h2 className="mt-3 text-balance text-lg font-semibold tracking-tight group-hover:text-brand">
                         {p.title}
                       </h2>
-                      <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
+                      <p className="mt-2 text-pretty text-sm/relaxed text-muted-foreground">
                         {p.description}
                       </p>
                       <p className="mt-auto pt-5 text-sm text-subtle">

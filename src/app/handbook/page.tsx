@@ -22,7 +22,7 @@ export default async function HandbookIndex() {
         <h1 className="mt-3 text-balance text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl">
           How we work, in the open.
         </h1>
-        <p className="mt-6 text-pretty text-lg leading-relaxed text-muted-foreground">
+        <p className="mt-6 text-pretty text-lg/relaxed text-muted-foreground">
           This is the real thing, not a polished excerpt. How {site.legalName}{" "}
           operates, what we value, how we pay people, how we decide. If
           something here reads badly, that&rsquo;s a bug; tell us and
@@ -76,14 +76,14 @@ export default async function HandbookIndex() {
                               </span>
                             ) : (
                               <ArrowRight
-                                className="h-4 w-4 shrink-0 translate-y-[0.15em] text-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-brand"
+                                className="size-4 shrink-0 translate-y-[0.15em] text-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-brand"
                                 strokeWidth={2}
                                 aria-hidden
                               />
                             )}
                           </span>
                           {page.description ? (
-                            <span className="mt-1.5 block max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                            <span className="mt-1.5 block max-w-2xl text-sm/relaxed text-muted-foreground">
                               {page.description}
                             </span>
                           ) : null}

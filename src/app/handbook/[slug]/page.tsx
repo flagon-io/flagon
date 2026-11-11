@@ -60,7 +60,7 @@ export default async function HandbookPage({
               {page.title}
             </h1>
             {page.description ? (
-              <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
+              <p className="mt-4 text-pretty text-lg/relaxed text-muted-foreground">
                 {page.description}
               </p>
             ) : null}

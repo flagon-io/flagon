@@ -48,7 +48,7 @@ export default function BooksIndex() {
                     <h2 className="mt-3 text-balance text-xl font-semibold tracking-tight group-hover:text-brand">
                       {book.title}
                     </h2>
-                    <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
+                    <p className="mt-2 text-pretty text-sm/relaxed text-muted-foreground">
                       {book.description}
                     </p>
                   </div>

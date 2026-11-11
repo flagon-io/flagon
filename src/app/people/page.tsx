@@ -99,7 +99,7 @@ function PersonCard({ person }: { person: Person }) {
         <p className="mt-1 text-sm text-muted-foreground">{person.role}</p>
 
         {person.bio ? (
-          <p className="mt-4 text-sm leading-relaxed text-muted-foreground">{person.bio}</p>
+          <p className="mt-4 text-sm/relaxed text-muted-foreground">{person.bio}</p>
         ) : null}
 
         <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] uppercase tracking-widest text-subtle">

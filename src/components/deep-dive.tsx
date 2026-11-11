@@ -82,7 +82,7 @@ export function DepthToggle({ className }: { className?: string }) {
           // drives the styling, so a mismatch here never shows.
           suppressHydrationWarning
           className={cn(
-            "whitespace-nowrap rounded px-2.5 py-1 font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand",
+            "whitespace-nowrap rounded-sm px-2.5 py-1 font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand",
             depth === o.value
               ? "bg-foreground/10 text-foreground"
               : "text-muted-foreground hover:text-foreground",
@@ -160,7 +160,7 @@ export function DeepDive({ title, children }: { title: string; children?: ReactN
     >
       <div className="deep-dive-head">
         <span className="deep-dive-label">
-          <Layers className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+          <Layers className="size-3.5" strokeWidth={2} aria-hidden />
           <span className="deep-dive-label-text">Deep dive</span>
         </span>
         <span className="deep-dive-title">{title}</span>
@@ -172,7 +172,7 @@ export function DeepDive({ title, children }: { title: string; children?: ReactN
         >
           {open ? "Collapse" : "Read it"}
           <ChevronDown
-            className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+            className={cn("size-3.5 transition-transform", open && "rotate-180")}
             strokeWidth={2}
             aria-hidden
           />

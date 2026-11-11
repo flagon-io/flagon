@@ -36,7 +36,7 @@ export default async function ContactPage({
               <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
                 Get in touch.
               </h1>
-              <p className="mt-6 max-w-md text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
+              <p className="mt-6 max-w-md text-pretty text-base/relaxed text-muted-foreground sm:text-lg/relaxed">
                 Whether you want to hire us, work here, or just say hello, it
                 lands with a person, not a queue. We reply within two business
                 days, even when the answer is no.
@@ -44,20 +44,20 @@ export default async function ContactPage({
 
               <ul className="mt-10 grid gap-5 text-sm">
                 <Channel
-                  icon={<Mail className="h-4 w-4" strokeWidth={2} />}
+                  icon={<Mail className="size-4" strokeWidth={2} />}
                   label="Email"
                   href={`mailto:${site.links.email}`}
                   value={site.links.email}
                 />
                 <Channel
-                  icon={<SiDiscord className="h-4 w-4" />}
+                  icon={<SiDiscord className="size-4" />}
                   label="Discord"
                   href={site.links.discord}
                   value="Chat with us and the community"
                   external
                 />
                 <Channel
-                  icon={<SiGithub className="h-4 w-4" />}
+                  icon={<SiGithub className="size-4" />}
                   label="GitHub"
                   href={site.links.github}
                   value="Issues and pull requests welcome"
@@ -65,7 +65,7 @@ export default async function ContactPage({
                 />
               </ul>
 
-              <p className="mt-10 max-w-sm text-sm leading-relaxed text-subtle">
+              <p className="mt-10 max-w-sm text-sm/relaxed text-subtle">
                 Hiring us? Our{" "}
                 <Link href="/work#rates" className="text-link underline underline-offset-2">
                   rates are public
@@ -100,7 +100,7 @@ function Channel({
 }) {
   return (
     <li className="flex items-start gap-3">
-      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-hairline bg-panel text-muted-foreground">
+      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-hairline bg-panel text-muted-foreground">
         {icon}
       </span>
       <div>

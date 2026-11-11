@@ -15,7 +15,7 @@ export type ChipLink = { label: string; href: string; external?: boolean };
 export function Chip({ label, href, external }: { label: string; href?: string; external?: boolean }) {
   const cls = cn(
     slantSurface,
-    "inline-flex items-center px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-foreground/80 before:bg-foreground/[0.06]",
+    "inline-flex items-center px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-foreground/80 before:bg-foreground/6",
   );
   if (!href) return <span className={cls}>{label}</span>;
   const linkCls = cn(
@@ -73,12 +73,12 @@ export function ArtCard({
           className={cn("flex h-full items-center justify-center py-2", artClassName)}
           style={{ ...DOTS, paddingInline: run }}
         >
-          <Scene id={artId ?? `card-${art}`} className="h-full w-full" />
+          <Scene id={artId ?? `card-${art}`} className="size-full" />
         </div>
       </SlantBox>
       <h3 className="mt-5 text-lg font-semibold tracking-tight">{title}</h3>
       <div className="mt-2">
-        <div className="text-pretty text-sm leading-relaxed text-muted-foreground">{children}</div>
+        <div className="text-pretty text-sm/relaxed text-muted-foreground">{children}</div>
         {chips && chips.length > 0 ? (
           <ul className="mt-5 flex flex-wrap gap-2">
             {chips.map((c) => (

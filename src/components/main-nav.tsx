@@ -50,7 +50,7 @@ export function MainNav({ className }: { className?: string }) {
                 >
                   {item.label}
                   <ChevronDown
-                    className="h-3.5 w-3.5 text-subtle transition-transform duration-200 group-data-[state=open]:rotate-180"
+                    className="size-3.5 text-subtle transition-transform duration-200 group-data-[state=open]:rotate-180"
                     strokeWidth={2}
                     aria-hidden
                   />
@@ -116,12 +116,12 @@ function DropdownLink({
   );
   const inner = (
     <>
-      {Icon ? <Icon className="h-4 w-4 shrink-0 text-subtle" /> : null}
+      {Icon ? <Icon className="size-4 shrink-0 text-subtle" /> : null}
       {link.label}
       {link.external ? (
         <>
           <ArrowUpRight
-            className="ml-auto h-4 w-4 shrink-0 text-subtle transition group-hover:-translate-y-px group-hover:translate-x-px group-hover:text-foreground group-focus-visible:text-foreground"
+            className="ml-auto size-4 shrink-0 text-subtle transition group-hover:-translate-y-px group-hover:translate-x-px group-hover:text-foreground group-focus-visible:text-foreground"
             strokeWidth={2}
             aria-hidden
           />

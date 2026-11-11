@@ -89,7 +89,7 @@ export function ProductRail({ className }: { className?: string }) {
       // and swipes on phones.
       style={{ "--n": COUNT } as CSSProperties}
       className={cn(
-        "product-rail flex scroll-px-6 snap-x sm:scroll-px-8 snap-mandatory overflow-x-auto overscroll-x-contain px-6 pb-6 pt-2 md:pb-14 outline-none [scrollbar-width:thin] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-8",
+        "product-rail flex scroll-px-6 snap-x sm:scroll-px-8 snap-mandatory overflow-x-auto overscroll-x-contain px-6 pb-6 pt-2 md:pb-14 outline-none scrollbar-thin focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-8",
         className,
       )}
     >
@@ -145,7 +145,7 @@ function OutlineShape({ slant, dashed, className }: { slant: number; dashed: boo
       aria-hidden
       viewBox="0 0 100 100"
       preserveAspectRatio="none"
-      className={cn("pointer-events-none absolute inset-0 h-full w-full", className)}
+      className={cn("pointer-events-none absolute inset-0 size-full", className)}
     >
       {/* Stroke is centered on the edge and half of it is clipped away, so the
           visible line is half the stroke width. */}
@@ -184,7 +184,7 @@ function ProductTile({ product }: { product: Product }) {
             className="h-9 w-auto"
             style={{ aspectRatio: product.logo.aspect }}
           />
-          <p className="mt-4 text-sm font-medium leading-snug opacity-90">
+          <p className="mt-4 text-sm/snug font-medium opacity-90">
             {product.tagline}
           </p>
         </div>
@@ -211,7 +211,7 @@ function ProductTile({ product }: { product: Product }) {
               const { label, icon: Icon } = SURFACE[s];
               return (
                 <li key={s} title={label}>
-                  <Icon className="h-4 w-4 opacity-80" strokeWidth={2} aria-hidden />
+                  <Icon className="size-4 opacity-80" strokeWidth={2} aria-hidden />
                   <span className="sr-only">{label}</span>
                 </li>
               );
@@ -248,12 +248,12 @@ function BrewingTile() {
           <p className="font-mono text-[11px] uppercase tracking-widest text-subtle">
             Product no. 01
           </p>
-          <p className="mt-3 text-balance text-lg font-semibold leading-snug tracking-tight group-hover:text-brand">
+          <p className="mt-3 text-balance text-lg/snug font-semibold tracking-tight group-hover:text-brand">
             Our first product is brewing.
           </p>
         </div>
 
-        <div className="mx-auto my-auto w-[46%] motion-safe:transition-transform motion-safe:duration-500 motion-safe:group-hover:scale-[1.04]">
+        <div className="m-auto w-[46%] motion-safe:transition-transform motion-safe:duration-500 motion-safe:group-hover:scale-[1.04]">
           <FlagonMark animated className="h-auto w-full" title="A flagon, filling" />
         </div>
 
@@ -261,7 +261,7 @@ function BrewingTile() {
           <Tag className="self-start text-brand before:border before:border-brand/40 before:bg-background">
             In the workshop
           </Tag>
-          <p className="min-h-[2lh] text-sm leading-snug text-muted-foreground">
+          <p className="min-h-[2lh] text-sm/snug text-muted-foreground">
             We&rsquo;ll pour it here when it&rsquo;s ready.
           </p>
         </div>
@@ -289,7 +289,7 @@ function PlaceholderTile({ label, note }: { label: string; note: string }) {
           {label}
         </p>
         {/* Two lines reserved, so labels line up across placeholders. */}
-        <p className="mt-2 min-h-[2lh] text-sm leading-snug">{note}</p>
+        <p className="mt-2 min-h-[2lh] text-sm/snug">{note}</p>
       </div>
       <Outline dashed className="text-mark" />
     </div>
@@ -303,13 +303,13 @@ function JoinTile() {
       className={cn(tileBase, "text-foreground motion-safe:hover:-translate-y-1.5 motion-safe:focus-visible:-translate-y-1.5")}
     >
       <div className="relative flex flex-1 flex-col items-start justify-end pb-8 pt-10" style={FOOT}>
-        <p className="text-balance text-xl font-semibold leading-snug tracking-tight group-hover:text-brand">
+        <p className="text-balance text-xl/snug font-semibold tracking-tight group-hover:text-brand">
           Want to build the next one?
         </p>
         <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand">
           Join the team
           <ArrowRight
-            className="h-4 w-4 motion-safe:transition-transform motion-safe:group-hover:translate-x-0.5"
+            className="size-4 motion-safe:transition-transform motion-safe:group-hover:translate-x-0.5"
             strokeWidth={2}
             aria-hidden
           />

@@ -42,7 +42,7 @@ export function StubPage({
           <h1 className="max-w-xl text-balance text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl">
             {title}
           </h1>
-          <p className="mt-6 max-w-lg text-pretty text-lg leading-relaxed text-muted-foreground">
+          <p className="mt-6 max-w-lg text-pretty text-lg/relaxed text-muted-foreground">
             {lead}
           </p>
           {actions.length > 0 && (

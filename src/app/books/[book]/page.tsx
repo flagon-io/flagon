@@ -99,7 +99,7 @@ export default async function BookPage(props: PageProps<"/books/[book]">) {
                 by <span className="font-semibold text-foreground">{book.author}</span>
               </p>
             ) : null}
-            <p className="mt-5 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
+            <p className="mt-5 max-w-xl text-pretty text-lg/relaxed text-muted-foreground">
               {book.description}
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -191,7 +191,7 @@ export default async function BookPage(props: PageProps<"/books/[book]">) {
                               {c.title}
                             </span>
                             {c.description ? (
-                              <span className="mt-1.5 block max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                              <span className="mt-1.5 block max-w-2xl text-sm/relaxed text-muted-foreground">
                                 {c.description}
                               </span>
                             ) : null}

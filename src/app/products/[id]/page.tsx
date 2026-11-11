@@ -142,7 +142,7 @@ export default async function ProductPage({
                     className={`${product.card.artClass} min-h-0 flex-1 pb-2 pt-8 sm:pt-10`}
                     style={{ paddingInline: HERO_RUN }}
                   >
-                    <Scene id={`hero-${product.id}`} label={page.pitch} className="h-full w-full" />
+                    <Scene id={`hero-${product.id}`} label={page.pitch} className="size-full" />
                   </div>
                   {/* Kept clear of the right edge, which leans in at the bottom. */}
                   <figcaption
@@ -187,7 +187,7 @@ export default async function ProductPage({
                   <h3 className="mt-3 text-base font-semibold tracking-tight">
                     {s.title}
                   </h3>
-                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                  <p className="mt-3 text-sm/relaxed text-muted-foreground">
                     {s.body}
                   </p>
                 </div>
@@ -206,7 +206,7 @@ export default async function ProductPage({
                   <h3 className="text-base font-semibold tracking-tight">
                     {f.title}
                   </h3>
-                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                  <p className="mt-3 text-sm/relaxed text-muted-foreground">
                     {f.body}
                   </p>
                 </div>
@@ -242,7 +242,7 @@ export default async function ProductPage({
                 {page.pricing.points.map((pt) => (
                   <li key={pt} className="flex items-start gap-3 text-sm">
                     <Check
-                      className="mt-0.5 h-4 w-4 shrink-0 text-brand"
+                      className="mt-0.5 size-4 shrink-0 text-brand"
                       strokeWidth={2}
                       aria-hidden
                     />
@@ -286,7 +286,7 @@ export default async function ProductPage({
                   <span className="flex items-center justify-between gap-3 font-mono text-[11px] uppercase tracking-widest text-subtle">
                     {l.hint}
                     <ArrowUpRight
-                      className="h-4 w-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+                      className="size-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
                       strokeWidth={2}
                       aria-hidden
                     />
@@ -302,7 +302,7 @@ export default async function ProductPage({
             >
               See everything we make
               <ArrowRight
-                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                className="size-4 transition-transform group-hover:translate-x-0.5"
                 strokeWidth={2}
               />
             </Link>

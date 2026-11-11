@@ -20,7 +20,7 @@ export function PdfDownload({
       aria-label={`Download ${title} as a PDF`}
       className={buttonClasses({ variant, className })}
     >
-      <Download className="h-4 w-4" strokeWidth={2} aria-hidden />
+      <Download className="size-4" strokeWidth={2} aria-hidden />
       Download PDF
     </a>
   );

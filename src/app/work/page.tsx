@@ -30,7 +30,7 @@ export default function WorkPage() {
           <h1 className="max-w-xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
             From the first sketch to the thing running in production.
           </h1>
-          <p className="mt-6 max-w-lg text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
+          <p className="mt-6 max-w-lg text-pretty text-base/relaxed text-muted-foreground sm:text-lg/relaxed">
             Flagon is a full-service studio: strategy, UX, design, and
             engineering under one roof, for products, apps, platforms, and
             websites. One small senior team from the first call to launch and
@@ -117,11 +117,11 @@ export default function WorkPage() {
                   <p className="mt-1 font-mono text-[11px] uppercase tracking-widest text-subtle">
                     {o.terms}
                   </p>
-                  <p className="mt-4 text-sm leading-relaxed text-muted-foreground">{o.body}</p>
+                  <p className="mt-4 text-sm/relaxed text-muted-foreground">{o.body}</p>
                   <ul className="mt-5 grid gap-2">
                     {o.includes.map((i) => (
                       <li key={i} className="flex gap-2.5 text-sm">
-                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" strokeWidth={2} />
+                        <Check className="mt-0.5 size-4 shrink-0 text-brand" strokeWidth={2} />
                         <span>{i}</span>
                       </li>
                     ))}
@@ -160,7 +160,7 @@ export default function WorkPage() {
                     Step {i + 1}
                   </p>
                   <h3 className="mt-3 text-base font-semibold tracking-tight">{s.title}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{s.body}</p>
+                  <p className="mt-2 text-sm/relaxed text-muted-foreground">{s.body}</p>
                 </div>
               ))}
             </SchematicGrid>

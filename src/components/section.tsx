@@ -27,8 +27,8 @@ export function Section({
       className={cn(
         "py-12 sm:py-14",
         divider && "border-t border-hairline",
-        bleed && "pb-0! [&>:last-child]:border-b-0",
-        bleed === "both" && "pt-0! [&>:first-child]:border-t-0",
+        bleed && "pb-0! *:last:border-b-0",
+        bleed === "both" && "pt-0! *:first:border-t-0",
         className,
       )}
     >

@@ -76,9 +76,9 @@ export default async function CoverWrapPage(props: PageProps<"/books/[book]/prin
           <p className="font-mono text-[9pt] uppercase tracking-[0.22em] text-[#5eead4]">
             {book.title}
           </p>
-          <div className="mt-[0.35in] flex flex-col gap-[0.16in] text-[12pt] leading-[1.5] text-[#cfe9e3]">
+          <div className="mt-[0.35in] flex flex-col gap-[0.16in] text-[12pt] leading-normal text-[#cfe9e3]">
             {paragraphs.map((p, i) => (
-              <p key={i} className={i === 0 ? "font-heading text-[17pt] font-bold leading-[1.25] text-[#e9fbf7]" : ""}>
+              <p key={i} className={i === 0 ? "font-heading text-[17pt] font-bold leading-tight text-[#e9fbf7]" : ""}>
                 {p}
               </p>
             ))}
@@ -96,7 +96,7 @@ export default async function CoverWrapPage(props: PageProps<"/books/[book]/prin
               </ol>
             </div>
           ) : null}
-          <div className="mt-auto text-[9.5pt] leading-[1.5] text-[#a7d9d0]">
+          <div className="mt-auto text-[9.5pt] leading-normal text-[#a7d9d0]">
             <p className="font-heading text-[11pt] font-bold text-[#e9fbf7]">{book.author}</p>
             <p>
               Free to read at {site.domain}/books/{book.slug}

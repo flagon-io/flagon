@@ -102,12 +102,12 @@ function Callout({
       role="note"
       aria-label={title ?? c.label}
       className={cn(
-        "my-6 flex gap-3 rounded-lg border px-4 py-3.5 text-sm leading-relaxed",
+        "my-6 flex gap-3 rounded-lg border px-4 py-3.5 text-sm/relaxed",
         c.box,
       )}
     >
       <Icon
-        className={cn("mt-0.5 h-4 w-4 shrink-0", c.icon_)}
+        className={cn("mt-0.5 size-4 shrink-0", c.icon_)}
         strokeWidth={2}
         aria-hidden
       />
@@ -150,13 +150,13 @@ function Card({
           {title}
         </span>
         <Arrow
-          className="mt-0.5 h-4 w-4 shrink-0 text-subtle transition group-hover:translate-x-0.5 group-hover:text-brand"
+          className="mt-0.5 size-4 shrink-0 text-subtle transition group-hover:translate-x-0.5 group-hover:text-brand"
           strokeWidth={2}
           aria-hidden
         />
       </span>
       {description || children ? (
-        <span className="mt-1.5 block text-sm leading-relaxed text-muted-foreground [&_p]:m-0">
+        <span className="mt-1.5 block text-sm/relaxed text-muted-foreground [&_p]:m-0">
           {description ?? children}
         </span>
       ) : null}
@@ -208,7 +208,7 @@ function Step({ title, children, n = 1, last = false }: StepProps) {
       ) : null}
       <span
         aria-hidden
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-hairline bg-panel font-mono text-xs font-medium tabular-nums text-foreground"
+        className="flex size-7 shrink-0 items-center justify-center rounded-full border border-hairline bg-panel font-mono text-xs font-medium tabular-nums text-foreground"
       >
         {n}
       </span>
@@ -272,13 +272,13 @@ export function ProveIt({
   title?: string;
 }) {
   return (
-    <details className="prove-it group my-6 rounded-lg border border-hairline bg-panel text-sm [&[open]]:bg-card">
+    <details className="prove-it group my-6 rounded-lg border border-hairline bg-panel text-sm [[open]]:bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-2.5 rounded-lg px-4 py-2.5 outline-none select-none focus-visible:ring-2 focus-visible:ring-brand [&::-webkit-details-marker]:hidden">
-        <FlaskConical className="h-4 w-4 shrink-0 text-brand" strokeWidth={2} aria-hidden />
+        <FlaskConical className="size-4 shrink-0 text-brand" strokeWidth={2} aria-hidden />
         <span className="font-medium text-foreground">{title}</span>
         <span className="hidden text-muted-foreground sm:inline">Run it yourself and check our numbers</span>
         <ArrowRight
-          className="ml-auto h-3.5 w-3.5 shrink-0 text-subtle transition-transform group-open:rotate-90"
+          className="ml-auto size-3.5 shrink-0 text-subtle transition-transform group-open:rotate-90"
           strokeWidth={2}
           aria-hidden
         />
@@ -297,7 +297,7 @@ function LabFooter({ lab, book }: { lab: string; book?: string }) {
   const file = shell ? lab : `${lab}.sql`;
   const command = `./lab ${lab}`;
   return (
-    <p className="text-xs leading-relaxed text-muted-foreground">
+    <p className="text-xs/relaxed text-muted-foreground">
       Every claim in this chapter is checked by{" "}
       {book ? <a href={`/books/${book}/lab/${file}`}>{file}</a> : <code>{file}</code>}. From the{" "}
       {book ? <a href={`/books/${book}/lab`}>lab</a> : "lab"} folder: <code>{command}</code>

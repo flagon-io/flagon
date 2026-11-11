@@ -76,9 +76,9 @@ export function ThemeToggle() {
         <button
           type="button"
           aria-label={`Theme: ${pref}`}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand data-[state=open]:text-foreground"
+          className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand data-[state=open]:text-foreground"
         >
-          <Current className="h-4.5 w-4.5" strokeWidth={2} />
+          <Current className="size-4.5" strokeWidth={2} />
         </button>
       </DropdownMenu.Trigger>
 
@@ -100,11 +100,11 @@ export function ThemeToggle() {
                     : "text-muted-foreground",
                 )}
               >
-                <o.icon className="h-4 w-4" strokeWidth={2} aria-hidden />
+                <o.icon className="size-4" strokeWidth={2} aria-hidden />
                 {o.label}
                 <DropdownMenu.ItemIndicator className="ml-auto">
                   <Check
-                    className="h-4 w-4 text-brand"
+                    className="size-4 text-brand"
                     strokeWidth={2}
                     aria-hidden
                   />

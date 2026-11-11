@@ -124,7 +124,7 @@ export function TypeSpecimen() {
             JetBrains Mono · code &amp; labels
           </div>
           <div className="mt-4 font-mono text-5xl font-medium tracking-tight text-foreground">Ag</div>
-          <div className="mt-4 font-mono text-sm leading-relaxed text-muted-foreground">
+          <div className="mt-4 font-mono text-sm/relaxed text-muted-foreground">
             const flagon = &quot;on tap&quot;; // 0123456789
           </div>
           <div className="mt-3 font-mono text-sm uppercase tracking-widest text-muted-foreground">
@@ -184,7 +184,7 @@ function Treatment({
             {spec}
           </span>
         </div>
-        <div className="mt-2 text-sm leading-relaxed text-muted-foreground">{note}</div>
+        <div className="mt-2 text-sm/relaxed text-muted-foreground">{note}</div>
       </div>
     </div>
   );
@@ -226,7 +226,7 @@ function Rule({
     <div className="p-6 sm:p-8">
       <div className="flex items-center gap-2.5">
         <span
-          className={`flex h-5 w-5 items-center justify-center rounded-full font-mono text-xs ${
+          className={`flex size-5 items-center justify-center rounded-full font-mono text-xs ${
             ok ? "bg-brand/15 text-brand" : "bg-red-500/15 text-red-500"
           }`}
           aria-hidden
@@ -235,7 +235,7 @@ function Rule({
         </span>
         <div className="text-base font-semibold tracking-tight text-foreground">{title}</div>
       </div>
-      <div className="mt-3 text-sm leading-relaxed text-muted-foreground">{children}</div>
+      <div className="mt-3 text-sm/relaxed text-muted-foreground">{children}</div>
     </div>
   );
 }

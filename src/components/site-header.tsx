@@ -17,7 +17,7 @@ export function SiteHeader() {
             href="/"
             className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
-            <Logo className="h-6 w-6 text-foreground" />
+            <Logo className="size-6 text-foreground" />
             <span className="text-[15px] font-semibold tracking-tight">Flagon</span>
           </Link>
 
@@ -41,8 +41,8 @@ export function SiteHeader() {
         {/* crosshair marks where the header divider meets the column rails;
             only shown once the column has outer margin (xl), so they never
             straddle the viewport edge and force horizontal scroll on mobile */}
-        <Plus className="absolute bottom-0 left-0 hidden h-3.5 w-3.5 -translate-x-1/2 translate-y-1/2 text-mark xl:block" />
-        <Plus className="absolute bottom-0 right-0 hidden h-3.5 w-3.5 translate-x-1/2 translate-y-1/2 text-mark xl:block" />
+        <Plus className="absolute bottom-0 left-0 hidden size-3.5 -translate-x-1/2 translate-y-1/2 text-mark xl:block" />
+        <Plus className="absolute bottom-0 right-0 hidden size-3.5 translate-1/2 text-mark xl:block" />
       </div>
     </header>
   );

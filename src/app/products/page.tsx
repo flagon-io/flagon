@@ -49,12 +49,12 @@ export default function ProductsPage() {
           <HexField />
           <SlantBeams />
           <div className="rise">
-            <FlagonPour className="relative h-32 w-32 sm:h-40 sm:w-40" />
+            <FlagonPour className="relative size-32 sm:size-40" />
           </div>
           <h1 className="mt-8 max-w-3xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">
             What we&rsquo;re building.
           </h1>
-          <p className="mt-6 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
+          <p className="mt-6 max-w-xl text-pretty text-base/relaxed text-muted-foreground sm:text-lg/relaxed">
             {site.legalName} makes software for developers. Each product is its
             own thing, with its own site and the team that builds it. This is
             where we introduce them.
