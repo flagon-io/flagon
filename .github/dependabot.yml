@@ -10,6 +10,19 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    # Majors we can't take yet. Patches and minors still come through.
+    ignore:
+      # Types track the Node runtime (.nvmrc / engines), not the newest Node.
+      # Move both together when we change runtimes.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # typescript-eslint doesn't support TypeScript 7 yet (lint fails on it).
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # eslint-config-next's React plugin breaks on ESLint 10. Lift this once
+      # eslint-config-next supports it.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
     groups:
       # Next and its ESLint config move together.
       next:
