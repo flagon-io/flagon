@@ -7,7 +7,7 @@
     "build": "next build && node scripts/book-pdf.mjs --serve",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "book:pdf": "node scripts/book-pdf.mjs",
     "book:check": "node scripts/book-check.mjs",
     "book:lab": "node scripts/book-lab.mjs",
